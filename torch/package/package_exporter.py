@@ -941,7 +941,7 @@ class PackageExporter:
                     storage = storage.cpu()
                 num_bytes = storage.nbytes()
                 self.zip_file.write_record(
-                    f".data/{storage_id}.storage", storage, num_bytes
+                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
                 )
             return ("storage", storage_type, storage_id, location, storage_numel)
 

@@ -99,10 +99,10 @@ class FSDPParamGroup:
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
-        self.mp_policy = mp_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
+        self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
 
         # - Hook state
@@ -123,6 +123,7 @@ class FSDPParamGroup:
         # accumulation); all-reducing without reduce-scatter is disallowed
         self.reduce_scatter_grads: bool = True
         self.all_reduce_grads: bool = True
+        self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -137,8 +138,6 @@ class FSDPParamGroup:
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
         orig_dtypes = {fsdp_param.orig_dtype for fsdp_param in self.fsdp_params}
         if len(orig_dtypes) != 1:
             # This can be relaxed if we copy-out for the reduce-scatter
@@ -157,44 +156,27 @@ class FSDPParamGroup:
         self._reduce_dtype = next(iter(reduce_dtypes))
 
     def _init_grad_divide_factors(self):
+        """
+        For N data parallel workers, each worker computes g_i, and they
+        collectively reduce to compute (g_1 + ... + g_N) / N. To avoid overflow
+        and underflow, we divide by ~sqrt(N) before and after the reduction.
+        """
         data_parallel_world_size = 1
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
-        if self._reduce_dtype == torch.float32:
-            # Use NCCL's AVG op to divide after reduction since it is more
-            # performant and fp32 has sufficient precision
-            self._grad_divide_factors: Optional[Tuple[float, float]] = None
-            return
-        # For N data parallel workers, each worker computes g_i, and they
-        # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
-        # underflow, we divide by ~sqrt(N) before and after the reduction.
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
             and data_parallel_world_size / factor > factor
         ):
             factor *= 2
-        factor = float(factor)
-        self._grad_divide_factors = (factor, data_parallel_world_size / factor)
+        self._grad_predivide_factor: float = float(factor)
+        self._grad_postdivide_factor: float = (
+            data_parallel_world_size / self._grad_predivide_factor
+        )
 
     def lazy_init(self):
-        param_names_on_meta = [
-            fsdp_param._param_fqn
-            for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type == "meta"
-        ]
-        if param_names_on_meta:
-            raise RuntimeError(
-                "FSDP parameters should be materialized from meta device before training, "
-                f"but the following were still on meta device: {param_names_on_meta}\n"
-                "For example, call module.to_empty(device) to materialize to device and "
-                "call module.reset_parameters() on each module to initialize values."
-            )
-        # Initialize mixed precision attributes lazily in case the user changes
-        # the parameter dtypes after construction time but before forward
-        self._init_mp_dtypes()
-        self._init_grad_divide_factors()
         self._register_state_dict_hooks()
 
     # Runtime #
@@ -322,7 +304,8 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self._grad_divide_factors,
+                self._grad_predivide_factor,
+                self._grad_postdivide_factor,
             )
 
     def finalize_backward(self):

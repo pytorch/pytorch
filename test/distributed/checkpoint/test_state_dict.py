@@ -3,16 +3,12 @@
 import copy
 import sys
 from itertools import chain
-from typing import Callable, Tuple, Type, Union
+from typing import Callable, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
-
-# importing fully_shard as FSDP2 since the original fully_shard is used in this test.
-# TODO: remove old composable fully_shard so that we don't have to import new fully_shard as FSDP2
-from torch.distributed._composable.fsdp import fully_shard as FSDP2
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -31,7 +27,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
@@ -195,31 +190,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self._test_save_load(init_model_optim)
 
-    def _test_fsdp2(
-        self,
-        *,
-        reshard_after_forward: Union[bool, int],
-        optimizer_class: Type[Optimizer],
-        compile_model: bool,
-    ):
-        def init_model_optim():
-            orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
-            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
-
-            dist_model = FSDP2(
-                copy.deepcopy(orig_model),
-                reshard_after_forward=reshard_after_forward,
-            )
-
-            if compile_model:
-                dist_model = torch.compile(dist_model)
-            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
-
-            return orig_model, orig_optim, copy_optim, dist_model, dist_optim
-
-        self._test_save_load(init_model_optim)
-
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp(self) -> None:
@@ -242,19 +212,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             use_dtensor=False,
             wrapping=tuple(),
             compile_model=True,
-        )
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp2(self) -> None:
-        self.run_subtests(
-            {
-                "reshard_after_forward": [True, False],
-                # TODO: Add torch.optim.AdamW to unit test.
-                "optimizer_class": [torch.optim.Adam],
-                "compile_model": [True, False],
-            },
-            self._test_fsdp2,
         )
 
     def _test_ddp(self, use_composable: bool) -> None:

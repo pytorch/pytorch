@@ -261,11 +261,6 @@ class TestShardTensor(ShardedTensorTestBase):
 
         # Verify.
         self.assertTrue(isinstance(st, sharded_tensor.ShardedTensor))
-        sms = st.metadata().shards_metadata
-        self.assertEqual(len(sms), 4)
-        for sm in sms:
-            self.assertTrue(sm.shard_offsets[0] + sm.shard_sizes[0] <= tensor.size(0))
-
         local_shard = st.local_tensor()
         self.assertEqual(1, len(st.local_shards()))
         if dist.get_rank() < 3:

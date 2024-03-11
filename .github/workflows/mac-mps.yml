@@ -29,7 +29,7 @@ jobs:
       environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-14" },
         ]}
 

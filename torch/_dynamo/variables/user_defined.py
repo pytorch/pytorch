@@ -19,11 +19,6 @@ try:
 except ModuleNotFoundError:
     np = None
 
-try:
-    from torch.utils._cxx_pytree import PyTreeSpec
-except ImportError:
-    PyTreeSpec = type(None)
-
 import torch._dynamo.config
 
 import torch.nn
@@ -70,7 +65,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
+    def __repr__(self):
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -312,12 +307,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
-            # check if this a quasi-namedtuple or a real one
-            if self.value.__module__ == "torch.return_types":
-                # create pseudo-defaults from values of the quasi-namedtuple
-                field_defaults = dict(zip(fields, args[0].items))
-            else:
-                field_defaults = self.value._field_defaults
+            field_defaults = self.value._field_defaults
 
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -702,7 +692,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
+            isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):

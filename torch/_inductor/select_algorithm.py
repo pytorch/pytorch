@@ -22,12 +22,7 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import (
-    ChoiceCaller,
-    IndentedBuffer,
-    KernelTemplate,
-    PrimitiveInfoType,
-)
+from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -157,7 +152,6 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -585,19 +579,6 @@ class TritonTemplate(KernelTemplate):
             make_kernel_render,
             extra.strip("-").replace("-", ", "),
             bmreq,
-            log_info={
-                "tile_shape": str(
-                    (
-                        kwargs.get("BLOCK_M", -1),
-                        kwargs.get("BLOCK_K", -1),
-                        kwargs.get("BLOCK_N", -1),
-                    )
-                ),
-                "num_stages": num_stages,
-                "num_warps": num_warps,
-                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
-                "acc_type": str(kwargs.get("ACC_TYPE", None)),
-            },
         )
 
 
@@ -609,7 +590,6 @@ class ExternKernelChoice:
         *,
         name=None,
         has_out_variant=True,
-        op_overload=None,
     ):
         super().__init__()
         name = name or kernel.__name__
@@ -619,7 +599,6 @@ class ExternKernelChoice:
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
-        self.op_overload = op_overload
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -641,13 +620,7 @@ class ExternKernelChoice:
             pass
         return code_hash("-".join(parts))
 
-    def bind(
-        self,
-        input_nodes,
-        layout,
-        ordered_kwargs_for_cpp_kernel=(),
-        **kwargs,
-    ):
+    def bind(self, input_nodes, layout, ordered_kwargs_for_cpp_kernel=(), **kwargs):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
@@ -656,32 +629,12 @@ class ExternKernelChoice:
 
 class TritonTemplateCaller(ChoiceCaller):
     def __init__(
-        self,
-        name,
-        input_nodes,
-        layout,
-        make_kernel_render,
-        debug_extra,
-        bmreq,
-        log_info: Optional[
-            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
-        ] = None,
+        self, name, input_nodes, layout, make_kernel_render, debug_extra, bmreq
     ):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
         self.debug_extra = debug_extra
-        self.bmreq: TritonBenchmarkRequest = bmreq
-        if log_info is None:
-            log_info = {}
-        self.log_info: Dict[str, Any] = log_info
-        self.log_info.update(
-            {
-                "backend": "Triton",
-                "grid": str(self.bmreq.grid),
-                "num_stages": self.bmreq.num_stages,
-                "num_warps": self.bmreq.num_warps,
-            }
-        )
+        self.bmreq = bmreq
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -709,10 +662,6 @@ class TritonTemplateCaller(ChoiceCaller):
                 make_kernel_render=self.make_kernel_render,
             )
         )
-
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
-        return self.log_info
 
 
 class ExternKernelCaller(ChoiceCaller):
@@ -777,17 +726,9 @@ class ExternKernelCaller(ChoiceCaller):
                 python_kernel_name=self.choice.call_name(),
                 cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
-                op_overload=self.choice.op_overload,
                 kwargs=self.kwargs,
             )
         )
-
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
-        return {
-            "backend": "extern",
-            "kernel_call_name": self.choice.call_name(),
-        }
 
 
 class ErrorFromChoice(RuntimeError):
@@ -905,7 +846,6 @@ class AlgorithmSelectorCache(PersistentCache):
         if (
             make_benchmark_fn.cache_info().currsize
             or log.getEffectiveLevel() == logging.DEBUG
-            or config.trace.log_autotuning_results
         ):
             self.log_results(name, input_nodes, timings, autotune_elapse)
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
@@ -1037,13 +977,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return benchmark
 
     @staticmethod
-    def log_results(
-        name: str,
-        input_nodes: List[ir.IRNode],
-        timings: Dict[ChoiceCaller, float],
-        elapse: float,
-    ):
-        V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
+    def log_results(name, input_nodes, timings, elapse):
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(

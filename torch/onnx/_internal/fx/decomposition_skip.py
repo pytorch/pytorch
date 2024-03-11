@@ -18,7 +18,6 @@ import contextlib
 from typing import Callable, Sequence, Type
 
 from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
-    core as torchlib_core,
     nn as torchlib_nn,
 )
 
@@ -120,61 +119,8 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
         )
 
 
-class InstanceNormDecompSkip(DecompSkip):
-    op_callable = torch.instance_norm  # type: ignore[attr-defined]
-    onnxscript_function = torchlib_core.aten_instance_norm  # type: ignore[attr-defined]
-    new_op_name = "instance_norm"
-    new_op_schema = (
-        "(Tensor input, Tensor? weight, Tensor? bias, "
-        "Tensor? running_mean, Tensor? running_var, "
-        "bool use_input_stats, float momentum, float eps, "
-        "bool cudnn_enabled) -> Tensor"
-    )
-
-    @classmethod
-    def register(cls, export_options: torch.onnx.ExportOptions):
-        if not hasattr(torch.ops, _NEW_OP_NAMESPACE) or not hasattr(
-            torch.ops.onnx_export, cls.new_op_name
-        ):
-            cls.register_custom_op()
-
-        torch.instance_norm = torch.ops.onnx_export.instance_norm  # type: ignore[attr-defined]
-        if export_options.onnx_registry is None:
-            export_options.onnx_registry = torch.onnx.OnnxRegistry()
-        registry = export_options.onnx_registry
-        registry.register_op(
-            function=cls.onnxscript_function,
-            namespace=_NEW_OP_NAMESPACE,
-            op_name=cls.new_op_name,
-        )
-
-    @classmethod
-    def unregister(cls):
-        torch.instance_norm = cls.op_callable  # type: ignore[attr-defined]
-
-    @classmethod
-    def abstract(
-        cls,
-        input,
-        weight,
-        bias,
-        running_mean,
-        running_var,
-        use_input_stats: bool,
-        momentum: float,
-        eps: float,
-        cudnn_enabled: bool,
-    ):
-        return torch.empty(
-            input.size(),
-            dtype=input.dtype,
-            device=input.device,
-        )
-
-
 _DEFAULT_SKIP_LIST = [
     UpsampleBilinear2DDecompSkip,
-    InstanceNormDecompSkip,
 ]
 
 

@@ -607,10 +607,8 @@ at::Tensor post_process_flash_output(
 //     query (Tensor): Query tensor; shape (N, ..., L, E)
 //     key (Tensor): Key tensor; shape (N, ..., S, E)
 //     value (Tensor): Value tensor; shape (N, ..., S, E)
-//     attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-//         which is (N,..., L, S). Two types of masks are supported.
-//         A boolean mask where a value of True indicates that the element *should* take part in attention.
-//         A float mask of the same type as query, key, value that is added to the attention score.
+//     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
+//         is supported, where a value of True indicates that the element *should* take part in attention.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
 //     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
 //         otherwise, the second return value is unspecified
@@ -619,8 +617,9 @@ at::Tensor post_process_flash_output(
 //         to get specialized support for causal masks (and other types of masking e.g. local attention / block
 //         sparse masks) via tensor subclassing, allowing for a leaner API.
 //
-// Returns a tensor:
+// Returns a tuple containing:
 //     output (Tensor): Attention output; shape (N, ..., L, E)
+//     attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
 //
 // Shape legend:
 //     N: Batch size

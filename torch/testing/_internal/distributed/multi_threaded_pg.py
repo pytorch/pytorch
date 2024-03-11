@@ -154,8 +154,8 @@ class Gather:
 
 class ReduceScatter:
     def __init__(self, op):
-        if op != dist.ReduceOp.SUM and op != dist.ReduceOp.AVG:
-            raise NotImplementedError(f"ReduceScatter does not support {op}")
+        if op != dist.ReduceOp.SUM:
+            raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
         self.op = op
 
     @torch.no_grad()
@@ -175,11 +175,6 @@ class ReduceScatter:
                     start_reduction[i] = True
                 else:
                     dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
-        if self.op == dist.ReduceOp.AVG:
-            num_ranks = len(data)
-            for each_rank_data in data:
-                each_rank_data[0][0] /= num_ranks
-
 
 class Broadcast:
     def __init__(self, src):

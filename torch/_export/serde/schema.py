@@ -51,7 +51,7 @@ class MemoryFormat(IntEnum):
 @dataclass
 class Device:
     type: str
-    index: Optional[int] = None
+    index: Optional[int]
 
 
 @dataclass(repr=False)

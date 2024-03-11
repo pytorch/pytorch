@@ -4,7 +4,7 @@ from typing import Union, Iterable, List, Dict, Tuple, Optional, cast
 
 import torch
 from torch import Tensor
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, _has_foreach_support, _device_has_foreach_support
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, _has_foreach_support
 
 _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
@@ -60,10 +60,7 @@ def clip_grad_norm_(
 
     norms: List[Tensor] = []
     for ((device, _), ([device_grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-        if (
-            (foreach is None and _has_foreach_support(device_grads, device))
-            or (foreach and _device_has_foreach_support(device))
-        ):
+        if (foreach is None or foreach) and _has_foreach_support(device_grads, device=device):
             norms.extend(torch._foreach_norm(device_grads, norm_type))
         elif foreach:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
@@ -84,11 +81,8 @@ def clip_grad_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for ((device, _), ([device_grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-        if (
-            (foreach is None and _has_foreach_support(device_grads, device))
-            or (foreach and _device_has_foreach_support(device))
-        ):
-            torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
+        if (foreach is None or foreach) and _has_foreach_support(device_grads, device=device):  # type: ignore[arg-type]
+            torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
         elif foreach:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
@@ -138,10 +132,7 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-        if (
-            (foreach is None and _has_foreach_support(cast(List[Tensor], grads), device=device))
-            or (foreach and _device_has_foreach_support(device))
-        ):
+        if (foreach is None or foreach) and _has_foreach_support(cast(List[Tensor], grads), device=device):
             torch._foreach_clamp_min_(cast(List[Tensor], grads), -clip_value)
             torch._foreach_clamp_max_(cast(List[Tensor], grads), clip_value)
         elif foreach:

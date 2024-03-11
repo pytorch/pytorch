@@ -122,31 +122,31 @@ functorch_maml_omniglot,pass,0
 
 
 
-hf_Albert,pass,0
+hf_Albert,fail_to_run,0
 
 
 
-hf_Bart,pass,0
+hf_Bart,fail_to_run,0
 
 
 
-hf_Bert,pass,0
+hf_Bert,fail_to_run,0
 
 
 
-hf_Bert_large,pass,0
+hf_Bert_large,fail_to_run,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,fail_to_run,0
 
 
 
-hf_DistilBert,pass,0
+hf_DistilBert,fail_to_run,0
 
 
 
-hf_GPT2,pass,0
+hf_GPT2,fail_to_run,0
 
 
 
@@ -154,7 +154,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_T5,pass,0
+hf_T5,fail_to_run,0
 
 
 
@@ -166,11 +166,15 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_Whisper,pass,0
+hf_Whisper,fail_to_run,0
 
 
 
-hf_distil_whisper,pass,0
+hf_clip,eager_fail_to_run,0
+
+
+
+hf_distil_whisper,fail_to_run,0
 
 
 
@@ -183,10 +187,6 @@ llama,fail_to_run,0
 
 
 llama_v2_7b_16h,model_fail_to_load,0
-
-
-
-llava,model_fail_to_load,0
 
 
 
@@ -218,10 +218,6 @@ moco,fail_to_run,0
 
 
 
-moondream,model_fail_to_load,0
-
-
-
 nanogpt,pass,0
 
 
@@ -239,6 +235,10 @@ phlippe_resnet,pass,0
 
 
 pyhpc_equation_of_state,pass,0
+
+
+
+pyhpc_isoneutral_mixing,fail_to_run,0
 
 
 
@@ -294,7 +294,7 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
+stable_diffusion_text_encoder,fail_to_run,0
 
 
 

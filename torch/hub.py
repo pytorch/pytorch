@@ -379,7 +379,7 @@ def set_dir(d):
     _hub_dir = os.path.expanduser(d)
 
 
-def list(github, force_reload=False, skip_validation=False, trust_repo=None, verbose=True):
+def list(github, force_reload=False, skip_validation=False, trust_repo=None):
     r"""
     List all callable entrypoints available in the repo specified by ``github``.
 
@@ -411,9 +411,6 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None, ver
               v2.0.
 
             Default is ``None`` and will eventually change to ``"check"`` in v2.0.
-        verbose (bool, optional): If ``False``, mute messages about hitting
-            local caches. Note that the message about first download cannot be
-            muted. Default is ``True``.
 
     Returns:
         list: The available callables entrypoint
@@ -422,7 +419,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None, ver
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=verbose,
+    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=True,
                                     skip_validation=skip_validation)
 
     with _add_to_sys_path(repo_dir):

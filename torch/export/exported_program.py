@@ -344,10 +344,14 @@ class ExportedProgram:
         return additional_inputs + flat_args
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError(
-            "Unable to call ExportedProgram directly. "
-            "You should use `exported_program.module()` instead."
+        graph_module_inputs = self._graph_module_flat_inputs(args, kwargs)
+
+        res = torch.fx.Interpreter(self.graph_module).run(
+            *graph_module_inputs,
+            enable_io_processing=False,
         )
+
+        return self._postprocess_graph_module_outputs(res, args, kwargs)
 
     def _postprocess_graph_module_outputs(self, res, orig_args, orig_kwargs):
         """Process potential mutations to the input.

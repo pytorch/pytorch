@@ -103,6 +103,9 @@ def lift_constants_pass(
     """
     all_constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
 
+    if len([node for node in gm.graph.nodes if node.op == "placeholder"]) == 0:
+        return {}
+
     inputs = graph_signature.input_specs
     num_custom_obj = sum(
         input_specs.kind == InputKind.CUSTOM_OBJ for input_specs in inputs

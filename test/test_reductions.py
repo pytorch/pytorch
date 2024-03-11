@@ -1344,50 +1344,6 @@ class TestReductions(TestCase):
         self.assertEqual(tensor.var(0), 0.03125)
 
     @onlyCPU
-    @dtypes(torch.bfloat16, torch.float16)
-    def test_sum_noncontig_lowp(self, device, dtype) -> None:
-        dim_sequences = {
-            2: [0, 1],
-            3: [0, 1, 2],
-            4: [0, 1, 2, 3],
-            5: [0, 1, 2, 3, 4],
-        }
-
-        def create_noncontig_inputs(x, ndim):
-            if ndim == 2:
-                return x[::2, ::2]
-            elif ndim == 3:
-                return x[::2, ::2, ::2]
-            elif ndim == 4:
-                return x[::2, ::2, ::2, ::2]
-            elif ndim == 5:
-                return x[::2, ::2, ::2, ::2, ::2]
-
-        def helper(self, shape, reduce_dims, device, dtype):
-            for permute_list in list(permutations(dim_sequences[len(shape)], len(shape))):
-                x = torch.ones(shape, device=device, dtype=dtype)
-                x = create_noncontig_inputs(x, len(shape))
-                x_trans = x.permute(permute_list)
-                x_sum = torch.sum(x_trans, reduce_dims)
-                x_trans_ref = x_trans.float()
-                x_sum_ref = torch.sum(x_trans_ref, reduce_dims)
-                self.assertEqual(x_sum, x_sum_ref.to(dtype=dtype))
-
-        shapes = [
-            (50, 50),
-            (50, 50, 50),
-            (10, 50, 30, 30),
-            (10, 5, 10, 50, 7),
-        ]
-
-        for shape in shapes:
-            for i in range(1, len(shape) + 1):
-                reduce_dims = list(combinations(dim_sequences[len(shape)], i))
-                for reduce_dim in reduce_dims:
-                    helper(self, shape, reduce_dim, device, dtype)
-
-
-    @onlyCPU
     @dtypes(torch.bool, torch.double)
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:

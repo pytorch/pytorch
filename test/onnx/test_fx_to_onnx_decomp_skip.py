@@ -39,15 +39,6 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
         assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
 
-    def test_instance_norm(self):
-        def func(x: torch.Tensor):
-            return torch.nn.functional.instance_norm(x)
-
-        onnx_program = torch.onnx.dynamo_export(func, torch.randn(1, 1, 2, 2))
-        # If decomposition is skipped, the model will contain an InstanceNormalization op
-        # instead of BatchNormalization op w/ training=True.
-        assert_op_in_onnx_model(onnx_program.model_proto, "InstanceNormalization")
-
 
 if __name__ == "__main__":
     common_utils.run_tests()

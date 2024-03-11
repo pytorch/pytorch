@@ -126,7 +126,6 @@ class CUDATemplate(KernelTemplate):
             make_kernel_render,
             bmreq,
             self,
-            kwargs,
         )
 
     def header(self) -> IndentedBuffer:

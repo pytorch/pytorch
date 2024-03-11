@@ -123,19 +123,10 @@ class ComputeFunction:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        is_method_variant = False
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return None
-
-        if Variant.function not in f.variants and Variant.method in f.variants:
-            is_method_variant = True
-
-        # only valid remaining case is only function is in f.variants
-        elif not (Variant.function in f.variants and Variant.method not in f.variants):
-            raise Exception(
-                f"Can't handle native function {f.func} with the following variant specification {f.variants}."
-            )
-
+        if Variant.function not in f.variants:
+            return None
         sig: Union[CppSignature, ExecutorchCppSignature] = (
             CppSignatureGroup.from_native_function(
                 f, method=False, fallback_binding=f.manual_cpp_binding
@@ -146,15 +137,7 @@ class ComputeFunction:
         if self.use_aten_lib and not self.is_custom_op(f):
             comma = ", "
 
-            if is_method_variant:
-                return f"""
-// {f.namespace}::{f.func}
-TORCH_API inline {_sig_decl_wrapper(sig)} {{
-    return {sig.arguments()[0].name}.{sig.name()}({comma.join(e.name for e in sig.arguments()[1:])});
-}}
-"""
-            else:
-                return f"""
+            return f"""
 // {f.namespace}::{f.func}
 TORCH_API inline {_sig_decl_wrapper(sig)} {{
     return at::{sig.name()}({comma.join(e.name for e in sig.arguments())});

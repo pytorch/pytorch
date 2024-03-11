@@ -293,11 +293,11 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand
-  IntArrayRef strides(int64_t arg) const {
+  IntArrayRef strides(int arg) const {
     return operands_[arg].stride_bytes;
   }
-  void* data_ptr(int64_t arg) const;
-  ScalarType dtype(int64_t arg = 0) const {
+  void* data_ptr(int arg) const;
+  ScalarType dtype(int arg = 0) const {
     return operands_[arg].current_dtype;
   }
   ScalarType common_dtype() const {
@@ -306,43 +306,43 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
         "Queried for invalid common dtype!");
     return common_dtype_;
   }
-  ScalarType input_dtype(int64_t arg = 0) const {
+  ScalarType input_dtype(int arg = 0) const {
     return operands_[num_outputs_ + arg].current_dtype;
   }
-  Device device(int64_t arg = 0) const {
+  Device device(int arg = 0) const {
     return operands_[arg].device.value();
   }
-  c10::DeviceType device_type(int64_t arg = 0) const {
+  c10::DeviceType device_type(int arg = 0) const {
     return device(arg).type();
   }
-  int64_t element_size(int64_t arg) const {
+  int64_t element_size(int arg) const {
     return static_cast<int64_t>(elementSize(dtype(arg)));
   }
-  bool is_scalar(int64_t arg) const;
-  bool is_cpu_scalar(int64_t arg) const;
+  bool is_scalar(int arg) const;
+  bool is_cpu_scalar(int arg) const;
 
-  const TensorBase& tensor_base(int64_t arg) const {
+  const TensorBase& tensor_base(int arg) const {
     return operands_[arg].tensor_base();
   }
-  const Tensor& tensor(int64_t arg) const {
+  const Tensor& tensor(int arg) const {
     return operands_[arg].tensor();
   }
 
-  const TensorBase& output_base(int64_t arg = 0) const {
+  const TensorBase& output_base(int arg = 0) const {
     AT_ASSERT(arg < num_outputs_);
     return tensor_base(arg);
   }
 
-  const Tensor& output(int64_t arg = 0) const {
+  const Tensor& output(int arg = 0) const {
     AT_ASSERT(arg < num_outputs_);
     return tensor(arg);
   }
 
-  const TensorBase& input_base(int64_t arg = 0) const {
+  const TensorBase& input_base(int arg = 0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
     return tensor_base(num_outputs_ + arg);
   }
-  const Tensor& input(int64_t arg = 0) const {
+  const Tensor& input(int arg = 0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
     return tensor(num_outputs_ + arg);
   }
@@ -352,7 +352,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   void cast_outputs();
 
   /// Removes an operand from this iterator
-  void remove_operand(int64_t arg);
+  void remove_operand(int arg);
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
   /// Narrows every dim after and including `start_dim` to size one.
@@ -360,7 +360,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// Replaces the data pointer for the operand at index `arg`.
   /// The new pointer should have the same sizes, strides and dtype as the
   /// original
-  void unsafe_replace_operand(int64_t arg, void* data);
+  void unsafe_replace_operand(int arg, void* data);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
@@ -370,7 +370,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   int get_dim_to_split() const;
 
   template <typename T>
-  T scalar_value(int64_t arg) {
+  T scalar_value(int arg) {
     auto& op = operands_[arg];
     return c10::fetch_and_cast<T>(op.tensor_base().scalar_type(), op.data);
   }
@@ -380,7 +380,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// If the scalar is aleady given in the type of Half, then return scalar
   /// value from tensor_base.
   template <typename T>
-  T original_scalar_value(int64_t arg) {
+  T original_scalar_value(int arg) {
     auto& original_tensor_base = operands_[arg].original_tensor_base();
     if (original_tensor_base.defined()) {
       TORCH_INTERNAL_ASSERT(
@@ -446,7 +446,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in
   /// bytes (e.g. `4` for `float`)
-  StrideVector compatible_stride(int64_t element_size) const;
+  StrideVector compatible_stride(int element_size) const;
 
   /// Inverts the re-ordering done by reorder_dimensions. This can only be
   /// called *before* coalesce_dimensions() is called.
@@ -465,10 +465,10 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   PtrVector get_base_ptrs() const;
 
   // Helper functions for advanced stride manipulations (e.g. torch.flip)
-  void _unsafe_set_arg_strides(const int64_t arg, IntArrayRef strides) {
+  void _unsafe_set_arg_strides(const int arg, IntArrayRef strides) {
     operands_[arg].stride_bytes = strides;
   }
-  void _unsafe_set_arg_data(const int64_t arg, void* data) {
+  void _unsafe_set_arg_data(const int arg, void* data) {
     operands_[arg].data = data;
   }
 
@@ -960,7 +960,7 @@ class TORCH_API TensorIteratorConfig final {
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
 
-  SmallVector<size_t, 4> const_tensor_indices_;
+  SmallVector<int, 4> const_tensor_indices_;
 };
 
 /// A container-like struct that acts as if it contains splits of a
@@ -995,7 +995,6 @@ struct TORCH_API SplitUntil32Bit {
   iterator end() const;
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const TensorIteratorBase& iter;
 };
 

@@ -5,7 +5,28 @@
 
 #include <utility>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
+
+VariableInfo::VariableInfo(const Variable& var)
+    : layout(var.layout()),
+      device(var.device()),
+      scalar_type(var.scalar_type()),
+      size(var.sym_sizes().vec()),
+      requires_grad(var.requires_grad()),
+      is_empty(false) {}
+
+VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
+
+Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+  if (is_empty) {
+    // Return undefined tensor.
+    return at::Tensor();
+  } else {
+    return at::zeros_symint(
+        size, at::TensorOptions(scalar_type).device(device).layout(layout));
+  }
+}
 
 // This function has two main goals:
 //  1) Use the user-provided jvp function to populate the outputs' forward
@@ -581,4 +602,5 @@ const std::unordered_set<at::TensorImpl*>& AutogradContext::
     get_non_differentiable() const {
   return non_differentiable_;
 }
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

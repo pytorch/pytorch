@@ -838,7 +838,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: Optional[torch.device] = None,
+        device: torch.device = torch.device("cpu"),
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
@@ -855,13 +855,9 @@ class MLP(nn.Module):
         z = F.relu(z)
         z = self.out_proj(z)
         z = F.relu(z)
-        if self.buffer is not None:
-            z = z + self.buffer
+        if self.buffer:
+            z += self.buffer
         return z
-
-    def reset_parameters(self):
-        if self.buffer is not None:
-            torch.nn.init.normal_(self.buffer)
 
 
 class DoubleLinear(nn.Module):
@@ -1378,28 +1374,15 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
             for fully_shard_patch in FullyShardPatch:
                 if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
-                imported_fully_shard = (
-                    f"{func.__module__}.{original_fully_shard.__name__}"
-                )
                 with mock.patch(
-                    imported_fully_shard,
+                    f"{func.__module__}.{torch.distributed._composable.fsdp.fully_shard.__name__}",
                     fully_shard_patch.value,
                 ):
                     func(*args, **kwargs)
-                    torch.distributed.barrier()
-                # mock.patch.__exit__ does not work with multi-thread
-                # thread 1 set {func.__module__}.fully_shard
-                # thread 2 read {func.__module__}.fully_shard and thought it is original
-                # hence we manually reset them after __exit__
-                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
-                setattr(
-                    import_path(), original_fully_shard.__name__, original_fully_shard
-                )
 
         return wrapper
 

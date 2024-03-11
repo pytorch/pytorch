@@ -15,10 +15,6 @@ namespace pytorch_flash {
 // Determine if the architecture supports FLASH and define a macro to handle parameter modifiers
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define ARCH_SUPPORTS_FLASH
-#endif
-
-#if defined(ARCH_SUPPORTS_FLASH) && defined(__CUDACC_VER_MAJOR__) && __CUDACC_VER_MAJOR__ >= 11 && \
-    defined(__CUDACC_VER_MINOR__) && __CUDACC_VER_MINOR__ >= 8
 #define KERNEL_PARAM_MODIFIER __grid_constant__
 #else
 #define KERNEL_PARAM_MODIFIER

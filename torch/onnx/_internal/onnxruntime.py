@@ -5,7 +5,6 @@ import os
 
 from typing import (
     Any,
-    Callable,
     Dict,
     Final,
     List,
@@ -302,6 +301,10 @@ def _get_onnx_devices(
         ...,
     ]
 ) -> Tuple["ORTC.OrtDevice", ...]:
+    devices = tuple(value.device for value in values if isinstance(value, torch.Tensor))
+    if len(devices) == 0:
+        devices = (torch.device("cpu"),)
+
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
 
@@ -309,12 +312,13 @@ def _get_onnx_devices(
         value: Union[
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
+        device: torch.device,
     ) -> int:
         if isinstance(value, torch.Tensor):
             return ORTC.OrtDevice(
-                _get_ort_device_type(value.device.type),
+                _get_ort_device_type(device.type),
                 ORTC.OrtDevice.default_memory(),
-                _device_id_or_zero(value.device.index),
+                _device_id_or_zero(device.index),
             )
         elif isinstance(
             value, (torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool)
@@ -325,11 +329,10 @@ def _get_onnx_devices(
         else:
             raise ValueError("Unsupported value type: " + str(type(value)))
 
-    if len(values) > 0:
-        ort_devices = tuple(_map_tensor_or_sym_to_device(value) for value in values)
-        return ort_devices
-    else:
-        return (_map_tensor_or_sym_to_device(1),)
+    ort_devices = tuple(
+        _map_tensor_or_sym_to_device(value, devices[0]) for value in values
+    )
+    return ort_devices
 
 
 def _get_ortvalues_from_torch_tensors(
@@ -701,12 +704,6 @@ class OrtBackendOptions:
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
-    pre_ort_model_transforms: Optional[  # type: ignore[name-defined]
-        Sequence[Callable[["onnx.ModelProto"], None]]
-    ] = None
-    """A list of graph transforms to be applied to the ONNX model before it
-    is fed to ONNXRuntime's InferenceSession."""
-
 
 @compatibility(is_backward_compatible=False)
 class OrtBackend:
@@ -922,13 +919,6 @@ class OrtBackend:
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
 
-            # Modify ONNX model using pre-registered graph transforms.
-            # They are in-place modifications for avoiding unnecessary
-            # copy of ONNX initializers.
-            if self._options.pre_ort_model_transforms:
-                for transform in self._options.pre_ort_model_transforms:
-                    transform(onnx_model)
-
             onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):
                 # If not empty, environment variable ONNXRT_DUMP_PATH defined the path
@@ -1128,7 +1118,6 @@ class OrtBackend:
                 or a.default_execution_providers != b.default_execution_providers
                 or a.preallocate_output != b.preallocate_output
                 or a.use_aot_autograd != b.use_aot_autograd
-                or a.pre_ort_model_transforms != b.pre_ort_model_transforms
             ):
                 return False
 

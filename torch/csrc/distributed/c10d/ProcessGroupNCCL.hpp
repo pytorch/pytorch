@@ -1,12 +1,5 @@
 #pragma once
 
-#if defined(__linux__)
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 #ifdef USE_C10D_NCCL
 
 #include <atomic>
@@ -148,59 +141,6 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
      "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
-
-#if defined(__linux__)
-struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
-      return;
-    }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
-    std::string filename = c10::str(fileStem, rank, ".pipe");
-    TORCH_CHECK(
-        unlink(filename.c_str()) != -1 || errno == ENOENT,
-        "Error removing existing named pipe ",
-        filename);
-    TORCH_CHECK(
-        mkfifo(filename.c_str(), 0666) != -1,
-        "Error creating named pipe ",
-        filename);
-    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
-    LOG(INFO) << "Pipe file " << filename
-              << " has been opened, write to it to trigger NCCL Debug Dump.";
-    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
-  }
-  bool shouldDump() {
-    if (fd_ == -1) {
-      return false;
-    }
-    char buf[128];
-    // non-blocking from O_NONBLOCK above.
-    // Ignore EINTR because we already will poll this
-    // again later.
-    ssize_t bytesRead = read(fd_, &buf, 128);
-    return bytesRead > 0;
-  }
-  ~DumpPipe() {
-    if (fd_ != -1) {
-      close(fd_);
-    }
-  }
-
- private:
-  int fd_ = -1;
-};
-#else
-struct DumpPipe {
-  DumpPipe(int rank) {}
-  bool shouldDump() {
-    return false;
-  }
-};
-#endif
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -627,7 +567,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return true if abort is successful, otherwise false
   bool abort(c10::optional<std::string> abortReason = c10::nullopt);
 
-  void shutdown(c10::optional<std::string> reason = c10::nullopt);
+  void shutdown();
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -924,15 +864,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
-
-  // This is the signal from watchdog threads to indicate whether the monitor
-  // thread should dump. Making it static so that it is accessiable from all the
-  // PGs. With this flag, monitor thread would dump debug info under any one of
-  // the 3 conditions: 1: this flag is set to true by the watchdog thread when
-  // it detects a timeout. 2: timeout signal is received from
-  // other ranks through tcpstore 3: no heartbeat of watchdog Note that only the
-  // monitor thread from PG0 should dump the debug info and only once
-  static std::atomic<bool> shouldDump_;
 
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;

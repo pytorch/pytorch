@@ -66,7 +66,7 @@ at::Tensor custom_to_device(
 // A dummy allocator for our custom device, that secretly uses the CPU
 struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
-  at::DataPtr allocate(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data = c10::alloc_cpu(nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, 0)};
   }

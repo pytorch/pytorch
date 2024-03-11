@@ -262,7 +262,7 @@ def _create_stateful_graph_module(
     # here.
     for buffer in graph_signature.non_persistent_buffers:
         _assign_attr(
-            plain_graph_module.get_buffer(buffer),
+            stateful_gm.get_buffer(buffer),
             stateful_gm,
             buffer,
             attr_kind=_AttrKind.BUFFER,

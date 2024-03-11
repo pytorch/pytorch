@@ -20,14 +20,12 @@ namespace at {
 // which do NO argument checking by default.
 
 struct TORCH_API TensorArg {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor& tensor;
   const char* name;
   int pos; // 1-indexed
   TensorArg(const Tensor& tensor, const char* name, int pos)
       : tensor(tensor), name(name), pos(pos) {}
   // Try to mitigate any possibility of dangling reference to temporaries.
-  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
   const Tensor* operator->() const {
     return &tensor;

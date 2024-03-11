@@ -9,11 +9,13 @@
 
 import json
 import os
+import shutil
 import signal
 import socket
 from string import Template
+import tempfile
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Set
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
@@ -27,7 +29,7 @@ from torch.distributed.elastic.agent.server.api import (
 )
 from torch.distributed.elastic.events.api import EventMetadataValue
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import PContext, start_processes, LogsSpecs
+from torch.distributed.elastic.multiprocessing import PContext, start_processes
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -134,19 +136,28 @@ class LocalElasticAgent(SimpleElasticAgent):
     def __init__(
         self,
         spec: WorkerSpec,
-        logs_specs: LogsSpecs,
         start_method="spawn",
         exit_barrier_timeout: float = 300,
+        log_dir: Optional[str] = None,
         log_line_prefix_template: Optional[str] = None,
+        local_ranks_filter: Optional[Set[int]] = None,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
         self._pcontext: Optional[PContext] = None
+        rdzv_run_id = spec.rdzv_handler.get_run_id()
         self._rdzv_handler = spec.rdzv_handler
+        self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
         self._log_line_prefix_template = log_line_prefix_template
+        self._local_ranks_filter = local_ranks_filter
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
-        self._logs_specs = logs_specs
 
+    def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
+        base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
+        os.makedirs(base_log_dir, exist_ok=True)
+        dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
+        log.info("log directory set to: %s", dir)
+        return dir
 
     def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -272,18 +283,26 @@ class LocalElasticAgent(SimpleElasticAgent):
             worker_args = macros.substitute(worker_args, str(local_rank))
             args[local_rank] = tuple(worker_args)
 
+        # scaling events do not count towards restarts (gets same attempt #)
+        # remove existing log dir if this restart is due to a scaling event
+        attempt_log_dir = os.path.join(self._log_dir, f"attempt_{restart_count}")
+        shutil.rmtree(attempt_log_dir, ignore_errors=True)
+        os.makedirs(attempt_log_dir)
+
         self._setup_local_watchdog(envs=envs)
 
         assert spec.entrypoint is not None
-        assert self._logs_specs is not None
         self._pcontext = start_processes(
             name=spec.role,
             entrypoint=spec.entrypoint,
             args=args,
             envs=envs,
-            logs_specs=self._logs_specs,
+            log_dir=attempt_log_dir,
             log_line_prefixes=log_line_prefixes,
             start_method=self._start_method,
+            redirects=spec.redirects,
+            tee=spec.tee,
+            local_ranks_filter=self._local_ranks_filter,
         )
 
         return self._pcontext.pids()

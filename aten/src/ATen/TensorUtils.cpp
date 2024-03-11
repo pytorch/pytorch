@@ -68,7 +68,7 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
 }
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
-  checkDim(c, t, static_cast<int64_t>(sizes.size()));
+  checkDim(c, t, sizes.size());
   TORCH_CHECK(
     t->sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
@@ -76,7 +76,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
 }
 
 void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
-  checkDim(c, t, static_cast<int64_t>(sizes.size()));
+  checkDim(c, t, sizes.size());
   TORCH_CHECK(
     t->sym_sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),

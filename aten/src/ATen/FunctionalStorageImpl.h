@@ -79,9 +79,7 @@ struct ViewMeta {
 struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
  public:
   struct Update {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const at::Tensor new_val;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::vector<ViewMeta> view_metas;
   };
 

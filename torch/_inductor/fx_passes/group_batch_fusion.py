@@ -59,32 +59,13 @@ default_graph_search_options = {
 graph_search_options = default_graph_search_options
 
 
-def update_stack_example_value(node, metadata, dim=0, op=torch.stack):
+def update_stack_example_value(stack_node, metadata, dim=0):
     """
     Update the example value of the node in the graph to enable followup split cat opt.
     """
-    if node is not None and hasattr(node, "meta"):
-        if op == torch.stack:
-            example_value = torch.stack(metadata, dim=dim)
-        elif op == torch.unbind:
-            example_value = torch.unbind(metadata, dim=dim)  # type: ignore[assignment]
-        else:
-            return
-        node.meta["example_value"] = example_value
-
-
-def update_pointwise_example_value(pointwise_node, input, other, op):
-    """
-    Update the example value of the add node in the graph to enable followup split cat opt.
-    """
-    if pointwise_node is not None and hasattr(pointwise_node, "meta"):
-        if op == torch.add:
-            example_value = torch.add(input, other)
-        elif op == torch.mul:
-            example_value = torch.mul(input, other)
-        else:
-            return
-        pointwise_node.meta["example_value"] = example_value
+    if stack_node is not None and hasattr(stack_node, "meta"):
+        example_value = torch.stack(metadata, dim=dim)
+        stack_node.meta["example_value"] = example_value
 
 
 class GroupBatchFusionBase:
@@ -674,62 +655,27 @@ class BatchLayernormFusion(BatchFusion):
                 args=(stack_input, group_shapes[-1]),
                 kwargs={"eps": group_epss[-1]},
             )
-            batch_layer_norm.meta["example_value"] = stack_input.meta["example_value"]
 
             if group_weights is not None and group_biases is not None:
-                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
-                update_pointwise_example_value(
-                    batch_layer_norm,
-                    stack_weight.meta["example_value"],
-                    previous_batch_layer_norm_meta,
-                    torch.mul,
-                )
-                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
-                )
-                update_pointwise_example_value(
-                    batch_layer_norm,
-                    stack_bias.meta["example_value"],
-                    previous_batch_layer_norm_meta,
-                    torch.add,
                 )
             elif group_weights is not None and group_biases is None:
-                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
-                update_pointwise_example_value(
-                    batch_layer_norm,
-                    stack_weight.meta["example_value"],
-                    previous_batch_layer_norm_meta,
-                    torch.mul,
-                )
             elif group_weights is None and group_biases is not None:
-                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
-                )
-                update_pointwise_example_value(
-                    batch_layer_norm,
-                    stack_bias.meta["example_value"],
-                    previous_batch_layer_norm_meta,
-                    torch.add,
                 )
 
             batch_layer_norm_unbind = graph.call_function(
                 torch.unbind,
                 args=(batch_layer_norm,),
                 kwargs={"dim": stack_dim},
-            )
-            update_stack_example_value(
-                batch_layer_norm_unbind,
-                batch_layer_norm.meta["example_value"],
-                op=torch.unbind,
-                dim=stack_dim,
             )
 
         for i, node in enumerate(group_nodes):

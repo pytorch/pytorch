@@ -17,18 +17,17 @@ import unittest
 import uuid
 from contextlib import closing
 from unittest import mock
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
-from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import (
-    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -490,6 +489,7 @@ class ElasticLaunchTest(unittest.TestCase):
         # torch.distributed.is_torchelastic_launched() returns True
 
         out_file = f"{os.path.join(self.test_dir, 'out')}"
+
         launch.main(
             [
                 "--run-path",
@@ -504,55 +504,6 @@ class ElasticLaunchTest(unittest.TestCase):
         with open(out_file) as fp:
             is_torchelastic_launched = fp.readline()
             self.assertEqual("True", is_torchelastic_launched)
-
-    @patch("torch.distributed.run.metadata")
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
-    def test_is_torchelastic_launched_with_logs_spec_defined(self, metadata_mock):
-        # mock the entrypoint API to avoid version issues.
-        entrypoints = MagicMock()
-        metadata_mock.entry_points.return_value = entrypoints
-
-        group = MagicMock()
-        entrypoints.select.return_value = group
-
-        ep = MagicMock()
-        ep.load.return_value = DefaultLogsSpecs
-
-        group.select.return_value = (ep)
-        group.__getitem__.return_value = ep
-
-        out_file = f"{os.path.join(self.test_dir, 'out')}"
-        if os.path.exists(out_file):
-            os.remove(out_file)
-        launch.main(
-            [
-                "--run-path",
-                "--nnodes=1",
-                "--nproc-per-node=1",
-                "--monitor-interval=1",
-                "--logs_specs=default",
-                path("bin/test_script_is_torchelastic_launched.py"),
-                f"--out-file={out_file}",
-            ]
-        )
-
-        with open(out_file) as fp:
-            is_torchelastic_launched = fp.readline()
-            self.assertEqual("True", is_torchelastic_launched)
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
-    def test_logs_logs_spec_entrypoint_must_be_defined(self):
-        with self.assertRaises(ValueError):
-            launch.main(
-                [
-                    "--run-path",
-                    "--nnodes=1",
-                    "--nproc-per-node=1",
-                    "--monitor-interval=1",
-                    "--logs_specs=DOESNOT_EXIST",
-                    path("bin/test_script_is_torchelastic_launched.py"),
-                ]
-            )
 
     def test_is_not_torchelastic_launched(self):
         # launch test script without torchelastic and validate that

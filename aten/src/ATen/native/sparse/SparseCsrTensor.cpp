@@ -151,11 +151,11 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
               "expected ", compressed_indices_name, " to be a strided tensor but got ", compressed_indices.layout(), " tensor");
 
   const int base_ndim = 2;  // corresponds to compressed and plain indices
-  const auto batch_ndim = compressed_indices.dim() - 1;
+  const int batch_ndim = compressed_indices.dim() - 1;
   const int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
                            layout, "validate_sparse_compressed_tensor_args",
                            [&] { return 0; }, [&] { return 2; });
-  const auto dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
+  const int dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
 
   // 2.3
   TORCH_CHECK(values.layout() == kStrided,
@@ -231,7 +231,8 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
   }
   const int64_t nrows = size[batch_ndim] / blocksize[0];
   const int64_t ncols = size[batch_ndim + 1] / blocksize[1];
-  auto [compressed_dim_size, plain_dim_size] = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
+  int64_t compressed_dim_size, plain_dim_size;
+  std::tie(compressed_dim_size, plain_dim_size) = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
                                                                                             [&] { return std::make_tuple(nrows, ncols); },
                                                                                             [&] { return std::make_tuple(ncols, nrows); });
   // 3.8
@@ -257,24 +258,22 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
       compressed_indices_type);
 
-  if (!compressed_indices.is_meta()) {
-    // Indices invariants
-    at::_validate_compressed_sparse_indices(
-        /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
-        compressed_indices,
-        plain_indices,
-        compressed_dim_size,
-        plain_dim_size,
-        values_nnz);
-  }
+  // Indices invariants
+  at::_validate_compressed_sparse_indices(
+      /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
+      compressed_indices,
+      plain_indices,
+      compressed_dim_size,
+      plain_dim_size,
+      values_nnz);
 
   // Device Invariants
   // 4.1
   TORCH_CHECK(
-      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kMeta,
+      values.device().type() == kCPU || values.device().type() == kCUDA,
       "device type of values (",
       values.device().type(),
-      ") must be CPU or CUDA or Meta");
+      ") must be CPU or CUDA");
   // 4.2, 4.3, 4.4
   TORCH_CHECK(
       compressed_indices.get_device() == values.get_device(),
@@ -332,20 +331,16 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   Layout layout = AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(options.layout(), "new_compressed_tensor", [&] { return the_layout; });
-  DispatchKey dispatch_key = DispatchKey::Undefined;
+  DispatchKey dispatch_key;
 
-  switch(options.device().type()) {
-  case kCPU:
-    dispatch_key = DispatchKey::SparseCsrCPU;
-    break;
-  case kCUDA:
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    options.device().type() == kCPU || options.device().type() == kCUDA,
+     "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
+
+  if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
-    break;
-  case kMeta:
-    dispatch_key = DispatchKey::SparseCsrMeta;
-    break;
-  default:
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
+  } else {
+    dispatch_key = DispatchKey::SparseCsrCPU;
   }
 
   return detail::make_tensor<SparseCsrTensorImpl>(DispatchKeySet(dispatch_key), options.device(), layout, options.dtype());
@@ -418,7 +413,7 @@ static DimVector _estimate_sparse_compressed_tensor_size(
     Layout layout) {
   const int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size", [&] { return 0; }, [&] { return 2; });
   const int base_ndim = 2;  // corresponds to compressed and plain indices
-  const auto batch_ndim = compressed_indices.dim() - 1;
+  const int batch_ndim = compressed_indices.dim() - 1;
   const std::string compressed_indices_name = compressedIndicesName(layout);
   const std::string plain_indices_name = plainIndicesName(layout);
   TORCH_CHECK(
@@ -428,7 +423,7 @@ static DimVector _estimate_sparse_compressed_tensor_size(
               compressed_indices.dim() == plain_indices.dim(),
               compressed_indices_name, " and ", plain_indices_name, " dimensionalities must be equal but got ",
               compressed_indices.dim(), " and ", plain_indices.dim(), ", respectively");
-  const int64_t dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
+  const int dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
   TORCH_CHECK(
               dense_ndim >= 0,
               "values must have dimensionality > sum of batch and block dimensionalities (=",

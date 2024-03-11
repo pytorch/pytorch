@@ -316,7 +316,7 @@ struct MetaAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) override {
+  DataPtr allocate(const size_t nbytes) const override {
     return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
   }
   DeleterFnPtr raw_deleter() const override {

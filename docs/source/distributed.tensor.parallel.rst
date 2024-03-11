@@ -6,7 +6,7 @@ Tensor Parallelism - torch.distributed.tensor.parallel
 
 Tensor Parallelism(TP) is built on top of the PyTorch DistributedTensor
 (`DTensor <https://github.com/pytorch/pytorch/blob/main/torch/distributed/_tensor/README.md>`__)
-and provides different parallelism styles: Colwise, Rowwise, and Sequence Parallelism.
+and provides different parallelism styles: Colwise and Rowwise Parallelism.
 
 .. warning ::
     Tensor Parallelism APIs are experimental and subject to change.
@@ -26,10 +26,6 @@ Tensor Parallelism supports the following parallel styles:
   :undoc-members:
 
 .. autoclass:: torch.distributed.tensor.parallel.RowwiseParallel
-  :members:
-  :undoc-members:
-
-.. autoclass:: torch.distributed.tensor.parallel.SequenceParallel
   :members:
   :undoc-members:
 
@@ -58,10 +54,3 @@ the ``parallelize_plan`` when calling ``parallelize_module``:
 For models like Transformer, we recommend users to use ``ColwiseParallel``
 and ``RowwiseParallel`` together in the parallelize_plan for achieve the desired
 sharding for the entire model (i.e. Attention and MLP).
-
-Parallelized cross-entropy loss computation (loss parallelism), is supported via the following context manager:
-
-.. autofunction:: torch.distributed.tensor.parallel.loss_parallel
-
-.. warning ::
-    The loss_parallel API is experimental and subject to change.

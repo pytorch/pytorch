@@ -7,7 +7,6 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
-import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
@@ -22,16 +21,14 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(
-    ndim, dim, op_name, convert_to_inner_dim=True, allow_batch_dim=False
-):
+def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    if wrapped == 1:
-        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=1")
-    elif wrapped == 0 and not allow_batch_dim:
-        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
+    if wrapped < 2:
+        raise RuntimeError(
+            f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
+        )
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
@@ -441,7 +438,6 @@ def to_copy_default(func, *args, **kwargs):
 
 register_jagged_func(
     [
-        torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
@@ -551,38 +547,12 @@ def chunk_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    new_kwargs["dim"] = _wrap_jagged_dim(
-        inp.dim(), new_kwargs["dim"], "chunk", allow_batch_dim=True
-    )
+    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "chunk")
 
-    if new_kwargs["dim"] == 0:
-        chunks = new_kwargs["chunks"]
-        dim0_size = inp._size[0]
-        chunk_size = math.ceil(dim0_size / chunks)
-
-        # get _offsets of the chunks
-        lengths = inp._offsets.diff()
-        chunked_lengths = lengths.chunk(chunks)
-        chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
-        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
-        nested_kwargs = [
-            {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
-            for per_offsets in chunked_offsets
-        ]
-
-        # get _values of the chunks
-        split_sizes = [x.sum().item() for x in chunked_lengths]
-        chunk_values = inp._values.split(split_sizes)
-
-        return [
-            NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
-            for i in range(0, chunk_size)
-        ]
-    else:
-        return [
-            NestedTensor(values=x, **extract_kwargs(inp))
-            for x in func(inp._values, **new_kwargs)
-        ]
+    return [
+        NestedTensor(values=x, **extract_kwargs(inp))
+        for x in func(inp._values, **new_kwargs)
+    ]
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")

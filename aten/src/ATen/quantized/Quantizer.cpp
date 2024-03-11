@@ -146,13 +146,12 @@ inline Tensor new_qtensor(
   auto scalar_type = typeMetaToScalarType(dtype);
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
-  auto storage = make_storage_impl(
+  auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
-      /*resizable=*/true,
-      device);
+      /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::DispatchKeySet(tensorDispatchKey), dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);

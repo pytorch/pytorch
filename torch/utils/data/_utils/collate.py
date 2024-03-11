@@ -9,7 +9,6 @@ static methods.
 
 import collections
 import contextlib
-import copy
 import re
 import torch
 
@@ -63,18 +62,9 @@ def default_convert(data):
         return torch.as_tensor(data)
     elif isinstance(data, collections.abc.Mapping):
         try:
-            if isinstance(data, collections.abc.MutableMapping):
-                # The mapping type may have extra properties, so we can't just
-                # use `type(data)(...)` to create the new mapping.
-                # Create a clone and update it if the mapping type is mutable.
-                clone = copy.copy(data)
-                clone.update({key: default_convert(data[key]) for key in data})
-                return clone
-            else:
-                return elem_type({key: default_convert(data[key]) for key in data})
+            return elem_type({key: default_convert(data[key]) for key in data})
         except TypeError:
-            # The mapping type may not support `copy()` / `update(mapping)`
-            # or `__init__(iterable)`.
+            # The mapping type may not support `__init__(iterable)`.
             return {key: default_convert(data[key]) for key in data}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return elem_type(*(default_convert(d) for d in data))
@@ -82,19 +72,9 @@ def default_convert(data):
         return [default_convert(d) for d in data]  # Backwards compatibility.
     elif isinstance(data, collections.abc.Sequence) and not isinstance(data, (str, bytes)):
         try:
-            if isinstance(data, collections.abc.MutableSequence):
-                # The sequence type may have extra properties, so we can't just
-                # use `type(data)(...)` to create the new sequence.
-                # Create a clone and update it if the sequence type is mutable.
-                clone = copy.copy(data)  # type: ignore[arg-type]
-                for i, d in enumerate(data):
-                    clone[i] = default_convert(d)
-                return clone
-            else:
-                return elem_type([default_convert(d) for d in data])
+            return elem_type([default_convert(d) for d in data])
         except TypeError:
-            # The sequence type may not support `copy()` / `__setitem__(index, item)`
-            # or `__init__(iterable)` (e.g., `range`).
+            # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [default_convert(d) for d in data]
     else:
         return data
@@ -146,18 +126,9 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
 
     if isinstance(elem, collections.abc.Mapping):
         try:
-            if isinstance(elem, collections.abc.MutableMapping):
-                # The mapping type may have extra properties, so we can't just
-                # use `type(data)(...)` to create the new mapping.
-                # Create a clone and update it if the mapping type is mutable.
-                clone = copy.copy(elem)
-                clone.update({key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem})
-                return clone
-            else:
-                return elem_type({key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem})
+            return elem_type({key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem})
         except TypeError:
-            # The mapping type may not support `copy()` / `update(mapping)`
-            # or `__init__(iterable)`.
+            # The mapping type may not support `__init__(iterable)`.
             return {key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem}
     elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
         return elem_type(*(collate(samples, collate_fn_map=collate_fn_map) for samples in zip(*batch)))
@@ -173,19 +144,9 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
             return [collate(samples, collate_fn_map=collate_fn_map) for samples in transposed]  # Backwards compatibility.
         else:
             try:
-                if isinstance(elem, collections.abc.MutableSequence):
-                    # The sequence type may have extra properties, so we can't just
-                    # use `type(data)(...)` to create the new sequence.
-                    # Create a clone and update it if the sequence type is mutable.
-                    clone = copy.copy(elem)  # type: ignore[arg-type]
-                    for i, samples in enumerate(transposed):
-                        clone[i] = collate(samples, collate_fn_map=collate_fn_map)
-                    return clone
-                else:
-                    return elem_type([collate(samples, collate_fn_map=collate_fn_map) for samples in transposed])
+                return elem_type([collate(samples, collate_fn_map=collate_fn_map) for samples in transposed])
             except TypeError:
-                # The sequence type may not support `copy()` / `__setitem__(index, item)`
-                # or `__init__(iterable)` (e.g., `range`).
+                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
                 return [collate(samples, collate_fn_map=collate_fn_map) for samples in transposed]
 
     raise TypeError(default_collate_err_msg_format.format(elem_type))

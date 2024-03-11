@@ -94,11 +94,13 @@ void* CUDAPluggableAllocator::malloc(
   return r;
 }
 
-c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) {
+c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
   c10::DeviceIndex device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
-  void* r = this->malloc(size, device, stream);
+  void* r =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      const_cast<CUDAPluggableAllocator*>(this)->malloc(size, device, stream);
   c10::DataPtr data_ptr = {
       r, r, raw_deleter(), c10::Device(c10::DeviceType::CUDA, device)};
   return data_ptr;

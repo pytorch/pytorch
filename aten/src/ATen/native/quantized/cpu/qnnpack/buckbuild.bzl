@@ -336,7 +336,6 @@ def define_qnnpack(third_party, labels = []):
             ":ukernels_sse2",
             ":ukernels_sse41",
             ":ukernels_ssse3",
-            third_party("clog"),
             third_party("cpuinfo"),
             third_party("FP16"),
             third_party("FXdiv"),

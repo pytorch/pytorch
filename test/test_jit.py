@@ -1678,13 +1678,6 @@ graph(%Ra, %Rb):
                   torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
             self.assertEqual(scr(x, t), foo(x, t))
 
-    def test_script_bool_literal_conversion(self):
-        def foo(x):
-            return torch.mul(x, True)
-        scr = torch.jit.script(foo)
-        x = torch.rand(3, 4)
-        self.assertEqual(scr(x), foo(x))
-
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
           %1 : Bool()):

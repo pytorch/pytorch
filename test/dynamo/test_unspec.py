@@ -212,24 +212,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    def test_no_recompiles_prod_backward(self):
-        # https://github.com/pytorch/pytorch/issues/120608
-        cnt = CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
-        def fn(t):
-            return torch.prod(t, 3, keepdim=True)
-
-        input_shapes = [(8, 10, 3, 2), (8, 3, 5, 2), (8, 4, 8, 2)]
-        for s in input_shapes:
-            t1 = torch.randn(s, requires_grad=True)
-            h_result = fn(t1)
-            grad = torch.ones_like(h_result)
-            h_result.backward(grad)
-
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
-
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_builtin_functions_on_cuda(self):
         def fn(x, scaler):

@@ -133,11 +133,7 @@ from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
 from typing import Dict, List
 
-from torch.distributed.elastic.multiprocessing import (
-    DefaultLogsSpecs,
-    start_processes,
-    Std,
-)
+from torch.distributed.elastic.multiprocessing import start_processes, Std
 
 format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
@@ -670,7 +666,8 @@ won't take effect even if it is set explicitly."
             entrypoint=entrypoint,
             args=launch_args,
             envs=launch_envs,
-            logs_specs=DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
+            log_dir=args.log_path,
+            tee=launch_tee,
         )
         ctx.wait()
 

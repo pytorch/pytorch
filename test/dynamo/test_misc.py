@@ -7,7 +7,6 @@ import dis
 import enum
 import functools
 import gc
-import io
 import itertools
 import logging
 import math
@@ -83,7 +82,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.logging_utils import logs_to_string
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -196,17 +194,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
-
-    def test_invalid_args_builtin(self):
-        @torch.compile(backend="eager")
-        def fn(x):
-            x = x.sin()
-            if isinstance(x, torch.Tensor, invalid=True):
-                x = x.sin()
-            return x
-
-        with self.assertRaises(TypeError):
-            fn(torch.randn(16))
 
     def test_callpacked(self):
         def call_packed(args):
@@ -606,27 +593,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.compile_fx", "post_grad_graphs"
-            )
-            with ctx():
-                torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
-
-            post_grad_graphs = "\n".join(
-                log_stream.getvalue().strip().split("\n")[3:]
-            ).strip()
-
-            # Check the graph under static shapes
-            if torch._dynamo.config.assume_static_by_default:
-                self.assertExpectedInline(
-                    post_grad_graphs,
-                    """\
-def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
-        # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
-        return ()""",
-                )
+            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -666,28 +633,9 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.compile_fx", "post_grad_graphs"
-            )
-            with ctx():
-                compiled_out = torch.compile(f, backend="inductor", fullgraph=True)(
-                    *compiled_args
-                )
-
-            if torch._dynamo.config.assume_static_by_default:
-                post_grad_graphs = "\n".join(
-                    log_stream.getvalue().strip().split("\n")[3:]
-                ).strip()
-                self.assertExpectedInline(
-                    post_grad_graphs,
-                    """\
-def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
-        # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
-        getitem_4: "f32[3]" = foo_default[0]
-        getitem_5: "f32[3]" = foo_default[1];  foo_default = None
-        return (getitem_4, getitem_5)""",
-                )
+            compiled_out = torch.compile(
+                f, backend="aot_eager_decomp_partition", fullgraph=True
+            )(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             eager_out = f(*eager_args)
@@ -760,24 +708,9 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.compile_fx", "post_grad_graphs"
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
             )
-            with ctx():
-                torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
-
-            if torch._dynamo.config.assume_static_by_default:
-                post_grad_graphs = "\n".join(
-                    log_stream.getvalue().strip().split("\n")[3:]
-                ).strip()
-                self.assertExpectedInline(
-                    post_grad_graphs,
-                    """\
-def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
-        # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
-        return ()""",
-                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -6100,7 +6033,7 @@ def fn():
                 first_guard_failure,
             )
         else:
-            self.assertIn("""2 <= L['x'].size()[0] <= 2""", first_guard_failure)
+            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -6287,18 +6220,6 @@ def fn():
         inputs = [torch.randn(10, 10) for _ in range(3)]
 
         fn(inputs, iter(tuple(inputs)))
-
-        def fn(params):
-            y = tuple(params)
-            return inner_fn(*y)
-
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        inputs = [torch.randn(10, 10) for _ in range(3)]
-        self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
-
-        # Force recompilation
-        inputs = [torch.randn(10, 10) for _ in range(4)]
-        self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
@@ -9376,6 +9297,9 @@ ShapeEnv not equal: field values don't match:
 ==> name_to_node: values don't match.
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> var_to_guards: values don't match.
+  >  Left: {s0: (s0 >= 3, None)}
+  > Right: {}
 ==> var_to_range: values don't match.
   >  Left: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
@@ -9859,23 +9783,6 @@ fn
         self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
         self.assertEqual(z, ref_y)
         self.assertEqual(x.grad, ref_x_grad)
-
-    def test_new_with_int_list(self):
-        # Make sure torch.Tensor.new(int argument list) behaves the same on dynamo.
-        def fn(x):
-            return x.new(*x.size()) + 5
-
-        optfn = torch.compile(backend="eager")(fn)
-
-        x = torch.arange(10).view(2, 5)
-
-        expected = fn(x)
-        actual = optfn(x)
-
-        self.assertEqual(expected.dtype, actual.dtype)
-        self.assertEqual(expected.shape, actual.shape)
-        self.assertEqual(expected.stride(), actual.stride())
-        self.assertEqual(expected.storage_offset(), actual.storage_offset())
 
 
 class TestTracer(JitTestCase):

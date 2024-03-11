@@ -2,7 +2,6 @@
 
 import os
 import sys
-from typing import Callable
 
 import torch
 import torch.nn.functional as F
@@ -11,24 +10,12 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-import unittest
-
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
-from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
-    SubgraphMatcherWithNameNodeMap,
-)
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-class WrapperModule(torch.nn.Module):
-    def __init__(self, fn: Callable):
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, *args, **kwargs):
-        return self.fn(*args, **kwargs)
-
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import SubgraphMatcherWithNameNodeMap
+from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests
+import unittest
 
 class TestMatcher(JitTestCase):
     def test_subgraph_matcher_with_attributes(self):
@@ -158,7 +145,7 @@ class TestMatcher(JitTestCase):
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        pattern_gm = capture_pre_autograd_graph(WrapperModule(pattern), example_inputs)
+        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
         before_split_res = pattern_gm(*example_inputs)
         pattern_gm, name_node_map = _split_to_graph_and_name_node_map(pattern_gm)
         after_split_res = pattern_gm(*example_inputs)
@@ -190,9 +177,9 @@ class TestMatcher(JitTestCase):
             torch.randn(1, 3, 3, 3) * 10,
             torch.randn(3, 3, 3, 3),
         )
-        pattern_gm = capture_pre_autograd_graph(WrapperModule(pattern), example_inputs)
+        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = capture_pre_autograd_graph(WrapperModule(target_graph), example_inputs)
+        target_gm = capture_pre_autograd_graph(target_graph, example_inputs)
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map

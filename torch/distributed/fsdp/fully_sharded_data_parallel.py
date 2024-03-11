@@ -247,10 +247,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         the all-reduce times over the replication process group for some
         cluster setups.
 
-    .. warning::
-        FSDP does not work with double backwards due to how it registers
-        backward hooks.
-
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.

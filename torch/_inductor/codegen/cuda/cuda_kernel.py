@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -8,7 +8,7 @@ from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
 
-from ..common import IndentedBuffer, Kernel, OpOverrides, PrimitiveInfoType
+from ..common import IndentedBuffer, Kernel, OpOverrides
 from ..cpp import CppPrinter, DTYPE_TO_CPP
 
 if TYPE_CHECKING:
@@ -137,7 +137,7 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
-        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -299,14 +299,12 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
-        self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
         assert self.bmreq is not None
@@ -314,9 +312,7 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, output_tensor=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self):
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
@@ -331,36 +327,6 @@ class CUDATemplateCaller(ChoiceCaller):
                 self.bmreq.hash_key,
             ]
         )
-
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
-        if self.info_kwargs is not None and "op" in self.info_kwargs:
-            op: Any = self.info_kwargs["op"]
-            epilogue_node_names: List[str] = [
-                getattr(en, "name", "no_name")
-                for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
-            ]
-            epilogue_node_strs: List[str] = [
-                str(en) for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
-            ]
-            return {
-                "backend": "CUDA",
-                "op_type": type(op).__name__,
-                "op_conf_name": str(op.configuration_name()),
-                "op_arch": str(op.arch),
-                "tile_shape": str(op.tile_description.tile_shape),
-                "epilogue_schedule": str(op.epilogue_schedule),
-                "kernel_schedule": str(op.kernel_schedule),
-                "element_accumulator": str(op.accumulator_type()),
-                "op_name": str(op.procedural_name()),
-                "epilogue_node_names": epilogue_node_names,  # type: ignore[dict-item]
-                "epilogue_node_strs": epilogue_node_strs,  # type: ignore[dict-item]
-                "instruction_shape": str(
-                    op.tile_description.math_instruction.instruction_shape
-                ),
-            }
-        else:
-            return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
         return TensorBox.create(

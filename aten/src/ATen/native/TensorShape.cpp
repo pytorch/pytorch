@@ -2066,7 +2066,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
+            const auto* ptr_src = src.data_ptr<int64_t>() + start;
 
             for (const auto i : c10::irange(start, end)) {
               const auto src_val = *ptr_src++;
@@ -2124,9 +2124,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
             const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
-            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).const_data_ptr<int64_t>();
-            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
-            const auto* ptr_tid_int_counts = int_counts.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
             auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
@@ -2324,9 +2324,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto end = std::min(start + chunk_size, src_len);
             auto* ptr_src_tid = ptr_src + start;
             const auto* ptr_src_counts_per_thread
-              = src_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
+              = src_counts_per_thread.select(0, tid).data_ptr<int64_t>();
             const auto* ptr_src_offset_counts_per_thread
-              = src_offset_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
+              = src_offset_counts_per_thread.select(0, tid).data_ptr<int64_t>();
             auto tid_counts = at::zeros({size}, src.options());
             auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
 
@@ -3419,10 +3419,6 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
-  start_dim = maybe_wrap_dim(start_dim, self.dim());
-  end_dim = maybe_wrap_dim(end_dim, self.dim());
-  TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
-
   auto outnames = self.names().vec();
   outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
   outnames.insert(outnames.begin() + start_dim, out_dim);

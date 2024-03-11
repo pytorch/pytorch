@@ -91,12 +91,6 @@ else
   fi
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
-  export USE_MKLDNN=1
-  export USE_MKLDNN_ACL=1
-  export ACL_ROOT_DIR=/ComputeLibrary
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)

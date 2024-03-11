@@ -105,6 +105,13 @@ class OutputNode:
     __repr__ = get_name
 
 
+def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
+    if node1.is_foreach() or node2.is_foreach():
+        return ForeachKernelSchedulerNode.fuse(node1, node2)
+    else:
+        return FusedSchedulerNode.fuse(node1, node2)
+
+
 def _prune_redundant_deps(node, name_to_fused_node):
     """
     Prunes weakdeps intended for mutation ordering
@@ -682,35 +689,24 @@ class SchedulerNode(BaseSchedulerNode):
         self,
         scheduler: "Scheduler",
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
+        group_fn,
     ):
         super().__init__(scheduler, node)
-        self._compute_attrs()
+        (
+            self._sizes,
+            self._body,
+        ) = node.simplify_and_reorder()
 
-    def _compute_attrs(
-        self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
-    ):
-        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, self._body = self.node.simplify_and_reorder(
-            extra_indexing_constraints=extra_indexing_constraints
-        )
+        self.group = (node.get_device(), group_fn(self._sizes))
 
-        group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
-        self.group = (self.node.get_device(), group_fn(self._sizes))
-
-        if isinstance(self.node, ir.TemplateBuffer):
-            self.set_read_writes(self.node.normalized_read_writes())
+        if isinstance(node, ir.TemplateBuffer):
+            self.set_read_writes(node.normalized_read_writes())
         else:
             self.set_read_writes(
                 dependencies.extract_read_writes(
                     self._body, *self._sizes, normalize=True
                 )
             )
-
-    def recompute_size_and_body(
-        self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
-    ):
-        self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
 
     def debug_str_extra(self) -> str:
         name = self.get_name()
@@ -976,26 +972,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def can_free(self):
         raise NotImplementedError
-
-    def debug_str(self) -> str:
-        """Longer form printout for trace logs"""
-        name = self.get_name()
-        node_typestr = ",".join(type(n).__name__ for n in self.snodes)
-        lines = [
-            f"{name}: {type(self).__name__}({node_typestr})",
-            f"{name}.writes = {pformat(self.read_writes.writes)}",
-            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
-            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
-            f"{name}.users = {self.users}",
-        ]
-        try:
-            lines += [
-                self.debug_str_extra(),
-            ]
-        except Exception:
-            log.warning("Ignoring error in debug_str()", exc_info=True)
-
-        return "\n".join(lines).rstrip()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -1273,7 +1249,7 @@ class Scheduler:
         }
         self.name_to_fused_node: Dict[
             str, BaseSchedulerNode
-        ] = dict()  # set in fuse_nodes()
+        ] = dict()  # set in fuse_nods()
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
@@ -1352,7 +1328,8 @@ class Scheduler:
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
-            return SchedulerNode(self, node)
+            group_fn = self.get_backend(node.get_device()).group_fn
+            return SchedulerNode(self, node, group_fn)
         elif isinstance(node, ir.ExternKernel):
             return ExternKernelSchedulerNode(self, node)
         else:
@@ -1712,7 +1689,7 @@ class Scheduler:
         if not config.benchmark_fusion:
             return True
 
-        if node1.is_template() or node1.is_foreach() or node2.is_foreach():
+        if node1.is_template():
             # TODO support benchmarking epilogue fusion
             return True
 
@@ -1817,9 +1794,7 @@ class Scheduler:
                     "fusing %s with %s", node1.get_name(), node2.get_name()
                 )
 
-                # above can_fuse asserts that node2 has the same device
-                device = node1.get_device()
-                node3 = self.get_backend(device).fuse(node1, node2)
+                node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
                 fused_nodes.add(node3)
@@ -2377,15 +2352,6 @@ class BaseScheduling:
         Check whether node1 and node2 can be horizontally fused or not.
         """
         raise NotImplementedError()
-
-    def fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-        """
-        Fuse two nodes
-        """
-        if node1.is_foreach() or node2.is_foreach():
-            return ForeachKernelSchedulerNode.fuse(node1, node2)
-        else:
-            return FusedSchedulerNode.fuse(node1, node2)
 
     def group_fn(self, sizes):
         """

@@ -51,7 +51,8 @@ Context::~Context() {
   }
 }
 
-DescriptorSet Context::get_descriptor_set(
+DescriptorSet Context::submit_compute_prologue(
+    CommandBuffer& command_buffer,
     const ShaderInfo& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
   VkDescriptorSetLayout shader_layout =
@@ -65,34 +66,21 @@ DescriptorSet Context::get_descriptor_set(
        shader_cache().retrieve(shader_descriptor),
        local_workgroup_size});
 
-  cmd_.bind_pipeline(pipeline, pipeline_layout, local_workgroup_size);
+  command_buffer.bind_pipeline(pipeline, pipeline_layout, local_workgroup_size);
 
   return descriptor_pool().get_descriptor_set(
       shader_layout, shader_descriptor.kernel_layout);
 }
 
-void Context::register_shader_dispatch(
+void Context::submit_compute_epilogue(
+    CommandBuffer& command_buffer,
     const DescriptorSet& descriptors,
     PipelineBarrier& pipeline_barrier,
-    const ShaderInfo& shader_descriptor,
     const utils::uvec3& global_workgroup_size) {
-  // Adjust the global workgroup size based on the output tile size
-  const utils::uvec3 effective_global_wg = {
-      utils::div_up(
-          global_workgroup_size.data[0u],
-          shader_descriptor.out_tile_size.data[0u]),
-      utils::div_up(
-          global_workgroup_size.data[1u],
-          shader_descriptor.out_tile_size.data[1u]),
-      utils::div_up(
-          global_workgroup_size.data[2u],
-          shader_descriptor.out_tile_size.data[2u]),
-  };
+  command_buffer.bind_descriptors(descriptors.get_bind_handle());
+  command_buffer.insert_barrier(pipeline_barrier);
 
-  cmd_.bind_descriptors(descriptors.get_bind_handle());
-  cmd_.insert_barrier(pipeline_barrier);
-
-  cmd_.dispatch(effective_global_wg);
+  command_buffer.dispatch(global_workgroup_size);
 }
 
 void Context::submit_cmd_to_gpu(VkFence fence_handle, const bool final_use) {
@@ -110,11 +98,6 @@ void Context::flush() {
 
   command_pool_.flush();
   descriptor_pool_.flush();
-
-  // If there is an existing command buffer, invalidate it
-  if (cmd_) {
-    cmd_.invalidate();
-  }
 
   std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
   std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
@@ -176,13 +159,12 @@ namespace {
 void memcpy_to_buffer(const VulkanBuffer& src, VulkanBuffer& dst) {
   MemoryMap dst_mapping(dst, MemoryAccessType::WRITE);
 
-  MemoryMap src_mapping(src, MemoryAccessType::READ);
+  MemoryMap src_mapping(src, api::MemoryAccessType::READ);
   src_mapping.invalidate();
 
   void* dst_ptr = dst_mapping.template data<void>();
   void* src_ptr = src_mapping.template data<void>();
 
-  // @lint-ignore CLANGTIDY facebook-security-vulnerable-memcpy
   memcpy(dst_ptr, src_ptr, src.mem_size());
 }
 

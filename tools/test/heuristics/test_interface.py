@@ -540,31 +540,5 @@ class TestAggregatedHeuristicsTestStats(TestTD):
         aggregator.get_test_stats(TestRun("test2"))
 
 
-class TestJsonParsing(TestTD):
-    def test_json_parsing_matches_TestPrioritizations(self) -> None:
-        tests = ["test1", "test2", "test3", "test4", "test5"]
-        tp = interface.TestPrioritizations(
-            tests,
-            {
-                TestRun("test3", included=["ClassA"]): 0.8,
-                TestRun("test3", excluded=["ClassA"]): 0.2,
-                TestRun("test4"): 0.7,
-                TestRun("test5"): 0.6,
-            },
-        )
-        tp_json = tp.to_json()
-        tp_json_to_tp = interface.TestPrioritizations.from_json(tp_json)
-
-        self.assertSetEqual(tp._original_tests, tp_json_to_tp._original_tests)
-        self.assertDictEqual(tp._test_scores, tp_json_to_tp._test_scores)
-
-    def test_json_parsing_matches_TestRun(self) -> None:
-        testrun = TestRun("test1", included=["classA", "classB"])
-        testrun_json = testrun.to_json()
-        testrun_json_to_test = TestRun.from_json(testrun_json)
-
-        self.assertTrue(testrun == testrun_json_to_test)
-
-
 if __name__ == "__main__":
     unittest.main()

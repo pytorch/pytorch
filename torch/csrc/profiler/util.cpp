@@ -347,9 +347,6 @@ static constexpr auto kOutSplit = "Out split size";
 static constexpr auto kGlobalRankStart = "Global rank start";
 static constexpr auto kGlobalRankStride = "Global rank stride";
 static constexpr auto kGroupSize = "Group size";
-static constexpr auto kProcessGroupId = "Process Group ID";
-static constexpr auto kGroupRanks = "Process Group Ranks";
-
 static constexpr int32_t kTruncatLength = 30;
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
@@ -405,22 +402,6 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   map.emplace(
       kGlobalRankStride, std::to_string(debugInfo->getGlobalRankStride()));
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
-  map.emplace(kProcessGroupId, std::to_string(debugInfo->getProcessGroupId()));
-  auto& groupRanks = debugInfo->getGroupRanks();
-  if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
-    map.emplace(
-        kGroupRanks, fmt::format("\"[{}]\"", fmt::join(groupRanks, ", ")));
-  } else if (groupRanks.size() > kTruncatLength) {
-    map.emplace(
-        kGroupRanks,
-        fmt::format(
-            "\"[{}, ..., {}]\"",
-            fmt::join(
-                groupRanks.begin(),
-                groupRanks.begin() + kTruncatLength - 1,
-                ", "),
-            groupRanks.back()));
-  }
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
   return map;

@@ -703,7 +703,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             torch._embedding_bag_forward_only
         )
         for i, f in enumerate(funcs):
-            err_type = (ValueError, RuntimeError) if i == 0 else RuntimeError
+            err_type = ValueError if i == 0 else RuntimeError
 
             weight = torch.full((2, 6,), 0, dtype=torch.float64, device=device)
             indices = torch.full((2, 0, 0, 6, 6,), 2, dtype=torch.int64, device=device)
@@ -713,24 +713,21 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 error_msg = 'input has to be 1D or 2D Tensor'
             else:
                 error_msg = 'input has to be a 1D or 2D Tensor'
-            torch._dynamo.disable(self.assertRaisesRegex)(
-                err_type, error_msg, lambda: f(weight, indices, offsets)
-            )
+            with self.assertRaisesRegex(err_type, error_msg):
+                f(weight, indices, offsets)
 
             weight = torch.full((2, 2), 0, dtype=torch.float64, device=device)
             indices = torch.full((2,), 1, dtype=torch.int64, device=device)
 
-            torch._dynamo.disable(self.assertRaisesRegex)(
-                err_type, 'offsets has to be a 1D Tensor', lambda: f(weight, indices, offsets)
-            )
+            with self.assertRaisesRegex(err_type, 'offsets has to be a 1D Tensor'):
+                f(weight, indices, offsets)
 
             weight = torch.full((2, 2, 2), 0, dtype=torch.float64, device=device)
             indices = torch.full((2,), 2, dtype=torch.int64, device=device)
             offsets = torch.full((2,), 0, dtype=torch.int64, device=device)
 
-            torch._dynamo.disable(self.assertRaisesRegex)(
-                err_type, 'weight has to be a 2D Tensor', lambda: f(weight, indices, offsets)
-            )
+            with self.assertRaisesRegex(err_type, 'weight has to be a 2D Tensor'):
+                f(weight, indices, offsets)
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
@@ -1005,9 +1002,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
         output.backward(grad_output)
         ref_output.backward(grad_output)
-        es_weight_grad = es.weight.grad
+        es_weight_grad = es.weight.grad.data
         if sparse:
-            es_weight_grad = es.weight.grad.to_dense()
+            es_weight_grad = es.weight.grad.data.to_dense()
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
@@ -1125,7 +1122,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         output = es(input, offsets)
         output.backward(grad_output_with_empty)
 
-        es_weight_grad = es.weight.grad
+        es_weight_grad = es.weight.grad.data
         if sparse:
             es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output_with_empty)
@@ -1165,14 +1162,14 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
         input = torch.ones(3, 4, dtype=dtype)
         offset = torch.arange(0, 3, dtype=odtype)
-        torch._dynamo.disable(self.assertRaises)(ValueError, lambda: es(input, offset))
-        torch._dynamo.disable(self.assertRaises)(ValueError, lambda: es(input.view(-1)))
+        self.assertRaises(ValueError, lambda: es(input, offset))
+        self.assertRaises(ValueError, lambda: es(input.view(-1)))
         offset[0] = 1
         if self.device_type == "cpu":
-            torch._dynamo.disable(self.assertRaises)(RuntimeError, lambda: es(input.view(-1), offset))
+            self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
             offset[0] = 0
             offset[-1] = 100
-            torch._dynamo.disable(self.assertRaises)(RuntimeError, lambda: es(input.view(-1), offset))
+            self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),

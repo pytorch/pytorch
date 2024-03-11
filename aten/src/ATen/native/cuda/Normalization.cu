@@ -722,8 +722,6 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
   c10::MaybeOwned<Tensor> running_var = at::borrow_from_optional_tensor(running_var_opt);
 
   const int64_t n_input = self.size(1);
-
-  TORCH_CHECK(self.numel() != 0, "input tensor must have at least one element, but got input_sizes = ", self.sizes());
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
   auto save_mean = at::empty({n_input}, options);

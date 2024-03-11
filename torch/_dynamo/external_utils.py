@@ -89,15 +89,3 @@ def untyped_storage_size(x: torch.Tensor):
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
     return getattr(bw_state, hook_name)(*args, **kwargs)
-
-
-def call_module_hooks_from_backward_state(
-    _, result, *args, bw_state, hooks_name: str, module_name: str
-):
-    module = getattr(bw_state, module_name)
-    hooks = getattr(bw_state, hooks_name)
-    for hook in hooks:
-        new_result = hook(module, result, *args)
-        if new_result is not None:
-            result = new_result
-    return result

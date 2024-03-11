@@ -302,6 +302,11 @@ def _full_pre_state_dict_hook(
     """
     if getattr(fsdp_state, "_device_mesh", False):
         parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        if parent_mesh:
+            raise RuntimeError(
+                f"Found FSDP's device_mesh {fsdp_state._device_mesh} has a parent device_mesh {parent_mesh}.",
+                "We do not support FULL_STATE_DICT for 2D FSDP + TP. Please use FSDP SHARDED_STATE_DICT instead.",
+            )
 
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -802,6 +807,11 @@ def _set_use_dtensor(fsdp_state: _FSDPState) -> None:
                 "Found state_dict_type LOCAL_STATE_DICT",
                 "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
                 "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
+            )
+        elif state_dict_type == StateDictType.FULL_STATE_DICT:
+            logger.warning(
+                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
             )
         else:
             fsdp_state._state_dict_config._use_dtensor = True

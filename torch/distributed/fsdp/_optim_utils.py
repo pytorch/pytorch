@@ -2082,5 +2082,10 @@ def _set_optim_use_dtensor(
                 "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
                 "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
             )
+        elif state_dict_type == StateDictType.FULL_STATE_DICT:
+            logger.warning(
+                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
+            )
         else:
             state_dict_settings.optim_state_dict_config._use_dtensor = True

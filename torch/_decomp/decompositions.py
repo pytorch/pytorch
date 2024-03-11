@@ -4479,12 +4479,6 @@ def _weight_norm_interface(x, y, dim=0):
 @register_decomposition(aten.isin)
 @out_wrapper()
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
-    # handle when either elements or test_elements are Scalars (they can't both be)
-    if not isinstance(elements, torch.Tensor):
-        elements = torch.tensor(elements, device=test_elements.device)
-    if not isinstance(test_elements, torch.Tensor):
-        test_elements = torch.tensor(test_elements, device=elements.device)
-
     if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
     else:
@@ -4494,9 +4488,6 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
 
 
 def isin_default(elements, test_elements, *, invert=False):
-    if elements.numel() == 0:
-        return torch.empty_like(elements, dtype=torch.bool)
-
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
     if not invert:
         cmp = x == test_elements

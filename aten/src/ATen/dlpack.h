@@ -195,12 +195,12 @@ typedef struct {
   /*! \brief The data type of the pointer*/
   DLDataType dtype;
   /*! \brief The shape of the tensor */
-  const int64_t* shape;
+  int64_t* shape;
   /*!
    * \brief strides of the tensor (in number of elements, not bytes)
    *  can be NULL, indicating tensor is compact and row-majored.
    */
-  const int64_t* strides;
+  int64_t* strides;
   /*! \brief The offset in bytes to the beginning pointer to data */
   uint64_t byte_offset;
 } DLTensor;

@@ -182,7 +182,6 @@ skip:
       # works on cuda, accuracy failure on cpu
       - hf_Whisper
       - stable_diffusion_text_encoder
-      - llava
 
     cuda: []
 
@@ -219,15 +218,6 @@ skip:
   # Models that should only run in --multiprocess mode
   multiprocess:
     - simple_gpt
-
-  # for these models, conv-batchnorm fusing causes big numerical churn.
-  # Skip them
-  freezing:
-    - mnasnet1_0
-    - moco
-    - shufflenet_v2_x1_0
-
-
 
 
 accuracy:

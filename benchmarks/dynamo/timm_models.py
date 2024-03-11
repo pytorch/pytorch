@@ -76,14 +76,6 @@ REQUIRE_HIGHER_TOLERANCE = {
     "selecsls42b",
 }
 
-REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
-    "adv_inception_v3",
-    "botnet26t_256",
-    "gluon_inception_v3",
-    "selecsls42b",
-    "swsl_resnext101_32x16d",
-}
-
 SCALED_COMPUTE_LOSS = {
     "ese_vovnet19b_dw",
     "fbnetc_100",
@@ -318,13 +310,6 @@ class TimmRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
-
-        if self.args.freezing and name in REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING:
-            # the conv-batchnorm fusion used under freezing may cause relatively
-            # large numerical difference. We need are larger tolerance.
-            # Check https://github.com/pytorch/pytorch/issues/120545 for context
-            tolerance = 8 * 1e-2
-
         if is_training:
             if name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2

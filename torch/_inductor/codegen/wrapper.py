@@ -631,9 +631,8 @@ class WrapperCodeGen(CodeGen):
             kernel_name, configs, grid, wrapper=self
         )
         # Must happen after free symbols are already codegened
-        # Emit the grid wrapper function right before the call
-        for line in code.split("\n"):
-            self.writeline(line)
+        with self.prefix.indent():
+            self.prefix.splice(code)
 
         stream_name = self.write_get_raw_stream(
             V.graph.scheduler.current_device.index, V.graph
@@ -981,6 +980,39 @@ class WrapperCodeGen(CodeGen):
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         original_name = kernel.__name__
 
+        # Distinguish between different functions using function id
+        cache_key = [id(kernel.fn)]
+        for arg in kwargs.values():
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
+                cache_key.append(arg.get_dtype())
+            elif len(configs) > 0:
+                # We need to key on non tensor arg only in autotune mode
+                cache_key.append(arg)
+        cache_key = tuple(cache_key)
+
+        if cache_key in self.user_defined_kernel_cache:
+            return self.user_defined_kernel_cache[cache_key]
+
+        name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
+
+        compile_wrapper.splice(
+            """
+            import triton
+            import triton.language as tl
+            from torch._inductor.utils import instance_descriptor
+            from torch._inductor.triton_heuristics import user_autotune
+            """,
+            strip=True,
+        )
+        from .triton import TritonKernel
+
+        if TritonKernel.gen_attr_descriptor_import():
+            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
+        compile_wrapper.newline()
+
         from .common import KernelArgType, SizeArg, TensorArg
 
         signature: List[KernelArgType] = []
@@ -1020,6 +1052,9 @@ class WrapperCodeGen(CodeGen):
                     if arg is not None and V.graph.sizevars.statically_known_equals(arg, 1):  # type: ignore[arg-type]
                         equal_to_1_args.append(key)
         index_dtype = "tl.int32"
+        inductor_meta = {
+            "kernel_name": name,
+        }
         triton_meta = {
             "signature": signature_to_meta(
                 signature,
@@ -1047,46 +1082,8 @@ class WrapperCodeGen(CodeGen):
             ],
         }
 
-        # Distinguish between different functions using function id
-        cache_key: List[Any] = [id(kernel.fn)]
-        if len(configs) > 0:
-            for arg in kwargs.values():
-                # We need to key on non tensor arg only in autotune mode
-                if not isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
-                    cache_key.append(arg)
-        cache_key.append(str(triton_meta))
-        cache_key = tuple(cache_key)
-
-        if cache_key in self.user_defined_kernel_cache:
-            return self.user_defined_kernel_cache[cache_key]
-
-        name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
         # Add to the cache for the next use
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
-
-        compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
-
-        compile_wrapper.splice(
-            """
-            import triton
-            import triton.language as tl
-            from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import user_autotune
-            """,
-            strip=True,
-        )
-
-        from .triton import TritonKernel
-
-        if TritonKernel.gen_attr_descriptor_import():
-            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
-        compile_wrapper.newline()
-
-        inductor_meta = {
-            "kernel_name": name,
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
-        }
 
         configs = [
             {
@@ -1096,7 +1093,6 @@ class WrapperCodeGen(CodeGen):
             }
             for config in configs
         ]
-
         compile_wrapper.splice(
             f"""
             @user_autotune(

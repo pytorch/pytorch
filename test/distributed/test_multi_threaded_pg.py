@@ -139,11 +139,6 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         expected_tensor = torch.ones(3, 3) * dist.get_rank() * self.world_size
         self.assertEqual(output_tensor, expected_tensor)
 
-        output_tensor = torch.empty(3, 3)
-        dist.reduce_scatter(output_tensor, to_reduce_scatter, op=dist.ReduceOp.AVG)
-        expected_tensor = torch.ones(3, 3) * dist.get_rank()
-        self.assertEqual(output_tensor, expected_tensor)
-
     def test_broadcast_object_list(self):
         val = 99 if dist.get_rank() == 0 else None
         object_list = [val] * dist.get_world_size()

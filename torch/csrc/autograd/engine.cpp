@@ -31,7 +31,6 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
-#include <c10/util/thread_name.h>
 
 #include <atomic>
 #include <chrono>
@@ -348,11 +347,6 @@ void Engine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
     bool should_increment) {
-  // pthread_setname_np restricts the name to 16 characters including
-  // the null byte.
-  std::string thread_name = "pt_autograd_" + std::to_string(device);
-  c10::setThreadName(thread_name);
-
   c10::set_terminate_handler();
   if (should_increment) {
     increment_non_reentrant_thread_count();

@@ -14,7 +14,7 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
 from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -23,7 +23,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import run_tests, wrapSwapTensorsTest
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -58,7 +58,8 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
         global_mesh = init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
-        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        dp_mesh = global_mesh["dp"]
+        tp_mesh = global_mesh["tp"]
         model = MLP(8, torch.device("cpu"), with_buffer=True)
         parallelize_module(
             model,
@@ -450,117 +451,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
-
-
-class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
-    """
-    Set ``torch.__future__.set_swap_module_params_on_conversion(True)`` using
-    ``@wrapSwapTensorsTest(True)`` until ``_apply`` swaps wrapper subclasses by
-    default in the future.
-    """
-
-    @property
-    def world_size(self) -> int:
-        return 4
-
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @wrapSwapTensorsTest(True)
-    def test_meta_device_1d_init(self):
-        default_pg = torch.distributed.distributed_c10d._get_default_group()
-        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
-
-        # Test both even sharding (8) and uneven sharding (3)
-        for mlp_dim in (8, 3):
-            with torch.device("meta"):
-                model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
-                for param in model.parameters():
-                    self.assertEqual(param.device, torch.device("meta"))
-                fully_shard(model[0], mesh=mesh)
-                fully_shard(model[1], mesh=mesh)
-                fully_shard(model, mesh=mesh)
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
-
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @wrapSwapTensorsTest(True)
-    def test_meta_device_2d_init(self):
-        assert self.world_size >= 4, f"{self.world_size}"
-        dp_size = 2
-        global_mesh = init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
-        )
-        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
-
-        # Test both even sharding (8) and uneven sharding (3)
-        for mlp_dim in (8, 3):
-            with torch.device("meta"):
-                model = MLP(mlp_dim, with_buffer=True)
-                for param in model.parameters():
-                    self.assertEqual(param.device, torch.device("meta"))
-                parallelize_module(
-                    model,
-                    tp_mesh,
-                    {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
-                )
-                for param in model.parameters():
-                    self.assertEqual(param.device, torch.device("meta"))
-                fully_shard(model.in_proj, mesh=dp_mesh)
-                fully_shard(model.out_proj, mesh=dp_mesh)
-                fully_shard(model, mesh=dp_mesh)
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            self._test_to_empty_and_reset_parameters(model, global_mesh, mlp_dim)
-
-    def _test_to_empty_and_reset_parameters(
-        self, model: nn.Module, mesh: DeviceMesh, mlp_dim: int
-    ):
-        # Check that we can materialize it on GPU with empty values
-        device = torch.device("cuda", torch.cuda.current_device())
-        model.to_empty(device=device)
-        for param in model.parameters():
-            self.assertEqual(param.device, device)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
-        # Check that `reset_parameters()` on each module initializes values
-        const = 1337
-        for tensor in itertools.chain(model.parameters(), model.buffers()):
-            tensor.detach().fill_(const)
-        for module in model.modules():
-            if hasattr(module, "reset_parameters"):
-                module.reset_parameters()
-        for param in model.parameters():
-            local_tensor = param.to_local()
-            if local_tensor.numel() > 0:
-                self.assertNotEqual(local_tensor, torch.ones_like(local_tensor) * const)
-        for buffer in model.buffers():
-            self.assertNotEqual(buffer, torch.ones_like(buffer) * const)
-
-        # Check that we can run an iteration without erroring
-        inp = torch.randn((4, mlp_dim), device="cuda")
-        model(inp).sum().backward()
-        optim.step()
-
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_invalid_meta_device_init(self):
-        default_pg = torch.distributed.distributed_c10d._get_default_group()
-        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
-        mlp_dim = 8
-        with torch.device("meta"):
-            model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            fully_shard(model[0], mesh=mesh)
-            fully_shard(model[1], mesh=mesh)
-            fully_shard(model, mesh=mesh)
-        inp = torch.randn((4, mlp_dim), device="cuda")
-        error_regex = (
-            "FSDP parameters should be materialized from meta device before training, "
-            "but the following were still on meta device: "
-            r"\['0.in_proj.weight', '0.in_proj.bias', '0.out_proj.weight', '0.out_proj.bias'\]"
-        )
-        with self.assertRaisesRegex(RuntimeError, error_regex):
-            model(inp)
 
 
 if __name__ == "__main__":

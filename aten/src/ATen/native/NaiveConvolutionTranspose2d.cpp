@@ -298,9 +298,6 @@ void slow_conv_transpose2d_out_cpu_template(
   }
   columns.zero_();
 
-  // Materialize if COW, since we cannot do so during parallel_for
-  output.mutable_data_ptr();
-
   AT_DISPATCH_FLOATING_TYPES_AND3(at::ScalarType::Long, at::ScalarType::BFloat16,
       at::ScalarType::Half, input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
 

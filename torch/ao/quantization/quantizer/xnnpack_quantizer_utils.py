@@ -7,7 +7,6 @@ import torch
 import torch.nn.functional as F
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
-from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.pt2e.utils import (
     _conv1d_bn_example_inputs,
@@ -446,7 +445,7 @@ def _do_annotate_conv_bn(
                 "output": output,
             }
 
-        return _WrapperModule(_conv_bn)
+        return _conv_bn
 
     # Needed for matching, otherwise the matches gets filtered out due to unused
     # nodes returned by batch norm

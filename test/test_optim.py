@@ -1,7 +1,6 @@
 # Owner(s): ["module: optimizer"]
 import functools
 import math
-import tempfile
 from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
@@ -825,52 +824,6 @@ class TestOptimRenewed(TestCase):
             else:
                 fwd_bwd(optimizer, model, input)
                 optimizer.step()
-
-
-    @optims(optim_db, dtypes=[torch.float32])
-    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info):
-        optim_cls = optim_info.optim_cls
-
-        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
-        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
-        weight = Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype))
-        bias = Parameter(torch.randn(2, requires_grad=True, device=device, dtype=dtype))
-        input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
-        params = [weight, bias]
-
-        def fwd_bwd(optim, w, b, i):
-            optim.zero_grad()
-            loss = (w.mv(i) + b).pow(2).sum()
-            loss.backward()
-            if optim_info.only_supports_sparse_grads:
-                weight.grad = weight.grad.to_sparse()
-                bias.grad = bias.grad.to_sparse()
-            return loss
-
-        for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
-            optimizer = optim_cls(params, **optim_input.kwargs)
-            closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
-
-            # Prime the optimizer
-            for _ in range(3):
-                optimizer.step(closure)
-
-            sd = optimizer.state_dict()
-
-            # === Check saved/loaded state_dict are the same (including weights_only load). ===
-            with tempfile.TemporaryFile() as f:
-                torch.save(sd, f)
-                f.seek(0)
-                sd_copy = torch.load(f)
-                self.assertEqual(sd_copy, sd)
-                del sd_copy
-                f.seek(0)
-                sd_copy_wo = torch.load(f, weights_only=True)
-                self.assertEqual(sd_copy_wo, sd)
 
 
     @optims(optim_db, dtypes=[torch.float32])

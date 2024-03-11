@@ -669,8 +669,6 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
         ), "'model' must be torch_export.ExportedProgram"
         ordered_buffers = tuple(
             model.state_dict[name]
-            if name in model.state_dict
-            else model.constants[name]
             for name in model.graph_signature.buffers_to_mutate.values()
         )
 

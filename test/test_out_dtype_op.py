@@ -66,7 +66,7 @@ class TestOutDtypeOp(TestCase):
             (x,),
         )
         FileCheck().check("torch.ops.higher_order.out_dtype").check("aten.mm.default").run(ep.graph_module.code)
-        self.assertTrue(torch.allclose(m(x), ep.module()(x)))
+        self.assertTrue(torch.allclose(m(x), ep(x)))
         for node in ep.graph.nodes:
             if node.op == "call_function" and node.target is out_dtype:
                 # Result of this node should be int32

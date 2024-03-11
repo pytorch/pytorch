@@ -832,19 +832,24 @@ class GraphModule(torch.nn.Module):
 
                 return DoubleSizeMaybeAddGeThreeTensor(out_inner)
 
+        lower_bound_str = None
+        upper_bound_str = None
         curr_var_to_val = None
         curr_var_to_sources = None
-        guards = None
 
         def backend(gm, args):
+            print(gm.code)
             context = torch._guards.TracingContext.get()
+            val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
             # Grab info on sources and guards from the shapeenv
+            nonlocal lower_bound_str
+            nonlocal upper_bound_str
             nonlocal curr_var_to_val
             nonlocal curr_var_to_sources
-            nonlocal guards
 
-            guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
+            lower_bound_str = str(val_to_guards[0][0].expr)
+            upper_bound_str = str(val_to_guards[0][1].expr)
             curr_var_to_val = {
                 str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
             }
@@ -876,15 +881,14 @@ class GraphModule(torch.nn.Module):
             "s0": "L['x'].size()[0]",
             "s1": "L['x'].inner_elem.size()[0]",
         }
+        # lower bound comes from code underneath torch_dispatch  (operating on the inner tensor size)
+        expected_lower_bound = "s1 > 3"
+        # upper bound comes from user code (operating on the wrapper size)
+        expected_upper_bound = "2*s1 < 10"
         self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
-        self.assertExpectedInline(
-            "\n".join(guards),
-            """\
-Eq(2*s1, s0)
-2*s1 < 10
-s1 > 3""",
-        )
+        self.assertEqual(lower_bound_str, expected_lower_bound)
+        self.assertEqual(upper_bound_str, expected_upper_bound)
 
     def test_wrapper_subclass_with_same_sized_inner_tensor(self):
         # shouldn't recompile for different sizes when dynamic=True
@@ -1282,23 +1286,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             self.assertTrue(out.stride() == out_ref.stride())
             self.assertTrue(torch.allclose(out.values(), out_ref.values()))
 
-            # Check that no upper/lower bound guards are incurred
+            # Check that no guards are incurred
             def backend(gm, args):
                 context = torch._guards.TracingContext.get()
-                guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
-                ranges = [
-                    f"{s}: [{vr.lower}, {vr.upper}]"
-                    for s, vr in context.fake_mode.shape_env.var_to_range.items()
-                ]
-                self.assertExpectedInline("\n".join(guards), """Eq(s3 - 1, s0)""")
-                self.assertExpectedInline(
-                    "\n".join(ranges),
-                    """\
-s0: [2, 9223372036854775805]
-s2: [2, 9223372036854775806]
-s3: [3, 9223372036854775806]
-s4: [2, 9223372036854775806]""",
-                )
+                val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
+                self.assertEqual(len(val_to_guards), 0)
                 return gm
 
             torch._dynamo.reset()

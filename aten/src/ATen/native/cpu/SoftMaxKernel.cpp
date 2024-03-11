@@ -213,8 +213,8 @@ _vec_softmax_lastdim(
 template <typename scalar_t, bool log_softmax>
 inline void _vec_host_softmax_backward_lastdim(
     scalar_t* grad_input_data_base,
-    const scalar_t* grad_data_base,
-    const scalar_t* output_data_base,
+    scalar_t* grad_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<at::opmath_type<scalar_t>>;
@@ -226,8 +226,8 @@ inline void _vec_host_softmax_backward_lastdim(
       [&](int64_t begin, int64_t end) {
         for (const auto i : c10::irange(begin, end)) {
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
-          const scalar_t* grad_data = grad_data_base + i * dim_size;
-          const scalar_t* output_data = output_data_base + i * dim_size;
+          scalar_t* grad_data = grad_data_base + i * dim_size;
+          scalar_t* output_data = output_data_base + i * dim_size;
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
           scalar_t sum;
           if (log_softmax) {
@@ -264,8 +264,8 @@ template<typename scalar_t>
 inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 _vec_softmax_backward(
     scalar_t* grad_input_data_base,
-    const scalar_t* grad_output_data_base,
-    const scalar_t* output_data_base,
+    scalar_t* grad_output_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
@@ -304,8 +304,8 @@ _vec_softmax_backward(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            const scalar_t* grad_output_ptr = grad_output_data_base + offset;
-            const scalar_t* output_ptr = output_data_base + offset;
+            scalar_t* grad_output_ptr = grad_output_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
 
             int64_t d1 = 0;
             for (; d1 < size - (size % Vec::size()); d1 += Vec::size()) {
@@ -324,8 +324,8 @@ _vec_softmax_backward(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            const scalar_t* grad_output_ptr = grad_output_data_base + offset;
-            const scalar_t* output_ptr = output_data_base + offset;
+            scalar_t* grad_output_ptr = grad_output_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
             scalar_t* grad_input_ptr = grad_input_data_base + offset;
 
             int64_t d2 = 0;
@@ -348,8 +348,8 @@ template<typename scalar_t>
 inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 _vec_softmax_backward(
     scalar_t* grad_input_data_base,
-    const scalar_t* grad_output_data_base,
-    const scalar_t* output_data_base,
+    scalar_t* grad_output_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
@@ -397,8 +397,8 @@ _vec_softmax_backward(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            const scalar_t* grad_output_ptr = grad_output_data_base + offset;
-            const scalar_t* output_ptr = output_data_base + offset;
+            scalar_t* grad_output_ptr = grad_output_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
             float* grad_output_buffer_ptr =
                 grad_output_buffer_data + dim_idx * CHUNK_SIZE;
             float* output_buffer_ptr =
@@ -475,8 +475,8 @@ template<typename scalar_t>
 inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 _vec_log_softmax_backward(
     scalar_t* grad_input_data_base,
-    const scalar_t* grad_output_data_base,
-    const scalar_t* output_data_base,
+    scalar_t* grad_output_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
@@ -513,7 +513,7 @@ _vec_log_softmax_backward(
 
           // compute sum of grad_output
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
-            const scalar_t* grad_output_ptr = grad_output_data_base +
+            scalar_t* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
 
@@ -533,8 +533,8 @@ _vec_log_softmax_backward(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            const scalar_t* grad_output_ptr = grad_output_data_base + offset;
-            const scalar_t* output_ptr = output_data_base + offset;
+            scalar_t* grad_output_ptr = grad_output_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
             scalar_t* grad_input_ptr = grad_input_data_base + offset;
 
             int64_t d2 = 0;
@@ -558,8 +558,8 @@ template<typename scalar_t>
 inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 _vec_log_softmax_backward(
     scalar_t* grad_input_data_base,
-    const scalar_t* grad_output_data_base,
-    const scalar_t* output_data_base,
+    scalar_t* grad_output_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
@@ -602,7 +602,7 @@ _vec_log_softmax_backward(
 
           // compute sum of grad_output
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
-            const scalar_t* grad_output_ptr = grad_output_data_base +
+            scalar_t* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             float* grad_output_buffer_ptr =
@@ -636,7 +636,7 @@ _vec_log_softmax_backward(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            const scalar_t* output_ptr = output_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
             scalar_t* grad_input_ptr = grad_input_data_base + offset;
             float* grad_output_buffer_ptr =
                 grad_output_buffer_data + dim_idx * CHUNK_SIZE;
@@ -1154,8 +1154,8 @@ struct vec_host_softmax_backward_lastdim {
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)
       outer_size *= grad.size(i);
     scalar_t* grad_input_data_base = grad_input.mutable_data_ptr<scalar_t>();
-    const scalar_t* grad_data_base = grad.const_data_ptr<scalar_t>();
-    const scalar_t* output_data_base = output.const_data_ptr<scalar_t>();
+    scalar_t* grad_data_base = grad.data_ptr<scalar_t>();
+    scalar_t* output_data_base = output.data_ptr<scalar_t>();
     _vec_host_softmax_backward_lastdim<scalar_t, LogSoftMax>(
         grad_input_data_base,
         grad_data_base,
@@ -1182,8 +1182,8 @@ struct vec_host_softmax_backward {
       inner_size *= grad.size(i);
     }
     scalar_t* grad_input_data_base = grad_input.mutable_data_ptr<scalar_t>();
-    const scalar_t* grad_output_data_base = grad.const_data_ptr<scalar_t>();
-    const scalar_t* output_data_base = output.const_data_ptr<scalar_t>();
+    scalar_t* grad_output_data_base = grad.data_ptr<scalar_t>();
+    scalar_t* output_data_base = output.data_ptr<scalar_t>();
     if (LogSoftMax) {
       _vec_log_softmax_backward<scalar_t>(
           grad_input_data_base,

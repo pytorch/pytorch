@@ -103,7 +103,7 @@ buf2.node.kernel = extern_kernels.mm""",
         self.assertExpectedInline(
             open(filename / "ir_post_fusion.txt").read().rstrip(),
             """\
-buf0_buf1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
+buf0_buf1: FusedSchedulerNode(NoneType)
 buf0_buf1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
 buf0_buf1.unmet_dependencies = []
 buf0_buf1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]

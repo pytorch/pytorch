@@ -22,7 +22,7 @@ from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
-from torch.export import export
+from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
@@ -305,16 +305,15 @@ class TestPasses(TestCase):
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                y = x + 4
-                y.add_(4)
-                z = y.view(y.shape)
-                return x.cos() + z.cos()
+        def foo(x):
+            y = x + 4
+            y.add_(4)
+            z = y.view(y.shape)
+            return x.cos() + z.cos()
 
         x = torch.zeros(4, 2, 3)
-        foo = Module()
-        ep = export(foo, (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
+
+        ep = export(WrapperModule(foo), (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -462,16 +461,14 @@ class TestPasses(TestCase):
         ).run(gm.code)
 
     def test_math_ops(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                return (
-                    torch.tensor([math.ceil(x.item())]),
-                    torch.tensor([math.floor(x.item())]),
-                )
+        def func(x):
+            return (
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
 
-        func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(WrapperModule(func), args=(x,))
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatceh_set_grad(self):
