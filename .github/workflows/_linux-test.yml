@@ -73,7 +73,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
@@ -87,7 +87,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 

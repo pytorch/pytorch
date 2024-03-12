@@ -356,7 +356,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
@@ -459,7 +459,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm6.0-main
       - name: Test Pytorch binary
@@ -809,7 +809,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
@@ -912,7 +912,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm6.0-main
       - name: Test Pytorch binary
@@ -1262,7 +1262,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
@@ -1365,7 +1365,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm6.0-main
       - name: Test Pytorch binary
@@ -1715,7 +1715,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
@@ -1818,7 +1818,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm6.0-main
       - name: Test Pytorch binary
@@ -2168,7 +2168,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
@@ -2271,7 +2271,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: pytorch/manylinux-builder:rocm6.0-main
       - name: Test Pytorch binary

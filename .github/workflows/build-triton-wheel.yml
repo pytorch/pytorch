@@ -60,7 +60,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
@@ -216,7 +216,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/retry_docker_login
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
