@@ -770,21 +770,27 @@ class TestExport(TestCase):
         m = BasicDynamiShapeModel()
         a = torch.randn(3, 4)
         dim0_x = torch.export.Dim("dim0_x", min=3)
-        dim1_x = torch.export.Dim("dim1_x")
+        dim1_x = torch.export.Dim("dim1_x", max=8000)
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
                 "Specializations unexpectedly required"
-                ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex"
-                ".*\n.*\\[1\\] must be specialized to 4.*guards.*too complex"
+                ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "dim0_x = None  # 3(.*\n)*.*"
+                "dim1_x = 2\\*_dim1_x"
             ),
         ):
             torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
-        em = torch.export.export(m, (a,))
+        dim0_x = None
+        dim1_x = 2 * torch.export.Dim("_dim1_x", max=4000)
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
+        em = torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(
-            RuntimeError, "shape\[1\] to be equal to 4, but got 5"
+            RuntimeError,
+            "Expected.*shape\\[1\\] = 5 to be of the form 2\\*s1, where s1 is an integer",
         ):
             em.module()(x)
 
@@ -1255,13 +1261,12 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "Constraints violated.*!(.*\n)*.*"
+                "Not all values of K.*satisfy the generated guard(.*\n)*.*"
                 "Not all values of batch.*satisfy the generated guard(.*\n)*.*"
-                "Specializations unexpectedly required \\(K\\)!(.*\n)*.*"
-                "K.*specialized.*because the guards generated for it are too complex(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = Dim\\('batch', max=15\\)(.*\n)*.*"
-                "K = None  # 3"
+                "K = 3\\*_K"
             ),
         ):
             export(
@@ -3783,6 +3788,45 @@ def forward(self, arg0_1):
         ep = export(m, (torch.rand(2, 3),), strict=True)
         self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
         self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
+
+    def test_nested_retrace(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                return x + self.param
+
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return x + self.nested(x)
+
+        # first export
+        foo = Foo().to("meta")
+        inputs = (torch.ones(3, device="meta"),)
+        foo(*inputs)
+        ep = torch.export.export(foo, inputs, strict=False)
+
+        # second export
+        foo_1 = ep.module()
+        ep_1 = torch.export.export(foo_1, inputs, strict=False)
+
+        for node1, node2 in zip(ep.graph.nodes, ep_1.graph.nodes):
+            nn_module_stack_1 = node1.meta.get("nn_module_stack", None)
+            nn_module_stack_2 = node2.meta.get("nn_module_stack", None)
+
+            if nn_module_stack_1 is None:
+                self.assertTrue(nn_module_stack_2 is None)
+            else:
+                for v1, v2 in zip(nn_module_stack_1.values(), nn_module_stack_2.values()):
+                    self.assertEqual(v1, v2)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
