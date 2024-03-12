@@ -131,9 +131,9 @@ def auto_functionalized_dense(
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *result)
+        return (*out, *result)  # type: ignore[return-value]
     else:
-        return (out, *result)
+        return (out, *result)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
