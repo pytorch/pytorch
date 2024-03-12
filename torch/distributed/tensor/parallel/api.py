@@ -11,7 +11,7 @@ from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh, _validate_tp_mesh_dim, _deprecate_warnings
+from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
 )
@@ -26,7 +26,6 @@ def parallelize_module(  # type: ignore[return]
     module: nn.Module,
     device_mesh: DeviceMesh,
     parallelize_plan: Union[ParallelStyle, Dict[str, ParallelStyle]],
-    tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
@@ -51,11 +50,6 @@ def parallelize_module(  # type: ignore[return]
             :class:`ParallelStyle` object which contains how
             we prepare input/output for Tensor Parallelism or it can be a
             dict of module FQN and its corresponding :class:`ParallelStyle` object.
-        tp_mesh_dim (int, deprecated):
-            The dimension of ``device_mesh`` where we perform
-            Tensor Parallelism on, this field is deprecated and will be removed in future.
-            If you have a 2-D or N-D :class:`DeviceMesh`, consider passing in device_mesh[\"tp\"]
-
     Return:
         A :class:`nn.Module` object parallelized.
 
@@ -76,26 +70,19 @@ def parallelize_module(  # type: ignore[return]
     """
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
+    _validate_tp_mesh_dim(device_mesh)
+
     # instantiate a TP RNG state tracker if it's not there
     if is_rng_supported_mesh(device_mesh) and not isinstance(
         random._rng_tracker, TensorParallelRNGTracker
     ):
         random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
         # TODO: we should allow user to pass in the default seed from a config
-        random._rng_tracker._manual_seed(
-            device_mesh, base_seed=1234, tp_dim=tp_mesh_dim
-        )
+        random._rng_tracker._manual_seed(device_mesh, base_seed=1234)
         # By default we execute random ops in non-tensor-parallel region. If users want
         # to execute in tensor-parallel region, they can manually set this field to True
         # after parallelizing the model.
         random._rng_tracker.distribute_region_enabled = False
-
-    if device_mesh.ndim > 1:
-        _deprecate_warnings("tp_mesh_dim", "If you have a 2-D or N-D device_mesh, consider passing in device_mesh[\"tp\"]")
-        device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
-    else:
-        _validate_tp_mesh_dim(device_mesh)
-
 
     if isinstance(parallelize_plan, ParallelStyle):
         return parallelize_plan._apply(module, device_mesh)
