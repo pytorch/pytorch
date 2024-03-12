@@ -86,28 +86,8 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
-
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -116,31 +96,11 @@ jobs:
           role-session-name: gha-linux-build
           aws-region: us-east-1
 
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@jeanschmidt/calc-dock-img-ecr-login
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
-
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -151,44 +111,14 @@ jobs:
           tag=${ECR_DOCKER_IMAGE##*/}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
-
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/calc-dock-img-ecr-login
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
 
       - name: Get workflow job id
         id: get-job-id
@@ -196,16 +126,6 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
 
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
@@ -216,16 +136,6 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
-
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
@@ -233,16 +143,6 @@ jobs:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
           s3_bucket: pytorch-ci-artifacts
-
-      - name: List stuff
-        shell: bash
-        run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -265,12 +165,6 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         run: |
-          set +e
-          set -x
-          pwd
-          ls -la ./
-          ls -la ./.ci
-          ls -la ./.ci/pytorch
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -298,7 +192,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
+          docker exec -t "${container_name}" bash -c 'pwd ; ls -la ; ls -la .ci ; ls -la .ci/pytorch/ ; ./.ci/pytorch/build.sh'
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
