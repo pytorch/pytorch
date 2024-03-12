@@ -3,7 +3,6 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/debug_macros.h>
-#include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
 
 #if IS_PYTHON_3_12_PLUS
@@ -87,15 +86,9 @@ PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
-    bool valid = false;
+    py::object valid = py::none();
     try {
-      // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is True
-      // by default
-      if (cache_entry.root_mgr != nullptr) {
-        valid = run_root_guard_manager(cache_entry.root_mgr, f_locals);
-      } else {
-        valid = cache_entry.check_fn(locals).cast<bool>();
-      }
+      valid = cache_entry.check_fn(locals);
     } catch (py::error_already_set& e) {
       if (guard_error_hook) {
         py::handle guard_error_hook_handle(guard_error_hook);
@@ -111,7 +104,7 @@ PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
       e.restore();
       return NULL;
     }
-    if (valid) {
+    if (valid.cast<bool>()) {
       found = &cache_entry;
       break;
     }
