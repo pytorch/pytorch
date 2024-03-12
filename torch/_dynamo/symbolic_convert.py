@@ -341,6 +341,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
                 return
 
+            if isinstance(value, SymNodeVariable):
+                # if the assertion is normal shape expression.
+                # just install guard and bail out.
+                sym_expr = value.sym_num
+                if not isinstance(sym_expr, torch.SymBool):
+                    sym_expr = sym_expr != 0
+
+                result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
+                if not result:
+                    raise unimplemented(
+                        "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
+                    )
+                self.jump(inst)
+                return
+
             scalar_to_tensor_proxy = self.output.create_proxy(
                 "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
             )
@@ -583,44 +598,6 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
-class BackedgeTracker:
-    """
-    A BackedgeTracker is used to keep track of backedges and how many nodes
-    we're expanding the graph by each time the backedge is seen. The general
-    idea is that if you're looping and each loop is inlining a large sub-graph
-    we detect that and skip frame when it's looking untenable.
-    """
-
-    def __init__(self):
-        # How many loops have we performed?
-        self.n_seen = 0
-        # How many nodes were in the graph on our first loop?
-        self.n_nodes_on_first_loop = None
-
-    # Raises SkipFrame if the loop is getting too big.
-    def append(self, count):
-        self.n_seen += 1
-        if self.n_seen == 1:
-            self.n_nodes_on_first_loop = count
-
-        # Don't skip if we haven't seen this particular backedge at least a few
-        # times.
-        if self.n_seen < 3:
-            return
-
-        # For now use the trivial hueristic of checking the raw number of nodes
-        # since the first time we saw this backedge. In the future we could do
-        # something more interesting like watching the rate of growth to trim
-        # loops earlier (so we don't have to wait for `max` nodes before
-        # skipping).
-        added_nodes = count - self.n_nodes_on_first_loop
-        if (
-            config.max_loop_unroll_nodes > 0
-            and added_nodes > config.max_loop_unroll_nodes
-        ):
-            raise exc.SkipFrame("unrolled loop getting too big")
-
-
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
@@ -637,8 +614,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    # Used to track how big the graph is getting on loop backedges.
-    loop_backedge_trackers: Dict[Tuple[int, int], BackedgeTracker]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1096,12 +1071,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable.create(value=val))
 
     def jump(self, inst):
-        target = self.indexof[inst.target]
-        if self.instruction_pointer and target < self.instruction_pointer:
-            key = (self.instruction_pointer, target)
-            count = len(self.output.graph.nodes)
-            self.loop_backedge_trackers[key].append(count)
-        self.instruction_pointer = target
+        self.instruction_pointer = self.indexof[inst.target]
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -1990,7 +1960,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     ):
         super().__init__()
         self.speculation_log = speculation_log
-        self.loop_backedge_trackers = collections.defaultdict(BackedgeTracker)
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
