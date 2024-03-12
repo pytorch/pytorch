@@ -1866,26 +1866,39 @@ class CppKernel(Kernel):
                         assert outer_loop_fusion_depth >= 0
                         if outer_loop_fusion_depth > 0:
                             # Do the next level fused outer loop codegen
-                            _next_loop_level_nested_list: List[List[LoopLevel]] = [
-                                _loop_level_list[0].inner
-                                for _loop_level_list in _loop_level_nested_list
-                            ]
-                            gen_loops_with_outer_fusion(
-                                _next_loop_level_nested_list,
-                                outer_loop_fusion_depth,
-                            )
+                            for inner_idx in range(len(first_loop_level_list[0].inner)):
+                                _next_loop_level_nested_list: List[List[LoopLevel]] = [
+                                    [
+                                        _loop_level_list[0].inner[inner_idx],
+                                    ]
+                                    for _loop_level_list in _loop_level_nested_list
+                                    if _loop_level_list[0].inner[inner_idx].lines()
+                                    is not None
+                                ]
+                                if _next_loop_level_nested_list != []:
+                                    gen_loops_with_outer_fusion(
+                                        _next_loop_level_nested_list,
+                                        outer_loop_fusion_depth,
+                                    )
                         else:
                             # Generate the code of inner loops one by one
                             for _loop_level_list in _loop_level_nested_list:
                                 loop = _loop_level_list[0]
                                 gen_loops(loop.inner, loop.is_reduction())
 
-                loop_nest_root_list: List[List[LoopLevel]] = [
-                    _loop_nest.root for _loop_nest in loop_nest_list
-                ]
-                gen_loops_with_outer_fusion(
-                    loop_nest_root_list, outer_loop_fusion_depth
-                )
+                for idx in range(len(loop_nest_list[0].root)):
+                    # Main loop and tail loop will codegen fused outer loop specific
+                    loop_nest_root_list: List[List[LoopLevel]] = [
+                        [
+                            _loop_nest.root[idx],
+                        ]
+                        for _loop_nest in loop_nest_list
+                        if _loop_nest.root[idx].lines() is not None
+                    ]
+                    if loop_nest_root_list != []:
+                        gen_loops_with_outer_fusion(
+                            loop_nest_root_list, outer_loop_fusion_depth
+                        )
             elif loop_nest.root:
                 gen_loops(loop_nest.root)
             else:
@@ -3765,16 +3778,85 @@ class CppScheduling(BaseScheduling):
                 lazy_cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 lazy_nodes_list.append(_nodes)
 
-            self.kernel_group.finalize_kernel(
-                lazy_cpp_kernel_proxy_list,
-                lazy_nodes_list,
-                node.outer_loop_fusion_depth,
-            )
+            def _check_loop_level_attr(
+                _lazy_cpp_kernel_proxy_list, _outer_loop_fusion_depth
+            ):
+                # This function ensures that the same tiling split is applied at each loop level within the outer loop fusion depth.
+                # In the fusion stage, we only examine nodes with same vars and reduce.
+                # However, for nodes with same vars and reduce, the loops may still have different tile splits.
+                # For example (test_expr_vec_non_contiguous in test_cpu_repro.py):
+                #   * buf0 tiling along the 2nd loop level, buf1 tiling along the 3rd loop level.
+                # If the check failed, we should fall back to standard loop codegen.
+                def _inner(
+                    _left_loop_level: LoopLevel,
+                    _right_loop_level: LoopLevel,
+                    _loop_fusion_depth: int,
+                ) -> bool:
+                    # Check if same loop level attr
+                    _outer_loops_attr_compare_list = [
+                        "var",
+                        "size",
+                        "offset",
+                        "steps",
+                        "kernel",
+                        "reduction_var_map",
+                    ]
+                    if not (
+                        all(
+                            getattr(_left_loop_level, _attr_compare)
+                            == getattr(_right_loop_level, _attr_compare)
+                            for _attr_compare in _outer_loops_attr_compare_list
+                        )
+                        and _left_loop_level.kernel is None
+                        and _left_loop_level.reduction_var_map is None
+                    ):
+                        return False
+
+                    assert _loop_fusion_depth >= 1
+                    if (_loop_fusion_depth := _loop_fusion_depth - 1) > 0:
+                        # Check next loop level attr
+                        if len(_left_loop_level.inner) != len(
+                            _right_loop_level.inner
+                        ) or any(
+                            not _inner(left_inner, right_inner, _loop_fusion_depth)
+                            for left_inner, right_inner in zip(
+                                _left_loop_level.inner, _right_loop_level.inner
+                            )
+                        ):
+                            return False
+                    return True
+
+                for idx in range(len(_lazy_cpp_kernel_proxy_list) - 1):
+                    _left_loop_nest = lazy_cpp_kernel_proxy_list[idx].loop_nest
+                    _right_loop_nest = lazy_cpp_kernel_proxy_list[idx + 1].loop_nest
+                    if len(_left_loop_nest.root) != len(_right_loop_nest.root) or any(  # type: ignore[union-attr]
+                        not _inner(left_root, right_root, _outer_loop_fusion_depth)
+                        for left_root, right_root in zip(
+                            _left_loop_nest.root, _right_loop_nest.root  # type: ignore[union-attr]
+                        )
+                    ):
+                        return False
+
+                return True
+
+            if _check_loop_level_attr(
+                lazy_cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+            ):
+                kernel_group.finalize_kernel(
+                    lazy_cpp_kernel_proxy_list,
+                    lazy_nodes_list,
+                    node.outer_loop_fusion_depth,
+                )
+            else:
+                # Fall back to standard loop codegen
+                for _kernel_proxy, _nodes in zip(
+                    lazy_cpp_kernel_proxy_list, lazy_nodes_list
+                ):
+                    kernel_group.finalize_kernel(_kernel_proxy, _nodes)
         else:
             nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
             cpp_kernel_proxy = CppKernelProxy(kernel_group)
             cpp_kernel_proxy.codegen_nodes(nodes)
-
             kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
         args_num = self._get_scheduled_num_args()
