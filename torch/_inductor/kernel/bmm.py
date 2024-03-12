@@ -129,36 +129,23 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 # Don't register this since it is slower than decomposing it
 # @register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
-    choices = []
+    m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
+
     # options to tune from
     choices = (
-        [aten_baddbmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)]
+        [aten_baddbmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
         if use_aten_gemm_kernels()
         else []
     )
-    if is_nonzero and use_triton_template(layout):
+    if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(
                 choices,
-                input_nodes=(inp_expanded, mat1, mat2),
+                input_nodes=(inp, mat1, mat2),
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
-
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
-
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices,
-            layout,
-            [mat1, mat2, inp_expanded],
-            alpha=alpha,
-            beta=beta,
-            input_reorder=[2, 0, 1],
-        )
 
     return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)

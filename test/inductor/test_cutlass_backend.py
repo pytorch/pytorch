@@ -946,6 +946,15 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
+        def mm(a, b):
+            # this should not be fused, since the output dtype is different from the matmul dtype
+            return (a @ b).to(torch.float32) * 0.00001
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
+        )
+
     def test_max_autotune_cutlass_backend_simple_bmm(self):
         def bmm(a, b):
             return torch.bmm(a, b)
@@ -955,28 +964,7 @@ class TestCutlassBackend(TestCase):
             fp16=True,
             expected_fuse_count=0,
             mm=bmm,
-            with_bias=False,
             batch_size=10,
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_simple_baddbmm(self):
-        def mm(a, b, bias):
-            # disabled usage of torch.baddbmm because it implicitly casts all inputs to float32
-            # during lowering in inductor for unknown reasons
-            # return torch.baddbmm(bias, a, b)
-            return (a @ b) + bias  # this is equivalent and doesn't cast to float32
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True,
-            fp16=True,
-            expected_fuse_count=0,
-            mm=mm,
-            with_bias=True,
-            batch_size=31,
-            evt_only=True,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1003,7 +991,8 @@ class TestCutlassBackend(TestCase):
         only_evt_capable: bool = False,
         max_autotune_gemm_backends: str = "CUTLASS",
     ):
-        """
+        """s
+
         Make sure autotuning mm in sub processes work without crashes.
         """
 
