@@ -3789,6 +3789,50 @@ def forward(self, arg0_1):
         self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
         self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
 
+    def test_constant_name(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.rand(2, 3)
+                self.parameter = torch.nn.Parameter(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.constant
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested_1 = Nested()
+                self.nested_2 = Nested()
+
+            def forward(self, x):
+                return (
+                    self.nested_1(x)
+                    + self.nested_2(x)
+                    + self.nested_1.constant
+                    + self.nested_2.constant
+                    + self.nested_1.parameter
+                    + self.nested_2.parameter
+                )
+
+        m = Mod()
+        ep = export(m, (torch.rand(2, 3),), strict=False)
+        self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
+
+        # check constant fqn when there are multiple instances of the same class
+        self.assertEqual(ep.constants["nested_1.constant"], m.nested_1.constant)
+        self.assertEqual(ep.constants["nested_2.constant"], m.nested_2.constant)
+
+        # check constant_name in the graph
+        placeholders = [
+            node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertEqual(len(placeholders), 5)
+        self.assertTrue(all(ph.name == ph.target for ph in placeholders))
+        # suffix should be added to duplicated constant_name
+        self.assertEqual(placeholders[2].name, "constant")
+        self.assertEqual(placeholders[3].name, "constant_1")
+
     def test_nested_retrace(self):
         class Nested(torch.nn.Module):
             def __init__(self):

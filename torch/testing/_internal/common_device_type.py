@@ -767,8 +767,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             empty_class.tearDownClass()
             base.tearDownClass()
 
-        setattr(device_type_test_class, "setUpClass", _setUpClass)
-        setattr(device_type_test_class, "tearDownClass", _tearDownClass)
+        device_type_test_class.setUpClass = _setUpClass
+        device_type_test_class.tearDownClass = _tearDownClass
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
