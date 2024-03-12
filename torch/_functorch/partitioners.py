@@ -783,7 +783,7 @@ def min_cut_rematerialization_partition(
     def ban_recomputation(node):
         if "recompute" in node.meta:
             return node.meta["recompute"] == 0
-        elif config.aggressive_recomputation:
+        elif config.aggressive_recomputation or True:
             ignored_ops = random_ops + compute_intensive_ops
             # if get_aten_target(node) in ignored_ops:
             #     is_banned = str(node) in {"addmm", "addmm_1", "addmm_2"}
