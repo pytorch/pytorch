@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <typeindex>

@@ -108,6 +108,8 @@ class SideEffects:
             return "store_attr_mutations: unknown diff"
         elif self.save_for_backward != other.save_for_backward:
             return "save_for_backward"
+        elif self.tensor_hooks != other.tensor_hooks:
+            return "tensor_hooks"
         else:
             return None
 
@@ -242,7 +244,7 @@ class SideEffects:
         options,
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
-            obj = torch.autograd.function.FunctionCtx()
+            obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
