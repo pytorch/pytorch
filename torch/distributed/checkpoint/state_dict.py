@@ -645,6 +645,8 @@ def get_model_state_dict(
 
     Returns:
         The state_dict for ``model``.
+
+    :rtype: typing.Dict[str, ValueType]
     """
     with gc_context():
         info = _verify_options(
@@ -683,6 +685,8 @@ def get_optimizer_state_dict(
 
     Returns:
         The state_dict for ``optimizers``.
+
+    :rtype: OptimizerStateType
     """
     with gc_context():
         optimizers = (
@@ -819,9 +823,7 @@ def _unflatten_model_state_dict(
 
 def set_model_state_dict(
     model: nn.Module,
-    model_state_dict: Union[
-        Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
-    ],
+    model_state_dict: Dict[str, ValueType],
     *,
     options: Optional[StateDictOptions] = None,
 ) -> _IncompatibleKeys:
@@ -832,7 +834,7 @@ def set_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        model_state_dict: (Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+        model_state_dict: (Dict[str, ValueType]):
            the model state_dict to load. If the key of the ``model_state_dict``
            is nn.Module, the key is a submodule of ``model`` and the value should
            be the state_dict of the submodule. When loading the state_dict,
@@ -845,6 +847,8 @@ def set_model_state_dict(
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys
             * **unexpected_keys** is a list of str containing the unexpected keys
+
+    :type model_state_dict: typing.Dict[str, ValueType]
     """
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
@@ -880,6 +884,8 @@ def set_optimizer_state_dict(
 
     Returns:
         None
+
+    :type optim_state_dict: typing.OptimizerStateType
     """
     with gc_context():
         optimizers = (
@@ -897,9 +903,7 @@ def set_state_dict(
     model: nn.Module,
     optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
     *,
-    model_state_dict: Union[
-        Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
-    ],
+    model_state_dict: Dict[str, ValueType],
     optim_state_dict: OptimizerStateType,
     options: Optional[StateDictOptions] = None,
 ) -> _IncompatibleKeys:
@@ -932,6 +936,9 @@ def set_state_dict(
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys of the model state_dict.
             * **unexpected_keys** is a list of str containing the unexpected keys of the model state_dict.
+
+    :type model_state_dict: typing.Dict[str, ValueType]
+    :type optim_state_dict: typing.OptimizerStateType
     """
 
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
