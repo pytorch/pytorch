@@ -279,23 +279,23 @@ class Redistribute(torch.autograd.Function):
         ctx.current_spec = current_spec
         ctx.async_op = async_op
 
-        # Early return the original DTensor if the placements are the same.
-        if current_spec.placements == placements:
-            return input
+        if current_spec.placements != placements:
+            target_spec = DTensorSpec(
+                device_mesh, placements, tensor_meta=input._spec.tensor_meta
+            )
 
-        target_spec = DTensorSpec(
-            device_mesh, placements, tensor_meta=input._spec.tensor_meta
-        )
-
-        local_tensor = input._local_tensor
-        output = redistribute_local_tensor(
-            local_tensor, current_spec, target_spec, async_op=async_op
-        )
+            local_tensor = input._local_tensor
+            output = redistribute_local_tensor(
+                local_tensor, current_spec, target_spec, async_op=async_op
+            )
+        else:
+            # use the same local tensor if placements are the same.
+            output = input._local_tensor
 
         return dtensor.DTensor(
             output,
             device_mesh,
-            target_spec.placements,
+            placements,
             shape=input.shape,
             dtype=input.dtype,
             requires_grad=input.requires_grad,

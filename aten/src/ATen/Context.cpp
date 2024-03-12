@@ -7,12 +7,16 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <stdexcept>
 
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <cpuinfo.h>
+#endif
 
 namespace at {
 
@@ -475,5 +479,22 @@ void Context::unsetDefaultMobileCPUAllocator() {
   // Setting the priority high to make sure no other allocator gets used instead of this.
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
+}
+
+bool Context::allowFP16ReductionCPU() const {
+  return allow_fp16_reduction_cpu;
+}
+
+void Context::setAllowFP16ReductionCPU(bool b) {
+  if ( b && !allow_fp16_reduction_cpu) {
+    // Check that CPU supports fp16 reductions
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+    if (!cpuinfo_initialize() || !cpuinfo_has_arm_fp16_arith())
+#else
+    if (true)
+#endif
+      throw std::runtime_error("Float16 arithmetic is not supported by the CPU!");
+  }
+  allow_fp16_reduction_cpu = b;
 }
 } // namespace at
