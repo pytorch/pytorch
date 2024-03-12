@@ -267,7 +267,11 @@ def make_constraints(
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                constraint = tensor_constraints[i] if tensor_constraints else None
+                constraint = (
+                    tensor_constraints[i]
+                    if tensor_constraints and i in tensor_constraints
+                    else None
+                )
                 if constraint:  # user-specified
                     range_constraints[d.node.expr] = ValueRanges(
                         lower=constraint["lower"], upper=constraint["upper"]
