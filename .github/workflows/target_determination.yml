@@ -39,6 +39,7 @@ jobs:
         id: td
         continue-on-error: true
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_WORKFLOW: ${{ github.workflow }}
           GITHUB_JOB: ${{ github.job }}
@@ -47,6 +48,7 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           python3 -m pip install boto3==1.19.12
           python3 tools/testing/do_target_determination_for_s3.py

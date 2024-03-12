@@ -70,8 +70,6 @@ class TestPythonRegistration(TestCase):
             ref = opt_fn(x)
             ref_array.append(ref)
 
-        torch_compile_op_lib_impl = torch.library.Library("aten", "IMPL")
-
         class WrapperFn:
             def __init__(self, op_name) -> None:
                 self.op_name = op_name
@@ -87,7 +85,7 @@ class TestPythonRegistration(TestCase):
         def make_elementwise(op_name):
             return WrapperFn(op_name)
 
-        def register_ops(op_set):
+        def register_ops(op_set, torch_compile_op_lib_impl):
             for _op_name in op_set:
                 qualified_op_name = f"{namespace_name}::{_op_name}"
                 _, overload_names = torch._C._jit_get_operation(qualified_op_name)
@@ -105,17 +103,17 @@ class TestPythonRegistration(TestCase):
                     except Exception as e:
                         continue
 
-        register_ops(unary_op_set)
 
-        res_array = []
-        for unary_op_name in unary_op_set:
-            res_array.append(getattr(torch, unary_op_name)(x))
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(unary_op_set, torch_compile_op_lib_impl)
 
-        self.assertEqual(invoke_count, unary_op_set.__len__())
-        for ref, res in zip(ref_array, res_array):
-            self.assertEqual(ref, res)
+            res_array = []
+            for unary_op_name in unary_op_set:
+                res_array.append(getattr(torch, unary_op_name)(x))
 
-        del torch_compile_op_lib_impl
+            self.assertEqual(invoke_count, unary_op_set.__len__())
+            for ref, res in zip(ref_array, res_array):
+                self.assertEqual(ref, res)
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
@@ -935,8 +933,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_new_ones(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -945,8 +941,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_like(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -1126,7 +1120,6 @@ def forward(self, x_a_1, x_b_1, y_1):
         called_funcs = []
 
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
             elem: torch.Tensor
             __slots__ = ['elem']
 
@@ -1436,8 +1429,6 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
                 return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
         a = SubTensor(torch.randn(2))
         with PoliteMode() as mode:
             a.abs()
@@ -1672,8 +1663,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -1692,8 +1681,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -1710,8 +1697,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1733,8 +1718,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         called = 0
 
         class SubTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 nonlocal called
@@ -1768,8 +1751,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 r = torch.Tensor._make_subclass(cls, elem)
                 return r
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
