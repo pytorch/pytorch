@@ -1005,7 +1005,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._scatter_out",
         "torch._C._scatter",
         "torch._C._select_conv_backend",
-        "torch._C._select_batch_norm_backend",
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",
