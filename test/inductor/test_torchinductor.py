@@ -37,6 +37,7 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -73,7 +74,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -192,7 +192,7 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -784,7 +784,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
                 " ".join(code).count(
-                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                    "view_dtype" if config.cpp_wrapper else "aten.view"
                 ),
                 3,
             )
@@ -918,6 +918,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @config.patch({"fx_graph_cache": False})
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -927,6 +928,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
+    @config.patch({"fx_graph_cache": False})
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -8553,16 +8555,94 @@ class CommonTemplate:
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
-    def test_inplace_resize_as(self):
-        def fn(x, y):
-            x.resize_as_(y)
+    @staticmethod
+    def _check_resize_common(self, fn, x, size_or_y, memory_format, inplace):
+        x_ref_arg = x.clone()
+        x_opt_arg = x.clone()
+        x_numel = x.numel()
+        torch._dynamo.reset_code_caches()
+        if not inplace:
+            opt_fn = torch._dynamo.optimize_assert("inductor")(fn)
+        else:
+            opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
+        correct = fn(x_ref_arg, size_or_y, memory_format)
+        actual = opt_fn(x_opt_arg, size_or_y, memory_format)
+
+        def get_numel(size_or_y):
+            if isinstance(size_or_y, torch.Tensor):
+                return size_or_y.numel()
+            else:
+                # assume shape
+                return functools.reduce(lambda x, y: x * y, size_or_y, 1)
+
+        nele_check = min(x_numel, get_numel(size_or_y)) 
+        correct_values = correct.flatten()[:nele_check]
+        actual_values = correct.flatten()[:nele_check]
+        self.assertTrue(same(correct_values, actual_values))
+        correct_strides = correct.stride()
+        actual_strides = actual.stride()
+        self.assertEqual(correct_strides, actual_strides)
+
+
+    @staticmethod
+    def _cases_resize_common():
+        sizes = [
+            ((1, ), (1, 3, 2, 3)),
+            ((100, ), (1, 3, 2, 3)),
+            ((1, 3, 2, 3), (1, 3, 2, 3)),
+            ((1, ), (1, 3, 2, 3, 1)),
+            ((100, ), (1, 3, 2, 3, 1)),
+            ((1, 3, 2, 3, 1), (1, 3, 2, 3, 1)),
+        ]
+        for x_size, y_size in sizes:
+            memory_formats = [torch.contiguous_format]
+            if len(y_size) == 4:
+                memory_formats.append(torch.channels_last)
+            if len(y_size) == 5:
+                memory_formats.append(torch.channels_last_3d)
+            for memory_format in memory_formats:
+                x = torch.randn(*x_size)
+                yield x, y_size, memory_format
+
+    def test_resize(self):
+        def fn(x, size, memory_format):
+            # NOTE: Tensor.resize() =/= aten::resize()
+            return torch.ops.aten.resize(x, size, memory_format=memory_format)
+    
+        for x, y_size, memory_format in CommonTemplate._cases_resize_common():
+            CommonTemplate._check_resize_common(self, fn, x, y_size, memory_format, inplace=False) 
+    
+    def test_inplace_resize(self):
+        def fn(x, size, memory_format):
+            torch.ops.aten.resize_(x, size, memory_format=memory_format)
             return x
 
-        x = torch.randn(2, 3)
-        y = torch.randn(200, 300)
-        x_clone = x.clone()
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x, y), opt_fn(x_clone, y))
+        for x, y_size, memory_format in CommonTemplate._cases_resize_common():
+            CommonTemplate._check_resize_common(self, fn, x, y_size, memory_format, inplace=True) 
+
+    @staticmethod
+    def _cases_resize_as_common():
+        for x, y_size, memory_format in CommonTemplate._cases_resize_common():
+            # each sizes /memory_format combintation tested in 2 ways: 
+            # 1. y is contiguous fn gets memory_format kwargs
+            # 2. y has memory_format contiguity and fn gets preserve kwarg
+            yield x, torch.randn(*y_size), memory_format
+            yield x, torch.randn(*y_size).contiguous(memory_format=memory_format), torch.preserve_format
+            
+    def test_resize_as(self):
+        def fn(x, y, memory_format):
+            return torch.ops.aten.resize_as(x, y, memory_format=memory_format)
+
+        for x, y, memory_format in CommonTemplate._cases_resize_as_common():
+            CommonTemplate._check_resize_common(self, fn, x, y, memory_format, inplace=False)
+        
+    def test_inplace_resize_as(self):
+        def fn(x, y, memory_format):
+            x.resize_as_(y, memory_format=memory_format)
+            return x
+
+        for x, y, memory_format in CommonTemplate._cases_resize_as_common():
+            CommonTemplate._check_resize_common(self, fn, x, y, memory_format, inplace=True)
 
     def test_erfc(self):
         def fn(x):
@@ -8890,6 +8970,7 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
+    @config.patch({"fx_graph_cache": False})
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
@@ -8919,7 +9000,7 @@ class CommonTemplate:
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
                 )
 
         with add_scheduler_init_hook(hook_fn):
@@ -9542,7 +9623,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
             r = fn_gpu(x)
             code = run_and_get_triton_code(fn_gpu, x)
-            self.assertIn("tl.sin", code)
+            self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
