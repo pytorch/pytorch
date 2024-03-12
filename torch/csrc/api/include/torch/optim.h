@@ -10,3 +10,4 @@
 
 #include <torch/optim/schedulers/lr_scheduler.h>
 #include <torch/optim/schedulers/step_lr.h>
+#include <torch/optim/schedulers/reduce_on_plateau_scheduler.h>
