@@ -242,10 +242,9 @@ def make_constraints(
         defaultdict
     )
     for const in constraints:
-        spec = const.serializable_spec
-        tensor_id_to_dim_constraint[spec["t_id"]][spec["dim"]] = {
-            "lower": spec["min"],
-            "upper": spec["max"],
+        tensor_id_to_dim_constraint[const.t_id][const.dim] = {
+            "lower": const.constraint_range.vr.lower,
+            "upper": const.constraint_range.vr.upper,
         }
 
     range_constraints = {}
