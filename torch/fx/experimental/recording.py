@@ -255,9 +255,17 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     fn, list(args), kwargs, tracked_fakes, name=fn.__name__
                 )
                 # Play the event on this ShapeEnv.
-                r = event.run(self)
+                # NB: It's important to put the event first, because running
+                # the event can trigger internal events that must be ordered
+                # after this event.  However, if an exception happens, we do
+                # NOT want to have the event in the list, so pop it off from
+                # the record if an error happened
                 self.events.append(event)
-                return r
+                try:
+                    return event.run(self)
+                except:
+                    self.events.pop()
+                    raise
 
         return wrapper
 
