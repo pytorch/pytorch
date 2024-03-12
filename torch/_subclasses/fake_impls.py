@@ -157,6 +157,11 @@ def constructors(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
+    if "names" in kwargs:
+        raise UnsupportedOperatorException(
+            "torch.compile doesn't support named tensors"
+        )
+
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
         # TODO: file issue
@@ -803,8 +808,9 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     value = kwargs["value"]
     cu_seqlens_q = kwargs["cu_seqlens_q"]
     max_seqlen_q = kwargs["max_seqlen_q"]
+    max_seqlen_k = kwargs["max_seqlen_k"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: bias, cu_seqlens_k, max_seqlen_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
+    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -826,6 +832,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     if cu_seqlens_q is not None:
         assert max_seqlen_q is not None
         actual_max_seqlen_q = max_seqlen_q
+    actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
     logsumexp_dim = (
         math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
     )
@@ -846,7 +853,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
         torch.empty((), dtype=torch.long, device="meta"), query.device
     )
 
-    return res, logsum_exp, seed, offset, M, N
+    return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
 
 
 FAST_OP_IMPLEMENTATIONS = {}
@@ -940,7 +947,11 @@ def make_fast_binary_impl(slow_ref):
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
-            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+            if (
+                isinstance(op, torch.Tensor)
+                and len(op.shape) == len(final_shape)
+                and op.shape == final_shape
+            ):
                 break
         else:
             return slow("both tensors nontrivially broadcast")

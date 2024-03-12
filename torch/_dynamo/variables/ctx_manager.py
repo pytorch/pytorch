@@ -323,9 +323,9 @@ class GradModeVariable(ContextWrappingVariable):
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx, target_value, **kwargs):
         var = InferenceModeVariable(
-            target_values, initial_values=torch.is_inference_mode_enabled(), **kwargs
+            [target_value], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
         return var
 
@@ -353,19 +353,19 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        ctx = torch.autograd.grad_mode._enter_inference_mode(self.target_values)
+        ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
         )
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,
-            (self.target_values,),
+            (*self.target_values,),
             {},
         )
 
     def module_name(self):
-        return "torch.inference_mode"
+        return "torch"
 
     def fn_name(self):
         return "inference_mode"
@@ -640,6 +640,42 @@ class StreamContextVariable(ContextWrappingVariable):
             {},
         )
         self.state.cleanup_assert()
+
+
+class PreserveVersionContextVariable(ContextWrappingVariable):
+    """
+    Wraps torch.autograd._unsafe_preserve_version_counter
+    """
+
+    @staticmethod
+    def constructor(tx):
+        return variables.LambdaVariable(
+            lambda tensor: PreserveVersionContextVariable(
+                tensor,
+                tensor.var_getattr(tx, "_version"),
+            )
+        )
+
+    def __init__(self, tensor, prev_version, **kwargs):
+        kwargs.setdefault("target_values", None)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.prev_version = prev_version
+
+    def enter(self, tx):
+        pass
+
+    def exit(self, tx, *args):
+        from ..tensor_version_op import _unsafe_set_version_counter
+
+        return variables.TorchInGraphFunctionVariable(
+            _unsafe_set_version_counter
+        ).call_function(tx, [self.tensor, self.prev_version], {})
+
+    def reconstruct(self, codegen):
+        unimplemented(
+            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        )
 
 
 class StreamVariable(VariableTracker):
