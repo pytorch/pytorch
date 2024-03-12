@@ -493,6 +493,7 @@ def perform_misc_tasks(
     set_output(
         "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
     )
+    set_output("ci-no-td", check_for_setting(labels, pr_body, "ci-no-td"))
 
     # Obviously, if the job name includes unstable, then this is an unstable job
     is_unstable = job_name and IssueType.UNSTABLE.value in job_name
@@ -588,7 +589,7 @@ def main() -> None:
         labels=labels,
         test_matrix=filtered_test_matrix,
         job_name=args.job_name,
-        pr_body=pr_body,
+        pr_body=pr_body if pr_body else "",
     )
 
     # Set the filtered test matrix as the output

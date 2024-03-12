@@ -36,15 +36,15 @@ C10_CUDA_API void warn_or_error_on_sync();
 // Raw CUDA device management functions
 C10_CUDA_API cudaError_t GetDeviceCount(int* dev_count);
 
-C10_CUDA_API cudaError_t GetDevice(int* device);
+C10_CUDA_API cudaError_t GetDevice(DeviceIndex* device);
 
-C10_CUDA_API cudaError_t SetDevice(int device);
+C10_CUDA_API cudaError_t SetDevice(DeviceIndex device);
 
-C10_CUDA_API cudaError_t MaybeSetDevice(int device);
+C10_CUDA_API cudaError_t MaybeSetDevice(DeviceIndex device);
 
-C10_CUDA_API int ExchangeDevice(int device);
+C10_CUDA_API DeviceIndex ExchangeDevice(DeviceIndex device);
 
-C10_CUDA_API int MaybeExchangeDevice(int device);
+C10_CUDA_API DeviceIndex MaybeExchangeDevice(DeviceIndex device);
 
 C10_CUDA_API void SetTargetDevice();
 

@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (3, 1)
+SCHEMA_VERSION = (5, 1)
 TREESPEC_VERSION = 1
 
 
@@ -51,7 +51,7 @@ class MemoryFormat(IntEnum):
 @dataclass
 class Device:
     type: str
-    index: Optional[int]
+    index: Optional[int] = None
 
 
 @dataclass(repr=False)
@@ -90,7 +90,7 @@ class TensorMeta:
     requires_grad: bool
     device: Device
     strides: List[SymInt]
-    storage_offset: int
+    storage_offset: SymInt
     layout: Layout
 
 
@@ -170,6 +170,7 @@ class Argument(_Union):
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
     as_custom_obj: CustomObjArgument
+    as_operator: str
 
 
 @dataclass
@@ -219,6 +220,8 @@ class InputToParameterSpec:
 class InputToBufferSpec:
     arg: TensorArgument
     buffer_name: str
+    persistent: bool
+
 
 
 @dataclass
@@ -270,6 +273,12 @@ class GradientToUserInputSpec:
     user_input_name: str
 
 
+@dataclass
+class UserInputMutationSpec:
+    arg: TensorArgument
+    user_input_name: str
+
+
 @dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
@@ -277,6 +286,7 @@ class OutputSpec(_Union):
     buffer_mutation: BufferMutationSpec
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec
+    user_input_mutation: UserInputMutationSpec
 
 
 @dataclass

@@ -1,15 +1,13 @@
 # Owner(s): ["module: optimizer"]
 
-import math
 import unittest
 import functools
 import itertools
-from copy import deepcopy
 
 import torch
 from torch.nn import Parameter
 from torch.optim import (
-    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, LBFGS, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam, Optimizer
+    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam
 )
 from torch.optim.lr_scheduler import (
     StepLR,
@@ -23,14 +21,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     gradcheck,
-    skipIfRocm,
     skipIfTorchDynamo
 )
 
 
 from torch.testing._internal.common_cuda import TEST_CUDA
-from typing import Dict, Any, Tuple
-from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 from unittest.mock import patch
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -271,30 +266,6 @@ class TestOptim(TestCase):
         )
 
 
-    def _test_complex_2d(self, optimizer_constructor):
-        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
-        a1_real = a1.real.clone().detach()
-        a1_imag = a1.imag.clone().detach()
-        a1_real.requires_grad_()
-        a1_imag.requires_grad_()
-        optim1 = optimizer_constructor([a1])
-        optim2 = optimizer_constructor([a1_real, a1_imag])
-
-        for _ in range(10):
-            optim1.zero_grad()
-            optim2.zero_grad()
-            a2 = torch.complex(a1_real, a1_imag)
-            rosenbrock(a1).abs().backward()
-            rosenbrock(a2).abs().backward()
-
-            self.assertEqual(a1.grad.real, a1_real.grad)
-            self.assertEqual(a1.grad.imag, a1_imag.grad)
-
-            optim1.step()
-            optim2.step()
-            self.assertEqual(a1.real, a1_real)
-            self.assertEqual(a1.imag, a1_imag)
-
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{"params": [weight]}, dict(params=[bias], **kwargs)]
 
@@ -489,16 +460,6 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
 
-    def test_adam_complex(self):
-        for foreach in (False, True):
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach))
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach, amsgrad=True))
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach, weight_decay=0.2))
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach, weight_decay=0.2, amsgrad=True))
-        self._test_complex_2d(Adam)
-        self._test_complex_2d(functools.partial(
-            Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
-        ))
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -514,17 +475,6 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
 
-
-    def test_adamw_complex(self):
-        self._test_complex_2d(AdamW)
-        self._test_complex_2d(functools.partial(
-            AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
-        ))
-        for foreach in (False, True):
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach))
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach, amsgrad=True))
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2))
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2, amsgrad=True))
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -628,11 +578,6 @@ class TestOptim(TestCase):
             )
 
 
-    def test_adamax(self):
-        self._test_complex_2d(Adamax)
-        self._test_complex_2d(functools.partial(Adamax, foreach=True))
-
-
     def test_radam(self):
         self._test_basic_cases(
             lambda weight, bias, foreach: RAdam(
@@ -655,40 +600,6 @@ class TestOptim(TestCase):
             ],
             constructor_accepts_foreach=True,
         )
-
-
-    def test_rmsprop(self):
-        for foreach in (False, True):
-            self._test_complex_2d(lambda param: RMSprop(param, foreach=foreach))
-            self._test_complex_2d(
-                lambda param: RMSprop(param, centered=True, foreach=foreach)
-            )
-            self._test_complex_2d(
-                lambda param: RMSprop(param, momentum=0.1, foreach=foreach)
-            )
-            self._test_complex_2d(
-                lambda param: RMSprop(param, maximize=True, foreach=foreach)
-            )
-
-
-    @skipIfRocm
-    @skipIfTorchDynamo()
-    def test_rprop(self):
-        for foreach in (False, True):
-            self._test_complex_2d(lambda param: Rprop(param, foreach=foreach))
-
-
-    def test_lbfgs_returns_consistent_type(self):
-        params = [torch.randn(10, 5), torch.randn(10)]
-        opt1 = LBFGS(params, 0.01, tolerance_grad=math.inf)
-        opt2 = LBFGS(params, 0.01, tolerance_grad=-math.inf)
-
-        def closure():
-            return torch.tensor([10])
-
-        res1 = opt1.step(closure)
-        res2 = opt2.step(closure)
-        self.assertEqual(type(res1), type(res2))
 
 
     def test_fused_optimizer_does_not_step_if_foundinf(self):
@@ -761,197 +672,6 @@ class TestOptim(TestCase):
                     nesterov=False,
                     maximize=False,
                 )
-
-
-    @skipIfTorchDynamo()
-    def test_post_hook(self):
-        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data += 2
-
-        params = [torch.Tensor([1, 1])]
-        opt = SGD(params, lr=0.001)
-        data = 2
-        hook_handle = opt.register_step_post_hook(post_hook)
-
-        opt.step()
-        opt.step()
-        # check if pre hooks were registered
-        self.assertEqual(data, 6)
-
-        # remove handles, take step and verify that hook is no longer registered
-        hook_handle.remove()
-
-        opt.step()
-        self.assertEqual(data, 6)
-
-    @skipIfTorchDynamo()
-    def test_pre_hook(self):
-        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data += 2
-
-        params = [torch.Tensor([1, 1])]
-        opt = SGD(params, lr=0.001)
-        data = 5
-        hook_handle = opt.register_step_pre_hook(pre_hook)
-
-        opt.step()
-        opt.step()
-        # check if pre hooks were registered
-        self.assertEqual(data, 9)
-
-        # remove handles, take step and verify that hook is no longer registered
-        hook_handle.remove()
-
-        opt.step()
-        self.assertEqual(data, 9)
-
-    @skipIfTorchDynamo()
-    def test_pre_and_post_hook(self):
-        def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data.append(0)
-
-        def global_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data.append(5)
-
-        def local_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data.append(1)
-
-        def local_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data.append(2)
-
-        params = [torch.Tensor([1, 1])]
-        opt1 = SGD(params, lr=0.001)
-        opt2 = Adam(params, lr=0.01)
-        data = []
-
-        # register global hooks to both optimizers
-        global_pre_handle = register_optimizer_step_pre_hook(global_pre_hook)
-        global_post_handle = register_optimizer_step_post_hook(global_post_hook)
-
-        # register local hooks
-        first_pre_handle = opt1.register_step_pre_hook(local_pre_hook)
-        first_post_handle = opt1.register_step_post_hook(local_post_hook)
-        second_pre_handle = opt2.register_step_pre_hook(local_pre_hook)
-        second_post_handle = opt2.register_step_post_hook(local_post_hook)
-
-        opt1.step()
-        self.assertListEqual(data, [0, 1, 2, 5])
-        opt2.step()
-        self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5])
-        opt1.step()
-        self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
-
-        # remove all hooks
-        global_pre_handle.remove()
-        global_post_handle.remove()
-        first_pre_handle.remove()
-        first_post_handle.remove()
-        second_pre_handle.remove()
-        second_post_handle.remove()
-
-        opt1.step()
-        opt2.step()
-        self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
-
-
-    @staticmethod
-    def _state_dict_pre_hook(optimizer: Optimizer) -> None:
-        optimizer.state["test"] = 1
-
-    @staticmethod
-    def _state_dict_post_hook(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
-        if "test" in state_dict["state"]:
-            state_dict["state"].pop("test")
-            state_dict["ran_state_dict_pre_hook"] = True
-        else:
-            state_dict["ran_state_dict_pre_hook"] = False
-        return state_dict
-
-    @staticmethod
-    def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
-        state_dict["param_groups"][0]["lr"] = 0.002
-
-    @staticmethod
-    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
-        # The typical use case for returning a state dict is to drastically modify the state dict.
-        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
-        my_state_dict = deepcopy(state_dict)
-        my_state_dict["param_groups"][0]["lr"] = 0.003
-        return my_state_dict
-
-    @staticmethod
-    def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
-        optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
-        optimizer.state["ran_load_state_dict_post_hook"] = True
-
-    def test_state_dict_pre_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
-        state_dict = opt.state_dict()
-        self.assertEqual(state_dict["state"]["test"], 1)
-
-    def test_state_dict_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_post_hook(self._state_dict_post_hook)
-        state_dict = opt.state_dict()
-        self.assertEqual(state_dict["ran_state_dict_pre_hook"], False)
-
-    def test_state_dict_pre_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
-        opt.register_state_dict_post_hook(self._state_dict_post_hook)
-        state_dict = opt.state_dict()
-        self.assertFalse("test" in state_dict["state"])
-        self.assertEqual(state_dict["ran_state_dict_pre_hook"], True)
-
-    def test_load_state_dict_pre_hook_and_prepend(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        state_dict = opt.state_dict()
-
-        # usually one would have a new opt instance here, but it's all the same here
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook1)
-        opt.load_state_dict(state_dict)
-        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
-
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2, prepend=True)
-        opt.load_state_dict(state_dict)
-        # If prepend were False would be 0.003 but since prepend is True, the other hook overrides
-        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
-
-    def test_load_state_dict_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-
-        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
-        opt.load_state_dict(opt.state_dict())
-        self.assertFalse(opt.state["ran_load_state_dict_pre_hook2"])
-        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
-
-    def test_load_state_dict_pre_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2)
-        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
-        opt.load_state_dict(opt.state_dict())
-        self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
-        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):

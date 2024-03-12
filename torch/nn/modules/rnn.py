@@ -379,6 +379,33 @@ class RNN(RNNBase):
     previous layer at time `t-1` or the initial hidden state at time `0`.
     If :attr:`nonlinearity` is ``'relu'``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.
 
+    .. code-block:: python
+
+        # Efficient implementation equivalent to the following with bidirectional=False
+        def forward(x, h_0=None):
+            if batch_first:
+                x = x.transpose(0, 1)
+            seq_len, batch_size, _ = x.size()
+            if h_0 is None:
+                h_0 = torch.zeros(num_layers, batch_size, hidden_size)
+            h_t_minus_1 = h_0
+            h_t = h_0
+            output = []
+            for t in range(seq_len):
+                for layer in range(num_layers):
+                    h_t[layer] = torch.tanh(
+                        x[t] @ weight_ih[layer].T
+                        + bias_ih[layer]
+                        + h_t_minus_1[layer] @ weight_hh[layer].T
+                        + bias_hh[layer]
+                    )
+                output.append(h_t[-1])
+                h_t_minus_1 = h_t
+            output = torch.stack(output)
+            if batch_first:
+                output = output.transpose(0, 1)
+            return output, h_t
+
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
@@ -480,7 +507,11 @@ class RNN(RNNBase):
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+        if len(args) > 3:
+            self.nonlinearity = args[3]
+            args = args[:3] + args[4:]
+        else:
+            self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
