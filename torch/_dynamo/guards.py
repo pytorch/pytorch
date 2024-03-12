@@ -1225,7 +1225,7 @@ class CheckFunctionManager:
         from torch.utils._triton import has_triton_package
 
         if has_triton_package():
-            pass
+            import triton
 
             globals_for_guard_fn[triton.__name__] = triton
 
