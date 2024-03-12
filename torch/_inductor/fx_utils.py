@@ -144,8 +144,12 @@ class FakeTensorUpdater:
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            with V.fake_mode:
-                new_fake_tensor = node.target(*args, **kwargs)
+            try:
+                with V.fake_mode:
+                    new_fake_tensor = node.target(*args, **kwargs)
+            except (ValueError, AttributeError):
+                # inductor lowerings fail to run under fake mode
+                continue
             if "val" in node.meta and is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"]
             ):
