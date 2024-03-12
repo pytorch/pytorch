@@ -1,10 +1,7 @@
-
-
-
-
-from caffe2.python import core, workspace
-from caffe2.proto import caffe2_pb2
 import time
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 SHAPE_LEN = 4096
 NUM_ITER = 1000
@@ -19,17 +16,23 @@ def build_net(net_name, cross_socket):
     numa_device_option.device_type = caffe2_pb2.CPU
     numa_device_option.numa_node_id = 0
     for replica_id in range(NUM_REPLICAS):
-        init_net.XavierFill([], net_name + "/input_blob_" + str(replica_id),
-            shape=[SHAPE_LEN, SHAPE_LEN], device_option=numa_device_option)
+        init_net.XavierFill(
+            [],
+            net_name + "/input_blob_" + str(replica_id),
+            shape=[SHAPE_LEN, SHAPE_LEN],
+            device_option=numa_device_option,
+        )
 
     net = core.Net(net_name)
     net.Proto().type = "async_scheduling"
     if cross_socket:
         numa_device_option.numa_node_id = 1
     for replica_id in range(NUM_REPLICAS):
-        net.Copy(net_name + "/input_blob_" + str(replica_id),
-                net_name + "/output_blob_" + str(replica_id),
-                device_option=numa_device_option)
+        net.Copy(
+            net_name + "/input_blob_" + str(replica_id),
+            net_name + "/output_blob_" + str(replica_id),
+            device_option=numa_device_option,
+        )
     return init_net, net
 
 
@@ -64,6 +67,10 @@ def main():
         print("Single BW / Cross BW: {}".format(single_bw / cross_bw))
 
 
-if __name__ == '__main__':
+def invoke_main() -> None:
     core.GlobalInit(["caffe2", "--caffe2_cpu_numa_enabled=1"])
     main()
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover

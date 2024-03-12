@@ -1,5 +1,3 @@
-
-
 import argparse
 import datetime
 
@@ -50,7 +48,7 @@ def benchmark_sparse_lengths_sum(
 
     net = core.Net("mynet")
     if flush_cache:
-        l3_cache_size = 30 * 2 ** 20 // 4
+        l3_cache_size = 30 * 2**20 // 4
         workspace.FeedBlob(
             "huge_blob", np.random.randn(l3_cache_size).astype(np.float32)
         )
@@ -80,7 +78,7 @@ def benchmark_sparse_lengths_sum(
     )
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="minimal benchmark for sparse lengths sum."
     )
@@ -115,3 +113,7 @@ if __name__ == "__main__":
         args.flush_cache,
         args.bit_rate,
     )
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover

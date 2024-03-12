@@ -1,5 +1,3 @@
-
-
 import argparse
 
 import numpy as np
@@ -41,10 +39,14 @@ def main(bit_rate):
     workspace.BenchmarkNet(net2.Proto().name, 1, iterations, True)
 
 
-if __name__ == "__main__":
+def invoke_main() -> None:
     parser = argparse.ArgumentParser(
         description="benchmark for row-wise 2/4-bit quantization."
     )
     parser.add_argument("--bit-rate", type=int, default=4)
     args = parser.parse_args()
     main(args.bit_rate)
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover
