@@ -734,7 +734,7 @@ def min_cut_rematerialization_partition(
     view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
     if compiler == "inductor":
         default_recomputable_ops += [prims.div, prims.convert_element_type, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.arange, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum]  # noqa: E501,B950
-        view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided]
+        view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided, aten.split_with_sizes]
         # Natalia said that we should allow recomputing indexing :)
         default_recomputable_ops += [aten.index]
     default_recomputable_ops += view_ops
@@ -753,7 +753,7 @@ def min_cut_rematerialization_partition(
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit, aten._batch_norm_with_update, aten.batch_norm_backward]  # noqa: E501,B950
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention]
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
@@ -767,6 +767,8 @@ def min_cut_rematerialization_partition(
         print()
 
     def is_materialized_backwards(node):
+        if get_aten_target(node) in view_ops:
+            return False
         cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
@@ -783,11 +785,17 @@ def min_cut_rematerialization_partition(
             return node.meta["recompute"] == 0
         elif config.aggressive_recomputation:
             ignored_ops = random_ops + compute_intensive_ops
+            # if get_aten_target(node) in ignored_ops:
+            #     is_banned = str(node) in {"addmm", "addmm_1", "addmm_2"}
+            #     if is_banned:
+            #         print(node, node.target, node.meta['val'])
+            #     return is_banned
             return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
             if node.op != 'call_function':
                 return False
             if get_aten_target(node) not in recomputable_ops:
+                # print(get_aten_target(node))
                 return True
             if node.target == operator.getitem:
                 return False
@@ -810,7 +818,7 @@ def min_cut_rematerialization_partition(
             # activation checkpointing. Removing the heuristic improves both
             # memory footprint and speedup.
             if not graph_has_recomputable_ops:
-                if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
+                if compiler == "inductor" and node.dist_from_bw  > config.max_dist_from_bw:
                     return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
@@ -837,8 +845,6 @@ def min_cut_rematerialization_partition(
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
-        # mem_sz = int(mem_sz + node.dist_from_bw)
-
         if is_materialized(node):
             return mem_sz
         else:
