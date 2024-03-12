@@ -8,6 +8,7 @@ from typing import Iterable, List, Tuple, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import FSDP, fully_shard
@@ -44,6 +45,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -710,13 +712,16 @@ class TestFullyShard2DTraining(FSDPTest):
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
 
-    @skip_if_lt_x_gpu(2)
-    def test_train_parity_2d_mlp(self):
+    def init_global_mesh(self) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
         dp_size = 2 if self.world_size > 2 else 1
-        global_mesh = init_device_mesh(
+        return init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_2d_mlp(self):
+        global_mesh = self.init_global_mesh()
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True],
@@ -781,6 +786,89 @@ class TestFullyShard2DTraining(FSDPTest):
                 losses[-1].backward()
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    @wrapSwapTensorsTest(True)
+    @with_temp_dir
+    def test_train_parity_2d_transformer_checkpoint_resume(self):
+        """
+        Tests train parity of a 2D transformer without checkpointing against a
+        2D transformer with a checkpoint save/load to the same model/optimizer.
+        """
+
+        def train_step(
+            _model: nn.Module, _optim: torch.optim.Optimizer, _inp: torch.Tensor
+        ) -> torch.Tensor:
+            loss = _model(_inp).sum()
+            loss.backward()
+            _optim.step()
+            _optim.zero_grad()
+            return loss
+
+        def parallelize(_model: Transformer, mesh: DeviceMesh, use_seq_parallel: bool):
+            _model = Transformer.parallelize(_model, mesh["tp"], use_seq_parallel)
+            for layer in _model.layers:
+                fully_shard(layer, mesh=mesh["dp"])
+            fully_shard(_model, mesh=mesh["dp"])
+            return _model
+
+        global_mesh = self.init_global_mesh()
+        for use_seq_parallel in (False, True):
+            # Run two iterations of a baseline model without checkpointing
+            seed = 42
+            torch.manual_seed(seed)
+            model_args = ModelArgs(dropout_p=0.0)
+            model_no_cp = parallelize(
+                Transformer(model_args), global_mesh, use_seq_parallel
+            )
+            optim_no_cp = torch.optim.Adam(model_no_cp.parameters(), lr=1e-2)
+
+            torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
+            inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
+            loss_no_cp1 = train_step(model_no_cp, optim_no_cp, inp)
+            loss_no_cp2 = train_step(model_no_cp, optim_no_cp, inp)
+
+            # Run one iteration, save checkpoint, zero states, load checkpoint,
+            # and run another iteration
+            torch.manual_seed(seed)
+            model_cp = parallelize(
+                Transformer(model_args), global_mesh, use_seq_parallel
+            )
+            optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+
+            loss_cp1 = train_step(model_cp, optim_cp, inp)
+            self.assertEqual(loss_no_cp1, loss_cp1)
+
+            sharded_sd = {
+                "model": model_cp.state_dict(),
+                "optim": optim_cp.state_dict(),
+            }
+            dcp.save(
+                state_dict=sharded_sd,
+                storage_writer=dcp.FileSystemWriter(self.temp_dir),
+            )
+            with torch.no_grad():
+                for param in model_cp.parameters():
+                    param.zero_()
+                optim_sd = optim_cp.state_dict()
+                for param_states in optim_sd["state"].values():
+                    for state_value in param_states.values():
+                        if torch.is_tensor(state_value):
+                            state_value.zero_()
+            self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
+
+            sharded_sd = {
+                "model": model_cp.state_dict(),
+                "optim": optim_cp.state_dict(),
+            }
+            dcp.load(
+                state_dict=sharded_sd,
+                storage_reader=dcp.FileSystemReader(self.temp_dir),
+            )
+            self.assertGreater(len(optim_cp.state_dict()["state"]), 0)
+
+            loss_cp2 = train_step(model_cp, optim_cp, inp)
+            self.assertEqual(loss_no_cp2, loss_cp2)
 
 
 if __name__ == "__main__":
