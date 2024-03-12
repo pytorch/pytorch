@@ -451,13 +451,11 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 )
             )
     if not strategies:
-        # Arbitrarily use each child strategy's 0th strategy's output spec
-        input_specs = tuple(
-            cast(OpStrategy, child_strategy).strategies[0].output_spec
-            for child_strategy in input_tuple_strategy.childs
-        )
         replicate_spec = DTensorSpec(mesh, tuple(Replicate() for _ in range(mesh.ndim)))
-        strategies.append(PlacementStrategy(output_specs=replicate_spec))
+        input_specs = tuple(replicate_spec for _ in input_tuple_strategy.childs)
+        strategies.append(
+            PlacementStrategy(output_specs=replicate_spec, input_specs=input_specs)
+        )
     return OpStrategy(strategies)
 
 

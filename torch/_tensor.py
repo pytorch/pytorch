@@ -711,7 +711,7 @@ class Tensor(torch._C.TensorBase):
         self._typed_storage()._share_memory_()
         return self
 
-    def module_load(self, other):
+    def module_load(self, other, assign=False):
         r"""Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
 
         Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
@@ -723,16 +723,23 @@ class Tensor(torch._C.TensorBase):
 
         .. note::
             This method should always return a new object that is not ``self`` or ``other``.
-            For example, the default implementation returns ``self.copy_(other).detach()``.
+            For example, the default implementation returns ``self.copy_(other).detach()``
+            if ``assign`` is ``False`` or ``other.detach()`` if ``assign`` is ``True``.
 
         Args:
             other (Tensor): value in state dict with key corresponding to ``self``
+            assign (bool): the assign argument passed to :meth:`nn.Module.load_state_dict`
 
         """
         if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.module_load, (self, other), self, other)
-        # In the default case, swap_tensors becomes a no-op
-        return self.copy_(other).detach()
+            return handle_torch_function(
+                Tensor.module_load, (self, other), self, other, assign=assign
+            )
+
+        if assign:
+            return other.detach()
+        else:
+            return self.copy_(other).detach()
 
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""

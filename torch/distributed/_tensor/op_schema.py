@@ -236,6 +236,9 @@ class OpSchema:
         """
         # filter out non-relevant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
+        # HACK!
+        if len(self.args_schema) == 1 and isinstance(self.args_schema[0], list):
+            return tuple(item for item in self.args_schema[0] if isinstance(item, DTensorSpec))
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
@@ -382,7 +385,12 @@ class OpSchema:
         suggestion_args_spec = self.args_spec
         new_arg_schema: List[object] = []
         idx_of_args_spec = 0
-        for arg in origin_schema.args_schema:
+        # HACK!
+        if len(origin_schema.args_schema) == 1 and isinstance(origin_schema.args_schema[0], list):
+            args_schema = origin_schema.args_schema[0]
+        else:
+            args_schema = origin_schema.args_schema
+        for arg in args_schema:
             if isinstance(arg, DTensorSpec):
                 new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
                 idx_of_args_spec += 1
