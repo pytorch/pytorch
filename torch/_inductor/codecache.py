@@ -1689,7 +1689,6 @@ class AotCodeCompiler:
             specified_output_path,
             specified_so_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
-
         key, input_path = write(
             source_code,
             "cpp",
@@ -1954,7 +1953,6 @@ class CppCodeCache:
     cache: Dict[str, Union[CDLL, ModuleType, str]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
-    vec_isa: VecISA = invalid_vec_isa
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
