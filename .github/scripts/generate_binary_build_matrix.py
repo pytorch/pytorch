@@ -380,5 +380,6 @@ def generate_wheels_matrix(
     return ret
 
 
+validate_nccl_dep_consistency("12.3")
 validate_nccl_dep_consistency("12.1")
 validate_nccl_dep_consistency("11.8")
