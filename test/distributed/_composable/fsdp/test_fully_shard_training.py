@@ -18,6 +18,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     CheckpointWrapper,
 )
+from torch.distributed.checkpoint.state_dict import get_optimizer_state_dict
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -792,9 +793,21 @@ class TestFullyShard2DTraining(FSDPTest):
     def test_train_parity_2d_transformer_checkpoint_resume(self):
         """
         Tests train parity of a 2D transformer without checkpointing against a
-        2D transformer with a checkpoint save/load to the same model/optimizer.
+        2D transformer with a checkpoint save/load.
         """
+        self.run_subtests(
+            {
+                "use_seq_parallel": [False, True],
+                # If reusing, then load into the same model/optimizer instance
+                # else construct new ones (requiring eager optim state init)
+                "reuse_model_optim": [False, True],
+            },
+            self._test_train_parity_2d_transformer_checkpoint_resume,
+        )
 
+    def _test_train_parity_2d_transformer_checkpoint_resume(
+        self, use_seq_parallel: bool, reuse_model_optim: bool
+    ):
         def train_step(
             _model: nn.Module, _optim: torch.optim.Optimizer, _inp: torch.Tensor
         ) -> torch.Tensor:
@@ -811,41 +824,48 @@ class TestFullyShard2DTraining(FSDPTest):
             fully_shard(_model, mesh=mesh["dp"])
             return _model
 
+        def optimizer_state_dict(_model: nn.Module, _optim: torch.optim.Optimizer):
+            # If loading into a new optimizer, then we need to eagerly init the
+            # optimizer state via `get_optimizer_state_dict`
+            return (
+                _optim.state_dict()
+                if reuse_model_optim
+                else get_optimizer_state_dict(_model, _optim)
+            )
+
         global_mesh = self.init_global_mesh()
-        for use_seq_parallel in (False, True):
-            # Run two iterations of a baseline model without checkpointing
-            seed = 42
-            torch.manual_seed(seed)
-            model_args = ModelArgs(dropout_p=0.0)
-            model_no_cp = parallelize(
-                Transformer(model_args), global_mesh, use_seq_parallel
-            )
-            optim_no_cp = torch.optim.Adam(model_no_cp.parameters(), lr=1e-2)
+        # Baseline: run two iterations without checkpointing
+        seed = 42
+        torch.manual_seed(seed)
+        model_args = ModelArgs(dropout_p=0.0)
+        model_no_cp = parallelize(
+            Transformer(model_args), global_mesh, use_seq_parallel
+        )
+        optim_no_cp = torch.optim.Adam(model_no_cp.parameters(), lr=1e-2)
 
-            torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
-            inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
-            loss_no_cp1 = train_step(model_no_cp, optim_no_cp, inp)
-            loss_no_cp2 = train_step(model_no_cp, optim_no_cp, inp)
+        torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
+        inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
+        loss_no_cp1 = train_step(model_no_cp, optim_no_cp, inp)
+        loss_no_cp2 = train_step(model_no_cp, optim_no_cp, inp)
 
-            # Run one iteration, save checkpoint, zero states, load checkpoint,
-            # and run another iteration
-            torch.manual_seed(seed)
-            model_cp = parallelize(
-                Transformer(model_args), global_mesh, use_seq_parallel
-            )
-            optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+        # Test: run one iteration, save checkpoint, zero states or init new
+        # model/optimizer, load checkpoint, and run another iteration
+        torch.manual_seed(seed)
+        model_cp = parallelize(Transformer(model_args), global_mesh, use_seq_parallel)
+        optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
 
-            loss_cp1 = train_step(model_cp, optim_cp, inp)
-            self.assertEqual(loss_no_cp1, loss_cp1)
+        loss_cp1 = train_step(model_cp, optim_cp, inp)
+        self.assertEqual(loss_no_cp1, loss_cp1)
 
-            sharded_sd = {
-                "model": model_cp.state_dict(),
-                "optim": optim_cp.state_dict(),
-            }
-            dcp.save(
-                state_dict=sharded_sd,
-                storage_writer=dcp.FileSystemWriter(self.temp_dir),
-            )
+        sharded_sd = {
+            "model": model_cp.state_dict(),
+            "optim": optimizer_state_dict(model_cp, optim_cp),
+        }
+        dcp.save(
+            state_dict=sharded_sd,
+            storage_writer=dcp.FileSystemWriter(self.temp_dir),
+        )
+        if reuse_model_optim:
             with torch.no_grad():
                 for param in model_cp.parameters():
                     param.zero_()
@@ -854,20 +874,26 @@ class TestFullyShard2DTraining(FSDPTest):
                     for state_value in param_states.values():
                         if torch.is_tensor(state_value):
                             state_value.zero_()
-            self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
-
-            sharded_sd = {
-                "model": model_cp.state_dict(),
-                "optim": optim_cp.state_dict(),
-            }
-            dcp.load(
-                state_dict=sharded_sd,
-                storage_reader=dcp.FileSystemReader(self.temp_dir),
+        else:
+            torch.manual_seed(seed + 1)  # different seed
+            model_cp = parallelize(
+                Transformer(model_args), global_mesh, use_seq_parallel
             )
-            self.assertGreater(len(optim_cp.state_dict()["state"]), 0)
+            optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+        self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
 
-            loss_cp2 = train_step(model_cp, optim_cp, inp)
-            self.assertEqual(loss_no_cp2, loss_cp2)
+        sharded_sd = {
+            "model": model_cp.state_dict(),
+            "optim": optimizer_state_dict(model_cp, optim_cp),
+        }
+        dcp.load(
+            state_dict=sharded_sd,
+            storage_reader=dcp.FileSystemReader(self.temp_dir),
+        )
+        self.assertGreater(len(optim_cp.state_dict()["state"]), 0)
+
+        loss_cp2 = train_step(model_cp, optim_cp, inp)
+        self.assertEqual(loss_no_cp2, loss_cp2)
 
 
 if __name__ == "__main__":
