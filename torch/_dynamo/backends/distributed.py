@@ -521,15 +521,18 @@ class DDPOptimizer:
                             buckets[0].params.append(f"{node.target}_{name}")
                             buckets[0].param_ids.append(id(param))
             elif node.op == "call_method":
-                target = gm.get_submodule(node.args[0].target)
-                if isinstance(target, torch.nn.Module):
-                    if target not in processed_modules:
-                        processed_modules.add(target)
-                        for name, param in target.named_parameters():
-                            if param.requires_grad and not self._ignore_parameter(param):
-                                buckets[0].size += param.untyped_storage().nbytes()
-                                buckets[0].params.append(f"{node.target}_{name}")
-                                buckets[0].param_ids.append(id(param))
+                try:
+                    target = gm.get_submodule(node.args[0].target)
+                    if isinstance(target, torch.nn.Module):
+                        if target not in processed_modules:
+                            processed_modules.add(target)
+                            for name, param in target.named_parameters():
+                                if param.requires_grad and not self._ignore_parameter(param):
+                                    buckets[0].size += param.untyped_storage().nbytes()
+                                    buckets[0].params.append(f"{node.target}_{name}")
+                                    buckets[0].param_ids.append(id(param))
+                except:
+                    pass
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if isinstance(maybe_param, torch.nn.Parameter) and maybe_param.requires_grad and not self._ignore_parameter(
