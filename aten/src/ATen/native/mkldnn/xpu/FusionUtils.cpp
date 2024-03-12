@@ -1,5 +1,5 @@
 
-#include "FusionUtils.h"
+#include <ATen/native/mkldnn/xpu/FusionUtils.h>
 
 using namespace at::native::xpu::onednn;
 
