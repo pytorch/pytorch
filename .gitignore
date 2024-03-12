@@ -16,9 +16,9 @@ coverage.xml
 .mypy_cache
 .additional_ci_files
 /.extracted_scripts/
-**/.pytorch_specified_test_cases.csv*
-**/.pytorch-disabled-tests.json*
-**/.pytorch-slow-tests.json*
+**/.pytorch_specified_test_cases.csv
+**/.pytorch-disabled-tests.json
+**/.pytorch-slow-tests.json
 */*.pyc
 */*.so*
 */**/__pycache__
