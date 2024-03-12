@@ -324,6 +324,46 @@ void gemm(
      return;
    }
 #endif
+
+#if AT_BUILD_WITH_BLAS()
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    float alpha_ = alpha, beta_ = beta;
+    int a_size = (transa != TransposeType::NoTranspose?m_:k_) * lda;
+    std::vector<float> float_a(a, a + a_size);
+    int b_size = (transb != TransposeType::NoTranspose?k_:n_) * ldb;
+    std::vector<float> float_b(b, b + b_size);
+    int c_size = n_ * ldc;
+    std::vector<float> float_c(c, c + c_size);
+    #if C10_IOS
+    CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
+    CBLAS_TRANSPOSE transb_ = to_apple_accelerate_transpose(transb);
+    cblas_sgemm(CblasColMajor,
+      transa_, transb_,
+      m_, n_, k_,
+      alpha_,
+      float_a.data(), lda_,
+      float_b.data(), ldb_,
+      beta_,
+      float_c.data(), ldc_);
+    #else
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    sgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        float_a.data(), &lda_,
+        float_b.data(), &ldb_,
+        &beta_,
+        float_c.data(), &ldc_);
+    #endif
+    for (auto cv: float_c) {
+      *(c++) = c10::convert<at::BFloat16>(cv);
+    }
+    return;
+  }
+#endif
+
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -343,6 +383,46 @@ void gemm(
      return;
    }
 #endif
+
+#if AT_BUILD_WITH_BLAS()
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    float alpha_ = alpha, beta_ = beta;
+    int a_size = (transa != TransposeType::NoTranspose?m_:k_) * lda;
+    std::vector<float> float_a(a, a + a_size);
+    int b_size = (transb != TransposeType::NoTranspose?k_:n_) * ldb;
+    std::vector<float> float_b(b, b + b_size);
+    int c_size = n_ * ldc;
+    std::vector<float> float_c(c, c + c_size);
+    #if C10_IOS
+    CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
+    CBLAS_TRANSPOSE transb_ = to_apple_accelerate_transpose(transb);
+    cblas_sgemm(CblasColMajor,
+      transa_, transb_,
+      m_, n_, k_,
+      alpha_,
+      float_a.data(), lda_,
+      float_b.data(), ldb_,
+      beta_,
+      float_c.data(), ldc_);
+    #else
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    sgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        float_a.data(), &lda_,
+        float_b.data(), &ldb_,
+        &beta_,
+        float_c.data(), &ldc_);
+    #endif
+    for (auto cv: float_c) {
+      *(c++) = c10::convert<at::Half>(cv);
+    }
+    return;
+  }
+#endif
+
    gemm_stub(
       at::kCPU, at::kHalf,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -379,6 +459,28 @@ void gemm(
     return;
   }
 #endif
+
+#if AT_BUILD_WITH_BLAS()
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    float alpha_ = alpha, beta_ = beta;
+    int a_size = (transa != TransposeType::NoTranspose?m_:k_) * lda;
+    std::vector<float> float_a(a, a + a_size);
+    int b_size = (transb != TransposeType::NoTranspose?k_:n_) * ldb;
+    std::vector<float> float_b(b, b + b_size);
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    sgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        float_a.data(), &lda_,
+        float_b.data(), &ldb_,
+        &beta_,
+        c, &ldc_);
+    return;
+  }
+#endif
+
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;
@@ -415,6 +517,28 @@ void gemm(
     return;
   }
 #endif
+
+#if AT_BUILD_WITH_BLAS()
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    float alpha_ = alpha, beta_ = beta;
+    int a_size = (transa != TransposeType::NoTranspose?m_:k_) * lda;
+    std::vector<float> float_a(a, a + a_size);
+    int b_size = (transb != TransposeType::NoTranspose?k_:n_) * ldb;
+    std::vector<float> float_b(b, b + b_size);
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    sgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        float_a.data(), &lda_,
+        float_b.data(), &ldb_,
+        &beta_,
+        c, &ldc_);
+    return;
+  }
+#endif
+
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;
