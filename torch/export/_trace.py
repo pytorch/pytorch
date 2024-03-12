@@ -327,14 +327,14 @@ def _export_to_torch_ir(
     operations inside and produce a torch.fx.GraphModule in torch IR.
     """
 
+    if _log_export_usage:
+        log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
+
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
-
-    if _log_export_usage:
-        log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
     kwargs = kwargs or {}
 
