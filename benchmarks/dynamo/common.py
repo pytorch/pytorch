@@ -2688,9 +2688,7 @@ class BenchmarkRunner:
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
                     with maybe_enable_compiled_autograd(self.args.compiled_autograd):
-                        warmup(
-                            optimized_model_iter_fn, model, example_inputs, "dynamo", 20
-                        )
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
