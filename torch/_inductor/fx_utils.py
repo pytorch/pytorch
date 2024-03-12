@@ -138,12 +138,7 @@ class FakeTensorUpdater:
             ):
                 continue
 
-            def is_aten_node(node):
-                return node.op == "call_function" and isinstance(
-                    node.target, torch._ops.OpOverload
-                )
-
-            if not is_aten_node(node):
+            if node.op != "call_function":
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
