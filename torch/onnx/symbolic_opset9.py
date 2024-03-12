@@ -5632,13 +5632,13 @@ def _var_mean(g: jit_utils.GraphContext, input, dim, correction, keepdim):
             var = g.op("Div", mul, g.op("Sub", num_elements, one))
         return var, mean
     else:
+        axes = None
         if dim is None:
             mean = g.op("ReduceMean", input, keepdims_i=0)
             t_mean = mean
             num_elements = numel(g, input)
         else:
             axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
-
             mean = g.op("ReduceMean", input, axes, keepdims_i=keepdim)
             t_mean = g.op("ReduceMean", input, axes, keepdims_i=1)
             redudced_dims = g.op("Shape", input)
@@ -5653,7 +5653,7 @@ def _var_mean(g: jit_utils.GraphContext, input, dim, correction, keepdim):
         sub_v = g.op("Sub", input, t_mean)
         sqr_sub = g.op("Mul", sub_v, sub_v)
         keepdim_mean = 0 if dim is None else keepdim
-        if dim is None:
+        if axes is None:
             var = g.op("ReduceMean", sqr_sub, keepdims_i=keepdim_mean)
         else:
             var = g.op("ReduceMean", sqr_sub, axes, keepdims_i=keepdim_mean)
