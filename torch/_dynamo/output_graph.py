@@ -788,7 +788,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
-            print(f"\nCreate get_attr. target:{target}, names:{names}, source:{source}\n")
             tracer = self.current_tracer
             if not self.is_root_tracer():
                 # For higher order ops, we don't want to insert the get_attr in
