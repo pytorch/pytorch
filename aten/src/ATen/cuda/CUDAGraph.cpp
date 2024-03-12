@@ -91,7 +91,14 @@ CUDAGraph::CUDAGraph()
 
 void CUDAGraph::register_generator_state(
     c10::intrusive_ptr<at::CUDAGeneratorState> state) {
-  captured_generator_states_.insert(state);
+  captured_generator_states_[state] = 0;
+}
+
+void CUDAGraph::register_generator_state(const at::Generator& generator) {
+  c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
+      dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(
+          generator.getIntrusivePtr());
+  cuda_gen->register_to_graph(this);
 }
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
@@ -100,17 +107,13 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
 
-  // For now, a CUDAGraph instance only accommodates the default generator on the device that's
-  // current when capture begins. If any op in the captured region uses a non-default generator,
-  // or a generator on another device, the offending generator will throw an error.
-  // These restrictions simplify CUDAGraph, but could be relaxed in the future:
-  // in principle, the underlying Cuda calls do permit cross-device ops to be captured.
+  // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
 
   auto gen_ptr =
       c10::intrusive_ptr<CUDAGeneratorImpl>::unsafe_reclaim_from_nonowning(gen);
-  gen->capture_prologue(this);
+  gen->register_to_graph(this);
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -219,8 +222,9 @@ void CUDAGraph::capture_end() {
 
   has_graph_exec_ = true;
 
-  for (auto& generator_state : captured_generator_states_) {
-    generator_state->capture_epilogue();
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    wholegraph_increments = generator_state->capture_epilogue();
   }
 
   size_t numCUDAGraphNodes = 0;
@@ -251,10 +255,10 @@ void CUDAGraph::replay() {
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  for (auto& generator_state : captured_generator_states_) {
-    generator_state->replay_prologue();
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    generator_state->replay_prologue(wholegraph_increments);
   }
-
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 

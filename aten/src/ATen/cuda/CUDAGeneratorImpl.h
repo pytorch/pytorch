@@ -97,9 +97,9 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t philox_offset_per_thread_;
   uint32_t offset_intragraph_;
   bool capturing_{};
-  std::unique_ptr<at::Tensor> seed_extragraph_;
-  std::unique_ptr<at::Tensor> offset_extragraph_;
-  uint64_t wholegraph_increment_{};
+  bool is_gpu_tensor_allocated_{};
+  std::unique_ptr<at::Tensor> seed_extragraph_{};
+  std::unique_ptr<at::Tensor> offset_extragraph_{};
   cuda::CUDAGraph* current_graph_{};
 
   CUDAGeneratorState(
@@ -108,9 +108,10 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
       uint32_t offset_intragraph_ = 0);
 
   void increase(uint64_t increment);
-  void register_capturing_graph(cuda::CUDAGraph* graph);
-  void capture_epilogue();
-  void replay_prologue();
+  void register_to_graph(cuda::CUDAGraph* graph);
+  // returns the wholegraph_increment
+  uint64_t capture_epilogue();
+  void replay_prologue(uint64_t wholegraph_increment);
   c10::intrusive_ptr<CUDAGeneratorState> clone();
 };
 
@@ -137,12 +138,12 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
-  void capture_prologue(cuda::CUDAGraph* graph);
+  void register_to_graph(cuda::CUDAGraph* graph);
   void capture_epilogue() {
     state_->capture_epilogue();
   }
-  void replay_prologue() {
-    state_->replay_prologue();
+  void replay_prologue(uint64_t wholegraph_increment) {
+    state_->replay_prologue(wholegraph_increment);
   }
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state

@@ -57,6 +57,15 @@ void THCPGraph_init(PyObject* module) {
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
       .def(
+          "register_generator_state",
+          [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
+            py::gil_scoped_acquire acquire;
+            auto generator = THPGenerator_Unwrap(raw_generator.ptr());
+            return self.register_generator_state(generator);
+          },
+          py::arg("generator"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
       .def(

@@ -5,10 +5,11 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 
-#include <unordered_set>
+#include <unordered_map>
 
 namespace at {
 
+struct Generator;
 struct CUDAGeneratorImpl;
 struct CUDAGeneratorState;
 
@@ -26,6 +27,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   static void dec_pending_event_queries();
   static int num_pending_event_queries();
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
+  void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
@@ -77,8 +79,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
 
-  // multiple generator states that are managed by the CUDA Graph
-  std::unordered_set<c10::intrusive_ptr<at::CUDAGeneratorState>>
+  // multiple generator states and their wholegraph_increments in this graph
+  // that are managed by the CUDA Graph
+  std::unordered_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>
       captured_generator_states_;
 
   // Device where capture occurred. Right now, for simplicity, we require all ops

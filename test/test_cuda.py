@@ -1782,65 +1782,82 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    def test_graph_set_get_rng_state_index(self):
+    def test_graphsafe_set_get_rng_state(self):
 
+        # Define a function to create generator states, with optional graph registration
         def create_states(generator):
+            """Initializes generator states and registers them with a CUDA graph if provided."""
+            # Ensure the CUDA generator is initialized
+            torch.rand(1, device="cuda")
             generator.manual_seed(0)
-            # old_state is a Generator that point to old GeneratorImpl
+
+            # Save the current state of the generator
             old_state = generator.graphsafe_get_state()
-            # old_state is a Generator that point to cloned GeneratorImpl
+            # Create and save a cloned state of the generator
             new_state = generator.clone_state()
+            # Return the original generator and its two states
             return generator, old_state, new_state
 
-        # Performs random number generation steps to increment the offset of the original state once and the new state twice.
+        def register_states_to_graph(generator_state, graph):
+            generator, old_state, new_state = generator_state
+            graph.register_generator_state(old_state)
+            graph.register_generator_state(new_state)
+
+        # Define a function to perform specific RNG actions using the generator's states
         def perform_random_generation_steps(generator_state):
             generator, old_state, new_state = generator_state
+            random_values = []
 
-            # we set the genrator point to new GeneratorImpl
+            # Generate random numbers with the new generator state
             generator.graphsafe_set_state(new_state)
-            torch.rand(5, device="cuda", generator=generator)
+            random_values.append(torch.rand(5, device="cuda", generator=generator))
 
-            # we set the genrator point to old GeneratorImpl
+            # Generate random numbers twice with the old generator state
             generator.graphsafe_set_state(old_state)
-            torch.rand(5, device="cuda", generator=generator)
-            torch.rand(5, device="cuda", generator=generator)
+            random_values.extend(
+                [torch.rand(5, device="cuda", generator=generator) for _ in range(2)]
+            )
 
-        # Retrieves the final offsets of the original and new states.
+            return random_values
+
+        # Define a function to retrieve the final offsets of the original and new generator states
         def get_final_offsets_of_states(generator_state):
             generator, old_state, new_state = generator_state
-            generator.graphsafe_set_state(old_state)
-            old_state_offset = generator.get_offset()
-
-            generator.graphsafe_set_state(new_state)
-            new_state_offset = generator.get_offset()
-
+            old_state_offset = old_state.get_offset()
+            new_state_offset = new_state.get_offset()
             return old_state_offset, new_state_offset
 
-        # Test with a new CUDA generator
+        # Set up and test a new CUDA generator
         generator = torch.Generator(device="cuda")
         generator_state = create_states(generator)
-        perform_random_generation_steps(generator_state)
 
-        # Test with the default CUDA generator within a CUDA Graph
-        # States are not allowed to change (get/set) under CUDAGraph
-        # State indecies are allowed to change under CUDAGraph
-        default_generator = torch.cuda.default_generators[0]
-        default_generator_state = create_states(default_generator)
-
+        # Set up and test the default CUDA generator with a CUDA Graph
         g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
+        default_generator = torch.cuda.default_generators[0]
+        default_generator_state = create_states(default_generator)
+        register_states_to_graph(default_generator_state, g)
+
+        # Perform random number generation within a CUDA graph
         with torch.cuda.stream(s):
             g.capture_begin()
-            perform_random_generation_steps(default_generator_state)
+            graphed_random_values = perform_random_generation_steps(
+                default_generator_state
+            )
             g.capture_end()
 
+        # Synchronize the streams and replay the graph
         torch.cuda.current_stream().wait_stream(s)
-        g.replay()
+        for _ in range(3):
+            random_values = perform_random_generation_steps(generator_state)
+            g.replay()
+            offset = get_final_offsets_of_states(generator_state)
+            graph_offset = get_final_offsets_of_states(default_generator_state)
 
-        # Comparing the final offsets of states for both generators
-        offset = get_final_offsets_of_states(generator_state)
-        graph_offset = get_final_offsets_of_states(default_generator_state)
-        self.assertTrue(offset == graph_offset, "Offsets for new_generator and default_generator should be equal.")
+            # Compare the final offsets of states for both generators to ensure consistency
+            self.assertTrue(offset == graph_offset)
+            # Compare the states generated outside and inside the graph
+            self.assertEqual(random_values, graphed_random_values)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_reset_recapture(self):
@@ -2389,19 +2406,26 @@ exit(2)
         gc.collect()
         torch.cuda.empty_cache()
 
+        first_cuda_generator_allocate = False
         s = torch.cuda.Stream()
+        for (
+            numel,
+            delta_cudaMallocs,
+            delta_cudaMalloc_bytes,
+            delta_cudaMalloc_bytes_post_del_g,
+            pool_string,
+        ) in cases:
+            delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
+            delta_active_bytes = numel * elem
 
-        for (numel,
-             delta_cudaMallocs,
-             delta_cudaMalloc_bytes,
-             delta_cudaMalloc_bytes_post_del_g,
-             pool_string) in cases:
-            if pool_string == "small_pool":
-                delta_active_blocks = 3  # one from "b" plus a sneaky two from CUDAGraph's one-element rng seed and offset holders
-                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
-            else:
-                delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
-                delta_active_bytes = numel * elem
+            # since the CUDAGraph's one-element rng seed and offset holders should be allocated in the generator,
+            # we don't need to count the delta of these two buffers
+            if first_cuda_generator_allocate:
+                # two from CUDAGraph's one-element rng seed and offset holders
+                delta_active_blocks += 2
+                # for CUDAGraph's rng seed and offset holders each
+                delta_active_bytes += 1024
+                first_cuda_generator_allocate = False
 
             g = torch.cuda.CUDAGraph()
             s.wait_stream(torch.cuda.current_stream())
@@ -2430,7 +2454,10 @@ exit(2)
                          delta_active_bytes)
             # Double checks replay and stats before and after a call to empty_cache
             for i in range(2):
-                for stat, expected in zip(stats_to_check, expecteds):
+                for stat, expected in zip(
+                    stats_to_check,
+                    expecteds,
+                ):
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
                     self.assertEqual(current, expected, "Pre to post capture delta of " +
@@ -2450,7 +2477,13 @@ exit(2)
             self.assertEqual(b.sum().item(), 6 * numel)
 
             # b should be the only live reference remaining from the graph's private pool
-            expecteds = (1, delta_cudaMalloc_bytes_post_del_g, 1, numel * elem)
+            # the CUDA Graph's RNG seed and offset tensor still alive within the CUDA generators
+            expecteds = (
+                1,
+                delta_cudaMalloc_bytes_post_del_g,
+                delta_active_blocks,
+                delta_active_bytes,
+            )
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
@@ -2461,6 +2494,7 @@ exit(2)
             # can throw off its allocation/deallocation counts.
             del a, b
             # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
+            gc.collect()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
@@ -3222,7 +3256,6 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-
     @skipIfRocm
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
@@ -3504,7 +3537,6 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
-
 
     @parametrize(
         "max_split_size_mb_setting", [False, True]
