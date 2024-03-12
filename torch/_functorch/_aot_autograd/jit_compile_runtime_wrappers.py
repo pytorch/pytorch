@@ -222,6 +222,9 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
+                + len(
+                    fw_metadata.tokens
+                )  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
@@ -483,8 +486,10 @@ def aot_dispatch_autograd(
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
-                ctx.mark_dirty(deduped_flat_tensor_args[i])
-                marked_dirty_inps.append(deduped_flat_tensor_args[i])
+                arg = deduped_flat_tensor_args[i]
+                if not (arg.requires_grad and arg.is_leaf):  # would error
+                    ctx.mark_dirty(arg)
+                marked_dirty_inps.append(arg)
 
             if not CompiledFunction._fakify_first_call:
                 if CompiledFunction.metadata.is_rng_op_functionalized:
@@ -493,7 +498,7 @@ def aot_dispatch_autograd(
                     args = (*args, seed, offset)
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
-                # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
+                # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
                 # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
                 #   of the original view, and not the synthetic base
 
@@ -514,6 +519,7 @@ def aot_dispatch_autograd(
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
+            num_tokens = len(CompiledFunction.metadata.tokens)
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
             num_forward = CompiledFunction.metadata.num_forward
 
@@ -538,7 +544,7 @@ def aot_dispatch_autograd(
             ), str([type(x) for x in symint_outs])
             ctx.symints = symint_outs
 
-            raw_returns = fw_outs[0:num_forward_returns]
+            raw_returns = fw_outs[0 : num_forward_returns + num_tokens]
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
@@ -784,7 +790,12 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous() if tangents_start_idx <= i < tangents_end_idx else t
+                t.contiguous()
+                if (
+                    (tangents_start_idx <= i < tangents_end_idx)
+                    and (not t.is_contiguous())
+                )
+                else t
                 for i, t in enumerate(all_args)
             ]
 
