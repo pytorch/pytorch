@@ -11,6 +11,7 @@ from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
@@ -1195,20 +1196,32 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             m = tl.sum(a, axis=1)
             tl.store(c_ptr + tl.arange(0, 4), m)
 
+        t = torch.randn(4)
+        kernel = reduce_sum_kernel
+        kwargs = {
+            "a_ptr": t,
+            "c_ptr": t,
+            "stride_am": 4,
+            "stride_an": 4,
+        }
+
+        # TODO(aakhundov): tt.reduce is now supported, but only
+        # in the new MLIR-based Triton analysis pass (not in the
+        # old TTIR string parsing-based one). remove this gating
+        # and use ["c_ptr"] as `expected` after the new Triton
+        # pin lands both in OSS and internally.
+        ttir_module, _ = generate_ttir(kernel, kwargs)
+        if hasattr(ttir_module, "walk"):
+            # with MLIR-based Triton analysis pass
+            expected = ["c_ptr"]
+        else:
+            # with TTIR string parsing-based Triton analysis pass
+            expected = ["a_ptr", "c_ptr"]
+
         return (
-            reduce_sum_kernel,
-            {
-                "a_ptr": torch.randn(4, 4),
-                "c_ptr": torch.randn(4),
-                "stride_am": 4,
-                "stride_an": 4,
-            },
-            # TODO(aakhundov): tt.reduce is now supported, but only
-            # in the new MLIR-based Triton analysis pass (not in the
-            # old TTIR string parsing-based one). change the line
-            # below to ["c_ptr"] when new Triton pin lands and this
-            # test starts failing.
-            ["a_ptr", "c_ptr"],
+            kernel,
+            kwargs,
+            expected,
         )
 
     @make_mutation_test
@@ -1225,20 +1238,31 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             tl.store(c_ptr + tl.arange(0, 4), m)
 
         t = torch.randn(4)
+        kernel = argmax_kernel
+        kwargs = {
+            "a_ptr": t,
+            "c_ptr": t,
+            "stride_am": 4,
+            "stride_an": 4,
+        }
+
+        # TODO(aakhundov): tt.reduce is now supported, but only
+        # in the new MLIR-based Triton analysis pass (not in the
+        # old TTIR string parsing-based one). remove this gating
+        # and use ["c_ptr"] as `expected` after the new Triton
+        # pin lands both in OSS and internally.
+        ttir_module, _ = generate_ttir(kernel, kwargs)
+        if hasattr(ttir_module, "walk"):
+            # with MLIR-based Triton analysis pass
+            expected = ["c_ptr"]
+        else:
+            # with TTIR string parsing-based Triton analysis pass
+            expected = ["a_ptr", "c_ptr"]
+
         return (
-            argmax_kernel,
-            {
-                "a_ptr": t,
-                "c_ptr": t,
-                "stride_am": 4,
-                "stride_an": 4,
-            },
-            # TODO(aakhundov): tt.reduce is now supported, but only
-            # in the new MLIR-based Triton analysis pass (not in the
-            # old TTIR string parsing-based one). change the line
-            # below to ["c_ptr"] when new Triton pin lands and this
-            # test starts failing.
-            ["a_ptr", "c_ptr"],
+            kernel,
+            kwargs,
+            expected,
         )
 
     @make_mutation_test
