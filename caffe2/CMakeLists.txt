@@ -278,7 +278,7 @@ if(PRINT_CMAKE_DEBUG_INFO)
 
 endif()
 
-if(NOT INTERN_BUILD_MOBILE)
+if(BUILD_CAFFE2_PROTOS)
   # ---[ List of libraries to link with
   add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
   add_dependencies(caffe2_protos Caffe2_PROTO)
@@ -1097,7 +1097,7 @@ endif()
 # formerly-libtorch flags
 # ==========================================================
 
-if(NOT INTERN_BUILD_MOBILE)
+if(BUILD_CAFFE2_PROTOS)
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
   # to establish the dependency, since the generation procedure is declared in a different CMake file.
@@ -1397,7 +1397,7 @@ if(USE_DISTRIBUTED)
   endif()
 endif()
 
-if(NOT INTERN_BUILD_MOBILE)
+if(BUILD_CAFFE2_PROTOS)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
   target_link_libraries(torch_cpu PRIVATE caffe2_protos_whole)
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
