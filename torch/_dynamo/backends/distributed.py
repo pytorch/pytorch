@@ -471,7 +471,6 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        print("gm.graph", gm.graph)
         if has_higher_order_op(gm):
             # This indicates presence of a higher order op. For now, we
             # have no way to break the higher order op into two buckets.
