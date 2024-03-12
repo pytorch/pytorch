@@ -88,7 +88,6 @@ jobs:
             rocm_version: "6.0"
           - device: "cuda"
             rocm_version: ""
-
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
@@ -180,6 +179,7 @@ jobs:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
+
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
