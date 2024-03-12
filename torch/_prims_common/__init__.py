@@ -1674,7 +1674,11 @@ def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
             f"no channels last format strides exist in {ndim} dimensions"
         )
 
-def make_strides_for(shape: ShapeType, memory_format: Optional[torch.memory_format] = None, ):
+
+def make_strides_for(
+    shape: ShapeType,
+    memory_format: Optional[torch.memory_format] = None,
+):
     if (memory_format is None) or (memory_format == torch.contiguous_format):
         return make_contiguous_strides_for(shape)
     elif memory_format == torch.channels_last:
@@ -1683,7 +1687,6 @@ def make_strides_for(shape: ShapeType, memory_format: Optional[torch.memory_form
         return make_channels_last_3d_strides_for(shape)
     else:
         raise RuntimeError(f"unsupported memory format {memory_format}")
-
 
 
 def compute_reduction_output_shape(

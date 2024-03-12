@@ -8575,7 +8575,7 @@ class CommonTemplate:
                 # assume shape
                 return functools.reduce(lambda x, y: x * y, size_or_y, 1)
 
-        nele_check = min(x_numel, get_numel(size_or_y)) 
+        nele_check = min(x_numel, get_numel(size_or_y))
         correct_values = correct.flatten()[:nele_check]
         actual_values = correct.flatten()[:nele_check]
         self.assertTrue(same(correct_values, actual_values))
@@ -8583,15 +8583,14 @@ class CommonTemplate:
         actual_strides = actual.stride()
         self.assertEqual(correct_strides, actual_strides)
 
-
     @staticmethod
     def _cases_resize_common():
         sizes = [
-            ((1, ), (1, 3, 2, 3)),
-            ((100, ), (1, 3, 2, 3)),
+            ((1,), (1, 3, 2, 3)),
+            ((100,), (1, 3, 2, 3)),
             ((1, 3, 2, 3), (1, 3, 2, 3)),
-            ((1, ), (1, 3, 2, 3, 1)),
-            ((100, ), (1, 3, 2, 3, 1)),
+            ((1,), (1, 3, 2, 3, 1)),
+            ((100,), (1, 3, 2, 3, 1)),
             ((1, 3, 2, 3, 1), (1, 3, 2, 3, 1)),
         ]
         for x_size, y_size in sizes:
@@ -8608,41 +8607,51 @@ class CommonTemplate:
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()
             return torch.ops.aten.resize(x, size, memory_format=memory_format)
-    
+
         for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-            CommonTemplate._check_resize_common(self, fn, x, y_size, memory_format, inplace=False) 
-    
+            CommonTemplate._check_resize_common(
+                self, fn, x, y_size, memory_format, inplace=False
+            )
+
     def test_inplace_resize(self):
         def fn(x, size, memory_format):
             torch.ops.aten.resize_(x, size, memory_format=memory_format)
             return x
 
         for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-            CommonTemplate._check_resize_common(self, fn, x, y_size, memory_format, inplace=True) 
+            CommonTemplate._check_resize_common(
+                self, fn, x, y_size, memory_format, inplace=True
+            )
 
     @staticmethod
     def _cases_resize_as_common():
         for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-            # each sizes /memory_format combintation tested in 2 ways: 
+            # each sizes /memory_format combintation tested in 2 ways:
             # 1. y is contiguous fn gets memory_format kwargs
             # 2. y has memory_format contiguity and fn gets preserve kwarg
             yield x, torch.randn(*y_size), memory_format
-            yield x, torch.randn(*y_size).contiguous(memory_format=memory_format), torch.preserve_format
-            
+            yield x, torch.randn(*y_size).contiguous(
+                memory_format=memory_format
+            ), torch.preserve_format
+
     def test_resize_as(self):
         def fn(x, y, memory_format):
             return torch.ops.aten.resize_as(x, y, memory_format=memory_format)
 
         for x, y, memory_format in CommonTemplate._cases_resize_as_common():
-            CommonTemplate._check_resize_common(self, fn, x, y, memory_format, inplace=False)
-        
+            CommonTemplate._check_resize_common(
+                self, fn, x, y, memory_format, inplace=False
+            )
+
     def test_inplace_resize_as(self):
         def fn(x, y, memory_format):
             x.resize_as_(y, memory_format=memory_format)
             return x
 
         for x, y, memory_format in CommonTemplate._cases_resize_as_common():
-            CommonTemplate._check_resize_common(self, fn, x, y, memory_format, inplace=True)
+            CommonTemplate._check_resize_common(
+                self, fn, x, y, memory_format, inplace=True
+            )
 
     def test_erfc(self):
         def fn(x):

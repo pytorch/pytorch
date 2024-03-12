@@ -27,8 +27,8 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
-    Number,
     make_strides_for,
+    Number,
     suggest_memory_format,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -53,7 +53,6 @@ from .ir import (
 from .utils import (
     ceildiv,
     decode_device,
-    get_dtype_size,
     is_dynamic,
     is_pointwise_use,
     pad_listlike,
@@ -5771,20 +5770,17 @@ def resize_storage_bytes_(variable, new_size):
 
 
 def resize_impl(self, size, *, memory_format=None):
-    if memory_format is None:
-        memory_format = torch.contiguous_format
     if memory_format == torch.preserve_format:
         raise RuntimeError(f"unsupported memory format: {memory_format}")
 
     assert isinstance(self, TensorBox)
     assert isinstance(size, (list, tuple))
 
-
     new_numel = sympy_product(size)
     old_numel = self.get_numel()
     dtype = self.get_dtype()
     device = self.get_device()
-    self_flat = view(self, (-1, ))
+    self_flat = view(self, (-1,))
     new_strides = make_strides_for(size, memory_format)
 
     if V.graph.sizevars.statically_known_leq(new_numel, old_numel):
@@ -5793,7 +5789,10 @@ def resize_impl(self, size, *, memory_format=None):
         return sliced
     else:
         # We are growing the tensor, so we must preserve elements, and handle initialization of new ones
-        if torch.are_deterministic_algorithms_enabled() and torch.utils.deterministic.fill_uninitialized_memory:
+        if (
+            torch.are_deterministic_algorithms_enabled()
+            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+        ):
             # deterministic fill value is documented, except for bool, but this seems to be consistant with eager
             if is_float_dtype(dtype):
                 uninitalized_val = float("nan")
@@ -5810,13 +5809,15 @@ def resize_impl(self, size, *, memory_format=None):
         def inner_fn(idx):
             flat_index = ops.index_expr(idx[0], torch.int64)
             limit = ops.index_expr(old_numel, torch.int64)
-            return ops.where(ops.lt(flat_index, limit), self_loader(idx), uninitalized_val)
+            return ops.where(
+                ops.lt(flat_index, limit), self_loader(idx), uninitalized_val
+            )
 
         pointwise = Pointwise.create(
             device=device,
             dtype=dtype,
             inner_fn=inner_fn,
-            ranges=(new_numel, ),
+            ranges=(new_numel,),
         )
         as_strided_(pointwise, size, new_strides)
         return pointwise
@@ -5826,8 +5827,6 @@ def resize_impl(self, size, *, memory_format=None):
 def resize(x, size, *, memory_format=None):
     if memory_format is None:
         memory_format = torch.contiguous_format
-    if memory_format == torch.preserve_format:
-        raise RuntimeError(f"unsupported memory format: {memory_format}")
 
     return resize_impl(x, size, memory_format=memory_format)
 
@@ -5840,12 +5839,20 @@ def resize_(x, size, *, memory_format=None):
     mutate_to(x, val)
     return x
 
+
 @register_lowering(aten.resize_as, type_promotion_kind=None)
 def resize_as(x, other, *, memory_format=None):
+    if memory_format is None:
+        memory_format = suggest_memory_format(other)
+
     return resize(x, other.get_size(), memory_format=memory_format)
+
 
 @register_lowering(aten.resize_as_, type_promotion_kind=None)
 def resize_as_(x, other, *, memory_format=None):
+    if memory_format is None:
+        memory_format = suggest_memory_format(other)
+
     return resize_(x, other.get_size(), memory_format=memory_format)
 
 
