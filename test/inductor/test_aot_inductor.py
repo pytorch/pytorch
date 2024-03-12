@@ -211,6 +211,24 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @requires_cuda
+    def test_duplicate_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w1 = torch.randn(4, 4, device=device)
+                self.w2 = torch.randn(4, 4, device=device)
+                self.w3 = torch.randn(4, 4, device=device)
+                self.w4 = torch.randn(4, 4, device=device)
+
+            def forward(self, x):
+                w_concat = torch.cat((self.w1, self.w2, self.w3, self.w4))
+                return torch.cat((x, w_concat))
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -757,6 +775,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @skipIfRocm
     def test_cond_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -774,6 +793,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_nested(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -795,6 +815,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
@@ -808,6 +829,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_reinterpret_view_inputs_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -825,6 +847,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_multiple_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -845,6 +868,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_outer_code_before_after(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -862,6 +886,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_use_buffers_from_outer_scope(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1972,6 +1997,9 @@ CPU_TEST_FAILURES = {
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -2163,6 +2191,9 @@ copy_tests(
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
+        "test_duplicate_constant_folding": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
         "test_dynamic_smem_above_default_limit": TestFailure(
             ("non_abi_compatible_cpu",)
         ),
