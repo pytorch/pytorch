@@ -1589,7 +1589,6 @@ class TestExport(TestCase):
             torch.allclose(ep.module()(*inp_test)["b"], ep_rexported.module()(*inp_test)["b"])
         )
 
-    @testing.expectedFailureNonStrict
     def test_args_type_checked(self):
         class M(torch.nn.Module):
             def forward(self, x):

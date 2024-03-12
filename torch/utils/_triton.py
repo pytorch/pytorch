@@ -1,8 +1,6 @@
 import functools
 import hashlib
 
-from torch._dynamo.device_interface import get_interface_for_device
-
 
 @functools.lru_cache(None)
 def has_triton_package() -> bool:
@@ -16,6 +14,8 @@ def has_triton_package() -> bool:
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
+    from torch._dynamo.device_interface import get_interface_for_device
+
     def cuda_extra_check(device_interface):
         return device_interface.Worker.get_device_properties().major >= 7
 
