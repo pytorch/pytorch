@@ -1981,11 +1981,11 @@ class CppCodeCache:
 
     @classmethod
     def compile(cls, source_code: str, cuda: bool = False) -> Tuple[str, str]:
-        cls.vec_isa = pick_vec_isa() if cls.vec_isa == invalid_vec_isa else cls.vec_isa
         cls.cpp_compile_command_flags.update({"cuda": cuda})
+        picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
-                "i", "o", vec_isa=cls.vec_isa, **cls.cpp_compile_command_flags
+                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
             )
         )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
@@ -2037,7 +2037,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         "shared": True,
     }
     entry_function = "kernel"
-    call_entry_function = "kernel(%s);Py_RETURN_NONE;"
+    call_entry_function = "%s(%s);Py_RETURN_NONE;"
     extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
@@ -2147,6 +2147,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 """
             )
 
+            # Build the computation kernel
             source_code_key, output_so_path = cls.compile(
                 source_code + c_func_name_decl, cuda
             )
@@ -2190,11 +2191,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 cls.entry_function,
             )
         else:
-            _extra_parse_arg = cls.extra_parse_arg
+            _extra_parse_arg = (
+                cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else ""
+            )
 
         suffix = cls.suffix_template % (
             cls.entry_function,
-            cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else "",
             _extra_parse_arg,
             cls.entry_function,
             len(argtypes),
@@ -2207,6 +2209,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         )
 
         if config.aot_inductor.eager_mode:
+            # For eager mode, the compuation kernel has been compiled as a single
+            # shared library, so we just compile the wrapper code(suffix) here.
             result = cls.load(suffix, cuda)
         else:
             result = cls.load(source_code + suffix, cuda)
@@ -2260,13 +2264,10 @@ class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
         """
         #include <dlfcn.h>
         #include <torch/csrc/autograd/python_variable.h>
-
         template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
             return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
         }
-
         using inductor_entry_cpp_t = std::vector<at::Tensor> (*)(const std::vector<at::Tensor>&);
-
         namespace {
             class SharedAOTIKernelObject {
             public:
@@ -2275,7 +2276,6 @@ class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
                     if (!inductor_entry_cpp_so_handle) {
                         throw std::runtime_error("Cannot load library: " + std::string(dlerror()));
                     }
-
                     inductor_entry_cpp_so_sym = dlsym(inductor_entry_cpp_so_handle, "aoti_eager_inductor_entry_cpp");
                     if (!inductor_entry_cpp_so_sym) {
                         dlclose(inductor_entry_cpp_so_handle);
@@ -2283,7 +2283,6 @@ class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
                         throw std::runtime_error("Cannot load symbol 'inductor_entry_cpp': " + std::string(dlerror()));
                     }
                 }
-
                 ~SharedAOTIKernelObject() {
                     if (inductor_entry_cpp_so_handle) {
                         dlclose(inductor_entry_cpp_so_handle);
@@ -2291,22 +2290,17 @@ class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
                         inductor_entry_cpp_so_sym = nullptr;
                     }
                 }
-
                 SharedAOTIKernelObject(const SharedAOTIKernelObject&) = delete;
                 SharedAOTIKernelObject& operator=(const SharedAOTIKernelObject&) = delete;
-
                 std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inputs) {
                     return reinterpret_cast<inductor_entry_cpp_t>(inductor_entry_cpp_so_sym)(inputs);
                 }
-
             private:
                 void* inductor_entry_cpp_so_handle = nullptr;
                 void* inductor_entry_cpp_so_sym = nullptr;
             };
-
             SharedAOTIKernelObject aoti_eager_inductor_entry_cpp_kernel("%s");
         }
-
         std::vector<at::Tensor> %s(const std::vector<at::Tensor>& inputs) {
             pybind11::gil_scoped_release release;
             return aoti_eager_inductor_entry_cpp_kernel(inputs);
@@ -2878,7 +2872,7 @@ class AsyncCompile:
             cpp_code_cache = cast(
                 Union[CDLL, ModuleType], CppCodeCache.load(source_code)
             )
-            return cpp_code_cache.kernel
+            return cpp_code_cache.load(source_code).kernel
 
         return self.submit(task)
 
