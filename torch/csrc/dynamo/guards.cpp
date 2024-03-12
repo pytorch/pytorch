@@ -2666,6 +2666,15 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   return THPVariable_Unpack(obj).data_ptr();
 }
 
+void* convert_to_root_guard_manager(py::object root) {
+  RootGuardManager* root_mgr = root.cast<RootGuardManager*>();
+  return (void*)root_mgr;
+}
+
+bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
