@@ -21,6 +21,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
     parametrize,
@@ -2383,7 +2384,7 @@ class TestSDPACudaOnly(NNTestCase):
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
 
-    @skipIfRocm  # Small matrices
+    @skipIfRocm  # TODO: Packed QKV
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
@@ -2785,16 +2786,6 @@ class TestSDPACudaOnly(NNTestCase):
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str):
-        if TEST_WITH_ROCM:
-            def is_power_of_2(n):
-                return n & (n - 1) == 0
-            if not is_power_of_2(seq_len_q) or not is_power_of_2(seq_len_k) or not is_power_of_2(head_dim):
-                self.skipTest("Flash attention on ROCM only supports power of two seq_len_q seq_len_k headdim, for now.")
-            if head_dim < 16 or seq_len_q < 16 or seq_len_k < 16:
-                self.skipTest("Flash attention on ROCM only supports power of two seq_len_q, seq_len_k, headdim >= 16, for now.")
-            if head_dim > 128:
-                self.skipTest("Flash attention on ROCM only supports power of two headdim <= 128, for now.")
-
         if isSM8XDevice and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3415,6 +3406,7 @@ class TestAttnBias(NNTestCase):
 
         self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
 
+    @skipIfRocm  # CausalVariant
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
@@ -3424,6 +3416,7 @@ class TestAttnBias(NNTestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
+    @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
