@@ -4,12 +4,12 @@ import os
 import sys
 
 import torch
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ASAN,
-    TestCase as TorchTestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -35,7 +35,7 @@ if IS_WINDOWS and IS_CI:
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -147,7 +147,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCpuTest, "cpu")
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests()
