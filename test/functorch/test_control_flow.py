@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch._subclasses.functional_tensor import FunctionalTensor
 
@@ -77,7 +77,7 @@ class ReduceMod(torch.nn.Module):
         return self._reduce(*operands)
 
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
     def setUp(self):
@@ -250,6 +250,7 @@ class TestControlFlow(TestCase):
         self.assertEqual(true_outs, fake_outs)
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def setUp(self):

@@ -14,7 +14,7 @@ from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
     skipIfNoX86,
-    skipIfNoDynamoSupport,
+    skipIfNoInductorSupport,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
@@ -321,7 +321,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         )
         return export_model, prepare_model, convert_model
 
-@skipIfNoDynamoSupport
+@skipIfNoInductorSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d(self):
