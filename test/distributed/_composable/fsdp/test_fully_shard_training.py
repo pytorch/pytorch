@@ -788,7 +788,6 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @wrapSwapTensorsTest(True)
     @with_temp_dir
     def test_train_parity_2d_transformer_checkpoint_resume(self):
         """
