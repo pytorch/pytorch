@@ -824,15 +824,6 @@ class TestFullyShard2DTraining(FSDPTest):
             fully_shard(_model, mesh=mesh["dp"])
             return _model
 
-        def optimizer_state_dict(_model: nn.Module, _optim: torch.optim.Optimizer):
-            # If loading into a new optimizer, then we need to eagerly init the
-            # optimizer state via `get_optimizer_state_dict`
-            return (
-                _optim.state_dict()
-                if reuse_model_optim
-                else get_optimizer_state_dict(_model, _optim)
-            )
-
         global_mesh = self.init_global_mesh()
         # Baseline: run two iterations without checkpointing
         seed = 42
@@ -859,7 +850,9 @@ class TestFullyShard2DTraining(FSDPTest):
 
         sharded_sd = {
             "model": model_cp.state_dict(),
-            "optim": optimizer_state_dict(model_cp, optim_cp),
+            # Use `get_optimizer_state_dict` to handle eager optim state init
+            # when constructing a new optimizer instance
+            "optim": get_optimizer_state_dict(model_cp, optim_cp),
         }
         dcp.save(
             state_dict=sharded_sd,
@@ -884,7 +877,7 @@ class TestFullyShard2DTraining(FSDPTest):
 
         sharded_sd = {
             "model": model_cp.state_dict(),
-            "optim": optimizer_state_dict(model_cp, optim_cp),
+            "optim": get_optimizer_state_dict(model_cp, optim_cp),
         }
         dcp.load(
             state_dict=sharded_sd,
