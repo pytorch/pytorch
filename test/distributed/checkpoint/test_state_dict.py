@@ -220,30 +220,29 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self._test_save_load(init_model_optim)
 
-    # TODO: these tests are failing on totally unrelated PR's, need to investigate
-    # @with_comms
-    # @skip_if_lt_x_gpu(2)
-    # def test_fsdp(self) -> None:
-    #     self.run_subtests(
-    #         {
-    #             "use_orig_params": [True, False],
-    #             "use_composable": [True, False],
-    #             "use_dtensor": [True, False],
-    #             "wrapping": [tuple(), (nn.Linear, UnitModule)],
-    #         },
-    #         self._test_fsdp,
-    #     )
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp(self) -> None:
+        self.run_subtests(
+            {
+                "use_orig_params": [True, False],
+                "use_composable": [True, False],
+                "use_dtensor": [True, False],
+                "wrapping": [tuple(), (nn.Linear, UnitModule)],
+            },
+            self._test_fsdp,
+        )
 
-    # @with_comms
-    # @skip_if_lt_x_gpu(2)
-    # def test_compiled_fsdp(self) -> None:
-    #     self._test_fsdp(
-    #         use_orig_params=True,
-    #         use_composable=False,
-    #         use_dtensor=False,
-    #         wrapping=tuple(),
-    #         compile_model=True,
-    #     )
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_fsdp(self) -> None:
+        self._test_fsdp(
+            use_orig_params=True,
+            use_composable=False,
+            use_dtensor=False,
+            wrapping=tuple(),
+            compile_model=True,
+        )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
