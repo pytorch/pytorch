@@ -32,7 +32,7 @@ static_weight_shapes = True
 cse = True
 
 # Restricts the amount of computation AOTAutograd can do.
-max_dist_from_bw = 3
+max_dist_from_bw = 5
 
 # Enable aggressive_recomputation in the min-cut algorithm in partitioners to reduce
 # memory usage with some penalty of performance. It allows more ops to be considered
