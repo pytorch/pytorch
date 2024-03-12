@@ -369,8 +369,11 @@ static __global__ void hybridCubeMeshAllReduceKernel(
       buffers[hcmInfo[1]],
       buffers[hcmInfo[2]],
   };
-  at::BFloat16* localRelay = buffers[rank] + bufferSize / 2;
-  at::BFloat16* remoteRelay = buffers[relayRank] + bufferSize / 2;
+  // Use the half second half of the buffer as relay
+  at::BFloat16* localRelay =
+      buffers[rank] + (bufferSize / sizeof(at::BFloat16) / 2);
+  at::BFloat16* remoteRelay =
+      buffers[relayRank] + (bufferSize / sizeof(at::BFloat16) / 2);
 
   for (size_t i = offset; i < N_aligned; i += stride) {
     bf16x8 vals[4];
