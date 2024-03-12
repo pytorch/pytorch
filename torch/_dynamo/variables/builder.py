@@ -15,6 +15,8 @@ import sys
 import types
 from typing import List, NamedTuple, Optional, Union
 
+from torch.utils._sympy.value_ranges import ValueRanges
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -89,6 +91,7 @@ from .ctx_manager import (
     AutocastModeVariable,
     EventVariable,
     NullContextVariable,
+    PreserveVersionContextVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -264,10 +267,17 @@ class VariableBuilder:
             if dup_guard:
                 self.install_guards(dup_guard)
             return side_effect_result
+
+        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        if cached_vt:
+            return cached_vt
+
         vt = self._wrap(value)
         vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
+
+        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
@@ -791,11 +801,14 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook,):
+            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
                 )
+            if value is torch.autograd._unsafe_preserve_version_counter:
+                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                return PreserveVersionContextVariable.constructor(self.tx)
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1779,7 +1792,24 @@ def _automatic_dynamic(
         constraint = dim2constraint.get(i)
         if constraint is None:
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                constraint_dim = RelaxedUnspecConstraint(warn_only=False)
+                if hasattr(e, "_dynamo_dynamic_range"):
+                    dim_range = [
+                        dr for dr in e._dynamo_dynamic_range if dr.dim == i
+                    ].pop()
+                    if dim_range.min is None and dim_range.max is None:
+                        constraint_dim = RelaxedUnspecConstraint(warn_only=False)
+                    else:
+                        from torch.fx.experimental.symbolic_shapes import (
+                            StrictMinMaxConstraint,
+                        )
+
+                        constraint_dim = StrictMinMaxConstraint(
+                            vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
+                            warn_only=False,
+                        )
+                else:
+                    constraint_dim = RelaxedUnspecConstraint(warn_only=False)
+
             elif not marked_static and automatic_dynamic:
                 constraint_dim = RelaxedUnspecConstraint(warn_only=True)
             else:
