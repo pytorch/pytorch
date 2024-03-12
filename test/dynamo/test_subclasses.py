@@ -33,6 +33,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 
 
+def test_subclass(c):
+    return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
+
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
@@ -51,6 +55,18 @@ class MockSubclass(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        return func(*args, **kwargs)
+
+
+class AttrSubclass(torch.Tensor):
+    x: int = 10
+    size: int = 10
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
         return func(*args, **kwargs)
 
 
@@ -517,6 +533,29 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_exp = fn(wrapped)
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
+
+    def test_tensor_subclass_custom_attr(self):
+        class AttrSubclass(torch.Tensor):
+            x: int = 10
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.x + torch.ones(2, 2)
+
+        with test_subclass(AttrSubclass):
+            input = torch.ones(2, 2).as_subclass(AttrSubclass)
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(input)
+            res_act = fn_opt(input)
+            self.assertEqual(res_exp, res_act)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])

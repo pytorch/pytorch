@@ -261,11 +261,12 @@ def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     return True
 
 
-def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
+@torch._dynamo.allow_in_graph
+def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, flash_enabled, mem_efficient_enabled, math_enabled):
     if (
-        not flash_sdp_enabled()
-        and not mem_efficient_sdp_enabled()
-        and not math_sdp_enabled()
+        not flash_enabled
+        and not mem_efficient_enabled
+        and not math_enabled
     ):
         return SDPBackend.ERROR
 
@@ -287,7 +288,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
             ):
                 return SDPBackend.EFFICIENT_ATTENTION
         if backend == SDPBackend.MATH:
-            if math_sdp_enabled() and _can_use_math_sdpa_jagged(params):
+            if math_enabled and _can_use_math_sdpa_jagged(params):
                 return SDPBackend.MATH
 
     log.warning("Memory efficient kernel not used because:")
@@ -614,6 +615,11 @@ def _post_process_flash_output(out: torch.Tensor, og_size):
     return out
 
 
+@torch._dynamo.allow_in_graph
+def _jagged_from_buffer(buffer, offsets):
+    return ViewNestedFromBuffer.apply(buffer, offsets)
+
+
 def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -654,7 +660,7 @@ def jagged_scaled_dot_product_attention(
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
     backend_choice = _select_sdp_backend(
-        query, key, value, attn_mask, dropout_p, is_causal
+        query, key, value, attn_mask, dropout_p, is_causal, flash_sdp_enabled(), mem_efficient_sdp_enabled(), math_sdp_enabled()
     )
 
     if backend_choice == SDPBackend.FLASH_ATTENTION:
@@ -695,7 +701,7 @@ def jagged_scaled_dot_product_attention(
             scale=og_scale,
         )
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = ViewNestedFromBuffer.apply(
+        attention = _jagged_from_buffer(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)

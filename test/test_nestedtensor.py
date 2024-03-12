@@ -3833,6 +3833,7 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
+    @xfailIfTorchDynamo
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # Guarding with sqrt() doesn't work on ROCm?
@@ -3881,13 +3882,14 @@ class TestNestedTensorSubclass(TestCase):
         attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
         attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
 
-        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention)
+        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention, fullgraph=True)
         attn_nt = compiled_sdpa(q_nt, k_nt, v_nt).transpose(1, 2)
 
         attn_nts = attn_nt.unbind()
         self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
 
+    @xfailIfTorchDynamo
     @dtypes(torch.float32, torch.double, torch.half)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
         # shape (B, P*, S, D)
@@ -3906,6 +3908,7 @@ class TestNestedTensorSubclass(TestCase):
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
 
+    @xfailIfTorchDynamo
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
