@@ -199,6 +199,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   using accscalar_t = at::acc_type<scalar_t, false>;
 
   int64_t n_input = input.size(1);
+  TORCH_CHECK(input.numel() != 0, "input tensor must have at least one element, but got input_sizes = ", input.sizes());
   int64_t n = input.numel() / n_input;
 
   bool all_contiguous = is_contiguous(input);
