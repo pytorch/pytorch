@@ -261,14 +261,24 @@ struct Identity {
 template <typename dst_t>
 struct Identity<dst_t, c10::complex<double>> {
   __device__ __forceinline__ dst_t operator()(const c10::complex<double>& x) {
-    return static_cast<dst_t>(x.real());
+    if constexpr (!(std::is_same_v<dst_t, c10::complex<double>> ||
+                    std::is_same_v<dst_t, c10::complex<float>>)) {
+      return static_cast<dst_t>(x.real());
+    } else {
+      return static_cast<dst_t>(x);
+    }
   }
 };
 
 template <typename dst_t>
 struct Identity<dst_t, c10::complex<float>> {
   __device__ __forceinline__ dst_t operator()(const c10::complex<float>& x) {
-    return static_cast<dst_t>(x.real());
+    if constexpr (!(std::is_same_v<dst_t, c10::complex<double>> ||
+                    std::is_same_v<dst_t, c10::complex<float>>)) {
+      return static_cast<dst_t>(x.real());
+    } else {
+      return static_cast<dst_t>(x);
+    }
   }
 };
 
