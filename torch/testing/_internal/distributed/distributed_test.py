@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
 
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
+from torch.utils._triton import has_triton
 from torch.utils.data.distributed import DistributedSampler
 import operator
 
@@ -10026,6 +10027,9 @@ class DistributedTest:
                     model, device_mesh=device_mesh
                 )
 
+
+        @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+        @skip_if_rocm
         @skip_if_lt_x_gpu(2)
         @require_world_size(2)
         @skip_but_pass_in_sandcastle_if(

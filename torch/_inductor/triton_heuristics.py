@@ -358,7 +358,16 @@ class CachingAutotuner(KernelInterface):
             # need to initialize context
             self.gpu_device.synchronize(self.gpu_device.current_device())
 
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            try:
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            except Exception:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
             binary._init_handles()
 
         call_args = [
