@@ -774,25 +774,25 @@ Tensor& _chunk_cat_out_cuda(
       "_chunk_cat_out_cuda: mismatch between input and out tensor devices");
   bool both_input_output_contiguous =
       detail::all_contiguous(tensors) && out.is_non_overlapping_and_dense();
-  if (both_input_output_contiguous) {
-    if ((tensors[0].dtype() == at::ScalarType::BFloat16) &&
-        (out.dtype() == at::ScalarType::Float)) {
-      detail::_chunk_cat_out_cuda_contiguous<float, detail::bfloat16>(
-          tensors,
-          dim,
-          num_chunks,
-          out,
-          out.element_size(),
-          tensors[0].element_size());
-    } else if (tensors[0].dtype() == out.dtype()) {
-      detail::_chunk_cat_out_cuda_contiguous<void, void>(
-          tensors,
-          dim,
-          num_chunks,
-          out,
-          out.element_size(),
-          tensors[0].element_size());
-    }
+  if (both_input_output_contiguous &&
+      (tensors[0].dtype() == at::ScalarType::BFloat16) &&
+      (out.dtype() == at::ScalarType::Float)) {
+    detail::_chunk_cat_out_cuda_contiguous<float, detail::bfloat16>(
+        tensors,
+        dim,
+        num_chunks,
+        out,
+        out.element_size(),
+        tensors[0].element_size());
+  } else if (
+      both_input_output_contiguous && tensors[0].dtype() == out.dtype()) {
+    detail::_chunk_cat_out_cuda_contiguous<void, void>(
+        tensors,
+        dim,
+        num_chunks,
+        out,
+        out.element_size(),
+        tensors[0].element_size());
   } else {
     at::native::_chunk_cat_out(tensors, dim, num_chunks, out);
   }
