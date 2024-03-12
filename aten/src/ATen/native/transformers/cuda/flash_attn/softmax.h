@@ -78,7 +78,7 @@ __forceinline__ __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tenso
             // Instead of computing exp(x - max), we compute exp2(x * log_2(e) -
             // max * log_2(e)) This allows the compiler to use the ffma
             // instruction instead of fadd and fmul separately.
-            tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
+            tensor(mi, ni) = exp2f(__fmul_rn(tensor(mi, ni), scale) - max_scaled);
         }
     }
 }
