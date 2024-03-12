@@ -252,14 +252,14 @@ FOREACH_BINARY_OP_LIST(
     /*division_op*/ true);
 
 template <typename dst_t, typename src_t = dst_t>
-struct Identity {
+struct Copy {
   __device__ __forceinline__ dst_t operator()(const src_t& x) {
     return static_cast<dst_t>(x);
   }
 };
 
 template <typename dst_t>
-struct Identity<dst_t, c10::complex<double>> {
+struct Copy<dst_t, c10::complex<double>> {
   __device__ __forceinline__ dst_t operator()(const c10::complex<double>& x) {
     if constexpr (!(std::is_same_v<dst_t, c10::complex<double>> ||
                     std::is_same_v<dst_t, c10::complex<float>>)) {
@@ -271,7 +271,7 @@ struct Identity<dst_t, c10::complex<double>> {
 };
 
 template <typename dst_t>
-struct Identity<dst_t, c10::complex<float>> {
+struct Copy<dst_t, c10::complex<float>> {
   __device__ __forceinline__ dst_t operator()(const c10::complex<float>& x) {
     if constexpr (!(std::is_same_v<dst_t, c10::complex<double>> ||
                     std::is_same_v<dst_t, c10::complex<float>>)) {
@@ -421,7 +421,7 @@ void foreach_tensor_copy_list_kernel_cuda_(
                     /* depth */ 2,
                     /* r_args_depth */ 1,
                     /* res_arg_index */ 1>(),
-                Identity<opmath_t, opmath_t>());
+                Copy<opmath_t, opmath_t>());
           } else {
             // Ref:
             // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
@@ -437,7 +437,7 @@ void foreach_tensor_copy_list_kernel_cuda_(
                     /* depth */ 2,
                     /* r_args_depth */ 1,
                     /* res_arg_index */ 1>(),
-                Identity<scalar_t, src_t>());
+                Copy<scalar_t, src_t>());
           }
         });
       });
