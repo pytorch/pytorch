@@ -822,9 +822,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 )
 
         elif isinstance(target, torch.nn.Module):
-            print(f"\nCreate module. target:{target}, names:{names}, source:{source}\n")
-
-
             assert isinstance(target, torch.nn.Module)
 
             install_guard(source.make_guard(GuardBuilder.NN_MODULE))
