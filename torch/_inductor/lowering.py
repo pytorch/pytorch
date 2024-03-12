@@ -3215,8 +3215,21 @@ def masked_scatter_with_index(self, mask, source_idx, source):
     return view(result_flat, self.get_size())
 
 
+fallback__unsafe_masked_index = fallback_handler(
+    aten._unsafe_masked_index, add_to_fallback_set=False
+)
+
+fallback__unsafe_masked_index_put_accumulate = fallback_handler(
+    aten._unsafe_masked_index_put_accumulate, add_to_fallback_set=False
+)
+
+
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
+    if torch.version.hip is not None:
+        # Avoid a triton compiler failure
+        return fallback__unsafe_masked_index(self, mask, indices, fill)
+
     ranges, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
     mask_loader = mask.make_loader()
 
@@ -3233,6 +3246,10 @@ def _unsafe_masked_index(self, mask, indices, fill):
 
 @register_lowering(aten._unsafe_masked_index_put_accumulate)
 def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    if torch.version.hip is not None:
+        # Avoid a triton compiler failure
+        return fallback__unsafe_masked_index_put_accumulate(x, mask, indices, values)
+
     masked_value = where(mask, values, 0)
     shape = x.get_size()
     clamped_indices = [
