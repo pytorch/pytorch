@@ -98,7 +98,10 @@ from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
+from torch.utils._triton import has_triton
 
+if has_triton():
+    import triton
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -977,6 +980,8 @@ common_constant_types = {
     torch.memory_format,
     torch.layout,
 }
+if has_triton():
+    common_constant_types.add(triton.language.dtype)
 
 
 def is_safe_constant(v):
@@ -2190,8 +2195,6 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch.utils._triton import has_triton
-
         compile_supported = has_triton()
     else:
         compile_supported = False

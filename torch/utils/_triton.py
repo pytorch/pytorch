@@ -59,3 +59,15 @@ def triton_hash_with_backend():
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def dtype_to_string(dtype, prefix=False):
+    if dtype.name.startswith("fp"):
+        suffix = "float" + dtype.name[2:]
+    elif dtype.name.startswith("bf"):
+        suffix = "bfloat" + dtype.name[2:]
+    else:
+        suffix = dtype.name
+    if prefix:
+        return "triton.language." + suffix
+    return suffix

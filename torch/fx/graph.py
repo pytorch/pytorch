@@ -380,10 +380,20 @@ class CodeGen:
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
+        from torch.utils._triton import dtype_to_string, has_triton
+
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
+
+        if has_triton():
+            import triton
+            globals_[triton.__name__] = triton
+            # Horrible Hack
+            # Triton emits triton.language.float32 as triton.language.fp32
+            # so our code generation fails as fp32 is not a real thing
+            triton.language.dtype.__str__ = lambda self: dtype_to_string(self)
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
