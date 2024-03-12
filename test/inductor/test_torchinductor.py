@@ -6,6 +6,7 @@ import functools
 import gc
 import importlib
 import itertools
+import json
 import math
 import operator
 import os
@@ -13,7 +14,6 @@ import random
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import typing
@@ -38,8 +38,10 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    cache_dir,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -74,7 +76,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -130,9 +131,6 @@ ids = set()
 f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
-
-# Test the FX graph code cache:
-config.fx_graph_cache = True
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
@@ -196,28 +194,7 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCaseBase(TorchTestCase):
-    def setUp(self):
-        super().setUp()
-
-        # For all tests, mock the tmp directory populated by the inductor
-        # FxGraphCache, both for test isolation and to avoid filling disk.
-        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
-        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
-            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
-        )
-        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
-        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
-
-    def tearDown(self):
-        super().tearDown()
-
-        # Clean up the FxGraphCache tmp dir.
-        self._inductor_cache_get_tmp_dir_patch.stop()
-        self._inductor_cache_tmp_dir.cleanup()
-
-
-class TestCase(TestCaseBase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -3851,6 +3828,28 @@ class CommonTemplate:
         self.common(fn, (torch.randn([2, 8]),))
         # Unrolled reduction
         self.common(fn, (torch.randn([2, 4]),))
+
+    def test_torch_compile_kernel_wrapper_separation(self):
+        def fn(x):
+            return torch.neg(x)
+
+        x = torch.randn(3, 4)
+        opt_fn = torch.compile(fn)
+        with config.patch(
+            {"aot_inductor.eager_mode": True, "aot_inductor.eager_op_name": "neg"}
+        ):
+            with config.patch({"cpp_wrapper": True}):
+                self.assertEqual(opt_fn(x), fn(x))
+
+                aten_eager_conf = os.path.join(cache_dir(), "aten_eager", "neg.json")
+                self.assertTrue(os.path.exists(aten_eager_conf))
+                with open(aten_eager_conf) as f:
+                    neg_kernel_conf = json.load(f)
+                    self.assertTrue(isinstance(neg_kernel_conf, list))
+                    self.assertTrue(len(neg_kernel_conf) > 0)
+                    self.assertTrue("meta_info" in neg_kernel_conf[0])
+                    self.assertTrue("kernel_path" in neg_kernel_conf[0])
+                    self.assertTrue(os.path.exists(neg_kernel_conf[0]["kernel_path"]))
 
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
