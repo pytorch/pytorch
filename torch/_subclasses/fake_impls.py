@@ -157,6 +157,11 @@ def constructors(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
+    if "names" in kwargs:
+        raise UnsupportedOperatorException(
+            "torch.compile doesn't support named tensors"
+        )
+
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
         # TODO: file issue
@@ -942,7 +947,11 @@ def make_fast_binary_impl(slow_ref):
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
-            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+            if (
+                isinstance(op, torch.Tensor)
+                and len(op.shape) == len(final_shape)
+                and op.shape == final_shape
+            ):
                 break
         else:
             return slow("both tensors nontrivially broadcast")
