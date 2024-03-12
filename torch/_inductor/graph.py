@@ -1195,6 +1195,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
+
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
 
@@ -1212,6 +1213,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code = parent_graph.wrapper_code
         self.device_ops = parent_graph.device_ops
+        self.cpp_wrapper = parent_graph.cpp_wrapper
 
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
