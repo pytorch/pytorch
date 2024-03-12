@@ -157,6 +157,7 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
+        self.cuda_kernel_saved = False
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -357,7 +358,16 @@ class CachingAutotuner(KernelInterface):
             # need to initialize context
             self.gpu_device.synchronize(self.gpu_device.current_device())
 
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            try:
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            except Exception:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
             binary._init_handles()
 
         call_args = [
@@ -563,6 +573,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.bin.asm["hsaco_path"]
             ).read_bytes()
             CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+
+        self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
@@ -782,6 +794,8 @@ def load_cached_autotuning(
     configs_hash: str,
     configs: List[Config],
 ):
+    if best_config is None:
+        return None
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
 
@@ -832,18 +846,29 @@ def cached_autotune(
         remote_cache_key = None
         if config.use_autotune_local_cache:
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        if config.use_autotune_remote_cache:
+        if config.use_autotune_remote_cache or (
+            config.is_fbcode()
+            and torch._utils_internal.justknobs_check(
+                "pytorch/autotune_remote_cache:enable"
+            )
+        ):
             backend_hash = inductor_meta.get("backend_hash", None)
             if backend_hash is not None:
-                key = backend_hash + "autotune-best-config"
-                if config.is_fbcode():
-                    remote_cache = (
-                        triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
-                            key, is_autotune=True
+                key = backend_hash + configs_hash + "autotune-best-config"
+                key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+                try:
+                    if config.is_fbcode():
+                        remote_cache = (
+                            triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
+                                key, is_autotune=True
+                            )
                         )
-                    )
-                else:
-                    remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
                 # we already sha256 hash the source contents
                 remote_cache_key = os.path.basename(filename)
             else:
@@ -856,12 +881,13 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get([remote_cache_key])
+            cache_outs = remote_cache.get([remote_cache_key])
+            cache_out = cache_outs.get(remote_cache_key, None)
+            best_config = json.loads(cache_out) if cache_out else None
 
+        best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
-            best_config = load_cached_autotuning(best_config, configs_hash, configs)
-            if best_config:
-                configs = [best_config]
+            configs = [best_config]
 
         def save_cache_hook(cfg, found_by_coordesc=False):
             data = json.dumps(

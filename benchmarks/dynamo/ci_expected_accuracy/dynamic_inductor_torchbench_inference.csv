@@ -86,6 +86,10 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,36
+
+
+
 detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
 
 
@@ -230,7 +234,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
+moco,pass,5
 
 
 

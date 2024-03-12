@@ -205,7 +205,8 @@ class TensorVariable(VariableTracker):
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder()(tx, example_value)
-        if not self.source:
+
+        if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
 
         # For local source, we associate the real value. We use this real value
@@ -291,6 +292,13 @@ class TensorVariable(VariableTracker):
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
+    def method_attr__version(self, tx):
+        from ..tensor_version_op import _tensor_version
+
+        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+            tx, [self], {}
+        )
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
@@ -307,7 +315,14 @@ class TensorVariable(VariableTracker):
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None:
+        if (
+            result is not None
+            and self.source
+            and self.source.subguards_allowed()
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
+        ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
 
@@ -850,7 +865,12 @@ class TensorVariable(VariableTracker):
     def method_new(self, *args, **kwargs):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
-        if len(args) == 1 and isinstance(args[0], SizeVariable):
+        if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
+            len(args) >= 1
+            and all(
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+            )
+        ):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
