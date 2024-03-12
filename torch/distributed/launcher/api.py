@@ -54,12 +54,6 @@ class LaunchConfig:
                         as a period of monitoring workers.
         start_method: The method is used by the elastic agent to start the
                     workers (spawn, fork, forkserver).
-        log_dir: base log directory where log files are written. If not set,
-                one is created in a tmp dir but NOT removed on exit.
-        redirects: configuration to redirect stdout/stderr to log files.
-                Pass a single ``Std`` enum to redirect all workers,
-                or a mapping keyed by local_rank to selectively redirect.
-        tee: configuration to "tee" stdout/stderr to console + log file.
         metrics_cfg: configuration to initialize metrics.
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
@@ -248,9 +242,9 @@ def launch_agent(
 
     agent = LocalElasticAgent(
         spec=spec,
+        logs_specs=config.logs_specs,  # type: ignore[arg-type]
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
-        logs_specs=config.logs_specs,  # type: ignore[arg-type]
     )
 
     shutdown_rdzv = True
