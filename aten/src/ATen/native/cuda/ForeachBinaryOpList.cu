@@ -328,7 +328,6 @@ template <
     int r_args_depth,
     int res_arg_index>
 struct CopyFunctor {
-  using opmath_t = at::opmath_type<T>;
   static_assert(depth == 2 && r_args_depth == 1 && res_arg_index == 1);
   template <typename Op>
   __device__ __forceinline__ void operator()(
