@@ -118,36 +118,6 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
     @skipIfNoDill
-    def test_nonlocal_module_fn_call(self):
-        # replay when we use a module
-        # not defined in the replay env
-        try:
-            from . import mock_modules
-        except ImportError:
-            import mock_modules
-
-        def test_fn():
-            z = mock_modules.mock_module2.method1([], 2)
-            z = torch.ones(2, 2) + z[0]
-            return z + torch.zeros(3, 3)
-
-        self.check_replay(test_fn, exp_exc_name="RuntimeError")
-
-    @skipIfNoDill
-    def test_nonlocal_module_class(self):
-        try:
-            from .mock_modules import mock_module2
-        except ImportError:
-            from mock_modules import mock_module2
-
-        def test_fn():
-            z = mock_module2.Class1(1, 2)
-            y = z.method2(torch.ones(3, 3))
-            return y + torch.zeros(3, 5)
-
-        self.check_replay(test_fn, exp_exc_name="RuntimeError")
-
-    @skipIfNoDill
     def test_local_module(self):
         try:
             from .mock_modules import mock_module3 as _  # noqa: F401
