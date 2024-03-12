@@ -9760,6 +9760,26 @@ fn
             lambda mod: mod,
         )
 
+    @xfailIfPy311
+    def test_outside_linear_module_free(self):
+        # Compared to test_linear_module_free, the linear
+        # layer is not the code object that is directly compiled.
+        def model_inp_ctr():
+            fc = torch.nn.Linear(100, 100)
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc_ref = fc
+
+                def forward(self, x):
+                    return fc(x[0])
+
+            # return fc to keep it alive in _test_compile_model_free
+            return Mod(), (torch.randn(100, 100), fc)
+
+        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
+
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
             def __init__(self):

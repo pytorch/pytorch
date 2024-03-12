@@ -2553,7 +2553,11 @@ def invalid_removeable_handle():
 def nn_module_proxy(mod):
     if not isinstance(mod, torch.nn.Module):
         return mod
-    proxy = torch.nn.Module.__new__(torch.nn.Module)
-    proxy.__class__ = mod.__class__
-    proxy.__dict__ = mod.__dict__
-    return proxy
+    try:
+        # best effort shallow copy
+        proxy = torch.nn.Module.__new__(torch.nn.Module)
+        proxy.__class__ = mod.__class__
+        proxy.__dict__ = mod.__dict__
+        return proxy
+    except Exception:
+        return mod
