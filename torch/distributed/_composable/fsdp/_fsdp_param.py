@@ -393,7 +393,13 @@ class FSDPParam:
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
-            grad = cast(DTensor, grad)._local_tensor
+            assert isinstance(grad, DTensor), f"{type(grad)}"
+            if any(pl.is_partial() for pl in grad.placements):
+                placements = [
+                    Replicate() if pl.is_partial() else pl for pl in grad.placements
+                ]
+                grad = grad.redistribute(placements=placements)
+            grad = grad._local_tensor
         return grad
 
     def _assert_in_states(self, *states: ShardedState) -> None:
