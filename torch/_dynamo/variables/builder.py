@@ -91,7 +91,6 @@ from .ctx_manager import (
     AutocastModeVariable,
     EventVariable,
     NullContextVariable,
-    PreserveVersionContextVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -794,14 +793,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
+            if value in (torch.utils.hooks.BackwardHook,):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
                 )
-            if value is torch.autograd._unsafe_preserve_version_counter:
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
-                return PreserveVersionContextVariable.constructor(self.tx)
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)

@@ -46,20 +46,9 @@ efficient_conv_bn_eval_pass = PatternMatcherPass(
 merge_getitem_cat_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
 )
-
-fuse_split_linear_add_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
-    pass_name="fuse_split_linear_add_pass",
+predispatch_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="predispatch_pass"
 )
-fuse_chunk_squeeze_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
-    pass_name="fuse_chunk_squeeze_cat_pass",
-)
-remove_reshape_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
-    pass_name="remove_reshape_pass",
-)
-
 # based on predispatch aten IR
 normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
@@ -123,16 +112,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
             )
             pass_execution_and_save(
-                fuse_chunk_squeeze_cat_pass.apply,
+                predispatch_pass.apply,
                 gm,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
+                "[Pre grad(predispatch IR)] Apply predispatch_pass",
             )
-            pass_execution_and_save(
-                fuse_split_linear_add_pass.apply,
-                gm,
-                "[Pre grad(predispatch IR)] Apply fuse_split_linear_add_pass",
-            )
-
             log.debug(
                 "[Pre grad(predispatch IR)]Before split cat in pre grad pass. graph: %s",
                 gm.graph,
@@ -145,11 +128,6 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                     gm,
                     f"[Pre grad(predispatch IR)]Apply split_cat, index: {ind}",
                 )
-            pass_execution_and_save(
-                remove_reshape_pass.apply,
-                gm,
-                "[Pre grad(predispatch IR)] Apply remove_reshape_pass",
-            )
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
