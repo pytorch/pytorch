@@ -71,6 +71,7 @@ def mps_ops_grad_modifier(ops):
         # Unimplemented ops
         '__getitem__': [torch.float16],
         '_segment_reduce': [torch.float16, torch.float32],
+        '_chunk_cat': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
         'sparse.mmreduce': [torch.float32],  # csr not supported
@@ -342,6 +343,7 @@ def mps_ops_modifier(ops):
 
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
         '__rdiv__',
+        '_chunk_cat',
         'acos',
         'acosh',
         'all',
@@ -723,7 +725,6 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_max_pool3d': None,
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
-        'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
         # TODO: max_pool2d for integral types fails the numerical test
         'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
@@ -7476,6 +7477,15 @@ class TestMPS(TestCaseMPS):
         helper((2, 3), (5, 2, 3), (2, 3))
         helper((2, 3), (2, 3), (5, 2, 3))
         helper((2, 3), (5, 2, 3), (6, 5, 2, 3))
+        # Test that output is correctly resizes
+        # TODO: Remove me when out OpInfo testing is enabled on MPS
+        output = torch.tensor(0.0, device="mps")
+        cond = torch.randint(2, (3, 3), dtype=torch.bool, device="mps")
+        inp = torch.rand(3, 3, device="mps")
+        other = torch.rand(3, 3, device="mps")
+        out = torch.where(cond, inp, other, out=output)
+        self.assertEqual(id(out), id(output))
+        self.assertEqual(out.shape, (3, 3))
 
     # Test normal
     def test_normal(self):

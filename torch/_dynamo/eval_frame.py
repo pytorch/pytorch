@@ -23,18 +23,7 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -59,19 +48,12 @@ from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
-if TYPE_CHECKING:
-    from torch._C._dynamo.eval_frame import (  # noqa: F401
-        reset_code,
-        set_eval_frame,
-        set_guard_error_hook,
-        skip_code,
-        unsupported,
-    )
-else:
-    for name in dir(torch._C._dynamo.eval_frame):
-        if name.startswith("__"):
-            continue
-        globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
+# see discussion at https://github.com/pytorch/pytorch/issues/120699
+reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
+set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
+skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
+unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
 
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
@@ -374,18 +356,32 @@ class _TorchDynamoContext:
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
-        if isinstance(fn, torch.fx.GraphModule):
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        if isinstance(fn, _LazyGraphModule) or (
+            isinstance(getattr(fn, "__self__", None), _LazyGraphModule)
+            and fn.__name__ == "_lazy_forward"
+        ):
             # Since dynamo will run the forward method for the GraphModule shortly
             # anyways, it does not hurt to do the real recompilation here if
             # this is a _LazyGraphModule. This makes it easier for dynamo to
             # optimize a _LazyGraphModule.
-            from torch.fx._lazy_graph_module import _LazyGraphModule
 
-            _LazyGraphModule.force_recompile(fn)
+            lazy_gm = fn if isinstance(fn, _LazyGraphModule) else fn.__self__
+
+            _LazyGraphModule.force_recompile(lazy_gm)
 
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
+            code_context.get_context(lazy_gm.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(lazy_gm)
+
+            if not isinstance(fn, _LazyGraphModule):
+                # replace fn with the real forward method
+                fn = lazy_gm.forward
+        elif isinstance(fn, GraphModule):
             code_context.get_context(fn.forward.__code__)[
                 "orig_graphmodule"
             ] = weakref.ref(fn)
@@ -1191,13 +1187,14 @@ def export(
     def inner(*args, **kwargs):
         nonlocal constraints
         if constraints is not None:
-            warnings.warn(
-                "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-                "and will not be supported in the future. "
-                "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            if _log_export_usage:
+                warnings.warn(
+                    "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+                    "and will not be supported in the future. "
+                    "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         else:
             constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
         f = _f
@@ -1524,10 +1521,6 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        excluded_single_tensor = {
-            radam,  # https://github.com/pytorch/pytorch/issues/118230
-        }
-
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             fused_fn_name = f"_fused_{opt_name}"
@@ -1536,16 +1529,6 @@ class TorchPatcher:
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
-                )
-
-            if (
-                hasattr(opt_mod, single_tensor_fn_name)
-                and opt_mod in excluded_single_tensor
-            ):
-                setattr(
-                    opt_mod,
-                    single_tensor_fn_name,
-                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [

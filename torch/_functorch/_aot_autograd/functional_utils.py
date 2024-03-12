@@ -17,8 +17,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
-from .schemas import MutationType
-
 
 def to_fun(t):
     if isinstance(t, Tensor):
@@ -370,27 +368,3 @@ def _check_if_mutation_can_be_in_graph(
             or mutations_under_no_grad_or_inference_mode
         )
     return False
-
-
-def _get_mutation_type(
-    keep_input_mutations: bool,
-    mutates_data,
-    mutates_metadata,
-    mutations_hidden_from_autograd,
-    mutations_under_no_grad_or_inference_mode,
-    requires_grad,
-):
-    if (not mutates_data) and (not mutates_metadata):
-        return MutationType.NOT_MUTATED
-
-    if _check_if_mutation_can_be_in_graph(
-        keep_input_mutations,
-        mutates_data,
-        mutates_metadata,
-        mutations_hidden_from_autograd,
-        mutations_under_no_grad_or_inference_mode,
-        requires_grad,
-    ):
-        return MutationType.MUTATED_IN_GRAPH
-
-    return MutationType.MUTATED_OUT_GRAPH
