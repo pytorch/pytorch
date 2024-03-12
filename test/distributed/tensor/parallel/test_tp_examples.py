@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, distribute_tensor
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -35,6 +36,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
+
+c10d_functional = torch.ops.c10d_functional
 
 class DistTensorParallelExampleTest(DTensorTestBase):
     def _check_module(self, m1, m2, check_grad=False):
@@ -91,11 +94,20 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
         output = model(inp)
-        output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
-
         output.sum().backward()
-        output_tp.sum().backward()
+
+        from torch.distributed._tensor.debug import CommDebugMode
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_tp = model_tp(inp)
+            output_tp.sum().backward()
+
+        self.assertEqual(output, output_tp)
+        if is_seq_parallel:
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1)
+        else:
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
 
         if is_seq_parallel:
             # Sum gradients from different ranks, since input
@@ -340,6 +352,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @with_comms
     def test_loss_parallel(self):
         device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
 
         channel_size, channel_dim = 16, 1
         test_setup = [
@@ -358,18 +371,26 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 y = F.cross_entropy(x, target, weight, reduction=reduction)
                 with loss_parallel():
                     if shard_dim == channel_dim:
-                        dist_y = F.cross_entropy(dist_x, target, weight, reduction=reduction)
-                        self.assertTrue(dist_y.placements[0].is_replicate())
-                        self.assertEqual(dist_y.to_local(), y)
+                        with comm_mode:
+                            dist_y = F.cross_entropy(dist_x, target, weight, reduction=reduction)
+                            self.assertEqual(comm_mode.get_total_counts(), 3)
+                            self.assertEqual(
+                                comm_mode.get_comm_counts()[c10d_functional.all_reduce],
+                                3,
+                            )
+                            self.assertTrue(dist_y.placements[0].is_replicate())
+                            self.assertEqual(dist_y.to_local(), y)
 
-                        if reduction == "none":
-                            y.sum().backward()
-                            dist_y.sum().backward()
-                        else:
-                            y.backward()
-                            dist_y.backward()
-                        self.assertTrue(dist_x.grad.placements[0].is_shard(shard_dim))
-                        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+                        with comm_mode:
+                            if reduction == "none":
+                                y.sum().backward()
+                                dist_y.sum().backward()
+                            else:
+                                y.backward()
+                                dist_y.backward()
+                            self.assertEqual(comm_mode.get_total_counts(), 0)
+                            self.assertTrue(dist_x.grad.placements[0].is_shard(shard_dim))
+                            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
                         x.grad.zero_()
                     else:
                         with self.assertRaisesRegex(
