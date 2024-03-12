@@ -405,8 +405,9 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
 def _export_non_strict(
     mod: torch.nn.Module,
-    fake_args,
-    fake_kwargs,
+    fake_combined_args,
+    # fake_args,
+    # fake_kwargs,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
     *,
@@ -438,10 +439,11 @@ def _export_non_strict(
     ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
-            fake_args,
+            fake_combined_args,
+            # fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
-            kwargs=fake_kwargs,
+            # kwargs=fake_kwargs,
         )
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -702,6 +704,8 @@ def _export(
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
 
+    print("start _export()")
+    breakpoint()
     if not strict:
         out_spec = None
 
@@ -733,6 +737,8 @@ def _export(
                                     *args, **kwargs
                                 )
                         else:
+                            print("before run _export_root()")
+                            breakpoint()
                             tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
@@ -775,11 +781,13 @@ def _export(
 
         (
             fake_mode,
-            fake_args,
-            fake_kwargs,
+            fake_combined_args,
+            # fake_args,
+            # fake_kwargs,
             equalities_inputs,
             original_signature,
         ) = make_fake_inputs(mod, args, kwargs, constraints)
+        breakpoint()
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
@@ -787,8 +795,9 @@ def _export(
         with fake_mode:
             ep_non_strict = _export_non_strict(
                 mod,
-                fake_args,
-                fake_kwargs,
+                fake_combined_args,
+                # fake_args,
+                # fake_kwargs,
                 fake_params_buffers,
                 constant_attrs,
                 pre_dispatch=pre_dispatch,
@@ -803,6 +812,8 @@ def _export(
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+        print("ran _export_non_strict()")
+        breakpoint()
 
         assert out_spec is not None
 
@@ -866,6 +877,8 @@ def _export(
         restore_fqn=False,  # don't need to restore because we will do it later
         _log_export_usage=False,
     )
+    print("ran _export_to_to_ir()")
+    breakpoint()
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
     (
@@ -957,6 +970,8 @@ def _export(
         constant_attrs,
         pre_dispatch=pre_dispatch,
     )
+    print("ran _export_non_strict()")
+    breakpoint()
 
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig

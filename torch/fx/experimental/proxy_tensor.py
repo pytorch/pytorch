@@ -493,6 +493,8 @@ class PythonKeyTracer(Tracer):
     def call_module(
             self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
+        print("call_module()", m, forward, args, kwargs)
+        breakpoint()
         return forward(*args, **kwargs)
 
     # We don't want to turn getattr calls into proxies. So we just return the actual value.
@@ -538,6 +540,7 @@ def dispatch_trace(
         tracer: Tracer,
         concrete_args: Optional[Tuple[Any, ...]] = None,
 ) -> GraphModule:
+    breakpoint()
     graph = tracer.trace(root, concrete_args)
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
     dedupe_symints(graph)
@@ -954,6 +957,11 @@ class _ModuleStackTracer(PythonKeyTracer):
     def is_leaf_module(self, m, module_qualified_name):
         return False
 
+    def create_node(self, *args, **kwargs):
+        print("create_node", args, kwargs)
+        breakpoint()
+        return super().create_node(*args, **kwargs)
+
 
 def make_fx(f,
             decomposition_table=None,
@@ -964,6 +972,7 @@ def make_fx(f,
             record_module_stack=False,
             _allow_fake_constant=False,
             _error_on_data_dependent_ops=True):
+    breakpoint()
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:

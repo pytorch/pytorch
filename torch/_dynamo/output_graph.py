@@ -1986,6 +1986,8 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        print("create_graph_input()", name, type_expr, before, source)
+        breakpoint()
         log.debug(
             "create_graph_input %s %s",
             name,

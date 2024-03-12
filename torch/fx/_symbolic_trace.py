@@ -340,6 +340,8 @@ class Tracer(TracerBase):
         # module hierarchy, so it can never create parameter references.
         # The default tracer adds the ability to refer to parameters when
         # tracing modules.
+        # print("Tracer.create_arg()", a)
+        # breakpoint()
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:
@@ -486,6 +488,8 @@ class Tracer(TracerBase):
             node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
             value was returned from the ``Module`` invocation.
         """
+        # print("Tracer.call_module()", m, args)
+        # breakpoint()
         module_qualified_name = self.path_of_module(m)
         with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
@@ -526,6 +530,8 @@ class Tracer(TracerBase):
         def maybe_get_proxy_for_attr(
             attr_val, collection_to_search, parameter_proxy_cache
         ):
+            # print("Tracer.getattr()", attr, attr_val)
+            # breakpoint()
             for n, p in collection_to_search:
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
@@ -570,6 +576,8 @@ class Tracer(TracerBase):
         Module. This method introspects root's signature and emits those
         nodes accordingly, also supporting ``*args`` and ``**kwargs``.
         """
+        # print("Tracer.create_args_for_root()", root_fn, is_module)
+        # breakpoint()
         # In some cases, a function or method has been decorated with a wrapper
         # defined via ``functools.wraps``. In this case, the outer code object
         # will likely not contain the actual parameters we care about, so unwrap
@@ -815,6 +823,8 @@ class Tracer(TracerBase):
         return new_tracer
 
     def _proxy_placeholder(self, name, concrete_args, sig, fn_for_analysis):
+        # print("Tracer._proxy_placeholder()", name, concrete_args, sig, fn_for_analysis)
+        # breakpoint()
         if concrete_args is not None and name in concrete_args:
             cnt = 0
 

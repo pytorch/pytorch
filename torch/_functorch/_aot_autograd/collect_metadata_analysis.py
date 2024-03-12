@@ -109,6 +109,9 @@ def run_functionalized_fw_and_collect_metadata(
         with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
+            print("run with FunctionalTensorMode")
+            print("### here the flat args are params, maybe we can store names here?")
+            breakpoint()
             flat_f_outs = f(*flat_f_args)
 
         if prior_autocast_states != _get_autocast_states():

@@ -526,6 +526,8 @@ def create_aot_dispatcher_function(
             and torch.is_grad_enabled()
         )
 
+        print("before run_functionalized_fw")
+        breakpoint()
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
@@ -624,7 +626,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         compiler_fn = partial(aot_wrapper_synthetic_base, compiler_fn=compiler_fn, needs_autograd=needs_autograd)
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
-
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
         if aot_config.is_export:
             # During export, we don't get back a callable - we get back the raw fx graph
@@ -978,12 +979,15 @@ def aot_export_module(
         **dict(named_buffers),
     }
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
+    # full_args = dict(**params_and_buffers, **args)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
     kwargs = kwargs or {}
 
     functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
+    print("create functional_call()")
+    breakpoint()
 
     num_fw_outs = None
 
@@ -1204,6 +1208,9 @@ def _aot_export_function(
     kwargs = kwargs or {}
 
     flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
+    # print("before flatten args")
+    # breakpoint()
+    # _, in_spec = pytree.tree_flatten((args, kwargs))
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     dynamic_shapes = False

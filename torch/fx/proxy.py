@@ -128,6 +128,8 @@ class TracerBase:
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
+        # print("TracerBase.create_node()", kind, target, args, name)
+        # breakpoint()
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
         # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
@@ -245,6 +247,8 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        # print("TracerBase.create_arg()", a)
+        # breakpoint()
         if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
             return a.__fx_create_arg__(self)
         # aggregates
