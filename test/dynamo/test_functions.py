@@ -2054,6 +2054,17 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_unary_fold_op_seq(self):
+        for op in (operator.length_hint,):
+            with self.subTest(op=op):
+
+                def fn():
+                    a = [tuple(range(-10, i)) for i in range(10)]
+                    return tuple(map(op, a))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
     def test_rand_inlined(self):
         @torch.compile(backend="eager", dynamic=True)
         def fn():
