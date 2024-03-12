@@ -972,6 +972,7 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
+    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -1462,6 +1463,7 @@ class TestExport(TestCase):
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -1833,6 +1835,7 @@ def forward(self, arg_0):
         )
 
     @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
+    @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -1888,6 +1891,7 @@ def forward(self, arg_0):
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2249,6 +2253,7 @@ def forward(self, arg_0):
             )
 
     @testing.expectedFailureSerDer  # We don't preserve metadata on graph module
+    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -2479,6 +2484,7 @@ def forward(self, arg_0):
         ):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
+    @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3052,6 +3058,7 @@ def forward(self, arg_0):
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
+    @testing.expectedFailureSerDerPreDispatch  # symfloat nyi
     @testing.expectedFailureRetraceability
     def test_sym_sqrt(self):
         import math
@@ -3788,6 +3795,50 @@ def forward(self, arg0_1):
         ep = export(m, (torch.rand(2, 3),), strict=True)
         self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
         self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
+
+    def test_constant_name(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.rand(2, 3)
+                self.parameter = torch.nn.Parameter(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.constant
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested_1 = Nested()
+                self.nested_2 = Nested()
+
+            def forward(self, x):
+                return (
+                    self.nested_1(x)
+                    + self.nested_2(x)
+                    + self.nested_1.constant
+                    + self.nested_2.constant
+                    + self.nested_1.parameter
+                    + self.nested_2.parameter
+                )
+
+        m = Mod()
+        ep = export(m, (torch.rand(2, 3),), strict=False)
+        self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
+
+        # check constant fqn when there are multiple instances of the same class
+        self.assertEqual(ep.constants["nested_1.constant"], m.nested_1.constant)
+        self.assertEqual(ep.constants["nested_2.constant"], m.nested_2.constant)
+
+        # check constant_name in the graph
+        placeholders = [
+            node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        self.assertEqual(len(placeholders), 5)
+        self.assertTrue(all(ph.name == ph.target for ph in placeholders))
+        # suffix should be added to duplicated constant_name
+        self.assertEqual(placeholders[2].name, "constant")
+        self.assertEqual(placeholders[3].name, "constant_1")
 
     def test_nested_retrace(self):
         class Nested(torch.nn.Module):
