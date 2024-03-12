@@ -36,9 +36,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_conj_copy_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_fw_primal_copy_native.h>
 #include <ATen/ops/_indices_copy_native.h>
 #include <ATen/ops/_make_dual.h>
@@ -2723,6 +2725,38 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
   }
 }
 
+// Pads each tensor on `dim`-th dimension such that padded_dim % num_chunks == 0.
+static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  auto num_tensors = tensors.size();
+  std::vector<Tensor> padded_tensors;
+  padded_tensors.reserve(num_tensors);
+  for (const auto & tensor : tensors) {
+    auto tensor_size = tensor.sizes();
+    std::vector<int64_t> padded_size(tensor_size.vec());
+    padded_size[dim] = (tensor_size[dim] + num_chunks - 1) / num_chunks * num_chunks;
+    Tensor padded_tensor = tensor;
+    if (padded_size != tensor_size) {
+      padded_tensor = tensor.new_zeros(padded_size);
+      padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor);
+    }
+    std::vector<int64_t> view_sizes(tensor_size.begin(), tensor_size.begin()+dim);
+    view_sizes.insert(view_sizes.end(), {num_chunks, -1});
+    padded_tensors.push_back(padded_tensor.view(view_sizes));
+  }
+  return padded_tensors;
+}
+
+Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  auto wrapped_dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  return at::cat(_pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
+}
+
+Tensor& _chunk_cat_out(TensorList tensors, int64_t dim, int64_t num_chunks, Tensor& out) {
+  auto wrapped_dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  at::cat_out(out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
+  return out;
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(),
@@ -3419,6 +3453,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
+  start_dim = maybe_wrap_dim(start_dim, self.dim());
+  end_dim = maybe_wrap_dim(end_dim, self.dim());
+  TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
   auto outnames = self.names().vec();
   outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
   outnames.insert(outnames.begin() + start_dim, out_dim);
