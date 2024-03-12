@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 #include <functional>
+#include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -308,6 +309,71 @@ struct Identity<dst_t, c10::complex<float>> {
                                                   src_t,                       \
                                                   __VA_ARGS__))
 
+namespace {
+
+template <
+    typename T,
+    typename src_t,
+    int depth,
+    int r_args_depth,
+    int res_arg_index>
+struct CopyFunctor {
+  using opmath_t = at::opmath_type<T>;
+  static_assert(depth == 2 && r_args_depth == 1 && res_arg_index == 1);
+  template <typename Op>
+  __device__ __forceinline__ void operator()(
+      int chunk_size,
+      TensorListMetadata<depth>& tl,
+      Op op) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    src_t* src_ptr = (src_t*)tl.addresses[0][tensor_loc];
+    src_ptr += chunk_idx * chunk_size;
+    T* self_ptr = (T*)tl.addresses[1][tensor_loc];
+    self_ptr += chunk_idx * chunk_size;
+
+    const bool all_aligned{is_aligned(src_ptr) && is_aligned(self_ptr)};
+
+    n -= chunk_idx * chunk_size;
+    src_t src_args[kILP];
+    T r_args[kILP];
+
+    // to make things simple, we put aligned case in a different code path
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int64_t i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        // load
+        load_store(src_args, src_ptr, 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[ii] = static_cast<T>(op(src_args[ii]));
+        }
+        // store
+        load_store(self_ptr, r_args, i_start, 0);
+      }
+    } else {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          const auto i = i_start + threadIdx.x + ii * blockDim.x;
+          src_args[ii] = src_ptr[i];
+        }
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[ii] = static_cast<T>(op(src_args[ii]));
+        }
+        store_args(self_ptr, r_args, i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
+} // anonymous namespace
+
 void foreach_tensor_copy_list_kernel_cuda_(
     TensorList self,
     TensorList src,
@@ -328,8 +394,6 @@ void foreach_tensor_copy_list_kernel_cuda_(
 
   std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
 
-  // TODO(crcrpar): need a custom functor where two vector<Tensor> have
-  // different dtypes.
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -338,17 +402,34 @@ void foreach_tensor_copy_list_kernel_cuda_(
       "foreach_tensor_copy",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        AT_DISPATCH_SOURCE_TYPES(
-            src[0].scalar_type(), "foreach_tensor_copy", [&] {
-              multi_tensor_apply<2>(
-                  tensor_lists,
-                  UnaryOpFunctor<
-                      scalar_t,
-                      /* depth */ 2,
-                      /* r_args_depth */ 1,
-                      /* res_arg_index */ 1>(),
-                  Identity<opmath_t, opmath_t>());
-            });
+        AT_DISPATCH_SOURCE_TYPES(src[0].scalar_type(), "foreach_tensor_copy", [&] {
+          if constexpr (std::is_same_v<scalar_t, src_t>) {
+            multi_tensor_apply<2>(
+                tensor_lists,
+                UnaryOpFunctor<
+                    scalar_t,
+                    /* depth */ 2,
+                    /* r_args_depth */ 1,
+                    /* res_arg_index */ 1>(),
+                Identity<opmath_t, opmath_t>());
+          } else {
+            // Ref:
+            // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
+            if (!self[0].is_complex() && src[0].is_complex()) {
+              TORCH_WARN_ONCE(
+                  "Casting complex values to real discards the imaginary part");
+            }
+            multi_tensor_apply<2>(
+                tensor_lists,
+                CopyFunctor<
+                    scalar_t,
+                    src_t,
+                    /* depth */ 2,
+                    /* r_args_depth */ 1,
+                    /* res_arg_index */ 1>(),
+                Identity<scalar_t, src_t>());
+          }
+        });
       });
   increment_version(self);
 }
