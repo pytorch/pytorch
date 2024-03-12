@@ -5,7 +5,6 @@ from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
-import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
@@ -64,14 +63,10 @@ class _ToTorchTensor(torch.autograd.Function):
         ctx,
         input: "DTensor",
         grad_placements: Optional[Sequence[Placement]],
-        async_output: bool,
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
         local_tensor = input._local_tensor
-        if not async_output and isinstance(local_tensor, funcol.AsyncCollectiveTensor):
-            # synchronously wait for any pending collectives to get the result tensor
-            local_tensor = local_tensor.wait()
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
@@ -89,31 +84,18 @@ class _ToTorchTensor(torch.autograd.Function):
             grad_output, mesh, dtensor_spec.placements
         )
         tensor_stride = tuple(tensor_stride)
-        if grad_placements is not None:
-            grad_spec = DTensorSpec(
-                mesh,
-                grad_placements,
-                tensor_meta=TensorMeta(
-                    shape=dtensor_meta.shape,
-                    stride=tensor_stride,
-                    dtype=dtensor_meta.dtype,
-                ),
-            )
-            grad_output = redistribute_local_tensor(
-                grad_output, grad_spec, dtensor_spec
-            )
+        grad_placements = grad_placements or dtensor_spec.placements
 
         return (
             DTensor(
                 grad_output,
                 mesh,
-                dtensor_spec.placements,
+                grad_placements,
                 shape=dtensor_meta.shape,
                 dtype=dtensor_meta.dtype,
                 requires_grad=grad_output.requires_grad,
                 stride=tensor_stride,
             ),
-            None,
             None,
         )
 
@@ -290,8 +272,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             stride=outer_stride,
         )
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
@@ -412,13 +392,15 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
-            self, grad_placements, True
+            self, grad_placements
         )  # pyre-ignore[16]: autograd func
 
     def redistribute(
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        *,
+        async_op: bool = False,
     ) -> "DTensor":
         """
         `redistribute` performs necessary collective operations that redistribute the current
@@ -433,6 +415,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             placements (List[:class:`Placement`], optional): the new placements that
                 describes how to place the DTensor into the DeviceMesh, must
                 have the same number of elements as `device_mesh.ndim`.
+
+        Keyword args:
+            async_op (bool, optional): whether to perform the DTensor redistribute operation
+                asynchronously or not. Default: False
 
         Returns:
             A :class:`DTensor` object
@@ -460,12 +446,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
 
-        # Early return the original DTensor if the placements are the same.
-        if self._spec.placements == placements:
-            return self
-
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(self, device_mesh, placements)
+        return Redistribute.apply(self, device_mesh, placements, async_op)
 
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
@@ -493,10 +475,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `full_tensor` is differentiable.
         """
 
-        # TODO: fix issue with full_tensor() for uneven-sharded tensor
-        # https://github.com/pytorch/pytorch/issues/115310
-        redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
-        return _ToTorchTensor.apply(redist_res, grad_placements, False)
+        redist_res = self.redistribute(
+            placements=[Replicate()] * self.device_mesh.ndim, async_op=False
+        )
+        return _ToTorchTensor.apply(redist_res, grad_placements)
 
     @property
     def device_mesh(self) -> DeviceMesh:
@@ -673,11 +655,32 @@ def distribute_module(
 
     Returns:
         A module that contains parameters/buffers that are all `DTensor`s.
+
+    Note:
+        When initialize the DeviceMesh with the `xla` device_type, `distribute_module`
+        return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
+        for more details. The XLA integration is experimental and subject to change.
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
+    device_type = device_mesh.device_type
+    if device_type == "xla":
+        try:
+            # This function annotates all module parameters for auto-partitioning with
+            # PyTorch/XLA SPMD or explicitly partition to :class:`XLAShardedTensor` parameters
+            # according to the `partition_fn` specified.
+            from torch_xla.distributed.spmd import (  # type:ignore[import]
+                xla_distribute_module,
+            )
+
+            return xla_distribute_module(
+                module, device_mesh, partition_fn, input_fn, output_fn
+            )  # type:ignore[return-value]
+        except ImportError as e:
+            msg = "To use DTensor API with xla, you must install the torch_xla package!"
+            raise ImportError(msg) from e
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and
