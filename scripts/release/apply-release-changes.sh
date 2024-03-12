@@ -4,6 +4,8 @@
 #
 # Creates PR with release only changes.
 #
+# Prerequisite: Must be  successfully authenticated in aws fbossci account.
+#
 # Usage (run from root of project):
 #  DRY_RUN=disabled ./scripts/release/apply-release-changes.sh
 #
