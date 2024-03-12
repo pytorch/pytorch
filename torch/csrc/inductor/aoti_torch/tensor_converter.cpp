@@ -1,25 +1,11 @@
-
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
 
 namespace torch {
 namespace aot_inductor {
 
-at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
-  return reinterpret_cast<at::Tensor*>(handle);
-}
-
-AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
-  return reinterpret_cast<AtenTensorHandle>(tensor);
-}
-
-AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
-  at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
-  return tensor_pointer_to_tensor_handle(new_tensor);
-}
-
 std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
-    std::vector<at::Tensor>& tensors) {
+    const std::vector<at::Tensor>& tensors) {
   std::vector<AtenTensorHandle> result;
   result.reserve(tensors.size());
   for (auto tensor : tensors) {
@@ -30,16 +16,14 @@ std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
 }
 
 std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
-    AtenTensorHandle* handles,
-    size_t length) {
+    std::vector<AtenTensorHandle>& handles) {
   std::vector<at::Tensor> result;
-  result.reserve(length);
-  for (size_t i = 0; i < length; i++) {
-    result.emplace_back(
-        std::move(*tensor_handle_to_tensor_pointer(handles[i])));
-    aoti_torch_delete_tensor_object(handles[i]);
-    handles[i] = nullptr;
+  result.reserve(handles.size());
+  for (auto handle : handles) {
+    result.emplace_back(std::move(*tensor_handle_to_tensor_pointer(handle)));
+    aoti_torch_delete_tensor_object(handle);
   }
+  handles.clear();
   return result;
 }
 

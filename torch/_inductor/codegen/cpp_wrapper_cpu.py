@@ -177,6 +177,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 #include <ATen/native/BinaryOps.h>
                 #include <torch/csrc/inductor/aoti_runtime/utils.h>
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+                #include <torch/csrc/inductor/aoti_torch/utils.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
                 #include <ATen/ops/bernoulli_native.h>
@@ -401,7 +402,8 @@ class CppWrapperCpu(WrapperCodeGen):
                         # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                         self.prefix.splice(
                             f"""
-                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, {num_args});
+                                std::vector<AtenTensorHandle> input_handles_vec(input_handles, input_handles+{num_args});
+                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles_vec);
                             """
                         )
 

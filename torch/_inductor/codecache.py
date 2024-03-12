@@ -2040,9 +2040,9 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             // For outputs, we only allocate a vector to hold returned tensor handles,
             // not allocating the actual output tensor storage here
             std::vector<AtenTensorHandle> output_handles(%s);
-
             try {
                 inductor_entry_impl(input_handles.data(), output_handles.data());
+                return alloc_tensors_by_stealing_from_handles(output_handles);
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return {};
@@ -2050,8 +2050,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return {};
             }
-
-            return alloc_tensors_by_stealing_from_handles(output_handles.data(), output_handles.size());
         }
         """
     )
