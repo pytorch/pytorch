@@ -388,11 +388,11 @@ void gemm(
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     float alpha_ = alpha, beta_ = beta;
-    int a_size = (transa != TransposeType::NoTranspose?m_:k_) * lda;
+    int a_size = k * lda;
     std::vector<float> float_a(a, a + a_size);
-    int b_size = (transb != TransposeType::NoTranspose?k_:n_) * ldb;
+    int b_size = n * ldb;
     std::vector<float> float_b(b, b + b_size);
-    int c_size = n_ * ldc;
+    int c_size = n * ldc;
     std::vector<float> float_c(c, c + c_size);
     #if C10_IOS
     CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
