@@ -248,29 +248,50 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
         elif child_block_ids:
-            if name in ("scf.if", "scf.for", "scf.while"):
-                # for blocked control flow ops: inline the enclosed
-                # ops into the parent block + rewire the last op in
-                # each child block (yield) to return the scf result
-                yield_ops = []
+            if name in ("scf.if", "scf.for", "scf.while", "tt.reduce"):
+                # for blocked ops: inline the enclosed ops into
+                # the parent block + rewire the last op in each
+                # child block to return the block result
+                return_ops = []
                 for block_id in child_block_ids:
-                    # the block args used as operands of the ops in the block
-                    # (and nested blocks inlined in the current block by now)
-                    # are replaced by new fake Intermediates to avoid "this
-                    # operand is not returned by anything other op in the fn"
-                    # error in the downstream analysis
-                    for idx in block_id_to_block_arg_ids[block_id]:
-                        next_fake_intermediate -= 1
-                        replacements[idx] = Intermediate(next_fake_intermediate)
+                    if name.startswith("scf."):
+                        # the scf block args are ignored by the pass. but, as they
+                        # may be used as operands of the ops inside the block
+                        # (and nested blocks inlined in the current block by now),
+                        # they are replaced by new fake Intermediates to avoid "this
+                        # operand is not returned by any other op in the fn" error
+                        # in the downstream analysis
+                        for idx in block_id_to_block_arg_ids[block_id]:
+                            next_fake_intermediate -= 1
+                            replacements[idx] = Intermediate(next_fake_intermediate)
+                    else:
+                        # for tt.reduce, wire the block arguments to the op arguments
+                        num_operands = len(operand_ids)
+                        block_arg_ids = block_id_to_block_arg_ids[block_id]
+                        assert len(block_arg_ids) == 2 * num_operands, (
+                            "tt.reduce is expected to have twice as "
+                            "many block arguments as op arguments: "
+                            f"{operand_ids=}, {block_arg_ids=}."
+                        )
+                        for i, idx in enumerate(block_arg_ids):
+                            # for a tt.reduce op with N arguments, the block
+                            # arguments comprise N reduced values followed by
+                            # N current values corresponding to the N op args
+                            replacements[idx] = Intermediate(
+                                operand_ids[i % num_operands]
+                            )
 
                     if block_id in op_stack:
                         block_ops = op_stack.pop(block_id)
                         if not block_ops:
                             continue
                         last_ret, last_ops = block_ops.popitem()
-                        if all(op.name == "scf.yield" for op in last_ops):
-                            # if last_ops are scf.yield, treat them separately
-                            yield_ops.extend(last_ops)
+                        if all(
+                            op.name in ("scf.yield", "tt.reduce.return")
+                            for op in last_ops
+                        ):
+                            # if last_ops are all return ops, treat them separately
+                            return_ops.extend(last_ops)
                         else:
                             # otherwise, return last_ops to the block
                             block_ops[last_ret] = last_ops
@@ -279,10 +300,9 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
                 for scf_result in scf_results:
-                    for yield_op in yield_ops:
-                        op_stack[parent_block_id][scf_result].append(yield_op)
+                    for return_op in return_ops:
+                        op_stack[parent_block_id][scf_result].append(return_op)
             else:
-                # TODO(oulgen): add support for tt.reduce
                 raise Exception(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
                 )
