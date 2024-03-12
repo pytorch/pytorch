@@ -738,6 +738,7 @@ class TestFullyShard2DTraining(FSDPTest):
 
         torch.manual_seed(42)
         model = nn.Sequential(
+            nn.LayerNorm(mlp_dim, bias=False),
             # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
@@ -750,15 +751,16 @@ class TestFullyShard2DTraining(FSDPTest):
         model = parallelize_module(
             model,
             device_mesh=tp_mesh,
+            # Leave the layer norm as implicitly replicated
             parallelize_plan={
                 # Pass `use_local_output=False` to keep as DTensor to preserve
                 # uneven activation dims
-                "0.in_proj": ColwiseParallel(use_local_output=False),
-                "0.out_proj": RowwiseParallel(use_local_output=False),
                 "1.in_proj": ColwiseParallel(use_local_output=False),
                 "1.out_proj": RowwiseParallel(use_local_output=False),
                 "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(),
+                "2.out_proj": RowwiseParallel(use_local_output=False),
+                "3.in_proj": ColwiseParallel(use_local_output=False),
+                "3.out_proj": RowwiseParallel(),
             },
         )
         for mlp in model:
