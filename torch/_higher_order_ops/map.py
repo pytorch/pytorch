@@ -13,8 +13,8 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
     FunctionalTensor,
-    unset_functional_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -65,7 +65,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     # when creating the output node, it fails to associate the wrapped tensor with its proxy.
     # Instead, it will create _tensor_constant as output.
 
-    with suspend_functionalization(), unset_functional_temporarily():
+    with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
 
             def _from_fun(t):
@@ -343,10 +343,15 @@ def map_functionalize(ctx, f, xs, pos_args):
     with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
-        if _has_potential_branch_input_mutation(f, example_inputs):
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        if _has_potential_branch_input_mutation(
+            f, example_inputs, pre_dispatch=pre_dispatch
+        ):
             raise UnsupportedAliasMutationException("torch.map is mutating the input!")
 
-        if _has_potential_branch_input_alias(f, example_inputs):
+        if _has_potential_branch_input_alias(
+            f, example_inputs, pre_dispatch=pre_dispatch
+        ):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)

@@ -353,6 +353,11 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+# for backend="cudagraphs", mutations on input be sent to the cudagraph backend
+# or replayed in aot_autograd epilogue. default is False because mutation on inputs
+# can prevent cudagraphing.
+cudagraph_backend_keep_input_mutation = False
+
 # When True, only ops that have the torch.Tag.pt2_compliant tag
 # will be allowed into the graph; all other ops will be disallowed
 # and will fall back to eager-mode PyTorch. Useful to ensure
@@ -405,11 +410,6 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
-
-# Approximate maximum number of nodes to unroll loops into. A value of 0 will
-# unroll fully but could result in very large graphs that take an inordinate
-# amount of time to process.
-max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 5000))
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
