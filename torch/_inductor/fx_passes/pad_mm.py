@@ -1,5 +1,5 @@
 import functools
-from typing import List, Optional, Union
+from typing import List, Optional, Set, Union
 
 import torch
 from torch import Tensor
@@ -8,7 +8,14 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
+from ..pattern_matcher import (
+    fwd_only,
+    joint_fwd_bwd,
+    Match,
+    MatchContext,
+    register_replacement,
+)
+from ..utils import is_view
 
 aten = torch.ops.aten
 
@@ -50,6 +57,46 @@ def check_device(a: Tensor, b: Tensor) -> bool:
 
 def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
+
+
+def _result_layout_affects_graph_output(match: Match) -> bool:
+    """
+    Check if the matched GEMM operation potentially affects the graph output strides.
+    returns True if the matched op's output buffer does not pass through functions which certainly
+    redefine the memory layout before being part of the graph output.
+    """
+
+    if match.ctx is not None:
+        assert isinstance(match.ctx, MatchContext)
+        search_node: torch.fx.Node = match.output_node()
+    else:
+        return True
+
+    assert search_node is not None
+    seen: Set[torch.fx.Node] = set()
+
+    def find_output(node: torch.fx.Node, is_start_node=False):
+        if not isinstance(node, torch.fx.Node):
+            return False
+        if node in seen:
+            return False
+        seen.add(node)
+        if node.op == "output":
+            return True
+        if node.op != "call_function":
+            return False
+        if not is_start_node and (
+            (not isinstance(node.target, torch._ops.OpOverload))
+            or (not is_view(node.target))
+        ):
+            return False
+        if node.users is not None and len(node.users) > 0:
+            for n in node.users:
+                if find_output(n):
+                    return True
+        return False
+
+    return find_output(search_node, True)
 
 
 def should_pad_common(
@@ -108,6 +155,11 @@ def addmm_pattern(
 
 
 def should_pad_addmm(match: Match) -> bool:
+    if (
+        torch._inductor.config.keep_output_stride
+        and _result_layout_affects_graph_output(match)
+    ):
+        return False
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     return should_pad_common(mat1, mat2, input) and should_pad_bench(
         mat1, mat2, torch.ops.aten.addmm, input=input
@@ -359,6 +411,11 @@ def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 def should_pad_mm(match: Match) -> bool:
+    if (
+        torch._inductor.config.keep_output_stride
+        and _result_layout_affects_graph_output(match)
+    ):
+        return False
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
         mat1, mat2, torch.ops.aten.mm
@@ -398,6 +455,11 @@ def bmm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 def should_pad_bmm(match: Match) -> bool:
+    if (
+        torch._inductor.config.keep_output_stride
+        and _result_layout_affects_graph_output(match)
+    ):
+        return False
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
         mat1, mat2, torch.ops.aten.bmm
