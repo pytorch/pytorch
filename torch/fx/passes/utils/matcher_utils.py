@@ -119,10 +119,6 @@ class SubgraphMatcher:
 
         pn_value = _getattr(pn.graph.owning_module, pn.target)
         gn_value = _getattr(gn.graph.owning_module, gn.target)
-<<<<<<< HEAD
-
-=======
->>>>>>> 2e5600c2936 (Switch capture_pre_autograd impl to functional IR)
         if type(pn_value) != type(gn_value):
             return False
 

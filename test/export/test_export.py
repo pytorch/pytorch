@@ -2325,14 +2325,10 @@ def forward(self, arg_0):
         ):
             graph_module.eval()
 
-<<<<<<< HEAD
 
     # TODO (tmanlaibaatar) We currently can't preserve
     # source_fn inside HOO in export. Since no one needs
     # it rn, it is ok to xfail it and revisit later.
-=======
-    # TODO (tmanlaibaatar) PreDispatch IR doesn't work with HOO yet
->>>>>>> 2e5600c2936 (Switch capture_pre_autograd impl to functional IR)
     @unittest.expectedFailure
     def test_export_cond_preserve_stack_trace_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
