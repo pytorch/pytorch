@@ -189,7 +189,7 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,True))
+    @parametrize("dynamic", (False, True))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
@@ -950,11 +950,11 @@ class TestCutlassBackend(TestCase):
         def bmm(a, b):
             return torch.bmm(a, b)
 
-        self._test_max_autotune_cutlass_backend_epilogue_fusion( # test bmm
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(  # test bmm
             mixed_precision=False,
             fp16=True,
             expected_fuse_count=0,
-            mm=mm,
+            mm=bmm,
             with_bias=False,
             batch_size=10,
         )
@@ -978,8 +978,6 @@ class TestCutlassBackend(TestCase):
             batch_size=31,
             evt_only=True,
         )
-
-
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
