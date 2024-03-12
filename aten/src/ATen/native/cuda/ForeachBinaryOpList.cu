@@ -250,26 +250,86 @@ FOREACH_BINARY_OP_LIST(
     power_functor,
     /*division_op*/ true);
 
-template <typename T>
+template <typename dst_t, typename src_t = dst_t>
 struct Identity {
-  __device__ __forceinline__ T operator()(const T& x) {
-    return x;
+  __device__ __forceinline__ dst_t operator()(const src_t& x) {
+    return static_cast<dst_t>(x);
   }
 };
+
+template <typename dst_t>
+struct Identity<dst_t, c10::complex<double>> {
+  __device__ __forceinline__ dst_t operator()(const c10::complex<double>& x) {
+    return static_cast<dst_t>(x.real());
+  }
+};
+
+template <typename dst_t>
+struct Identity<dst_t, c10::complex<float>> {
+  __device__ __forceinline__ dst_t operator()(const c10::complex<float>& x) {
+    return static_cast<dst_t>(x.real());
+  }
+};
+
+#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                              \
+  AT_DISPATCH_SWITCH(                                                          \
+      TYPE,                                                                    \
+      NAME,                                                                    \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                                         \
+          at::ScalarType::Byte, src_t, __VA_ARGS__)                            \
+          AT_PRIVATE_CASE_TYPE_USING_HINT(                                     \
+              at::ScalarType::Char, src_t, __VA_ARGS__)                        \
+              AT_PRIVATE_CASE_TYPE_USING_HINT(                                 \
+                  at::ScalarType::Long, src_t, __VA_ARGS__)                    \
+                  AT_PRIVATE_CASE_TYPE_USING_HINT(                             \
+                      at::ScalarType::Short, src_t, __VA_ARGS__)               \
+                      AT_PRIVATE_CASE_TYPE_USING_HINT(                         \
+                          at::ScalarType::Double, src_t, __VA_ARGS__)          \
+                          AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+                              at::ScalarType::Float, src_t, __VA_ARGS__)       \
+                              AT_PRIVATE_CASE_TYPE_USING_HINT(                 \
+                                  at::ScalarType::ComplexDouble,               \
+                                  src_t,                                       \
+                                  __VA_ARGS__)                                 \
+                                  AT_PRIVATE_CASE_TYPE_USING_HINT(             \
+                                      at::ScalarType::ComplexFloat,            \
+                                      src_t,                                   \
+                                      __VA_ARGS__)                             \
+                                      AT_PRIVATE_CASE_TYPE_USING_HINT(         \
+                                          at::ScalarType::Half,                \
+                                          src_t,                               \
+                                          __VA_ARGS__)                         \
+                                          AT_PRIVATE_CASE_TYPE_USING_HINT(     \
+                                              at::ScalarType::BFloat16,        \
+                                              src_t,                           \
+                                              __VA_ARGS__)                     \
+                                              AT_PRIVATE_CASE_TYPE_USING_HINT( \
+                                                  at::ScalarType::Bool,        \
+                                                  src_t,                       \
+                                                  __VA_ARGS__))
 
 void foreach_tensor_copy_list_kernel_cuda_(
     TensorList self,
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
-  if (!can_use_fast_route(
-          self, src, /* does_op_promote_integer_inputs_to_float */ false)) {
+  if (!(_check_tensors_share_device_and_dtype(
+            {self, src}, /* skip_dtype_check */ true) &&
+        std::all_of(
+            src.cbegin(),
+            src.cend(),
+            [&](const auto& t) -> bool {
+              return t.dtype() == src[0].dtype();
+            }) &&
+        _check_tensors_share_sizes_and_strides({self, src}))) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
 
+  // TODO(crcrpar): need a custom functor where two vector<Tensor> have
+  // different dtypes.
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -278,16 +338,21 @@ void foreach_tensor_copy_list_kernel_cuda_(
       "foreach_tensor_copy",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        multi_tensor_apply<2>(
-            tensor_lists,
-            UnaryOpFunctor<
-                scalar_t,
-                /* depth */ 2,
-                /* r_args_depth */ 1,
-                /* res_arg_index */ 1>(),
-            Identity<opmath_t>());
+        AT_DISPATCH_SOURCE_TYPES(
+            src[0].scalar_type(), "foreach_tensor_copy", [&] {
+              multi_tensor_apply<2>(
+                  tensor_lists,
+                  UnaryOpFunctor<
+                      scalar_t,
+                      /* depth */ 2,
+                      /* r_args_depth */ 1,
+                      /* res_arg_index */ 1>(),
+                  Identity<opmath_t, opmath_t>());
+            });
       });
   increment_version(self);
 }
+
+#undef AT_DISPATCH_SOURCE_TYPES
 
 } // namespace at::native
