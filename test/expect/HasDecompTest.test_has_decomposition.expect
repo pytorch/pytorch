@@ -387,6 +387,7 @@ aten::_linalg_det
 aten::_linalg_det.result
 aten::_linalg_eigh
 aten::_linalg_eigh.eigenvalues
+aten::_linalg_eigvals
 aten::_linalg_slogdet
 aten::_linalg_slogdet.sign
 aten::_linalg_solve_ex
@@ -605,6 +606,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out
@@ -844,6 +846,7 @@ aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
 aten::linalg_eig.out
+aten::linalg_eigvals.out
 aten::linalg_householder_product
 aten::linalg_householder_product.out
 aten::linalg_inv_ex
