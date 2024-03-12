@@ -999,12 +999,92 @@ def forward(self, x_1, output_1):
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
             self.assertTrue("equal_to_1=()" in sources[0])
-            self.assertTrue("ids_of_folded_args=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
-            self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("size", [4, 16])
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_different_shapes(self, size, dynamic):
+        from torch._inductor.utils import run_and_get_code
+
+        def f(x, y, xx, yy):
+            n_elements = x.numel()
+            output_1 = torch.zeros_like(x)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output_1, n_elements, BLOCK_SIZE=4)
+
+            n_elements = xx.numel()
+            output_2 = torch.zeros_like(xx)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](xx, yy, output_2, n_elements, BLOCK_SIZE=4)
+
+            return output_1, output_2
+
+        x = torch.rand(size, device="cuda")
+        y = torch.rand(size, device="cuda")
+        xx = torch.rand(size, size, device="cuda")
+        yy = torch.rand(size, size, device="cuda")
+        args = [x, y, xx, yy]
+
+        eager_out = f(*args)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True, dynamic=dynamic, backend="inductor"), *args
+        )
+        if size == 4 and not dynamic:
+            # Produce 2 kernels due to divisibility
+            self.assertTrue("add_kernel_0.run" in code)
+            self.assertTrue("add_kernel_1.run" in code)
+        else:
+            # size == 16 or dynamic
+            # Only one kernel
+            self.assertTrue("add_kernel_0.run" in code)
+            self.assertTrue("add_kernel_1.run" not in code)
 
         self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_reset_to_zero(self):
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+            ],
+            key=["n_elements"],
+            reset_to_zero=["out_ptr"],
+        )
+        @triton.jit
+        def add_kernel_autotuned_reset(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True)
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned_reset[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.randn(4, device="cuda")
+        msg = "Only configs and keys are supported for triton.autotune"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            f(x, x)
 
 
 def make_mutation_test(fn):
@@ -1103,6 +1183,35 @@ class MutationTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_mutation_test
+    def test_reduce_sum():
+        @triton.jit
+        def reduce_sum_kernel(a_ptr, c_ptr, stride_am, stride_an):
+            offs_am = tl.arange(0, 4)
+            offs_an = tl.arange(0, 4)
+            a_ptrs = a_ptr + (
+                offs_am[:, None] * stride_am + offs_an[None, :] * stride_an
+            )
+            a = tl.load(a_ptrs)
+            m = tl.sum(a, axis=1)
+            tl.store(c_ptr + tl.arange(0, 4), m)
+
+        return (
+            reduce_sum_kernel,
+            {
+                "a_ptr": torch.randn(4, 4),
+                "c_ptr": torch.randn(4),
+                "stride_am": 4,
+                "stride_an": 4,
+            },
+            # TODO(aakhundov): tt.reduce is now supported, but only
+            # in the new MLIR-based Triton analysis pass (not in the
+            # old TTIR string parsing-based one). change the line
+            # below to ["c_ptr"] when new Triton pin lands and this
+            # test starts failing.
+            ["a_ptr", "c_ptr"],
+        )
+
+    @make_mutation_test
     def test_argmax():
         @triton.jit
         def argmax_kernel(a_ptr, c_ptr, stride_am, stride_an):
@@ -1124,7 +1233,11 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "stride_am": 4,
                 "stride_an": 4,
             },
-            # TODO(oulgen): tt.reduce closures are not implemented yet
+            # TODO(aakhundov): tt.reduce is now supported, but only
+            # in the new MLIR-based Triton analysis pass (not in the
+            # old TTIR string parsing-based one). change the line
+            # below to ["c_ptr"] when new Triton pin lands and this
+            # test starts failing.
             ["a_ptr", "c_ptr"],
         )
 
