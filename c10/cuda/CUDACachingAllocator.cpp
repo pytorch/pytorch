@@ -129,20 +129,18 @@ using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
 
-void update_stat(Stat& stat, int64_t amount) {
-  stat.current += amount;
+void increase_stat(Stat& stat, size_t amount) {
+  stat.current += static_cast<int64_t>(amount);
+  stat.peak = std::max(stat.current, stat.peak);
+  stat.allocated += static_cast<int64_t>(amount);
+}
 
+void decrease_stat(Stat& stat, size_t amount) {
+  stat.current -= static_cast<int64_t>(amount);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stat.current >= 0,
       "Negative tracked stat in CUDA allocator (likely logic error).");
-
-  stat.peak = std::max(stat.current, stat.peak);
-  if (amount > 0) {
-    stat.allocated += amount;
-  }
-  if (amount < 0) {
-    stat.freed += -amount;
-  }
+  stat.freed += static_cast<int64_t>(amount);
 }
 
 void reset_accumulated_stat(Stat& stat) {
@@ -163,13 +161,13 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   }
 }
 
-void update_stat_array(
+void decrease_stat_array(
     StatArray& stat_array,
-    int64_t amount,
+    size_t amount,
     const StatTypes& stat_types) {
   for_each_selected_stat_type(
       stat_types, [&stat_array, amount](size_t stat_type) {
-        update_stat(stat_array[stat_type], amount);
+        decrease_stat(stat_array[stat_type], amount);
       });
 }
 
@@ -1207,28 +1205,22 @@ class DeviceCachingAllocator {
 
       if (already_split && !block->expandable_segment_) {
         // An already-split inactive block is being shrunk by size bytes.
-        update_stat_array(
-            stats.inactive_split_bytes,
-            -static_cast<std::int64_t>(block->size),
-            params.stat_types);
+        decrease_stat_array(
+            stats.inactive_split_bytes, block->size, params.stat_types);
       } else if (!block->expandable_segment_) {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-          update_stat(
-              stats.inactive_split_bytes[stat_type],
-              static_cast<std::int64_t>(remaining->size));
-          update_stat(stats.inactive_split[stat_type], 1);
+          increase_stat(stats.inactive_split_bytes[stat_type], remaining->size);
+          increase_stat(stats.inactive_split[stat_type], 1);
         });
       }
 
     } else if (already_split && !block->expandable_segment_) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        update_stat(
-            stats.inactive_split_bytes[stat_type],
-            -static_cast<std::int64_t>(block->size));
-        update_stat(stats.inactive_split[stat_type], -1);
+        decrease_stat(stats.inactive_split_bytes[stat_type], block->size);
+        decrease_stat(stats.inactive_split[stat_type], 1);
       });
     }
 
@@ -1248,20 +1240,14 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-      update_stat(stats.allocation[stat_type], 1);
-      update_stat(
-          stats.allocated_bytes[stat_type],
-          static_cast<std::int64_t>(block->size));
-      update_stat(stats.active[stat_type], 1);
-      update_stat(
-          stats.active_bytes[stat_type],
-          static_cast<std::int64_t>(block->size));
-      update_stat(
-          stats.requested_bytes[stat_type],
-          static_cast<std::int64_t>(block->requested_size));
+      increase_stat(stats.allocation[stat_type], 1);
+      increase_stat(stats.allocated_bytes[stat_type], block->size);
+      increase_stat(stats.active[stat_type], 1);
+      increase_stat(stats.active_bytes[stat_type], block->size);
+      increase_stat(stats.requested_bytes[stat_type], block->requested_size);
     });
     if (block->size >= CUDAAllocatorConfig::max_split_size())
-      update_stat(stats.oversize_allocations, 1);
+      increase_stat(stats.oversize_allocations, 1);
 
     c10::reportMemoryUsageToProfiler(
         block->ptr,
@@ -1287,10 +1273,8 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      update_stat(stats.allocation[stat_type], -1);
-      update_stat(
-          stats.allocated_bytes[stat_type],
-          -static_cast<std::int64_t>(block->size));
+      decrease_stat(stats.allocation[stat_type], 1);
+      decrease_stat(stats.allocated_bytes[stat_type], block->size);
     });
 
     record_trace(
@@ -1302,7 +1286,7 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_allocated);
 
     if (block->size >= CUDAAllocatorConfig::max_split_size())
-      update_stat(stats.oversize_allocations, -1);
+      decrease_stat(stats.oversize_allocations, 1);
 
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway.size())) {
@@ -2024,7 +2008,7 @@ class DeviceCachingAllocator {
     total_allocated_memory += mapped_range.size;
     StatTypes stat_types = get_stat_types_for_pool(*to_map->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      update_stat(stats.reserved_bytes[stat_type], mapped_range.size);
+      increase_stat(stats.reserved_bytes[stat_type], mapped_range.size);
     });
 
     stats.num_device_alloc++;
@@ -2130,19 +2114,28 @@ class DeviceCachingAllocator {
       // so we simply just exclude expandable segments from
       // inactive_split
       if (!block->expandable_segment_) {
-        update_stat(
-            stats.inactive_split[stat_type], net_change_inactive_split_blocks);
-        update_stat(
-            stats.inactive_split_bytes[stat_type],
-            net_change_inactive_split_size);
+        if (net_change_inactive_split_blocks > 0) {
+          increase_stat(
+              stats.inactive_split[stat_type],
+              static_cast<size_t>(net_change_inactive_split_blocks));
+        } else if (net_change_inactive_split_blocks < 0) {
+          decrease_stat(
+              stats.inactive_split[stat_type],
+              static_cast<size_t>(-net_change_inactive_split_blocks));
+        }
+        if (net_change_inactive_split_size > 0) {
+          increase_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<size_t>(net_change_inactive_split_size));
+        } else if (net_change_inactive_split_size < 0) {
+          decrease_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<size_t>(-net_change_inactive_split_size));
+        }
       }
-      update_stat(stats.active[stat_type], -1);
-      update_stat(
-          stats.active_bytes[stat_type],
-          -static_cast<std::int64_t>(original_block_size));
-      update_stat(
-          stats.requested_bytes[stat_type],
-          -static_cast<std::int64_t>(requested_size));
+      decrease_stat(stats.active[stat_type], 1);
+      decrease_stat(stats.active_bytes[stat_type], original_block_size);
+      decrease_stat(stats.requested_bytes[stat_type], requested_size);
     });
   }
 
@@ -2440,11 +2433,11 @@ class DeviceCachingAllocator {
     total_allocated_memory += size;
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
-      update_stat(stats.segment[stat_type], 1);
-      update_stat(stats.reserved_bytes[stat_type], size);
+      increase_stat(stats.segment[stat_type], 1);
+      increase_stat(stats.reserved_bytes[stat_type], size);
     });
     if (size >= CUDAAllocatorConfig::max_split_size())
-      update_stat(stats.oversize_segments, 1);
+      increase_stat(stats.oversize_segments, 1);
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
@@ -2575,14 +2568,12 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      update_stat(stats.segment[stat_type], -1);
-      update_stat(
-          stats.reserved_bytes[stat_type],
-          -static_cast<std::int64_t>(block->size));
+      decrease_stat(stats.segment[stat_type], 1);
+      decrease_stat(stats.reserved_bytes[stat_type], block->size);
     });
 
     if (block->size >= CUDAAllocatorConfig::max_split_size())
-      update_stat(stats.oversize_segments, -1);
+      decrease_stat(stats.oversize_segments, 1);
     pool->blocks.erase(block);
     delete block;
   }
@@ -2634,7 +2625,7 @@ class DeviceCachingAllocator {
     total_allocated_memory -= unmapped.size;
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      update_stat(stats.reserved_bytes[stat_type], -unmapped.size);
+      decrease_stat(stats.reserved_bytes[stat_type], unmapped.size);
     });
 
     stats.num_device_free++;
@@ -3106,7 +3097,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return cpd;
   }
 
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
         OutOfMemoryError,
@@ -3131,9 +3122,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       }
     } else {
       if (size != 0) {
-        // Allocator declars allocate const!?
-        const_cast<NativeCachingAllocator*>(this)->malloc(
-            &devPtr, device, size, stream);
+        this->malloc(&devPtr, device, size, stream);
       }
     }
 
