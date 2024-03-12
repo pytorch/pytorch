@@ -24,7 +24,7 @@ class DataPtr;
  * choice for events on that backend, which may not be the same.
  *
  * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation. 
+ * backend implementation.
  */
 enum class EventFlag {
   // Disable timing
