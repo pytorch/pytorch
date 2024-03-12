@@ -373,10 +373,11 @@ __device__ __inline__ void copy_chunk_with_pad<void, void>(
 
 // Read `actual_chunk_size` bytes from bfloat16 array `src`  (i.e.,
 // actual_chunk_size/2 bfloat16 elements), cast bfloat16 to float, and write to
-// float array `dst`. Pad 0.0f if 2*actual_chunk_size < max_chunk_size. src:
-// pointer to a bfloat16 array dst: pointer to a float32 array max_chunk_size:
-// number of bytes in dst array actual_chunk_size: number of bytes in src array,
-// which is less than or equal to max_chunk_size / 2
+// float array `dst`. Pad 0.0f if 2*actual_chunk_size < max_chunk_size.
+// src is pointer to a bfloat16 array; dst is pointer to a float32 array;
+// max_chunk_size is number of bytes in dst array; actual_chunk_size is
+// the number of bytes in src array, which is less than or equal to
+// max_chunk_size / 2.
 template <>
 __device__ __inline__ void copy_chunk_with_pad<float, bfloat16>(
     char* dst,
