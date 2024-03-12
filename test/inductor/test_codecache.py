@@ -4,7 +4,6 @@ import pickle
 import unittest
 from typing import List
 from unittest import mock
-from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
