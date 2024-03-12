@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorShape.h>
+#include <c10/util/TypeCast.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -45,12 +46,6 @@ namespace detail {
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
-
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-using bfloat16 = at::BFloat16;
-#else
-using bfloat16 = __nv_bfloat16;
-#endif
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -294,26 +289,34 @@ static inline std::vector<int64_t> get_chunk_cat_out_sizes(
   return view_sizes;
 }
 
-template <typename dst_t, typename src_t>
-static __device__ __inline__ void copy_chunk_with_pad(
-    char* dst,
-    const char* src,
-    int64_t max_chunk_size,
-    int64_t actual_chunk_size,
-    int64_t thread_idx,
-    int64_t num_threads);
-
 // Copy `max_chunk_size` bytes from `src` to `dst` by `num_threads`, and pad
 // zero when `src` size (i.e., actual_chunk_size) is less than `max_chunk_size`.
 // Assume elements of src and dst have the same data type.
-template <>
-__device__ __inline__ void copy_chunk_with_pad<void, void>(
-    char* dst,
-    const char* src,
+template <typename dst_t, typename src_t>
+__device__ __inline__ void copy_chunk_with_pad(
+    dst_t* dst_ptr,
+    src_t* src_ptr,
     int64_t max_chunk_size,
     int64_t actual_chunk_size,
     int64_t thread_idx,
     int64_t num_threads) {
+  // Supports type cast
+  if(!std::is_same_v<dst_t, src_t>) {
+    const int64_t max_num_elems = max_chunk_size / sizeof(dst_t);
+    const int64_t actual_num_elems = actual_chunk_size / sizeof(src_t);
+    int64_t elem_index = thread_idx;
+    while (elem_index < actual_num_elems) {
+      dst_ptr[elem_index] = static_cast_with_inter_type<dst_t, src_t>::apply(src_ptr[elem_index]);
+      elem_index += num_threads;
+    }
+    while (elem_index < max_num_elems) {
+      dst_ptr[elem_index] = static_cast_with_inter_type<dst_t, int>::apply(0);
+      elem_index += num_threads;
+    }
+    return;
+  }
+  char* dst = reinterpret_cast<char*>(dst_ptr);
+  char* src = reinterpret_cast<char*>(src_ptr);
   // Fast path when the number of threads is larger than the number of bytes to
   // be copied (i.e., max_chunk_size). In this case, each thread only copies 1
   // byte. For 0 <= thread_idx < actual_chunk_size, the thread copies data from
@@ -371,42 +374,6 @@ __device__ __inline__ void copy_chunk_with_pad<void, void>(
   }
 }
 
-// Read `actual_chunk_size` bytes from bfloat16 array `src`  (i.e.,
-// actual_chunk_size/2 bfloat16 elements), cast bfloat16 to float, and write to
-// float array `dst`. Pad 0.0f if 2*actual_chunk_size < max_chunk_size.
-// src is pointer to a bfloat16 array; dst is pointer to a float32 array;
-// max_chunk_size is number of bytes in dst array; actual_chunk_size is
-// the number of bytes in src array, which is less than or equal to
-// max_chunk_size / 2.
-template <>
-__device__ __inline__ void copy_chunk_with_pad<float, bfloat16>(
-    char* dst,
-    const char* src,
-    int64_t max_chunk_size,
-    int64_t actual_chunk_size,
-    int64_t thread_idx,
-    int64_t num_threads) {
-  const int64_t dst_elem_size = 4;
-  const int64_t src_elem_size = 2;
-  const int64_t max_num_elems = max_chunk_size / dst_elem_size;
-  const int64_t actual_num_elems = actual_chunk_size / src_elem_size;
-  int64_t elem_index = thread_idx;
-  while (elem_index < actual_num_elems) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-    reinterpret_cast<float*>(dst)[elem_index] =
-        static_cast<float>(reinterpret_cast<const bfloat16*>(src)[elem_index]);
-#else
-    reinterpret_cast<float*>(dst)[elem_index] =
-        __bfloat162float(reinterpret_cast<const bfloat16*>(src)[elem_index]);
-#endif
-    elem_index += num_threads;
-  }
-  while (elem_index < max_num_elems) {
-    reinterpret_cast<float*>(dst)[elem_index] = 0.0f;
-    elem_index += num_threads;
-  }
-}
-
 // NOTE [CUDA kernel for chunk_cat]
 // chunk_cat_cuda adopts a "jagged grid" strategy, inspired by NOTE [CUDA fast
 // path for split_with_sizes_copy.out]. In addition, chunk_cat_cuda supports
@@ -414,8 +381,8 @@ __device__ __inline__ void copy_chunk_with_pad<float, bfloat16>(
 // size.
 template <typename dst_t, typename src_t>
 static __global__ void chunk_cat_cuda_kernel(
-    char** src,
-    char* dst,
+    src_t** src,
+    dst_t* dst,
     int64_t* block_idx_to_tensor_idx,
     int64_t* tensor_idx_to_start_tensor_bytes,
     int64_t* start_block_idx_per_tensor_chunk,
@@ -434,10 +401,10 @@ static __global__ void chunk_cat_cuda_kernel(
   const int64_t num_threads =
       num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE;
   const int64_t thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x;
-  const char* src_addr = src[tensor_idx] +
+  char* src_addr = reinterpret_cast<char**>(src)[tensor_idx] +
       slice_idx * actual_tensor_sizes[tensor_idx] +
       chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio;
-  char* dst_addr = dst + slice_idx * slice_size + chunk_idx * chunk_size +
+  char* dst_addr = reinterpret_cast<char*>(dst) + slice_idx * slice_size + chunk_idx * chunk_size +
       tensor_idx_to_start_tensor_bytes[tensor_idx];
   // Compute the actual number of bytes to copy from src.
   const int64_t actual_copy_size = std::min(
@@ -448,8 +415,8 @@ static __global__ void chunk_cat_cuda_kernel(
               chunk_idx * pad_tensor_chunk_sizes[tensor_idx] /
                   dst_to_src_ratio));
   copy_chunk_with_pad<dst_t, src_t>(
-      dst_addr,
-      src_addr,
+      reinterpret_cast<dst_t*>(dst_addr),
+      reinterpret_cast<src_t*>(src_addr),
       pad_tensor_chunk_sizes[tensor_idx],
       actual_copy_size,
       thread_idx,
@@ -560,10 +527,9 @@ void _chunk_cat_out_cuda_contiguous(
   at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
-  detail::chunk_cat_cuda_kernel<dst_t, src_t>
-      <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-          /*srcs=*/reinterpret_cast<char**>(device_ptrs[0]),
-          reinterpret_cast<char*>(out.data_ptr()),
+  detail::chunk_cat_cuda_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+          /*srcs=*/reinterpret_cast<src_t**>(device_ptrs[0]),
+          reinterpret_cast<dst_t*>(out.data_ptr()),
           /*block_idx_to_tensor_idx=*/device_ptrs[1],
           /*tensor_idx_to_start_tensor_bytes=*/device_ptrs[2],
           /*start_block_idx_per_tensor_chunk=*/device_ptrs[3],
@@ -755,7 +721,8 @@ Tensor _chunk_cat_cuda(TensorList tensors, int64_t dim, int64_t num_chunks) {
         tensors[0]
             .new_empty(chunk_size * num_chunks * leading_dim / elem_size)
             .view(view_sizes);
-    detail::_chunk_cat_out_cuda_contiguous<void, void>(
+    // Type-agnostic copy since out and input tensors have the same type.
+    detail::_chunk_cat_out_cuda_contiguous<char, char>(
         tensors, dim, num_chunks, out, elem_size, elem_size);
     return out;
   } else {
@@ -777,7 +744,7 @@ Tensor& _chunk_cat_out_cuda(
   if (both_input_output_contiguous &&
       (tensors[0].dtype() == at::ScalarType::BFloat16) &&
       (out.dtype() == at::ScalarType::Float)) {
-    detail::_chunk_cat_out_cuda_contiguous<float, detail::bfloat16>(
+    detail::_chunk_cat_out_cuda_contiguous<float, BFloat16>(
         tensors,
         dim,
         num_chunks,
@@ -786,7 +753,8 @@ Tensor& _chunk_cat_out_cuda(
         tensors[0].element_size());
   } else if (
       both_input_output_contiguous && tensors[0].dtype() == out.dtype()) {
-    detail::_chunk_cat_out_cuda_contiguous<void, void>(
+    // Type-agnostic copy since out and input tensors have the same type.
+    detail::_chunk_cat_out_cuda_contiguous<char, char>(
         tensors,
         dim,
         num_chunks,
