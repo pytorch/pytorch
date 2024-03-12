@@ -61,13 +61,21 @@ def triton_hash_with_backend():
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def dtype_to_string(dtype, prefix=False):
+def dtype_to_string(dtype):
     if dtype.name.startswith("fp"):
         suffix = "float" + dtype.name[2:]
     elif dtype.name.startswith("bf"):
         suffix = "bfloat" + dtype.name[2:]
     else:
         suffix = dtype.name
-    if prefix:
-        return "triton.language." + suffix
-    return suffix
+    return "triton.language." + suffix
+
+
+def patch_triton_dtype_repr():
+    import triton
+
+    # Hack to get triton dtype repr to produce an evaluatable expression
+    # triton.language.float32 emits triton.language.fp32 which does not
+    # exist
+    # REMOVE when https://github.com/openai/triton/pull/3342 lands
+    triton.language.dtype.__repr__ = lambda self: dtype_to_string(self)

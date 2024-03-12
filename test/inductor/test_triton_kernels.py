@@ -1109,22 +1109,27 @@ def forward(self, x_1, output_1):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        def f(x, y):
-            output = torch.zeros_like(x).to(dtype=torch.float32)
+        def f(x, y, dtype_torch, dtype_triton):
+            output = torch.zeros_like(x).to(dtype=dtype_torch)
             n_elements = output.numel()
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
             add_kernel_with_dtype[grid](
-                x, y, output, tl.float32, n_elements, BLOCK_SIZE=4
+                x, y, output, dtype_triton, n_elements, BLOCK_SIZE=4
             )
             return output
 
         x = torch.randn(4, device="cuda")
         y = torch.randn(4, device="cuda")
-        eager_out = f(x, y)
-        compiled_out = torch.compile(
-            f, fullgraph=True, backend=backend, dynamic=dynamic
-        )(x, y)
-        self.assertEqual(compiled_out, eager_out)
+        args_list = (
+            [x, y, torch.float32, tl.float32],
+            [x, y, torch.bfloat16, tl.bfloat16],
+        )
+        for args in args_list:
+            eager_out = f(*args)
+            compiled_out = torch.compile(
+                f, fullgraph=True, backend=backend, dynamic=dynamic
+            )(*args)
+            self.assertEqual(compiled_out, eager_out)
 
 
 def make_mutation_test(fn):
