@@ -3483,6 +3483,7 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "sam_fast",
             "resnet50_quantized_qat",
             "mobilenet_v2_quantized_qat",
         }:
