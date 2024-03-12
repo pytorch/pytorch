@@ -103,13 +103,12 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   cuda::CUDAGraph* current_graph_{};
 
   CUDAGeneratorState(
-      uint64_t seed_ = default_rng_seed_val,
-      uint64_t philox_offset_per_thread_ = 0,
-      uint32_t offset_intragraph_ = 0);
-
+      uint64_t seed = default_rng_seed_val,
+      uint64_t philox_offset_per_thread = 0,
+      uint32_t offset_intragraph = 0);
   void increase(uint64_t increment);
   void register_to_graph(cuda::CUDAGraph* graph);
-  // returns the wholegraph_increment
+  // capture_epilogue returns the wholegraph_increment
   uint64_t capture_epilogue();
   void replay_prologue(uint64_t wholegraph_increment);
   c10::intrusive_ptr<CUDAGeneratorState> clone();
