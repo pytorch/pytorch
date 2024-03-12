@@ -32,7 +32,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 
-test_subclass = lambda x: torch._dynamo.config.patch("traceable_tensor_subclasses", {x})
+
+def test_subclass(c):
+    return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
