@@ -28,13 +28,12 @@ runs:
 
     - name: Start docker if docker deamon is not running
       shell: bash
+      if: ${{ hashFiles('/.inarc') == '' }}
       run: |
-        if [ ! -e /.inarc ]; then
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
+        if systemctl is-active --quiet docker; then
+            echo "Docker daemon is running...";
+        else
+            echo "Starting docker deamon..." && sudo systemctl start docker;
         fi
 
     - name: Log in to ECR
