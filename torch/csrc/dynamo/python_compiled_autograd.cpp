@@ -492,13 +492,13 @@ variable_list compiled_autograd(
   THPObjectPtr sizes;
   THPObjectPtr hooks;
   CacheNode* cache = _compiled_autograd_impl(
-    graph_root,
-    graph_task,
-    accumulate_grad,
-    output_edges,
-    &inputs,
-    &sizes,
-    &hooks);
+      graph_root,
+      graph_task,
+      accumulate_grad,
+      output_edges,
+      &inputs,
+      &sizes,
+      &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
