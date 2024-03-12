@@ -165,6 +165,12 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         run: |
+          set +e
+          set -x
+          pwd
+          ls -la ./
+          ls -la ./.ci
+          ls -la ./.ci/pytorch
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
