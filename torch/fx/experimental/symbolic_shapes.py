@@ -2930,11 +2930,8 @@ class ShapeEnv:
             def get_expression(tensor_dim_src):
                 fake = placeholders[source_index[tensor_dim_src.base.name()]]
                 symint = fake.shape[tensor_dim_src.idx]
-                if isinstance(symint, torch.SymInt):
-                    return symint.node.expr
-                else:
-                    assert type(symint) is int, f"Expected int, got {type(symint)}"
-                    return symint
+                assert isinstance(symint, torch.SymInt)
+                return symint.node.expr
 
             for src1, src2 in equalities_inputs.source_pairs:
                 expr1, expr2 = get_expression(src1), get_expression(src2)

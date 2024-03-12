@@ -224,7 +224,7 @@ class _Broadcast(Function):
     def forward(ctx, src, group, tensor):
         ctx.src = src
         ctx.group = group
-        ctx.rank = dist.get_rank(group=group)
+        ctx.rank = dist.get_rank()
         # torch.distributed makes all the calls in place
         # we allocate new tensors to avoid this
         tensor = tensor.clone()
@@ -328,7 +328,7 @@ class _AllGather(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank(group=ctx.group)
+            rank = dist.get_rank()
             gx = torch.empty_like(grad_outputs[rank])
             gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
