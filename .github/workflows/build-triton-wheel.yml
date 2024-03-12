@@ -11,7 +11,6 @@ on:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
-      - .github/scripts/download_triton_packages.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-rocm.txt
@@ -19,7 +18,6 @@ on:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
-      - .github/scripts/download_triton_packages.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-rocm.txt
@@ -29,55 +27,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  download-triton-deps:
-    name: "Download Triton Dependencies"
-    runs-on: [self-hosted, linux.large]
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ["cuda", "rocm"]
-    env:
-      BUILD_DEVICE: ${{ matrix.device }}
-    steps:
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-
-      - name: Download Packages
-        run: |
-            set -x
-
-            BUILD_ROCM=""
-            if [[ "$BUILD_DEVICE" == "rocm" ]]; then
-                BUILD_ROCM="--build-rocm"
-            fi
-
-            python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py" ${BUILD_ROCM}
-
-      - name: Tar Triton Dependencies
-        run: tar -C ~ -cf triton-deps.tar .triton
-
-      - name: Upload Dependency Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: triton-packages-${{ matrix.device }}
-          path: triton-deps.tar
-          retention-days: 1  # Minimum retention period
-
   build-wheel:
     name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
-    needs: download-triton-deps
     strategy:
       fail-fast: false
       matrix:
@@ -88,7 +40,6 @@ jobs:
             rocm_version: "6.0"
           - device: "cuda"
             rocm_version: ""
-
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
@@ -113,14 +64,6 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
-      - name: Download Dependency Artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: triton-packages-${{ matrix.device }}
-
-      - name: Untar Triton Dependencies
-        run: tar -xf triton-deps.tar
-
       - name: Build Triton wheel
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
@@ -130,7 +73,6 @@ jobs:
           container_name=$(docker run \
             --tty \
             --detach \
-            -v "${GITHUB_WORKSPACE}/.triton:/root/.triton" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
@@ -177,9 +119,11 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          # NB: Use the same name here and all wheels can be downloaded by referring to the same artifact
+          name: pytorch-triton-wheel
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
+
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
@@ -213,15 +157,8 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
-          # Download all available artifacts
-          path: ${{ runner.temp }}/artifacts-all
-
-      - name: Select Wheel Artifacts
-        shell: bash
-        run: |
-          set -x
-          mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
+          name: pytorch-triton-wheel
+          path: ${{ runner.temp }}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
@@ -256,7 +193,6 @@ jobs:
   build-conda:
     name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
-    needs: download-triton-deps
     strategy:
       fail-fast: false
       matrix:
@@ -284,14 +220,6 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
-      - name: Download Dependency Artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: triton-packages-cuda
-
-      - name: Untar Triton Dependencies
-        run: tar -xf triton-deps.tar
-
       - name: Build Triton conda package
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
@@ -301,7 +229,6 @@ jobs:
           container_name=$(docker run \
             --tty \
             --detach \
-            -v "${GITHUB_WORKSPACE}/.triton:/root/.triton" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
@@ -319,7 +246,8 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: pytorch-triton-conda-${{ matrix.py_vers }}
+          # NB: Use the same name here and all wheels can be downloaded by referring to the same artifact
+          name: pytorch-triton-conda
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
@@ -339,15 +267,8 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
-          # Download all available artifacts
-          path: ${{ runner.temp }}/artifacts-all
-
-      - name: Select Conda Artifacts
-        shell: bash
-        run: |
-          set -x
-          mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-conda-*/* "${RUNNER_TEMP}/artifacts/"
+          name: pytorch-triton-conda
+          path: ${{ runner.temp }}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
