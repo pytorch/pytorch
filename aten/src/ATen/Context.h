@@ -24,7 +24,6 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 
 namespace at {
@@ -289,7 +288,7 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
   // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
@@ -549,15 +548,10 @@ struct TORCH_API NoTF32Guard {
   bool changed = false;
 };
 
-#ifdef USE_ROCM
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
-
- private:
-  static thread_local bool is_backward_pass_;
 };
-#endif
 
 } // namespace at
