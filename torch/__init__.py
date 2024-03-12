@@ -2008,7 +2008,7 @@ def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optiona
     Add min/max constraint on the intermediate symbol at tracing time. If called in eager mode,
     it will still check if the input value is within the specified range.
     """
-    torch.sym_constrain_range(symbol, min=min, max=max)
+    torch.sym_constrain_range(symbol, min=min, max=max if max is None else builtins.min(max, sys.maxsize))
 
 
 def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
