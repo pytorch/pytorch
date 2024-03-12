@@ -139,8 +139,7 @@ class VariableTrackerCache:
     def clone(self):
         # Needed for copy and restore graph state
         new_cache = VariableTrackerCache()
-        for k, v in self.cache.items():
-            new_cache.cache[k] = v
+        new_cache.cache.update(self.cache)
         return new_cache
 
     def clear(self):
