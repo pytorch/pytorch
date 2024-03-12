@@ -144,6 +144,7 @@ class BuiltinVariable(VariableTracker):
             operator.add,
             operator.sub,
             operator.getitem,
+            operator.length_hint,
             operator.lshift,
             operator.rshift,
             operator.and_,
@@ -194,6 +195,7 @@ class BuiltinVariable(VariableTracker):
             operator.eq,
             operator.sub,
             operator.getitem,
+            operator.length_hint,
             operator.lshift,
             operator.rshift,
             operator.and_,
@@ -1655,10 +1657,10 @@ class BuiltinVariable(VariableTracker):
             ):
                 return ConstantVariable(op(left.value, right.value))
 
-        if op.__name__ == "is_":
-            # If the two objects are of different type, we can safely return False
+        if op.__name__.startswith("is_"):
+            # If the two objects are of different type, we can safely return False and True for `is` and `is not`, respectively
             if type(left) is not type(right):
-                return ConstantVariable.create(False)
+                return ConstantVariable.create(op.__name__ != "is_")
 
         if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
             return ConstantVariable.create(op(left.fn, right.fn))

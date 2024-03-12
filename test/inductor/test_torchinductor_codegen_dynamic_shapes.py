@@ -6,12 +6,12 @@ import unittest
 
 import torch
 from torch._inductor.compile_fx import compile_fx
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
@@ -69,6 +69,7 @@ def check_codegen(
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
+    torch._inductor.codecache.FxGraphCache.clear()
     torch._inductor.metrics.reset()
 
     called = False
