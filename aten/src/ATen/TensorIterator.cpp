@@ -643,6 +643,14 @@ void TensorIteratorBase::coalesce_dimensions() {
   // We can coalesce two adjacent dimensions if either dim has size 1 or if:
   // shape[n] * stride[n] == stride[n + 1].
   auto can_coalesce = [&](int dim0, int dim1) {
+    if (is_reduction_) {
+      for (auto& op : operands_) {
+        if (op.is_output && (op.stride_bytes[dim0] == 0 || op.stride_bytes[dim1] == 0 )) {
+          return false;
+        }
+      }
+    }
+    
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
     if (shape0 == 1 || shape1 == 1) {
@@ -713,7 +721,7 @@ SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
 
 bool TensorIteratorBase::is_dim_reduced(int dim) const {
   for (auto& op : operands_) {
-    if (op.is_output && op.stride_bytes[dim] == 0 && shape_[dim] > 1) {
+    if (op.is_output && op.stride_bytes[dim] == 0) {
       return true;
     }
   }
