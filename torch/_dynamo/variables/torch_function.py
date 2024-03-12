@@ -97,7 +97,7 @@ def call_torch_function(
 def build_torch_function_fn(tx, value, source):
     from .builder import SourcelessBuilder, VariableBuilder
 
-    if not source:
+    if source:
         return VariableBuilder(
             tx,
             AttrSource(AttrSource(source, "__torch_function__"), "__func__"),

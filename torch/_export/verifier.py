@@ -306,9 +306,19 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             buffer = input_spec.target
-            if buffer not in exported_program.state_dict:
+            if input_spec.persistent is None:
+                raise SpecViolationError(
+                    f"Buffer {buffer} is missing a persistence flag"
+                )
+
+            if input_spec.persistent is True and buffer not in exported_program.state_dict:
                 raise SpecViolationError(
                     f"Buffer {buffer} is not in the state dict."
+                )
+
+            if input_spec.persistent is False and buffer in exported_program.state_dict:
+                raise SpecViolationError(
+                    f"Non-persistent buffer {buffer} is in the state dict, it should not be."
                 )
         elif input_spec.kind == InputKind.CONSTANT_TENSOR:
             if not isinstance(input_spec.arg, TensorArgument):
@@ -340,6 +350,11 @@ def _verify_exported_program_signature(exported_program) -> None:
                 raise SpecViolationError(
                     f"Custom object {custom_obj} is not in the constants dictionary."
                 )
+        elif input_spec.kind == InputKind.TOKEN:
+            if not isinstance(input_spec.arg, TensorArgument):
+                raise SpecViolationError(
+                    f"Constant tensor {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
+                )
         else:
             raise SpecViolationError(
                 f"Unknown InputKind {input_spec.kind}."
@@ -361,8 +376,9 @@ def _verify_exported_program_signature(exported_program) -> None:
             f"Number of user outputs: {len(gs.user_outputs)}. \n"
         )
 
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate)
-    mutate_nodes: List[str] = output_nodes[:end]
+    num_tokens = len(gs.output_tokens)
+    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
+    mutate_nodes: List[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:

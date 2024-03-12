@@ -107,6 +107,7 @@ class SubgraphMatcher:
         assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
         assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
 
+        # TODO(tmanlaibaatar) should probably make this actual API
         def _getattr(model: torch.fx.GraphModule, attr_name: str):
             *prefix, field = attr_name.split(".")
             t = model
@@ -118,6 +119,10 @@ class SubgraphMatcher:
 
         pn_value = _getattr(pn.graph.owning_module, pn.target)
         gn_value = _getattr(gn.graph.owning_module, gn.target)
+<<<<<<< HEAD
+
+=======
+>>>>>>> 2e5600c2936 (Switch capture_pre_autograd impl to functional IR)
         if type(pn_value) != type(gn_value):
             return False
 

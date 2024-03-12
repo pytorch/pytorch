@@ -1,7 +1,9 @@
 #include <torch/csrc/dynamo/init.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
@@ -34,6 +36,18 @@ void initDynamoBindings(PyObject* torch) {
       PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
     throw python_error();
   }
+
+  auto m = py::handle(eval_frame).cast<py::module>();
+
+  py::class_<CacheEntry>(m, "_CacheEntry")
+      .def_readonly("check_fn", &CacheEntry::check_fn)
+      .def_readonly("code", &CacheEntry::code)
+      .def_property_readonly("next", &CacheEntry::next);
+
+  py::class_<ExtraState>(m, "_ExtraState")
+      .def("invalidate", &ExtraState::invalidate);
+
+  m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
 }
 
 } // namespace dynamo

@@ -1,5 +1,6 @@
+import functools
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch._inductor.virtualized import V
@@ -94,7 +95,9 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
-aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
+aten_addmm = ExternKernelChoice(
+    torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
+)
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
@@ -178,8 +181,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
-
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if m * n == 0 or not use_max_autotune():
         choices = (
@@ -187,7 +188,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 aten_addmm.bind(
                     (inp, mat1, mat2),
                     layout,
-                    ordered_kwargs_for_cpp_kernel,
                     alpha=alpha,
                     beta=beta,
                 )
@@ -202,7 +202,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
                 layout,
-                ordered_kwargs_for_cpp_kernel,
                 alpha=alpha,
                 beta=beta,
             )
@@ -259,11 +258,19 @@ def fallback_mixed_mm(mat1, mat2, *, out):
 aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
 
 
+@functools.lru_cache(None)
+def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
+    props = torch.cuda.get_device_properties(index or 0)
+    return props.major <= 7
+
+
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
     choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
-    if mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous():
-        # can't use triton kernel unless one of these is true
+    if (
+        mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
+    ) or _is_sm7x_or_older_gpu(layout.device.index):
+        # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
         return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
     if inductor_config.force_mixed_mm:
         choices = []
