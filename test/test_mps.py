@@ -6922,6 +6922,14 @@ class TestMPS(TestCaseMPS):
         # see https://github.com/pytorch/pytorch/issues/116769#issuecomment-1920066984
         compare_mm(32769, 1, 1025)
 
+        if product_version >= 14.0:
+            # Test bfloat16 mm
+            x = torch.rand(182, 182, 4, dtype=torch.bfloat16, device='mps')
+            y = torch.rand(4, 3, dtype=torch.bfloat16, device='mps')
+            z = torch.matmul(x, y).cpu()
+            z_cpu = torch.matmul(x.cpu(), y.cpu())
+            self.assertEqual(z, z_cpu)
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
