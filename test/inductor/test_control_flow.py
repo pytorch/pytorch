@@ -399,6 +399,8 @@ class CondTests(TestCase):
             {
                 "pre_grad_custom_pass": pre_grad_pass_counter,
                 "post_grad_custom_pre_pass": post_grad_pass_counter,
+                # The above patches don't pickle
+                "fx_graph_cache": False,
             }
         ):
             self._run_test(
