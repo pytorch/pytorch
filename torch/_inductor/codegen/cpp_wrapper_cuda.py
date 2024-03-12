@@ -43,6 +43,7 @@ class CppWrapperCuda(CppWrapperCpu):
     """
 
     def __init__(self):
+        self.device = "cuda"
         super().__init__()
         self.grid_id = count()
         self.cuda = True

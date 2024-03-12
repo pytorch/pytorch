@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, distribute_tensor
-import torch.distributed._functional_collectives as funcol
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -16,7 +15,6 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     loss_parallel,
     parallelize_module,
-    PrepareModuleInput,
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
@@ -183,85 +181,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # onto the device mesh.
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
-
-        # Parallelize the embedding submodules.
-        parallelize_module(
-            model_tp.tok_embeddings,
-            device_mesh,
-            ColwiseParallel(
-                output_layouts=Shard(1)
-            ) if is_seq_parallel else ColwiseParallel(output_layouts=Replicate())
-        )
-        parallelize_module(
-            model_tp.pos_embeddings,
-            device_mesh,
-            ColwiseParallel(
-                output_layouts=Shard(0),
-            ) if is_seq_parallel else ColwiseParallel(output_layouts=Replicate())
-        )
-
-        # Parallelize the attention and feed forward submodules.
-        for layer in model_tp.layers:
-            layer_parallelize_plan = {}
-            if is_seq_parallel:
-                layer_parallelize_plan["attention"] = PrepareModuleInput(
-                    input_layouts=Shard(1),
-                    desired_input_layouts=Replicate(),
-                )
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wo"] = RowwiseParallel(
-                output_layouts=Shard(1)
-            ) if is_seq_parallel else RowwiseParallel()
-
-            layer_parallelize_plan["feed_forward.w1"] = ColwiseParallel(
-                input_layouts=Shard(1)
-            ) if is_seq_parallel else ColwiseParallel()
-            layer_parallelize_plan["feed_forward.w2"] = RowwiseParallel(
-                output_layouts=Shard(1)
-            ) if is_seq_parallel else RowwiseParallel()
-
-            parallelize_module(layer, device_mesh, layer_parallelize_plan)
-
-        # Parallelize the output submodule. If weight tying is enabled, we need to
-        # make sure output.weight is sharded consistently as tok_embeddings.weight,
-        # at the cost of the all_reduce operation using RowwiseParallel.
-        output_parallelize_plan = None
-        if not model_args.weight_tying:
-            output_parallelize_plan = ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate(),
-            ) if is_seq_parallel else ColwiseParallel(output_layouts=Replicate())
-        else:
-            output_parallelize_plan = RowwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate(),
-            ) if is_seq_parallel else RowwiseParallel(input_layouts=Replicate())
-        parallelize_module(model_tp.output, device_mesh, output_parallelize_plan)
-
-        # Step 2.5: Do manual setup on features that DTensor does not support yet.
-
-        # Manually adjust the number of heads after sharding the attention modules.
-        for layer in model_tp.layers:
-            layer.attention.n_heads = model_args.n_heads // self.world_size
-
-        # TODO: switch to a TP API once that feature is ready.
-        # Manually register all_reduce hooks for all norm layers as they only process sharded inputs.
-        if is_seq_parallel:
-            def all_reduce_fn(grad):
-                return funcol.all_reduce(grad, reduceOp="SUM", group=device_mesh)
-            for layer in model_tp.layers:
-                layer.attention_norm.weight.register_hook(all_reduce_fn)
-                layer.attention_norm.bias.register_hook(all_reduce_fn)
-                layer.ffn_norm.weight.register_hook(all_reduce_fn)
-                layer.ffn_norm.bias.register_hook(all_reduce_fn)
-            model_tp.norm.weight.register_hook(all_reduce_fn)
-            model_tp.norm.bias.register_hook(all_reduce_fn)
-
-        # Manually set output.weight so that parameters and gradients are shared.
-        if model_args.weight_tying:
-            model_tp.output.weight = model_tp.tok_embeddings.weight
+        model_tp = Transformer.parallelize(model_tp, device_mesh, is_seq_parallel)
 
         # Step 3: Run test by comparing outputs from single-gpu and multi-gpu models.
 
