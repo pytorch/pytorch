@@ -26,9 +26,19 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
+    - name: Check if in a ARC runner
+      shell: bash
+      id: check_arc_runner
+      run: |
+        if [[ -f /.inarc ]] ; then
+          echo "IN_ARC_RUNNER=true" >> $GITHUB_OUTPUT
+        else
+          echo "IN_ARC_RUNNER=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Start docker if docker deamon is not running
       shell: bash
-      if: ${{ hashFiles('/.inarc') == '' }}
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
       run: |
         if systemctl is-active --quiet docker; then
             echo "Docker daemon is running...";
