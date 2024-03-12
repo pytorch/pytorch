@@ -1227,7 +1227,7 @@ class CheckFunctionManager:
         if has_triton_package():
             pass
 
-            # globals_for_guard_fn[triton.__name__] = triton
+            globals_for_guard_fn[triton.__name__] = triton
 
         try:
             exec(pycode, globals_for_guard_fn, out)
