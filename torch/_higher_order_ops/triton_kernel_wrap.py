@@ -113,7 +113,7 @@ def generate_ttir(kernel, kwargs):
     assert isinstance(kernel, JITFunction)
 
     if len(kwargs) != len(kernel.arg_names):
-        raise RuntimeError("Incorrect number of arguments passed to kernel")
+        raise ValueError("Incorrect number of arguments passed to kernel")
 
     # Replace all SymExprs with a regular value for TTIR generation
     # Replace all FakeTensor with real tensors
@@ -605,7 +605,7 @@ def identify_mutated_tensors(kernel, kwargs):
         from torch._dynamo import config
 
         if not config.optimize_user_defined_triton_kernels:
-            raise RuntimeError("optimize_user_defined_triton_kernels is False")
+            raise ValueError("optimize_user_defined_triton_kernels is False")
 
         ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
 
