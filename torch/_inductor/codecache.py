@@ -2002,7 +2002,7 @@ class CppCodeCache:
                         cpp_compile_command(
                             input=input_path,
                             output=output_path,
-                            vec_isa=cls.vec_isa,
+                            vec_isa=picked_vec_isa,
                             **cls.cpp_compile_command_flags,
                         )
                     )
