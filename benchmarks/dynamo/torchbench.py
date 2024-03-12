@@ -112,6 +112,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
+    def skip_models_for_freezing(self):
+        return self._skip["freezing"]
+
+    @property
     def slow_models(self):
         return self._config["slow"]
 
@@ -225,6 +229,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if part:
             extra_args += ["--part", part]
 
+        # sam_fast only runs with amp
+        if model_name == "sam_fast":
+            self.args.amp = True
+            self.setup_amp()
+
         if model_name == "vision_maskrcnn" and is_training:
             # Output of vision_maskrcnn model is a list of bounding boxes,
             # sorted on the basis of their scores. This makes accuracy
@@ -255,7 +264,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
             )
         model, example_inputs = benchmark.get_module()
-
         # Models that must be in train mode while training
         if is_training and (
             not use_eval_mode or model_name in self._config["only_training"]
@@ -265,7 +273,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.eval()
         gc.collect()
         batch_size = benchmark.batch_size
-
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":

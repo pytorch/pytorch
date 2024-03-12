@@ -263,6 +263,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(self.module.custom_storageImpl_called())
             z3 = z3.foo()
             self.assertTrue(self.module.custom_storageImpl_called())
+            self.assertFalse(self.module.custom_storageImpl_called())
+            z3 = z3[0:3]
+            self.assertTrue(self.module.custom_storageImpl_called())
 
         def test_open_device_storage_pin_memory():
             torch.utils.rename_privateuse1_backend('foo')

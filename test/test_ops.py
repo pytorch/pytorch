@@ -999,6 +999,38 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @ops(
+        [op for op in op_db if op.supports_out and (op.supports_autograd or op.is_factory_function)],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float, torch.cfloat]
+    )
+    def test_out_requires_grad_error(self, device, dtype, op):
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+
+        # Call op to get prototype for out arguments
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+        any_requires_grad = False
+
+        def set_requires_grad(x):
+            nonlocal any_requires_grad
+            if isinstance(x, torch.Tensor) and (
+                x.is_floating_point() or x.is_complex()
+            ):
+                any_requires_grad = True
+                x.requires_grad_(True)
+            return x
+
+        out = pytree.tree_map_(set_requires_grad, expect)
+        if not any_requires_grad:
+            # Skip ops without any floating point outputs, e.g. isnan
+            return
+
+        msg = (
+            "functions with out=... arguments don't support automatic "
+            "differentiation, but one of the arguments requires grad."
+        )
+        with self.assertRaises(RuntimeError, msg=msg):
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
