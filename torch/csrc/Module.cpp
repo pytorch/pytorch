@@ -23,6 +23,7 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -192,6 +193,11 @@ static PyObject* THPModule_initExtension(
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
+
+  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
+  // becomes latency sensitive. If the thread is named, we can debug performance
+  // issues easier.
+  c10::setThreadName("pt_main_thread");
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
@@ -992,6 +998,25 @@ PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowFP16ReductionCPU(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_allow_fp16_reduction_cpu expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16ReductionCPU(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_allowFP16ReductionCPU(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().allowFP16ReductionCPU()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1365,6 +1390,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
+     METH_O,
+     nullptr},
+    {"_get_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_allowFP16ReductionCPU,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_setAllowFP16ReductionCPU,
      METH_O,
      nullptr},
     {"_vmapmode_increment_nesting",
