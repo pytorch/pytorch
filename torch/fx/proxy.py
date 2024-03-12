@@ -374,9 +374,6 @@ class Proxy:
     For a more detailed description into the Proxy internals, check out
     the "Proxy" section in `torch/fx/OVERVIEW.md`
     """
-    # Indicates to our torch_function dispatching infra that
-    # this is an "infra" object
-    _mode_key = torch._C._TorchFunctionModeKey.PROXY
 
     @compatibility(is_backward_compatible=True)
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
