@@ -174,7 +174,7 @@ jobs:
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          ALPINE_IMAGE: "library/alpine"
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}

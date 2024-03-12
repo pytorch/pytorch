@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
+  ALPINE_IMAGE: library/alpine
   AWS_DEFAULT_REGION: us-east-1
 
 permissions: read-all
@@ -116,7 +116,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
         with:
-          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ (matrix.runner == 'linux.arm64.2xlarge') && 'arm64v8' || 'tool' }}/alpine
+          ALPINE_IMAGE: ${{ (matrix.runner == 'linux.arm64.2xlarge') && 'arm64v8' || 'library' }}/alpine
         if: always()
 
       - name: Teardown Linux
