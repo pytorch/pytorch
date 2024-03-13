@@ -670,17 +670,21 @@ class SequentialLR(LRScheduler):
 
     def __init__(self, optimizer, schedulers, milestones, last_epoch=-1, verbose="deprecated"):
         if len(schedulers) < 1:
-            raise ValueError("Sequential Schedulers expects at least one scheduler, but got no scheduler.")
+            raise ValueError(f"{self.__class__.__name__} expects at least one scheduler, but got no scheduler.")
 
         for scheduler_idx, scheduler in enumerate(schedulers):
-            if not isinstance(scheduler, LRScheduler):
+            if not hasattr(scheduler, 'optimizer'):
                 raise TypeError(
-                    f"{self.__class__.__name__} expects all schedulers to be of type LRScheduler, "
-                    f"but got {type(scheduler)}"
+                    f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
+                )
+            if isinstance(scheduler, ReduceLROnPlateau):
+                raise ValueError(
+                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler, "
+                    f"but got one at index {scheduler_idx} in the given schedulers sequence."
                 )
             if scheduler.optimizer != optimizer:
                 raise ValueError(
-                    "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
+                    f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
                     f"got schedulers at index {scheduler_idx} to be different than the optimizer passed in."
                 )
 
