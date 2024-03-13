@@ -722,8 +722,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             scores = scores.masked_fill(attn_mask, -float("inf"))
             weights = torch.nn.functional.softmax(scores, dim=-1)
             weights = torch.nn.functional.dropout(
-                weights,
-                p=0.0,
+                p=0.4,
+                training=training,
+                inplace=False,
             )
             return torch.matmul(weights, v)
 
