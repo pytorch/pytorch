@@ -6,6 +6,7 @@ from typing import Dict, List
 import torch
 
 from ..decorators import mark_static_address
+from ..exc import Unsupported
 
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
@@ -78,11 +79,22 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # trace normally if we can't map args or install guards correctly
                 pass
 
+        if name == "step":
+            if (
+                "closure" in kwargs
+                and not isinstance(kwargs["closure"], ConstantVariable)
+                or len(args) == 1
+                and not isinstance(args[0], ConstantVariable)
+            ):
+                raise Unsupported(
+                    "Optimizer step with closure not supported by torch.compile()"
+                )
+
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
-        if name == "_init_group":
-            return GetAttrVariable(self, name)
+        if name in ("_init_group", "step"):
+            return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         return super().var_getattr(tx, name)
 

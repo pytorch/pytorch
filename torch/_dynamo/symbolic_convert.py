@@ -2108,6 +2108,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             }
+
+            self._check_for_optimizer_step_closure()
+
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2120,6 +2123,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
+
+    def _check_for_optimizer_step_closure(self):
+        if (
+            "closure" in self.symbolic_locals
+            and not isinstance(self.symbolic_locals["closure"], ConstantVariable)
+            and "self" in self.symbolic_locals
+            and isinstance(self.symbolic_locals["self"].value, torch.optim.Optimizer)
+            and self.code_options["co_name"] == "step"
+        ):
+            unimplemented("Optimizer step with closure not supported.")
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
