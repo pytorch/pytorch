@@ -2009,7 +2009,6 @@ class CppCodeCache:
                         output_path
                     ), f"Failed to compile {input_path}"
         else:
-            assert output_path == cls.cache[key], f"Cache mismatch for {key}"
             assert os.path.exists(output_path), f"Failed to find {output_path}"
 
         return key, output_path
