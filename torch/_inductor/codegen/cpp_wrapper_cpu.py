@@ -399,8 +399,7 @@ class CppWrapperCpu(WrapperCodeGen):
                         # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                         self.prefix.splice(
                             f"""
-                                std::vector<AtenTensorHandle> input_handles_vec(input_handles, input_handles+{num_args});
-                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles_vec);
+                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, {num_args});
                             """
                         )
 
