@@ -6,11 +6,6 @@ set -ex
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] ; then
-  # Forces build to rely on system libstdc++ rather then anaconda provided one see https://github.com/pytorch/pytorch/issues/121796
-  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
-fi
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh

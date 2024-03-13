@@ -22,11 +22,6 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
-if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] || [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3-clang12-executorch ]] ; then
-  # Forces build to rely on system libstdc++ rather then anaconda provided one see https://github.com/pytorch/pytorch/issues/121796
-  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
-fi
-
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then

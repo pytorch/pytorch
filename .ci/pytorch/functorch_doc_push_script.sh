@@ -10,11 +10,6 @@ set -ex
 version=${DOCS_VERSION:-nightly}
 echo "version: $version"
 
-if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] ; then
-  # Forces build to rely on system libstdc++ rather then anaconda provided one see https://github.com/pytorch/pytorch/issues/121796
-  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
-fi
-
 # Build functorch docs
 pushd $pt_checkout/functorch/docs
 make html
