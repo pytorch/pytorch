@@ -13,7 +13,7 @@ namespace torch {
 namespace utils {
 
 static PyObject* recursive_to_list(
-    char* data,
+    const char* data,
     IntArrayRef sizes,
     IntArrayRef strides,
     int64_t dim,
@@ -55,10 +55,10 @@ PyObject* tensor_to_list(const Tensor& tensor) {
     data = data.toBackend(Backend::CPU);
   }
   TORCH_CHECK(
-      tensor.numel() == 0 || data.data_ptr(),
+      tensor.numel() == 0 || data.const_data_ptr(),
       "tolist() shouldn't be called on a tensor with unallocated storage");
   return recursive_to_list(
-      (char*)data.data_ptr(),
+      (const char*)data.const_data_ptr(),
       data.sizes(),
       data.strides(),
       0,

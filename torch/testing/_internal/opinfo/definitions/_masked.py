@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import unittest
 from collections.abc import Sequence
 from functools import partial
@@ -834,7 +836,6 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.median",
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfCUDA=floating_types_and(torch.float16),
         method_variant=None,
         supports_out=False,
         supports_forward_ad=True,

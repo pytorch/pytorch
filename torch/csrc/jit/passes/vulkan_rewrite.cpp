@@ -118,6 +118,27 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   transpose_rewriter.runOnGraph(graph);
 }
 
+void insertPrePackedConv1dOp(std::shared_ptr<Graph>& graph) {
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
+
+  std::string conv_1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %r = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string prepacked_ops_conv1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %packed_weight_bias = vulkan_prepack::create_conv1d_context(
+            %weight, %bias, %stride, %padding, %dilation, %groups)
+        %r = vulkan_prepack::run_conv1d_context(%input, %packed_weight_bias)
+        return (%r) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(
+      conv_1d_pattern, prepacked_ops_conv1d_pattern);
+  rewriter.runOnGraph(graph);
+}
+
 void transferInputOutputBackends(std::shared_ptr<Graph>& graph) {
   // Move inputs to Vulkan backend
   for (Value* input : graph->inputs()) {
@@ -389,6 +410,7 @@ void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
   insertPrePackedLayernormOp(graph);
   insertPrePackedConv2dOp(graph);
+  insertPrePackedConv1dOp(graph);
   rewriteQuantizedOps(graph);
   insertPrePackedGruOp(graph);
   insertPrePackedLstmOp(graph);
@@ -423,6 +445,8 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString(
              "vulkan_quantized_prepack::convert_qconv2d_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_conv1d_context")) ||
         (n->kind() ==
          Symbol::fromQualString(
              "vulkan_quantized_prepack::convert_linear_context")) ||
