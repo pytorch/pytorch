@@ -113,6 +113,7 @@ jobs:
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
         conda activate "${CONDA_ENV}"
 
+        export RELEASE_VERSION_TAG="2.3"
         # Regenerate workflows
         .github/scripts/generate_ci_workflows.py
 
