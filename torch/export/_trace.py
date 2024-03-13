@@ -701,7 +701,7 @@ def _export(
     _EXPORT_FLAGS = flags
 
     kwargs = kwargs or {}
-    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
+    constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
 
     constant_attrs = _gather_constant_attrs(mod)
 
