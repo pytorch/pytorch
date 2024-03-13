@@ -331,7 +331,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             a = torch.tensor([[2, 4, 0], [8, 0, 12]]).to(self.rank)
             self.assertEqual(tensor_list[0], a)
         except RuntimeError as e:
-            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+            if "NCCL does not support all_reduce with sparse tensors" in str(e):
                 pass
             else:
                 # Rethrow the exception if it's a different error
@@ -1098,6 +1098,23 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             self.assertEqual(send_tensor, recv_tensor)
 
     @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_send_recv_complex(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        # Generate the same random tensor
+        torch.manual_seed(0)
+        send_tensor = torch.rand(10, 10, dtype=torch.cfloat, device=device)
+        if self.rank == 0:
+            dist.send(send_tensor, 1)
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, dtype=torch.cfloat, device=device)
+            dist.recv(recv_tensor, 0)
+            self.assertEqual(send_tensor, recv_tensor)
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
     def test_nccl_dist_backend_error(self):
@@ -1522,6 +1539,18 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
         self.assertEqual(backend.comm_split_count(), 1)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_get_uid(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        from torch.distributed.distributed_c10d import _get_process_group_uid
+        self.assertEqual(_get_process_group_uid(pg), 0)
+        pg_2 = c10d.new_group([0, 1])
+        self.assertEqual(_get_process_group_uid(pg_2), 1)
 
 
 class DistributedDataParallelTest(
@@ -2834,6 +2863,42 @@ class DistributedDataParallelTest(
         tensor = torch.ones((2, 16, 768, 1152), dtype=torch.float32, device=device).to(memory_format=torch.channels_last)
         process_group.broadcast([tensor]).wait()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_complex_params(self):
+        class FFTModel(nn.Module):
+            def __init__(self, hin, win, n_features):
+                super().__init__()
+                self.hin = hin
+                self.win = win
+                self.weight = nn.Parameter(torch.ones((n_features, n_features, hin, win // 2 + 1), dtype=torch.cfloat))
+
+            def forward(self, x):
+                xc = torch.fft.rfft2(x, s=(self.hin, self.win), dim=(-2, -1), norm="ortho")
+                xcw = torch.einsum("nchw,cohw->nohw", xc, self.weight)
+                x = torch.fft.irfft2(xcw, dim=(-2, -1), norm="ortho")
+                return x
+
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        N, C, H, W = 1, 16, 64, 64
+        ddp_model = DistributedDataParallel(
+            FFTModel(hin=H, win=W, n_features=C).to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+        optimizer = torch.optim.Adam(ddp_model.parameters(), lr=0.001)
+
+        inp = torch.ones((N, C, H, W), dtype=torch.float32)
+
+        # train step
+        out = ddp_model(inp)
+        loss = torch.sum(out)
+        loss.backward()
+        optimizer.step()
+
+        torch.cuda.synchronize()
+
 
 class WorkHookTest(MultiProcessTestCase):
 
@@ -3987,7 +4052,7 @@ class SparseCollective(MultiProcessTestCase):
             loss.backward()
             self.assertTrue(ddp_model.module.embedding.weight.grad.indices, indices)
         except RuntimeError as e:
-            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+            if "NCCL does not support all_reduce with sparse tensors" in str(e):
                 pass
             else:
                 # Rethrow the exception if it's a different error
@@ -4509,9 +4574,8 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
-        # We need to completely disable the coordinated timeout dump to avoid rank 0
-        # also timeout so that we set the check frequency to be very large (25 min).
-        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1500000'
+        # dump on heartbeatmonitor thread
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1000'
         # need rank0 to crash before looking for its output file
         os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
 
