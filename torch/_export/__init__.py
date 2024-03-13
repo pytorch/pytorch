@@ -40,7 +40,6 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.export._unlift import _create_stateful_graph_module
 from torch.export.dynamic_shapes import (
     _process_constraints,
-    _process_dynamic_shapes,
     Constraint,
     dims,
     dynamic_dim,
@@ -94,7 +93,6 @@ def capture_pre_autograd_graph(
     f: torch.nn.Module,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> torch.nn.Module:
     """
@@ -109,15 +107,6 @@ def capture_pre_autograd_graph(
       args: example positional inputs.
 
       kwargs: optional example keyword inputs.
-
-      constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
       dynamic_shapes: Should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
@@ -138,7 +127,6 @@ def capture_pre_autograd_graph(
 
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
-    from torch.export.dynamic_shapes import _process_dynamic_shapes
 
     log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
@@ -146,17 +134,6 @@ def capture_pre_autograd_graph(
 
     if kwargs is None:
         kwargs = {}
-
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     # Do not decompose dropout for exported models, because in eval mode the dropout
     # op disappears from the graph, which makes it difficult to switch to train mode.
@@ -169,7 +146,7 @@ def capture_pre_autograd_graph(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             assume_static_by_default=True,
             tracing_mode="symbolic",
             decomposition_table=decomp_table,
@@ -195,6 +172,7 @@ def capture_pre_autograd_graph(
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
         range_constraints = _process_constraints(fake_mode, m, 0, flat_args)
+
         module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
@@ -372,10 +350,8 @@ def aot_compile(
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
 
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-
     if config.is_predispatch:
-        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
+        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -383,7 +359,7 @@ def aot_compile(
             f,
             args,
             kwargs,
-            constraints,
+            dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
             # Disabling this flag, because instead we can rely on the mapping
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.

@@ -487,6 +487,10 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # Code object can not be compared against their string representation
+        # I.e `eval(f"{compile('2+2','','exec')!r}")` raises SyntaxError
+        assert not istype(val, types.CodeType)
+
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking
         # and NaN tests
@@ -495,7 +499,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None), types.CodeType)):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
@@ -999,17 +1003,6 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
-
-        # Note: right overrides left
-        def combine_scopes(left, right):
-            if left is None:
-                return right
-
-            if right is None:
-                return left
-
-            return {**left, **right}
-
         w_builder = None
 
         def source_ref(source):
@@ -1229,6 +1222,13 @@ class CheckFunctionManager:
         # guard_fn.__globals__ becomes equal to builder.scope. This causes
         # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
         globals_for_guard_fn = {"G": builder.scope["G"]}
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton
+
+            globals_for_guard_fn[triton.__name__] = triton
+
         try:
             exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
