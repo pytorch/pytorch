@@ -1205,10 +1205,9 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             },
             # TODO(aakhundov): tt.reduce is now supported, but only
             # in the new MLIR-based Triton analysis pass (not in the
-            # old TTIR string parsing-based one). change the line
-            # below to ["c_ptr"] when new Triton pin lands and this
-            # test starts failing.
-            ["a_ptr", "c_ptr"],
+            # old TTIR string parsing-based one). fbcode is still on
+            # the older Triton pin so needs a special case here.
+            ["a_ptr", "c_ptr"] if config.is_fbcode() else ["c_ptr"],
         )
 
     @make_mutation_test
@@ -1235,10 +1234,9 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             },
             # TODO(aakhundov): tt.reduce is now supported, but only
             # in the new MLIR-based Triton analysis pass (not in the
-            # old TTIR string parsing-based one). change the line
-            # below to ["c_ptr"] when new Triton pin lands and this
-            # test starts failing.
-            ["a_ptr", "c_ptr"],
+            # old TTIR string parsing-based one). fbcode is still on
+            # the older Triton pin so needs a special case here.
+            ["a_ptr", "c_ptr"] if config.is_fbcode() else ["c_ptr"],
         )
 
     @make_mutation_test
