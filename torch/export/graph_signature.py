@@ -145,11 +145,11 @@ def _sig_to_specs(
                     arg=o,
                     target=buffer_mutations[name],
                 )
-            elif name in user_input_mutations.values():
+            elif name in user_input_mutations:
                 return OutputSpec(
                     kind=OutputKind.USER_INPUT_MUTATION,
                     arg=o,
-                    target=name,
+                    target=user_input_mutations[name],
                 )
             elif name in output_tokens:
                 return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)

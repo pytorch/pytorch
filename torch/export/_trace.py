@@ -497,8 +497,6 @@ def _export_non_strict(
             # should have been handled already
             return ConstantArgument(value=val)
 
-    print(graph_signature.inputs_to_buffers, gm.graph)
-
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
         inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]
@@ -844,6 +842,8 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+
+        print("GRAPH", gm.graph)
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -1040,6 +1040,7 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
+    print("GRAPH", gm.graph)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,

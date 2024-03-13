@@ -65,6 +65,7 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
             match_pattern = get_aten_graph_module(
                 _WrapperModule(dropout_train), example_inputs
             )
+            match_pattern.graph.eliminate_dead_code()
             replacement_pattern = get_aten_graph_module(
                 _WrapperModule(dropout_eval), example_inputs
             )
@@ -72,6 +73,7 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
             match_pattern = get_aten_graph_module(
                 _WrapperModule(dropout_eval), example_inputs
             )
+            match_pattern.graph.eliminate_dead_code()
             replacement_pattern = get_aten_graph_module(
                 _WrapperModule(dropout_train), example_inputs
             )
