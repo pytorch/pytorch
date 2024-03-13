@@ -15,10 +15,6 @@
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #endif
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-#include <cuda_bf16.h>
-#endif
-
 namespace at::native {
 
 namespace detail {
@@ -460,7 +456,7 @@ get_chunk_cat_metadata(
   num_blocks_per_tensor_chunk.reserve(num_tensors);
   start_block_idx_per_tensor_chunk.reserve(num_tensors + 1);
   actual_tensor_sizes.reserve(num_tensors);
-  tensor_idx_to_start_tensor_bytes.reserve(num_tensors);
+  tensor_idx_to_start_tensor_bytes.reserve(num_tensors + 1);
   srcs.reserve(num_tensors);
   //  block_idx_to_tensor_idx cannot be reserved since the number of blocks is
   //  data dependent
@@ -749,6 +745,9 @@ Tensor& _chunk_cat_out_cuda(
   if (both_input_output_contiguous &&
       (tensors[0].dtype() == at::ScalarType::BFloat16) &&
       (out.dtype() == at::ScalarType::Float)) {
+    // _chunk_cat_out_cuda_contiguous should also support other types, thanks to
+    // static_cast_with_inter_type. Here, we dispatch to BFloat16 in and float32
+    // out since it is the only known use case.
     detail::_chunk_cat_out_cuda_contiguous<float, BFloat16>(
         tensors,
         dim,
