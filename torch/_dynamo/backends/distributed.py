@@ -521,15 +521,15 @@ class DDPOptimizer:
             if node.op == "call_module":
                 target_mod = gm.get_submodule(node.target)
                 if target_mod not in processed_modules:
-                    self.add_module_params_to_bucket(target_mod, buckets[0], processed_modules, node.target)
+                    self.add_module_params_to_bucket(
+                        target_mod, buckets[0], processed_modules, node.target
+                    )
             elif node.op == "call_method":
-                try:
-                    target_mod = gm.get_submodule(node.args[0].target)
-                    if isinstance(target_mod, torch.nn.Module) and target_mod not in processed_modules:
-                        self.add_module_params_to_bucket(target_mod, buckets[0], processed_modules, node.target)
-                except AttributeError:
-                    # call_method with no target module, e.g. x.reshape(5,3)
-                    pass
+                target_mod = gm.try_get_submodule(node.args[0].target)
+                if target_mod is not None and target_mod not in processed_modules:
+                    self.add_module_params_to_bucket(
+                        target_mod, buckets[0], processed_modules, node.target
+                    )
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if (
