@@ -228,6 +228,7 @@ filegroup(
         [
             "aten/src/ATen/cuda/*.cpp",
             "aten/src/ATen/cuda/detail/*.cpp",
+            "aten/src/ATen/cuda/tunable/*.cpp",
             "aten/src/ATen/cudnn/*.cpp",
             "aten/src/ATen/native/cuda/*.cpp",
             "aten/src/ATen/native/cuda/linalg/*.cpp",
@@ -413,6 +414,7 @@ cc_library(
         "@cuda//:cusolver",
         "@cuda//:nvrtc",
         "@cudnn",
+        "@cudnn_frontend",
     ],
     alwayslink = True,
 )

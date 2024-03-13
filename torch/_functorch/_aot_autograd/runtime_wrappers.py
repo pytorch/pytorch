@@ -69,10 +69,15 @@ def create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
+    num_tokens = len(runtime_metadata.tokens)
+
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(*args):
+        # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+        args = (*[torch.tensor([])] * num_tokens, *args)
+
         if trace_joint:
             args_ = list(args)
             # See Note [Detaching inputs that never need gradients]
@@ -90,7 +95,14 @@ def create_runtime_wrapper(
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            with torch.no_grad():
+            if torch.is_grad_enabled():
+                with torch.no_grad():
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn,
+                        args,
+                        disable_amp=disable_amp,
+                    )
+            else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
@@ -113,7 +125,11 @@ def create_runtime_wrapper(
             == num_mutated_runtime_inps
             + runtime_metadata.num_outputs
             + num_intermediate_bases
+            + num_tokens
         )
+
+        # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+        all_outs = all_outs[num_tokens:]
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices

@@ -11,8 +11,9 @@ import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import \
-    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
+    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck, skipIfRocmVersionLessThan
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
@@ -65,13 +66,14 @@ class ForeachFuncWrapper:
             assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
-        # note(mkozuki): inplace foreach functions are void functions.
-        return inputs[0] if self.is_inplace else actual
+        if self.is_inplace:
+            assert id(inputs[0]) == id(actual)
+        return actual
 
 
 class InplaceForeachVersionBumpCheck:
 
-    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:
+    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:  # noqa: F821
         self._testcase = testcase
         self._tensorlist = tensorlist
         self._orig_version_counts = [t._version for t in tensorlist]
@@ -133,7 +135,7 @@ class TestForeach(TestCase):
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
+    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )
@@ -646,6 +648,20 @@ class TestForeach(TestCase):
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
+    @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
+    def test_big_num_tensors(self, device, dtype, op):
+        N = 600
+        tensorlist = [make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False) for _ in range(N)]
+        fn, ref_fn, *_ = self._get_funcs(op)
+
+        import math
+        for ord in (1, 2, math.inf):
+            actual = fn(inputs=[tensorlist], is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
+            expect = ref_fn(inputs=[tensorlist], ord=ord)
+
+            self.assertEqual(expect, actual, equal_nan=True)
+
+    @onlyCUDA
     @ops(foreach_reduce_op_db)
     def test_foreach_reduce_large_input(self, device, dtype, op):
         # test inputs larger than kChunkSize = 65536
@@ -746,7 +762,7 @@ class TestForeach(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1), "requires multiple GPUs")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensors_grouping(self):
         num_tensors_per_list = 10
         num_devices = torch.cuda.device_count()

@@ -14,11 +14,10 @@ from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
-from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
-from typing_extensions import TypeAlias  # Python 3.10+
+from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO, List
+from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 import copyreg
 import pickle
-import pathlib
 import torch._weights_only_unpickler as _weights_only_unpickler
 
 DEFAULT_PROTOCOL = 2
@@ -68,7 +67,7 @@ def mkdtemp():
         shutil.rmtree(path)
 
 
-_package_registry = []
+_package_registry: List[Tuple[int, Callable[[STORAGE], Optional[str]], Callable[[STORAGE, str], Optional[STORAGE]]]] = []
 
 class LoadEndianness(Enum):
     NATIVE = 1
@@ -406,8 +405,8 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _is_path(name_or_buffer):
-    return isinstance(name_or_buffer, (str, pathlib.Path))
+def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
+    return isinstance(name_or_buffer, (str, os.PathLike))
 
 
 class _opener:
@@ -566,7 +565,7 @@ def _check_dill_version(pickle_module) -> None:
 
 
 def _check_save_filelike(f):
-    if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
+    if not _is_path(f) and not hasattr(f, 'write'):
         raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
             "a 'write' attribute")
@@ -860,7 +859,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        zip_file.write_record(name, storage, num_bytes)
 
 
 def load(
@@ -1010,10 +1009,10 @@ def load(
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
-                    if not isinstance(f, str):
-                        raise ValueError("f must be a string filename in order to use mmap argument")
+                    if not _is_path(f):
+                        raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    overall_storage = torch.UntypedStorage.from_file(f, False, size)
+                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), False, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,
@@ -1029,8 +1028,9 @@ def load(
                              overall_storage=overall_storage,
                              **pickle_load_args)
         if mmap:
+            f_name = "" if not isinstance(f, str) else f"{f}, "
             raise RuntimeError("mmap can only be used with files saved with "
-                               "`torch.save(_use_new_zipfile_serialization=True), "
+                               f"`torch.save({f_name}_use_new_zipfile_serialization=True), "
                                "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:
             try:
@@ -1167,7 +1167,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     numel = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
-                    tensor = torch.tensor([], dtype=storage.dtype).set_(
+                    tensor = torch.empty((0,), dtype=storage.dtype).set_(
                         storage._untyped_storage, storage_offset, numel, stride)
                     deserialized_objects[key] = tensor
 
@@ -1197,12 +1197,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             nbytes = numel * torch._utils._element_size(dtype)
 
             if root_key not in deserialized_objects:
-                obj = cast(Storage, torch.UntypedStorage(nbytes))
-                obj._torch_load_uninitialized = True
+                if torch._guards.active_fake_mode() is not None:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes, device='meta'))
+                else:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes))
+                    obj._torch_load_uninitialized = True
+                    obj = restore_location(obj, location)
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
                 typed_storage = torch.storage.TypedStorage(
-                    wrap_storage=restore_location(obj, location),
+                    wrap_storage=obj,
                     dtype=dtype,
                     _internal=True)
                 deserialized_objects[root_key] = typed_storage
@@ -1269,15 +1273,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    offset = f.tell() if f_should_read_directly else None
-    for key in deserialized_storage_keys:
-        assert key in deserialized_objects
-        typed_storage = deserialized_objects[key]
-        typed_storage._untyped_storage._set_from_file(
-            f, offset, f_should_read_directly,
-            torch._utils._element_size(typed_storage.dtype))
-        if offset is not None:
-            offset = f.tell()
+    if torch._guards.active_fake_mode() is None:
+        offset = f.tell() if f_should_read_directly else None
+        for key in deserialized_storage_keys:
+            assert key in deserialized_objects
+            typed_storage = deserialized_objects[key]
+            typed_storage._untyped_storage._set_from_file(
+                f, offset, f_should_read_directly,
+                torch._utils._element_size(typed_storage.dtype))
+            if offset is not None:
+                offset = f.tell()
 
     torch._utils._validate_loaded_sparse_tensors()
 
@@ -1366,7 +1371,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-        if overall_storage is not None:
+        if torch._guards.detect_fake_mode(None) is not None:
+            nbytes = numel * torch._utils._element_size(dtype)
+            storage = torch.UntypedStorage(nbytes, device='meta')
+        elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
         else:

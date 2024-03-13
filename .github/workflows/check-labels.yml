@@ -9,13 +9,14 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
-    paths-ignore: [.github]
 
-  # To allow testing PRs that change workflows.
-  # May be triggered together with pull_request_target, it's OK.
+  # To check labels on ghstack PRs.
+  # Note: as pull_request doesn't trigger on PRs targeting main,
+  # to test changes to the workflow itself one needs to create
+  # a PR that targets a gh/**/base branch.
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths: [.github]
+    branches: [gh/**/base]
 
   workflow_dispatch:
 
@@ -26,6 +27,7 @@ concurrency:
 jobs:
   check-labels:
     name: Check labels
+    if: github.repository_owner == 'pytorch'
     runs-on: linux.20_04.4x
     steps:
       - name: Checkout PyTorch

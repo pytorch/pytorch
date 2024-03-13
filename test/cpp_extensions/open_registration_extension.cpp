@@ -48,8 +48,6 @@ void abs_kernel(::at::TensorIteratorBase& iter) {
   abs_counter += 1;
 }
 
-} // namespace
-
 void quantize_tensor_per_tensor_affine_privateuse1(
     const at::Tensor& rtensor,
     at::Tensor& qtensor,
@@ -57,6 +55,8 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     int64_t zero_point) {
     // do nothing
 }
+
+} // namespace
 
 namespace at::native {
 
@@ -137,10 +137,17 @@ void custom_set_backend_meta(const at::Tensor& t) {
 // A dummy storageImpl for our custom device, that secretly uses the CPU
 c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t,
                                                               c10::SymInt size_bytes,
+                                                              c10::DataPtr data_ptr,
                                                               c10::Allocator* allocator,
                                                               bool resizable) {
-  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
+  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl;
+  if (data_ptr == nullptr){
+    custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
+  } else {
+    custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(), size_bytes, std::move(data_ptr), allocator, resizable);
+  }
   storageImpl_counter += 1;
   return custom_storage_impl;
 }
@@ -173,7 +180,7 @@ at::Tensor& custom_abs_out(const at::Tensor& self, at::Tensor& out) {
 // A dummy allocator for our custom device, that secretly uses the CPU
 struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     void* data = c10::alloc_cpu(nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, custom_device_index)};
   }
@@ -187,6 +194,10 @@ struct DummyCustomAllocator final : at::Allocator {
 
   at::DeleterFnPtr raw_deleter() const override {
     return &ReportAndDelete;
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
   }
 };
 
@@ -362,6 +373,7 @@ void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices

@@ -8,7 +8,7 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
-from torch.optim import Adam, SGD
+from torch.optim import Adam, SGD, Rprop
 from torch.optim.lr_scheduler import (
     LambdaLR,
     MultiplicativeLR,
@@ -685,6 +685,14 @@ class TestLRScheduler(TestCase):
             cooldown=5,
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_get_last_lr_before_step(self):
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+        )
+        self.assertEqual(scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups])
 
     def test_sequentiallr1(self):
         epochs = 19
@@ -1510,8 +1518,12 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
         with self.assertRaises(ValueError):
-            adam_opt = Adam(self.net.parameters())
-            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+            rprop_opt = Rprop(self.net.parameters())
+            scheduler = CyclicLR(rprop_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+
+    def test_cycle_lr_cycle_momentum_with_beta1_optimizer(self):
+        adam_opt = Adam(self.net.parameters())
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
 
     def test_cycle_lr_removed_after_out_of_scope(self):
         import gc

@@ -3,6 +3,9 @@
 #include <ATen/core/boxing/impl/WrapFunctionIntoFunctor.h>
 #include <ATen/core/boxing/impl/WrapFunctionIntoRuntimeFunctor.h>
 
+#include <c10/util/C++17.h>
+#include <type_traits>
+
 namespace c10 {
 
 inline KernelFunction::KernelFunction()
@@ -83,8 +86,7 @@ C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, Di
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
-    // This should get inlined by compiler
-    if (guts::disjunction<has_symint<Args>...>::value) {
+    if constexpr (std::disjunction_v<has_symint<Args>...>) {
       if (sym_unboxed_kernel_func_ != nullptr) {
         auto *functor = boxed_kernel_func_.getFunctor();
         return callUnboxedKernelFunction<Return, Args...>(
