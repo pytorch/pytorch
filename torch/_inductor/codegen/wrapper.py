@@ -1107,7 +1107,7 @@ class WrapperCodeGen(CodeGen):
 
         inductor_meta = {
             "kernel_name": name,
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            # "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
 
         configs = [
