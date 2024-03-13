@@ -210,6 +210,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfRocm
     @requires_cuda
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
