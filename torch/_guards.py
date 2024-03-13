@@ -10,7 +10,7 @@ import threading
 import traceback
 import unittest.mock
 import weakref
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import contextmanager
 from typing import (
     Any,
@@ -329,7 +329,7 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 """
 
 
-class Checkpointable(ABC, Generic[T]):
+class Checkpointable(Generic[T]):
     @abstractmethod
     def copy_graphstate(self) -> T:
         ...
@@ -733,9 +733,22 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name
+        TracingContext.get()._set_current_loc(filename, lineno, frame_name)
+
+    def _set_current_loc(self, filename, lineno, frame_name):
+        self.loc_in_frame = traceback.FrameSummary(
+            filename, lineno, frame_name, lookup_line=False
         )
+
+    @staticmethod
+    def set_current_loc_partial():
+        # This is expensive, so precompute it
+        ctx = TracingContext.get()
+
+        def set_current_loc(filename, lineno, frame_name):
+            ctx.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+
+        return set_current_loc
 
 
 @contextmanager
