@@ -269,9 +269,6 @@ threeOutputs linalg_lu_unpack_batch_rule(
     const Tensor& LU, optional<int64_t> LU_bdim,
     const Tensor& pivots, optional<int64_t> pivots_bdim,
     bool unpack_data, bool unpack_pivots) {
-  const auto LU_min_rank = 2;
-  const auto pivots_min_rank = 1;
-
   auto LU_ = moveBatchDimToFront(LU, LU_bdim);
   auto pivots_ = moveBatchDimToFront(pivots, pivots_bdim);
 
