@@ -150,7 +150,7 @@ def get_dequantize_qconv_pt2e_pattern(users=1):
     )
 
 
-def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors):
+def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):
     qlinear_op = (
         torch.ops.onednn.qlinear_pointwise.tensor
         if x_scale_zp_are_tensors
@@ -171,6 +171,7 @@ def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors):
         KeywordArg("postop_name"),
         KeywordArg("postop_args"),
         KeywordArg("postop_algorithm"),
+        _users=users,
     )
 
 
@@ -605,6 +606,11 @@ def _register_quantized_conv_binary_lowering(
 
 
 def _register_quantization_unary_fusion():
+    from .mkldnn_fusion import (
+        _gelu_fusion_1 as _gelu_fusion_erf,
+        _gelu_fusion_2 as _gelu_fusion_tanh,
+    )
+
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
             self.op_name = op_name
@@ -689,6 +695,18 @@ def _register_quantization_unary_fusion():
                     generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
                     dtype=original_pattern_output_dtype,
                 ),
+                UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
+                    _gelu_fusion_erf(
+                        get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 2)
+                    ),
+                    dtype=original_pattern_output_dtype,
+                ),
+                UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
+                    _gelu_fusion_tanh(
+                        get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 4)
+                    ),
+                    dtype=original_pattern_output_dtype,
+                ),
             }
 
             for unary_attr, patterns in linear_unary_replace_patterns.items():
@@ -705,6 +723,12 @@ def _register_quantization_unary_fusion():
             linear_unary_replace_float_out_patterns = {
                 UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                     qlinear_pattern, aten.relu.default
+                ),
+                UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(
+                    get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 2)
+                ),
+                UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(
+                    get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 4)
                 ),
             }
 
