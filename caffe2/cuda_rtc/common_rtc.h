@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CUDA_RTC_COMMON_RTC_H_
 #define CAFFE2_CUDA_RTC_COMMON_RTC_H_
 
+#include <locale.h>
 #include <sstream>
 #include <string>
 
@@ -46,7 +47,10 @@ class CudaRTCFunction {
     // coding it?
     const char* nvrtc_opts[] = {
         "--gpu-architecture=compute_35", "--use_fast_math"};
+    locale_t oldLocale = uselocale((locale_t) 0);
     nvrtcResult compile_result = nvrtcCompileProgram(prog, 2, nvrtc_opts);
+    if (oldLocale != (locale_t) 0)
+      uselocale(oldLocale);
     if (compile_result != NVRTC_SUCCESS) {
       size_t log_size;
       NVRTC_CHECK(nvrtcGetProgramLogSize(prog, &log_size));
