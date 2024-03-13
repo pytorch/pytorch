@@ -157,6 +157,7 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
+        self.cuda_kernel_saved = False
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -357,7 +358,16 @@ class CachingAutotuner(KernelInterface):
             # need to initialize context
             self.gpu_device.synchronize(self.gpu_device.current_device())
 
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            try:
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            except Exception:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
             binary._init_handles()
 
         call_args = [
@@ -563,6 +573,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.bin.asm["hsaco_path"]
             ).read_bytes()
             CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+
+        self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
@@ -845,14 +857,18 @@ def cached_autotune(
                 key = backend_hash + configs_hash + "autotune-best-config"
                 key = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
-                if config.is_fbcode():
-                    remote_cache = (
-                        triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
-                            key, is_autotune=True
+                try:
+                    if config.is_fbcode():
+                        remote_cache = (
+                            triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
+                                key, is_autotune=True
+                            )
                         )
-                    )
-                else:
-                    remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
                 # we already sha256 hash the source contents
                 remote_cache_key = os.path.basename(filename)
             else:
