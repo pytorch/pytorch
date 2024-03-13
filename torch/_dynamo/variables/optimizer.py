@@ -5,7 +5,6 @@ from typing import Dict, List
 
 import torch
 
-from ..decorators import mark_static_address
 from ..exc import Unsupported
 
 from ..guards import GuardBuilder, install_guard
@@ -37,6 +36,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
+        from ..decorators import mark_static_address
+
         super().__init__(value, **kwargs)
 
         for group in self.value.param_groups:
@@ -178,6 +179,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
+        from ..decorators import mark_static_address
         from .builder import VariableBuilder
 
         # If we have a source for a tensor already use it,
