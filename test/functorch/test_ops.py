@@ -1094,7 +1094,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
         xfail('fill'),
@@ -1103,11 +1102,9 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
@@ -1124,7 +1121,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
         xfail('linalg.lu', ''),
-        xfail('linalg.lu_solve', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
@@ -1166,8 +1162,6 @@ class TestOperators(TestCase):
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('linalg.householder_product'),
-        xfail('lu'),
-        xfail('lu_solve'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
@@ -1195,13 +1189,11 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.fractional_max_pool2d'),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
 
         xfail('nn.functional.max_unpool2d', ''),
         xfail('nn.functional.multi_margin_loss', ''),
@@ -1215,7 +1207,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('linalg.lu', ''),
-        xfail('linalg.lu_solve', ''),
         xfail('cdouble', ''),
         xfail('cfloat', ''),
         xfail('chalf', ''),
