@@ -665,30 +665,6 @@ class Module:
 
         return mod
 
-    def try_get_submodule(self, target: str) -> Optional["Module"]:
-        """Return the submodule given by ``target`` if it exists, otherwise return None.
-
-        See the docstring for ``get_submodule`` for a more detailed
-        explanation of this method's functionality as well as how to
-        correctly specify ``target``.
-
-        Args:
-            target: The fully-qualified string name of the submodule
-                to look for. (See ``get_submodule`` for how to specify a
-                fully-qualified string.)
-        """
-        if target == "":
-            return self
-        atoms: List[str] = target.split(".")
-        mod: torch.nn.Module = self
-        for item in atoms:
-            if not hasattr(mod, item):
-                return None
-            mod = getattr(mod, item)
-            if not isinstance(mod, torch.nn.Module):
-                return None
-        return mod
-
     def get_parameter(self, target: str) -> "Parameter":
         """Return the parameter given by ``target`` if it exists, otherwise throw an error.
 
