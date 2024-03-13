@@ -1,5 +1,5 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
-#include <torch/csrc/inductor/aoti_eager/aoti_static_checker.h>
+#include <torch/csrc/inductor/aoti_eager/static_checker.h>
 
 namespace torch::inductor {
 

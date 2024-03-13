@@ -1,10 +1,9 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 
 #include <ATen/ATen.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>

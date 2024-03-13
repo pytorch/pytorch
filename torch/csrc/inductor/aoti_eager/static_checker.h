@@ -1,8 +1,8 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #pragma once
 
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_checker.h>
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_meta_info.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_checker.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 
 namespace torch::inductor {
 
