@@ -68,7 +68,7 @@ def check_file(
     try:
         proc = run_command([
             binary,
-            '-ignore',
+            "-ignore",
             '"runs-on" section must be sequence node but got mapping node with "!!map" tag',
             file
         ])
