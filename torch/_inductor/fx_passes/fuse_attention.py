@@ -586,9 +586,7 @@ def _get_sfdp_patterns():
     )
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
-
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
-    m_transposed_inp = functools.partial(torch.empty, (2, 1, 1, 8), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -613,7 +611,6 @@ def _get_sfdp_patterns():
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
-        m_transposed_inputs = functools.partial(m_transposed_inp, dtype=dtype)
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
