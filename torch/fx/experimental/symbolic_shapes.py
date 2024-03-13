@@ -1824,6 +1824,29 @@ class DimConstraints:
 TLS = threading.local()
 
 
+@dataclass(frozen=True)
+class CreateSymbolicSizesStridesStorageOffsetInput:
+    size: Tuple[int, ...]
+    stride: Tuple[int, ...]
+    storage_offset: int
+    dynamo_dynamic_indices: Set[int]
+
+    @classmethod
+    def from_tensor(cls, ex):
+        return cls(
+            ex.size(),
+            ex.stride(),
+            ex.storage_offset(),
+            getattr(ex, "_dynamo_dynamic_indices", set())
+        )
+
+    def dim(self):
+        return len(self.size)
+
+    def is_dim_dynamic(self, i):
+        return i in self.dynamo_dynamic_indices
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -2277,9 +2300,20 @@ class ShapeEnv:
             ))
         return size
 
+    # TODO: This is just for testing convenienced, rename accordingly
     def create_symbolic_sizes_strides_storage_offset(
         self,
         ex: torch.Tensor,
+        source: Source,
+        *,
+        symbolic_context: Optional[SymbolicContext] = None,
+    ):
+        inp = CreateSymbolicSizesStridesStorageOffsetInput.from_tensor(ex)
+        return self.hermetic_create_symbolic_sizes_strides_storage_offset(inp, source, symbolic_context=symbolic_context)
+
+    def hermetic_create_symbolic_sizes_strides_storage_offset(
+        self,
+        ex: CreateSymbolicSizesStridesStorageOffsetInput,
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
@@ -2332,15 +2366,15 @@ class ShapeEnv:
                 return maybe_sym.node.require_hint()
             return maybe_sym
 
-        ex_size = tuple(maybe_specialize_sym_int_with_hint(sz) for sz in ex.size())
-        ex_stride = tuple(maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride())
-        ex_storage_offset = maybe_specialize_sym_int_with_hint(ex.storage_offset())
+        ex_size = tuple(maybe_specialize_sym_int_with_hint(sz) for sz in ex.size)
+        ex_stride = tuple(maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride)
+        ex_storage_offset = maybe_specialize_sym_int_with_hint(ex.storage_offset)
 
         return self._create_symbolic_sizes_strides_storage_offset(
             ex_size,
             ex_stride,
             ex_storage_offset,
-            [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
+            [ex.is_dim_dynamic(i) for i in range(ex.dim())],
             source,
             symbolic_context=symbolic_context,
         )
