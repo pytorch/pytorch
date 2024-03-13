@@ -678,7 +678,7 @@ def min_cut_rematerialization_partition(
     if config.cse:
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
-    full_bw_graph = joint_module.graph
+    joint_graph = joint_module.graph
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
@@ -717,6 +717,19 @@ def min_cut_rematerialization_partition(
     # this case, send our graph over to the default partitioner.
     if len(required_bw_nodes) == 0:
         return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+
+    def is_fusible(a, b):
+        # We can perform "memory fusion" into a cat, but cat cannot be a
+        # producer to a fusion
+        if get_aten_target(b) == aten.cat:
+            return True
+        return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
+
+    fw_order = 0
+    for node in joint_module.graph.nodes:
+        if node in required_fw_nodes:
+            node.fw_order = fw_order
+            fw_order += 1
 
     for node in reversed(joint_module.graph.nodes):
         if node not in required_fw_nodes:
@@ -826,12 +839,6 @@ def min_cut_rematerialization_partition(
             output_size = _size_of(node)
             return (output_size * 4 < input_tensors_size)
 
-    def is_fusible(a, b):
-        # We can perform "memory fusion" into a cat, but cat cannot be a
-        # producer to a fusion
-        if get_aten_target(b) == aten.cat:
-            return True
-        return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
         if node.op == 'placeholder':
@@ -851,7 +858,7 @@ def min_cut_rematerialization_partition(
             return mem_sz * 2
 
     nx_graph = nx.DiGraph()
-    for node in full_bw_graph.nodes:
+    for node in joint_graph.nodes:
         if node.op == 'output':
             continue
 
@@ -893,6 +900,31 @@ def min_cut_rematerialization_partition(
         nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
         for user in node.users:
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
+
+    visited = set()
+    for start_node in joint_graph.nodes:
+        if start_node not in required_fw_nodes:
+            continue
+        import heapq
+        fusible = [(start_node.fw_order, start_node)]
+        start_pos = start_node.fw_order
+        # print("---------", start_node, start_node.fw_order)
+        start_order = start_node.fw_order
+        while len(fusible) > 0:
+            _, cur = heapq.heappop(fusible)
+            if cur in visited:
+                continue
+            visited.add(cur)
+            # print(cur, cur.fw_order, len(fusible))
+            if cur.fw_order > start_order + 50 and len(fusible) == 0:
+                print("force materializing ", cur, start_node, cur.fw_order, start_node.fw_order)
+                nx_graph.add_edge("source", cur.name + "_in", capacity=math.inf)
+                break
+
+            for user in cur.users:
+                if user in required_fw_nodes and is_fusible(cur, user):
+                    heapq.heappush(fusible, (user.fw_order, user))
+
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
