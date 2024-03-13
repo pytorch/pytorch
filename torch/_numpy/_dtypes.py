@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """ Define analogs of numpy dtypes supported by pytorch.
 Define the scalar types and supported dtypes and numpy <--> torch dtype mappings.
 """
@@ -12,9 +14,7 @@ from . import _dtypes_impl
 
 
 class generic:
-    @property
-    def name(self):
-        return self.__class__.__name__
+    name = "generic"
 
     def __new__(cls, value):
         # NumPy scalars are modelled as 0-D arrays
@@ -37,32 +37,43 @@ class generic:
 
 
 class number(generic):
-    pass
+    name = "number"
 
 
 class integer(number):
-    pass
+    name = "integer"
 
 
 class inexact(number):
-    pass
+    name = "inexact"
 
 
 class signedinteger(integer):
-    pass
+    name = "signedinteger"
 
 
 class unsignedinteger(integer):
-    pass
+    name = "unsignedinteger"
 
 
 class floating(inexact):
-    pass
+    name = "floating"
 
 
 class complexfloating(inexact):
-    pass
+    name = "complexfloating"
 
+
+_abstract_dtypes = [
+    "generic",
+    "number",
+    "integer",
+    "signedinteger",
+    "unsignedinteger",
+    "inexact",
+    "floating",
+    "complexfloating",
+]
 
 # ##### concrete types
 
@@ -399,6 +410,17 @@ def issubclass_(arg, klass):
 
 def issubdtype(arg1, arg2):
     # cf https://github.com/numpy/numpy/blob/v1.24.0/numpy/core/numerictypes.py#L356-L420
+
+    # We also accept strings even if NumPy doesn't as dtypes are serialized as their
+    # string representation in dynamo's graph
+    def str_to_abstract(t):
+        if isinstance(t, str) and t in _abstract_dtypes:
+            return globals()[t]
+        return t
+
+    arg1 = str_to_abstract(arg1)
+    arg2 = str_to_abstract(arg2)
+
     if not issubclass_(arg1, generic):
         arg1 = dtype(arg1).type
     if not issubclass_(arg2, generic):
@@ -406,17 +428,7 @@ def issubdtype(arg1, arg2):
     return issubclass(arg1, arg2)
 
 
-__all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype"]
+__all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype", "sctypes"]
 __all__ += list(_names.keys())  # noqa: PLE0605
 __all__ += list(_name_aliases.keys())  # noqa: PLE0605
-__all__ += [  # noqa: PLE0605
-    "sctypes",
-    "generic",
-    "number",
-    "integer",
-    "signedinteger",
-    "unsignedinteger",
-    "inexact",
-    "floating",
-    "complexfloating",
-]
+__all__ += _abstract_dtypes  # noqa: PLE0605

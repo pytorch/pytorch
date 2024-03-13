@@ -238,6 +238,8 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
+aten::frexp.Tensor
+aten::frexp.Tensor_out
 aten::full
 aten::full.out
 aten::gcd
@@ -267,6 +269,8 @@ aten::hardtanh.out
 aten::hypot
 aten::hypot.out
 aten::hypot_
+aten::i0
+aten::i0.out
 aten::i0_
 aten::igamma
 aten::igamma.out
@@ -417,8 +421,10 @@ aten::remainder_.Scalar
 aten::remainder_.Tensor
 aten::repeat
 aten::repeat.out
-aten::roll
-aten::roll.out
+aten::round
+aten::round.decimals
+aten::round.decimals_out
+aten::round.out
 aten::round_
 aten::round_.decimals
 aten::rrelu_with_noise_backward

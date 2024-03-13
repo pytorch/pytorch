@@ -30,6 +30,10 @@ inline PyObject* wrap(bool value) {
   }
 }
 
+inline PyObject* wrap(c10::DeviceIndex value) {
+  return THPUtils_packDeviceIndex(value);
+}
+
 inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
 }

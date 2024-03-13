@@ -83,12 +83,10 @@ class _Checkpointer:
         Returns:
             Future: A future holding the resultant Metadata object from `save`.
         """
-        return saver._async_save(
+        return saver.async_save(
             state_dict,
-            self.storage_writer,
+            storage_writer=self.storage_writer,
             process_group=self.process_group,
-            coordinator_rank=self.coordinator_rank,
-            no_dist=self.no_dist,
             planner=self.save_planner,
         )
 
@@ -98,7 +96,5 @@ class _Checkpointer:
             state_dict,
             storage_reader=self.storage_reader,
             process_group=self.process_group,
-            coordinator_rank=self.coordinator_rank,
-            no_dist=self.no_dist,
             planner=self.load_planner,
         )

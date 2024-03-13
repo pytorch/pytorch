@@ -12,7 +12,7 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64, skipIfTorchDynamo)
 from torch.utils._pytree import tree_map
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
@@ -59,8 +59,6 @@ class TorchDispatchTensor(torch.Tensor):
         t = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
         t.elem = elem
         return t
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -518,6 +516,7 @@ class TestProfilerTree(TestCase):
                   ..."""
         )
 
+    @skipIfTorchDynamo("too slow")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):

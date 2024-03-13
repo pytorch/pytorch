@@ -215,6 +215,8 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
 
                 # sharing with other users of the producer node
                 # (arg, user)
+                if not isinstance(arg, Node) or not isinstance(n, Node):
+                    raise Exception(f"Expected input_edge to have type Tuple[Node, Node], but got: {arg, n}")
                 for user in arg.users:
                     if user is n:
                         continue
@@ -359,11 +361,22 @@ def _maybe_insert_input_observers_for_node(
     # Look through every input arg.  If that arg's target dtype does not
     # match the current node's target dtype, insert an observer.
     new_args = []
+    # map from old arg to new arg, used for updating the numeric debug handle map
+    remap = {}
     for arg in node.args:
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, named_modules, obs_or_fq_map, is_qat,
         )
         new_args.append(new_arg)
+        remap[arg] = new_arg
+
+    if "numeric_debug_handle" in node.meta:
+
+        def remap_fn(x):
+            return remap.get(x, x)
+
+        numeric_debug_handle = node.meta["numeric_debug_handle"]
+        node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
 
     # Clone has a memory_format kwarg and zeros_like has a pin_memory kwarg
     # that persist in exported graph. This is just a work around for these.

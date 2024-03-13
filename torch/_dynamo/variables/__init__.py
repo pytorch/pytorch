@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -5,10 +7,13 @@ from .ctx_manager import (
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
+    GradIncrementNestingCtxManagerVariable,
+    GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
     StreamContextVariable,
     StreamVariable,
+    VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
@@ -18,12 +23,18 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
+from .distributed import BackwardHookVariable
 from .functions import (
+    FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .higher_order_ops import (
+    FunctorchHigherOrderVariable,
+    TorchHigherOrderOperatorVariable,
+)
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
@@ -51,33 +62,37 @@ from .misc import (
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    MethodWrapperVariable,
     NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
+    TypingVariable,
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
+    UntypedStorageVariable,
 )
-from .torch import (
-    TorchCtxManagerClassVariable,
-    TorchInGraphFunctionVariable,
-    TorchVariable,
+from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .user_defined import (
+    RemovableHandleVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
 )
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
+    "BackwardHookVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "ClosureVariable",
@@ -111,20 +126,22 @@ __all__ = [
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
+    "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
-    "SkipFilesVariable",
+    "SDPAParamsVariable",
+    "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
-    "TorchVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
     "UnspecializedPythonVariable",
+    "UntypedStorageVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",

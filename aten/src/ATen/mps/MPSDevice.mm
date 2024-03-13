@@ -14,8 +14,8 @@ static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device, bool macOS13Plus) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
-  // host_name attribute needs at least Metal 2.2
-  MTLLanguageVersion languageVersion = MTLLanguageVersion2_2;
+  // host_name attribute needs at least Metal 2.2 and ulong needs Metal 2.3 (supported on MacOS 11+
+  MTLLanguageVersion languageVersion = MTLLanguageVersion2_3;
 #if defined(__MAC_13_0)
   if (macOS13Plus) {
     languageVersion = MTLLanguageVersion3_0;
@@ -59,11 +59,7 @@ id<MTLComputePipelineState> MPSDevice::metalIndexingPSO(const std::string& kerne
 
   id<MTLFunction> indexFunction =
       [[indexing_lib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]] autorelease];
-  TORCH_CHECK(indexFunction,
-              "Failed to create specialized function state object: ",
-              kernel,
-              ", error: ",
-              [[error description] UTF8String]);
+  TORCH_CHECK(indexFunction, "Can't find function ", kernel);
 
   state = [_mtl_device newComputePipelineStateWithFunction:indexFunction error:&error];
   TORCH_CHECK(state, error.localizedDescription.UTF8String);

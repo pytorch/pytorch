@@ -122,9 +122,12 @@ def check_files(
     retries: int,
     code: str,
 ) -> List[LintMessage]:
+    # dmypy has a bug where it won't pick up changes if you pass it absolute
+    # file names, see https://github.com/python/mypy/issues/16768
+    filenames = [os.path.relpath(f) for f in filenames]
     try:
         proc = run_command(
-            [sys.executable, "-mmypy", f"--config={config}"] + filenames,
+            ["dmypy", "run", "--", f"--config={config}"] + filenames,
             extra_env={},
             retries=retries,
         )
