@@ -560,6 +560,12 @@ if(CMAKE_COMPILER_IS_GNUCXX)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
 endif()
 
+# Enable conditional FP16 arithmetic intrinsics
+if(CPU_AARCH64 AND LINUX)
+set_source_files_properties(${TORCH_ROOT}/aten/src/ATen/native/BlasKernel.cpp PROPERTIES COMPILE_FLAGS "-march=armv8.2-a+fp16")
+endif()
+
+
 if(NOT INTERN_DISABLE_MOBILE_INTERP)
   set(MOBILE_SRCS
      ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
@@ -979,7 +985,8 @@ if(USE_ROCM)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
-    target_link_libraries(torch_hip PRIVATE __caffe2_oort)
+    target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
+    add_dependencies(torch_hip aotriton_external)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
