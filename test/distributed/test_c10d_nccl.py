@@ -331,7 +331,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             a = torch.tensor([[2, 4, 0], [8, 0, 12]]).to(self.rank)
             self.assertEqual(tensor_list[0], a)
         except RuntimeError as e:
-            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+            if "NCCL does not support all_reduce with sparse tensors" in str(e):
                 pass
             else:
                 # Rethrow the exception if it's a different error
@@ -4052,7 +4052,7 @@ class SparseCollective(MultiProcessTestCase):
             loss.backward()
             self.assertTrue(ddp_model.module.embedding.weight.grad.indices, indices)
         except RuntimeError as e:
-            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+            if "NCCL does not support all_reduce with sparse tensors" in str(e):
                 pass
             else:
                 # Rethrow the exception if it's a different error
