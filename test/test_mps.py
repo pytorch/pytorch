@@ -139,10 +139,6 @@ def mps_ops_grad_modifier(ops):
         # Unimplemented
         'logaddexp2': [torch.float32],
 
-        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
-        # fixed in macOS 13. We are not raising error.
-        '__rpow__': [torch.float32],
-        'pow': [torch.float32],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
@@ -159,11 +155,6 @@ def mps_ops_grad_modifier(ops):
         # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
         # Running `msort` with stable `sort` passes.
         'msort': [torch.float16],
-
-        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
-        # fixed in macOS 13. We are not raising error.
-        'pow': [torch.float32],
-        '__rpow__': [torch.float32],
 
         # See https://github.com/pytorch/pytorch/issues/106112 for more information
         'cumprod': [torch.float32, torch.float16],
@@ -6918,9 +6909,9 @@ class TestMPS(TestCaseMPS):
         # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
         self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
 
-        def compare_mm(m, n, k):
-            x = torch.rand(m, n, device="mps")
-            y = torch.rand(n, k, device="mps")
+        def compare_mm(m, n, k, dtype=torch.float):
+            x = torch.rand(m, n, device="mps", dtype=dtype)
+            y = torch.rand(n, k, device="mps", dtype=dtype)
             z = torch.mm(x, y).cpu()
             z_cpu = torch.mm(x.cpu(), y.cpu())
             self.assertEqual(z, z_cpu)
@@ -6930,6 +6921,10 @@ class TestMPS(TestCaseMPS):
         # one more time, but with dimensions inverted
         # see https://github.com/pytorch/pytorch/issues/116769#issuecomment-1920066984
         compare_mm(32769, 1, 1025)
+
+        if product_version >= 14.0:
+            # Test bfloat16 mm
+            compare_mm(1024, 1, 32769, torch.bfloat16)
 
     # Test flip
     def test_flip(self):
@@ -11395,7 +11390,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.gelu',
         'nn.functional.glu',
         '_native_batch_norm_legit',
-        '_batch_norm_with_update',
         'native_batch_norm',
         'softmax',
         '_softmax_backward_data',
@@ -11433,6 +11427,35 @@ class TestConsistency(TestCaseMPS):
         'addbmm',
     }
 
+    def _compute_tolerances(self, op, dtype):
+        if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+            return (1e-4, 3e-5)
+
+        if op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+            return (1e-2, 1e-2)
+
+        if op.name in ['nn.functional.conv_transpose1d',
+                       'nn.functional.conv_transpose2d',
+                       'nn.functional.conv_transpose3d',
+                       '__rmatmul__', 'addbmm', 'addmv',
+                       'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
+            return (5e-2, 5e-2)
+        if op.name == "masked.mean":
+            return (7e-4, 2e-3)
+        if op.name == "native_layer_norm":
+            return (1e-4, 1.3e-5)
+        if op.name in ["pow", "__rpow__"] and product_version < 13.3:
+            # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+            # fixed in macOS 13.3+
+            return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
+        if op.name == "nn.functional.interpolate":
+            return (1e-3, 1e-4)
+        if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+            # TODO: Investigate why this is needed
+            # See https://github.com/pytorch/pytorch/issues/120237
+            return (3e-5, 3e-5)
+        return (None, None)
+
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
@@ -11464,42 +11487,10 @@ class TestConsistency(TestCaseMPS):
             cpu_out = op(*cpu_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
-            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
-                atol = 1e-4
-                rtol = 3e-5
-            elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
-                atol = 1e-2
-                rtol = 1e-2
-            elif op.name in ['nn.functional.conv_transpose1d',
-                             'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d',
-                             '__rmatmul__', 'addbmm', 'addmv',
-                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
-                atol = 5e-2
-                rtol = 5e-2
-            elif op.name == "masked.mean":
-                atol = 7e-4
-                rtol = 2e-3
-            elif op.name == "native_layer_norm":
-                atol = 1e-4
-                rtol = 1.3e-5
-            elif op.name in ["pow", "__rpow__"]:
-                atol = 1e-6
-                rtol = 4e-6
-            elif op.name == "nn.functional.interpolate":
-                atol = 1e-3
-                rtol = 1e-4
-            elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
+            atol, rtol = self._compute_tolerances(op, dtype)
+            if op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
                 atol = 1.0
                 rtol = 0.0
-            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
-                # TODO: Investigate why this is needed
-                # See https://github.com/pytorch/pytorch/issues/120237
-                atol = 3e-5
-                rtol = 3e-5
-            else:
-                atol = None
-                rtol = None
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -11532,41 +11523,13 @@ class TestConsistency(TestCaseMPS):
             cpu_out = op(*cpu_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
-            if op.name in self.FP32_LOW_PRECISION_LIST and dtype == torch.float32:
-                atol = 1e-4
-                rtol = 3e-5
-            elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
-                atol = 1e-2
-                rtol = 1e-2
-            elif op.name in ['nn.functional.conv_transpose1d',
-                             'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d',
-                             '__rmatmul__', 'addbmm', 'addmv',
-                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
-                atol = 5e-2
-                rtol = 5e-2
-            elif (op.name == "masked.mean"):
-                atol = 7e-4
-                rtol = 2e-3
-            elif (op.name == "native_layer_norm"):
-                atol = 1e-4
-                rtol = 1.3e-5
-            elif op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
+            if op.name == "unique" and cpu_kwargs["sorted"] is False:
+                continue
+
+            atol, rtol = self._compute_tolerances(op, dtype)
+            if op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
                 atol = 7e-4
                 rtol = 1.5e-3
-            elif op.name == "unique" and cpu_kwargs["sorted"] is False:
-                continue
-            elif op.name == "nn.functional.interpolate":
-                atol = 1e-3
-                rtol = 1e-4
-            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
-                # TODO: Investigate why this is needed
-                # See https://github.com/pytorch/pytorch/issues/120237
-                atol = 3e-5
-                rtol = 2e-5
-            else:
-                atol = None
-                rtol = None
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
