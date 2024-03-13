@@ -41,7 +41,7 @@ if(NOT BUILD_LIBTORCHLESS)
   # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
 
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
+  target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB" "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
