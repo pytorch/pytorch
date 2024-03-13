@@ -1132,10 +1132,10 @@ class GraphLowering(torch.fx.Interpreter):
         device_type = "cpu" if only_cpu else device_types.pop()
 
         self.device_ops = get_device_op_overrides(device_type)
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type, self.cpp_wrapper)
-        assert (
-            wrapper_code_gen_cls is not None
-        ), f"Device {device_type} not supported"
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+            device_type, self.cpp_wrapper
+        )
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
         if self.const_module:
