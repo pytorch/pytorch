@@ -685,7 +685,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 (torch.matmul(q, k.transpose(-2, -1)).div(3.0) + attn_mask).softmax(
                     dim=-1
                 ),
-                weights,
                 p=0.4,
                 training=training,
                 inplace=False,
@@ -723,6 +722,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             scores = scores.masked_fill(attn_mask, -float("inf"))
             weights = torch.nn.functional.softmax(scores, dim=-1)
             weights = torch.nn.functional.dropout(
+                weights,
                 p=0.4,
                 training=training,
                 inplace=False,
