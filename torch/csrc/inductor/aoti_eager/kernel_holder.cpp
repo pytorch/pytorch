@@ -27,6 +27,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     device_opt_ = c10::Device(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
   }
 
+  (void)is_symbolic_; // Suppress unused variable warning
   canonicalizeOpName();
 }
 
