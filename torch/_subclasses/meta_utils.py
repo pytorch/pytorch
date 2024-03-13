@@ -111,7 +111,7 @@ def is_sparse_any(t):
 # meta storages. This class will hold weak references to cached tenosrs
 # and tensor storages.
 class MetaConverter:
-    def __init__(self):
+    def __init__(self, shape_env=None):
         self.storage_memo = {}
         self.tensor_memo: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
         self.maybe_storages_to_delete = []
@@ -121,6 +121,7 @@ class MetaConverter:
         self.miss = 0
         self.del_hook = None
         self.arg_cnt = 0
+        self.shape_env = shape_env
 
     def successful(self):
         return self.hit > 0 and self.miss == 0
@@ -205,11 +206,12 @@ class MetaConverter:
     def meta_tensor(
         self,
         t,
-        shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
         symbolic_context: Optional["SymbolicContext"] = None,
     ):
+        shape_env = self.shape_env
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -332,7 +334,7 @@ class MetaConverter:
         # fully dynamic dims. This is useful when fake-ifying intermediate tensors in
         # closed-over ViewFunc state, as we don't have symbolic contexts for them, but we
         # don't want to over-specialize during view replay.
-        def all_dynamic_symbolic_context(t, source, shape_env, callback):
+        def all_dynamic_symbolic_context(t, source, callback):
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import (
                 DimDynamic,
@@ -344,7 +346,7 @@ class MetaConverter:
             view_base_context: Optional[SymbolicContext] = None
             if t._is_view():
                 view_base_context = all_dynamic_symbolic_context(
-                    t._base, AttrSource(source, "_base"), shape_env, callback
+                    t._base, AttrSource(source, "_base"), callback
                 )
 
             t_symbolic_context: SymbolicContext
@@ -356,7 +358,7 @@ class MetaConverter:
                     assert isinstance(attr, str)
                     inner = getattr(t, attr)
                     inner_contexts[attr] = all_dynamic_symbolic_context(
-                        inner, AttrSource(source, attr), shape_env, callback
+                        inner, AttrSource(source, attr), callback
                     )
                 t_symbolic_context = SubclassSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
@@ -403,7 +405,7 @@ class MetaConverter:
         #     context and with the correct relationship to the outer size / stride metadata.
         #     Then view replay is done, swapping in the fake offsets so the view replay output
         #     is fully fake with no invalid specialization.
-        def view_from_base(base, t, source=source, shape_env=shape_env):
+        def view_from_base(base, t, source=source):
             # fake-ify t's metadata according to the outer symbolic context
             (sizes, strides, storage_offset) = sym_sizes_strides_storage_offset(
                 t, source
@@ -453,9 +455,7 @@ class MetaConverter:
                 for attr in attrs:
                     real_to_fake_mapping[getattr(t, attr)] = getattr(fake_t, attr)
 
-            def tensor_visitor_fn(
-                visited_t, shape_env=shape_env, callback=callback, source=source
-            ):
+            def tensor_visitor_fn(visited_t, callback=callback, source=source):
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:
                     return None
@@ -474,11 +474,10 @@ class MetaConverter:
                 temp_source = EphemeralSource("tensor_visitor_fn")
                 return self.meta_tensor(
                     visited_t,
-                    shape_env,
                     callback,
                     source=temp_source,
                     symbolic_context=all_dynamic_symbolic_context(
-                        visited_t, temp_source, shape_env, callback
+                        visited_t, temp_source, callback
                     ),
                 )
 
@@ -680,7 +679,6 @@ class MetaConverter:
 
                     base = self.meta_tensor(
                         t._base,
-                        shape_env,
                         callback,
                         source=torch._dynamo.source.AttrSource(source, "_base"),
                         symbolic_context=base_symbolic_context,
@@ -873,7 +871,6 @@ class MetaConverter:
                     # the one from t. This isn't correct if e.g. t._is_view() != t.grad._is_view().
                     r.grad = self.meta_tensor(
                         safe_grad(t),
-                        shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
                         symbolic_context=symbolic_context,
@@ -889,7 +886,6 @@ class MetaConverter:
     def __call__(
         self,
         t,
-        shape_env=None,
         *,
         callback=lambda t: t(),
         source=None,
@@ -933,7 +929,6 @@ class MetaConverter:
                         with torch._dispatch.python.suspend_functionalization():
                             fake_t = self.meta_tensor(
                                 unwrap_t,
-                                shape_env=shape_env,
                                 callback=callback,
                                 source=source,
                                 symbolic_context=symbolic_context,
@@ -951,7 +946,6 @@ class MetaConverter:
                         with pop_st_ctx:
                             fake_t = self.meta_tensor(
                                 unwrap_t,
-                                shape_env=shape_env,
                                 callback=callback,
                                 source=source,
                                 symbolic_context=symbolic_context,
@@ -966,7 +960,6 @@ class MetaConverter:
                 with disable_functorch():
                     r = self.meta_tensor(
                         t,
-                        shape_env=shape_env,
                         callback=callback,
                         source=source,
                         symbolic_context=symbolic_context,

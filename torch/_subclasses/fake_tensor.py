@@ -198,8 +198,9 @@ class FakeTensorConverter:
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
-    def __init__(self):
-        self.meta_converter = MetaConverter()
+    def __init__(self, shape_env=None):
+        self.meta_converter = MetaConverter(shape_env)
+        self.shape_env = shape_env
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
@@ -262,14 +263,13 @@ class FakeTensorConverter:
         fake_mode,
         t,
         make_constant=False,
-        shape_env=None,
         *,
         source=None,
         symbolic_context=None,
         memoized_only=False,
     ):
         # see note [Tensor Fakification and Symbol Caching]
-        if not symbolic_context and not source and shape_env:
+        if not symbolic_context and not source and self.shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
                 if t in tracing_context.tensor_to_context:
                     symbolic_context = tracing_context.tensor_to_context[t]
@@ -305,7 +305,6 @@ class FakeTensorConverter:
 
         out = self.meta_converter(
             t,
-            shape_env=shape_env,
             callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
@@ -341,7 +340,6 @@ class FakeTensorConverter:
         t,
         *,
         make_constant=False,
-        shape_env=None,
         source=None,
         symbolic_context=None,
         memoized_only=False,
@@ -350,7 +348,6 @@ class FakeTensorConverter:
             fake_mode,
             t,
             make_constant,
-            shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
             memoized_only=memoized_only,
@@ -825,7 +822,7 @@ class FakeTensorMode(TorchDispatchMode):
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
-        self.fake_tensor_converter = FakeTensorConverter()
+        self.fake_tensor_converter = FakeTensorConverter(shape_env)
         if static_shapes is not None:
             self.static_shapes = static_shapes
         else:
@@ -1649,14 +1646,21 @@ class FakeTensorMode(TorchDispatchMode):
         # seen before.
         memoized_only=False,
     ):
-        shape_env = self.shape_env
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
+            from torch.fx.experimental.symbolic_shapes import (
+                DimDynamic,
+                StatelessSymbolicContext,
+            )
+
             assert (
                 symbolic_context is None
             ), "cannot set both static_shapes and symbolic_context"
-            shape_env = None
+            if self.shape_env is not None:
+                symbolic_context = StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.STATIC] * tensor.ndim
+                )
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and not static_shapes:
             if tracing_context := torch._guards.TracingContext.try_get():
@@ -1666,7 +1670,6 @@ class FakeTensorMode(TorchDispatchMode):
         return self.fake_tensor_converter(
             self,
             tensor,
-            shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
             memoized_only=memoized_only,
