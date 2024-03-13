@@ -138,6 +138,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_isoneutral_mixing",
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -674,9 +675,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
                 args.compiled_autograd
             ):
-                compiled_model = kwargs.get("compiled_model", model)
                 timings[rep, 1], actual_output = timed(
-                    compiled_model,
+                    model,
                     frozen_model_iter_fn,
                     inputs,
                     return_result=True,
@@ -737,20 +737,20 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+
+    if "cache_lookup_latency" in kwargs:
+        headers.append("cache_lookup_latency")
+        row.append(kwargs["cache_lookup_latency"])
+
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
             row.append(v)
-    if (
-        not torch.distributed.is_available()  # no distributed is built
-        or not torch.distributed.is_initialized()  # single gpu
-        or torch.distributed.get_rank() == 0  # distributed + rank0
-    ):
-        output_csv(
-            output_filename,
-            headers,
-            row,
-        )
+    output_csv(
+        output_filename,
+        headers,
+        row,
+    )
     headers, data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
     assert (
         output_filename.find(".csv") > 0
@@ -2059,6 +2059,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -2649,15 +2653,10 @@ class BenchmarkRunner:
             return latency, peak_mem, dynamo_stats
 
         # Cast the model to float16/float32 as necessary
-        orig_model, example_inputs = self.maybe_cast(model, example_inputs)
+        model, example_inputs = self.maybe_cast(model, example_inputs)
 
         # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_parallelize(orig_model)
-        if experiment.func is speedup_experiment:
-            # If DDP + compiler is enabled, we need to use a different
-            compiled_model = self.deepcopy_and_maybe_parallelize(orig_model)
-        else:
-            compiled_model = model
+        model = self.deepcopy_and_maybe_parallelize(model)
 
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
@@ -2681,8 +2680,23 @@ class BenchmarkRunner:
 
             with maybe_enable_compiled_autograd(self.args.compiled_autograd):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, compiled_model, example_inputs, "dynamo"
+                    optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
+
+            if self.args.profile_dynamo_cache_lookup:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU]
+                ) as prof:
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+
+                events = list(
+                    filter(
+                        lambda event: "TorchDynamo Cache Lookup" in event.key,
+                        prof.key_averages(),
+                    )
+                )
+                dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
@@ -2701,16 +2715,20 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                if self.args.profile_dynamo_cache_lookup:
+                    experiment_kwargs[
+                        "cache_lookup_latency"
+                    ] = dynamo_cache_lookup_latency
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
                 results = []
                 # run with torch._dynamo few times to populate the cache
                 for _ in range(3):
-                    optimized_model_iter_fn(compiled_model, example_inputs)
+                    optimized_model_iter_fn(model, example_inputs)
                 _, frames_second_pass = Stats.reset_counters()  # should be 0
                 if frames_second_pass > 0:
-                    optimized_model_iter_fn(compiled_model, example_inputs)
+                    optimized_model_iter_fn(model, example_inputs)
                     _, frames_third_pass = Stats.reset_counters()  # should be 0
                 else:
                     frames_third_pass = 0
@@ -2726,7 +2744,6 @@ class BenchmarkRunner:
 
             if not hasattr(model, name):
                 model.name = name
-            experiment_kwargs["compiled_model"] = compiled_model
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -3208,6 +3225,13 @@ def parse_args(args=None):
         help="Enables compiled autograd on compiled benchmark",
     )
 
+    parser.add_argument(
+        "--profile_dynamo_cache_lookup",
+        "--profile-dynamo-cache-lookup",
+        action="store_true",
+        help="profiles TorchDynamo cache lookup",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -3490,6 +3514,7 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "sam_fast",
             "resnet50_quantized_qat",
             "mobilenet_v2_quantized_qat",
         }:
@@ -3589,6 +3614,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()

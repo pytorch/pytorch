@@ -999,10 +999,8 @@ def forward(self, x_1, output_1):
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
             self.assertTrue("equal_to_1=()" in sources[0])
-            self.assertTrue("ids_of_folded_args=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
-            self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda
@@ -1185,6 +1183,35 @@ class MutationTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_mutation_test
+    def test_reduce_sum():
+        @triton.jit
+        def reduce_sum_kernel(a_ptr, c_ptr, stride_am, stride_an):
+            offs_am = tl.arange(0, 4)
+            offs_an = tl.arange(0, 4)
+            a_ptrs = a_ptr + (
+                offs_am[:, None] * stride_am + offs_an[None, :] * stride_an
+            )
+            a = tl.load(a_ptrs)
+            m = tl.sum(a, axis=1)
+            tl.store(c_ptr + tl.arange(0, 4), m)
+
+        return (
+            reduce_sum_kernel,
+            {
+                "a_ptr": torch.randn(4, 4),
+                "c_ptr": torch.randn(4),
+                "stride_am": 4,
+                "stride_an": 4,
+            },
+            # TODO(aakhundov): tt.reduce is now supported, but only
+            # in the new MLIR-based Triton analysis pass (not in the
+            # old TTIR string parsing-based one). change the line
+            # below to ["c_ptr"] when new Triton pin lands and this
+            # test starts failing.
+            ["a_ptr", "c_ptr"],
+        )
+
+    @make_mutation_test
     def test_argmax():
         @triton.jit
         def argmax_kernel(a_ptr, c_ptr, stride_am, stride_an):
@@ -1206,7 +1233,11 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "stride_am": 4,
                 "stride_an": 4,
             },
-            # TODO(oulgen): tt.reduce closures are not implemented yet
+            # TODO(aakhundov): tt.reduce is now supported, but only
+            # in the new MLIR-based Triton analysis pass (not in the
+            # old TTIR string parsing-based one). change the line
+            # below to ["c_ptr"] when new Triton pin lands and this
+            # test starts failing.
             ["a_ptr", "c_ptr"],
         )
 

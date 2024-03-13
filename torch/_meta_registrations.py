@@ -788,6 +788,32 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
+@register_meta([aten._linalg_eigvals.default, aten.linalg_eigvals.out])
+@out_wrapper()
+def meta__linalg_eigvals(input: Tensor) -> Tensor:
+    squareCheckInputs(input, "linalg.eigvals")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    return input.new_empty(input.shape[:-1], dtype=complex_dtype)
+
+
+@register_meta([aten.linalg_eig])
+@out_wrapper("eigenvalues", "eigenvectors")
+def meta_linalg_eig(input: Tensor):
+    squareCheckInputs(input, "linalg.eig")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    values = input.new_empty(input.shape[:-1], dtype=complex_dtype)
+    vectors = input.new_empty(input.shape, dtype=complex_dtype)
+    return values, vectors
+
+
 def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
     return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
 
@@ -2249,6 +2275,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.qlinear_pointwise.default)
+    @register_meta(torch.ops.onednn.qlinear_pointwise.tensor)
     def meta_qlinear_pointwise(
         x,
         x_scale,
@@ -3426,6 +3453,21 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+
+
+@register_meta([aten._weight_int8pack_mm])
+def meta__weight_int8pack_mm(x, w, q_scales):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(
+        x.dtype is torch.bfloat16,
+        lambda: f"expected x to be bf16, got {x.dtype}",
+    )
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        w.dtype is torch.int8,
+        lambda: f"expected w to be int8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
 @register_meta(aten._cdist_forward.default)

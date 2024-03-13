@@ -456,11 +456,13 @@ class CompiledNodeArgs {
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
     if (C10_UNLIKELY(s >= encode_as_u16)) {
       // first write a byte indicating the path we followed, then the data
+
+
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
         specialize_on_bytes(encode_as_u16);
         specialize_on_bytes(static_cast<uint16_t>(s));
-      } else if (
+      } else if constexpr (
           std::numeric_limits<uint32_t>::max() ==
           std::numeric_limits<size_t>::max()) {
         // Need to repeat this condition to silence internal build errors due to
@@ -470,14 +472,17 @@ class CompiledNodeArgs {
         // 5 bytes
         specialize_on_bytes(encode_as_u32);
         specialize_on_bytes(static_cast<uint32_t>(s));
-      } else if (s <= std::numeric_limits<uint32_t>::max()) {
-        // 5 bytes
-        specialize_on_bytes(encode_as_u32);
-        specialize_on_bytes(static_cast<uint32_t>(s));
       } else {
-        // 9 bytes
-        specialize_on_bytes(encode_as_u64);
-        specialize_on_bytes(s);
+        // size_t is >32-bit
+        if (s <= std::numeric_limits<uint32_t>::max()) {
+          // 5 bytes
+          specialize_on_bytes(encode_as_u32);
+          specialize_on_bytes(static_cast<uint32_t>(s));
+        } else {
+          // 9 bytes
+          specialize_on_bytes(encode_as_u64);
+          specialize_on_bytes(s);
+        }
       }
     } else {
       // happy case, 1 byte
