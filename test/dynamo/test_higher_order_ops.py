@@ -3,6 +3,7 @@ import enum
 import functools
 import pprint
 import re
+import sys
 import unittest
 import warnings
 
@@ -2818,9 +2819,7 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(
-            actual,
-            """\
+        expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         child_6 = L_x_
@@ -2939,9 +2938,13 @@ class GraphModule(torch.nn.Module):
         jac_out_in = split_2[0];  split_2 = None
 
         unflatten = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
-        return (unflatten, child_10, _wrap_for_grad_1, child_15, child_13, primal_out)
-""",
-        )
+        """
+        # Python 3.10 and 3.11 produces slightly different graphs
+        if sys.version_info[:2] > (3, 10):
+            expected += 'return (unflatten, child_10, _wrap_for_grad_1, child_15, child_13, primal_out)\n'
+        else:
+            expected += 'return (unflatten, child_15, child_10, _wrap_for_grad_1, child_13, primal_out)\n'
+        self.assertExpectedInline(actual, expected)
 
     @config.patch(capture_func_transforms=True)
     def test_jacrev(self):
