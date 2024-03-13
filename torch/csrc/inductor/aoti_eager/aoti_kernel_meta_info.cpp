@@ -72,7 +72,7 @@ bool TensorMetaInfo::sanityCheck(const TensorMetaInfo& tensor_meta_info) {
 }
 
 AOTIKernelMetaInfo TensorMetaInfo::loadFromFile(
-    const std::vector<std::string>& tensors_meta_info) {
+    const std::vector<nlohmann::json>& tensors_meta_info) {
   auto parse_symbolic = [](const std::string& symbolic_str) -> bool {
     return symbolic_str == "true";
   };
@@ -142,14 +142,13 @@ AOTIKernelMetaInfo TensorMetaInfo::loadFromFile(
 
   // config file is in the following format:
   //  ${is_symbolic};${dtype};${device};[${sizes}];[${strides}]
-  auto parse_tensor_meta_info = [&](const std::string& line) -> TensorMetaInfo {
-    std::stringstream ss(line);
-    std::string symbolic_str, dtype_str, device_str, sizes_str, strides_str;
-    getline(ss, symbolic_str, ';');
-    getline(ss, device_str, ';');
-    getline(ss, dtype_str, ';');
-    getline(ss, sizes_str, ';');
-    getline(ss, strides_str, ';');
+  auto parse_tensor_meta_info =
+      [&](const nlohmann::json& line) -> TensorMetaInfo {
+    std::string symbolic_str = line["is_symbloic"];
+    std::string device_str = line["device_type"];
+    std::string dtype_str = line["dtype"];
+    std::string sizes_str = line["sizes"];
+    std::string strides_str = line["strides_str"];
     sizes_str.erase(
         std::remove(sizes_str.begin(), sizes_str.end(), '['), sizes_str.end());
     sizes_str.erase(
