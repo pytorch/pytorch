@@ -3215,11 +3215,11 @@ def masked_scatter_with_index(self, mask, source_idx, source):
 
 
 fallback__unsafe_masked_index = fallback_handler(
-    aten._unsafe_masked_index, add_to_fallback_set=False
+    aten._unsafe_masked_index.default, add_to_fallback_set=False
 )
 
 fallback__unsafe_masked_index_put_accumulate = fallback_handler(
-    aten._unsafe_masked_index_put_accumulate, add_to_fallback_set=False
+    aten._unsafe_masked_index_put_accumulate.default, add_to_fallback_set=False
 )
 
 
