@@ -12,6 +12,9 @@
 #define VK_KERNEL(shader_name) \
   ::at::native::vulkan::api::shader_registry().get_shader_info(#shader_name)
 
+#define VK_KERNEL_FROM_STR(shader_name_str) \
+  ::at::native::vulkan::api::shader_registry().get_shader_info(shader_name_str)
+
 namespace at {
 namespace native {
 namespace vulkan {
