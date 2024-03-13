@@ -79,6 +79,20 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class SyntheticLocalSource(Source):
+    local_name: str
+
+    def reconstruct(self, codegen):
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    def guard_source(self):
+        return GuardSource.SYNTHETIC_LOCAL
+
+    def name(self):
+        return f"SYNTHETIC_LOCAL[{self.local_name!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
 class RandomValueSource(Source):
     random_call_index: int
 
