@@ -1,12 +1,9 @@
 # Owner(s): ["module: inductor"]
 import functools
 import pickle
-import tempfile
 import unittest
-from unittest.mock import patch
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -16,6 +13,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -80,22 +78,6 @@ class MyModelConv2d(torch.nn.Module):
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # Reroute all cache disk activity to a clean temporary directory to
-        # ensure isolation (and initial cache misses). Deliberately create the
-        # temp dir in setUpClass, however, so that individual test runs reuse
-        # the same location. We don't expect different tests to reuse cache
-        # entries, so preserving the temp dir provides that additional testing.
-        cls.tmpdir = tempfile.TemporaryDirectory()
-        cls.cache_dir_patch = patch("torch._inductor.codecache.cache_dir")
-        cls.cache_dir_patch.start().return_value = cls.tmpdir.name
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.cache_dir_patch.stop()
-        cls.tmpdir.cleanup()
-
     def setUp(self):
         super().setUp()
         counters.clear()
