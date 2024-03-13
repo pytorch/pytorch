@@ -998,7 +998,7 @@ class Partitioner:
                 if cost < min_cost:
                     node_pair = [node, n1]
                     min_cost = cost
-            return cost, node_pair
+            return cost, node_pair  # type: ignore[possibly-undefined]
 
         # First use size_base_partition
         self.size_based_partition()

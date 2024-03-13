@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import collections.abc
 import math
@@ -772,6 +774,9 @@ class OpInfo:
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
 
+    # Whether the operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize: bool = True
+
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
 
@@ -1321,6 +1326,8 @@ class OpInfo:
         return result
 
     def supported_dtypes(self, device_type):
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
@@ -1330,6 +1337,8 @@ class OpInfo:
         if not self.supports_autograd:
             return set()
 
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
         backward_dtypes = None
         if device_type == "cuda":

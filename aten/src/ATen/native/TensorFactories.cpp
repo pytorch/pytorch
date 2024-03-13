@@ -214,8 +214,8 @@ Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(real)
-      .add_input(imag)
+      .add_const_input(real)
+      .add_const_input(imag)
       .check_all_same_dtype(false)
       .build();
   complex_stub(iter.device_type(), iter);
@@ -234,8 +234,8 @@ Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(abs)
-      .add_input(angle)
+      .add_const_input(abs)
+      .add_const_input(angle)
       .check_all_same_dtype(false)
       .build();
   polar_stub(iter.device_type(), iter);
@@ -574,7 +574,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBFloat16, kHalf, kBool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;

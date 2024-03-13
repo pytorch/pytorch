@@ -139,8 +139,10 @@ torch.device
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
-The :class:`torch.device` contains a device type (``'cpu'``, ``'cuda'`` or ``'mps'``) and optional device
-ordinal for the device type. If the device ordinal is not present, this object will always represent
+The :class:`torch.device` contains a device type (most commonly "cpu" or
+"cuda", but also potentially :doc:`"mps" <mps>`, :doc:`"xpu" <xpu>`,
+`"xla" <https://github.com/pytorch/xla/>`_ or :doc:`"meta" <meta>`) and optional
+device ordinal for the device type. If the device ordinal is not present, this object will always represent
 the current device for the device type, even after :func:`torch.cuda.set_device()` is called; e.g.,
 a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is
 the result of :func:`torch.cuda.current_device()`.
@@ -225,6 +227,21 @@ non-None device argument.  To globally change the default device, see also
    >>> torch.randn((2,3), device='cuda:1')
    >>> torch.randn((2,3), device=1)  # legacy
 
+.. note::
+   Tensors are never moved automatically between devices and require an explicit call from the user. Scalar Tensors (with tensor.dim()==0) are the only exception to this rule and they are automatically transferred from CPU to GPU when needed as this operation can be done "for free".
+   Example:
+
+   >>> # two scalars
+   >>> torch.ones(()) + torch.ones(()).cuda()  # OK, scalar auto-transferred from CPU to GPU
+   >>> torch.ones(()).cuda() + torch.ones(())  # OK, scalar auto-transferred from CPU to GPU
+
+   >>> # one scalar (CPU), one vector (GPU)
+   >>> torch.ones(()) + torch.ones(1).cuda()  # OK, scalar auto-transferred from CPU to GPU
+   >>> torch.ones(1).cuda() + torch.ones(())  # OK, scalar auto-transferred from CPU to GPU
+
+   >>> # one scalar (GPU), one vector (CPU)
+   >>> torch.ones(()).cuda() + torch.ones(1)  # Fail, scalar not auto-transferred from GPU to CPU and non-scalar not auto-transferred from CPU to GPU
+   >>> torch.ones(1) + torch.ones(()).cuda()  # Fail, scalar not auto-transferred from GPU to CPU and non-scalar not auto-transferred from CPU to GPU
 
 .. _layout-doc:
 

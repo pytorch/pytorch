@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Dict, Any, Set, Mapping
+from typing import List, Tuple, Union, Dict, Any, Set, Mapping, Optional
 import collections
 from dataclasses import dataclass
 
@@ -123,12 +123,19 @@ class FxNetAccFusionsFinder:
         self,
         fusion_group: "FxNetAccFusionsFinder.FusionGroup",
         inputs: Union[NodeSet, NodeList],
+        visited: Optional[NodeSet] = None,
     ):
         """
         Start from inputs and going reverse topological order. If any upstream node
         is in the fusion group, add all the nodes in this path to fusion group.
         """
         for arg in inputs:
+            # skip the node if already seen
+            if visited is not None:
+                if arg in visited:
+                    continue
+                visited.add(arg)
+
             # Skip placeholder and get_attr because they won't be in the fusion group.
             if arg.op not in CALLABLE_NODE_OPS:
                 continue
@@ -144,7 +151,7 @@ class FxNetAccFusionsFinder:
 
             # Check the upstream nodes of the node, if any of them is in the fusion group
             # we'll add this node to fusion group and return True.
-            if self.recursive_add_node(fusion_group, arg.all_input_nodes):
+            if self.recursive_add_node(fusion_group, arg.all_input_nodes, visited):
                 fusion_group.add_node(arg)
                 return True
 
@@ -172,7 +179,11 @@ class FxNetAccFusionsFinder:
             )
             while fusion_group.nodes_need_process:
                 node = fusion_group.nodes_need_process.pop()
-                self.recursive_add_node(fusion_group, fusion_group.inputs)
+                self.recursive_add_node(
+                    fusion_group,
+                    fusion_group.inputs,
+                    visited=set(),
+                )
 
                 # Optionally add downstream nodes
                 if "tensor_meta" not in node.meta:
@@ -183,7 +194,11 @@ class FxNetAccFusionsFinder:
                             continue
 
                         fusion_group.add_node(user)
-                        self.recursive_add_node(fusion_group, fusion_group.inputs)
+                        self.recursive_add_node(
+                            fusion_group,
+                            fusion_group.inputs,
+                            visited=set(),
+                        )
 
                 # Add some upstream nodes
                 for arg in node.all_input_nodes:
@@ -198,7 +213,11 @@ class FxNetAccFusionsFinder:
                     fusion_group.top_node_idx = min(
                         fusion_group.top_node_idx, self.nodes.index(arg)
                     )
-                    self.recursive_add_node(fusion_group, fusion_group.inputs)
+                    self.recursive_add_node(
+                        fusion_group,
+                        fusion_group.inputs,
+                        visited=set(),
+                    )
 
             if not (set(fusion_group.nodes) <= self.acc_nodes):
                 self.acc_nodes -= fusion_group.nodes
@@ -224,7 +243,7 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     Returns:
         The graph module in-place sorted
     """
-    indeg = {node: 0 for node in gm.graph.nodes}
+    indeg = dict.fromkeys(gm.graph.nodes, 0)
     new_graph = torch.fx.Graph()
     # Track how many unfulfilled dependencies each node has
     for node in gm.graph.nodes:
