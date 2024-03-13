@@ -1810,7 +1810,7 @@ def compile(model: Optional[Callable] = None, *,
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom-backends.html
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom_backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
