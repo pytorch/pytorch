@@ -113,7 +113,7 @@ def generate_ttir(kernel, kwargs):
     assert isinstance(kernel, JITFunction)
 
     if len(kwargs) != len(kernel.arg_names):
-        raise Exception("Incorrect number of arguments passed to kernel")
+        raise ValueError("Incorrect number of arguments passed to kernel")
 
     # Replace all SymExprs with a regular value for TTIR generation
     # Replace all FakeTensor with real tensors
@@ -155,7 +155,7 @@ def generate_ttir(kernel, kwargs):
     src = ASTSource(kernel, signature, constants, specialization)
     ttir_module = src.make_ir(options, context)
     if not ttir_module.verify():
-        raise Exception("Verification for TTIR module has failed")
+        raise RuntimeError("Verification for TTIR module has failed")
 
     return ttir_module, ordered_tensor_names
 
@@ -248,7 +248,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
         elif child_block_ids:
-            if name in ("scf.if", "scf.for", "scf.while", "tt.reduce"):
+            if name in {"scf.if", "scf.for", "scf.while", "tt.reduce", "tt.scan"}:
                 # for blocked ops: inline the enclosed ops into
                 # the parent block + rewire the last op in each
                 # child block to return the block result
@@ -265,16 +265,17 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                             next_fake_intermediate -= 1
                             replacements[idx] = Intermediate(next_fake_intermediate)
                     else:
-                        # for tt.reduce, wire the block arguments to the op arguments
+                        assert name in ("tt.reduce", "tt.scan")
+                        # wire the block arguments to the op arguments
                         num_operands = len(operand_ids)
                         block_arg_ids = block_id_to_block_arg_ids[block_id]
                         assert len(block_arg_ids) == 2 * num_operands, (
-                            "tt.reduce is expected to have twice as "
+                            f"{name} is expected to have twice as "
                             "many block arguments as op arguments: "
                             f"{operand_ids=}, {block_arg_ids=}."
                         )
                         for i, idx in enumerate(block_arg_ids):
-                            # for a tt.reduce op with N arguments, the block
+                            # for a tt.reduce/tt.scan op with N arguments, the block
                             # arguments comprise N reduced values followed by
                             # N current values corresponding to the N op args
                             replacements[idx] = Intermediate(
@@ -303,7 +304,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                     for return_op in return_ops:
                         op_stack[parent_block_id][scf_result].append(return_op)
             else:
-                raise Exception(
+                raise RuntimeError(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
                 )
         else:
@@ -526,7 +527,7 @@ class MemoizeWithCycleCheck:
             self.cache[key] = None
             self.cache[key] = self.fn(functions, fn_name, num_args)
         if self.cache[key] is None:
-            raise Exception("Recursion is not supported")
+            raise RuntimeError("Recursion is not supported")
         return self.cache[key]
 
     def reset(self):
@@ -555,7 +556,7 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
     for op_list in ops.values():
         for op in op_list:
             if op.name in UNKNOWN_OPS:
-                raise Exception(
+                raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
 
@@ -605,7 +606,7 @@ def identify_mutated_tensors(kernel, kwargs):
         from torch._dynamo import config
 
         if not config.optimize_user_defined_triton_kernels:
-            raise Exception("optimize_user_defined_triton_kernels is False")
+            raise ValueError("optimize_user_defined_triton_kernels is False")
 
         ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
 
@@ -633,14 +634,9 @@ def identify_mutated_tensors(kernel, kwargs):
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
     except Exception as e:
-        import traceback
-
-        warnings.warn(
-            "Encountered an exception in identify_mutated_tensors, "
-            "assuming every input is mutated:\n"
-            "".join(
-                traceback.TracebackException.from_exception(e).format()  # noqa: G001
-            )
+        log.warning(
+            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
+            exc_info=True,
         )
         if ttir_module is not None:
             log.debug("TTIR:\n%s", str(ttir_module))

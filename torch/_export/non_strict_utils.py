@@ -97,7 +97,7 @@ def make_fake_params_buffers(
     return faked_params_buffers
 
 
-def make_fake_inputs(nn_module, args, kwargs, constraints):
+def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -113,6 +113,10 @@ def make_fake_inputs(nn_module, args, kwargs, constraints):
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
 
+    constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
+        nn_module, args, kwargs, dynamic_shapes
+    )
+    constraints = constraints or []
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
