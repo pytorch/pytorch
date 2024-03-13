@@ -1450,6 +1450,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),), gelu)
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qlinear_gelu_int8_mixed_bf16(self):
