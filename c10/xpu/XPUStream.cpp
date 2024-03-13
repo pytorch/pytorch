@@ -132,11 +132,10 @@ void initXPUStreamsOnce() {
   current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
     // Assigning the current stream to the last one in the pool can be
-    // beneficial in certain scenarios, particularly when users initialize
-    // their workload to perform computations with the current stream (the
-    // last one) and utilize stream (the first one) from the pool for
-    // communication, it allows for different streams to overlap in
-    // computation and communication.
+    // beneficial in certain scenarios, particularly when users initialize their
+    // workload to perform computations with the current stream (the last one)
+    // and utilize stream (the first one) from the pool for communication, it
+    // allows for different streams to overlap in computation and communication.
     current_streams[i] =
         makeStreamId(StreamIdType::NORMAL, kStreamsPerPool - 1);
   }
