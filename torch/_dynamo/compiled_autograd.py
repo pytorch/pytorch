@@ -220,11 +220,15 @@ class AutogradCompilerInstance:
         target = torch.ops.inductor.accumulate_grad_.default
         last = None
         for node in self.fx_tracer.graph.nodes:
-            order[node] = next(counter)
-            if node.op == "call_function" and node.target == target:
+            if (
+                node.op == "call_function"
+                and node.target == target
+                and node not in order
+            ):
                 arg = max(node.args, key=order.get)  # type: ignore[arg-type]
                 if arg is not last:
                     arg.append(node)
+            order[node] = next(counter)
             last = node
 
     def to_proxy(self, t):

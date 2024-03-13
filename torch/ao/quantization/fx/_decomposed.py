@@ -212,7 +212,7 @@ def dequantize_per_tensor(
 def dequantize_per_tensor_meta(
     input: torch.Tensor,
     scale: torch.Tensor,
-    zero_pointe: torch.Tensor,
+    zero_point: torch.Tensor,
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
@@ -486,14 +486,14 @@ def quantize_per_channel_meta(
 # matching in the future
 # We will revisit this later if we found there are no use cases for it
 quantized_decomposed_lib.define(
-    "dequantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
+    "dequantize_per_channel(Tensor input, Tensor scales, Tensor? zero_points, int axis, "
     "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor")
 
 @impl(quantized_decomposed_lib, "dequantize_per_channel", "CompositeExplicitAutograd")
 def dequantize_per_channel(
         input: torch.Tensor,
         scales: torch.Tensor,
-        zero_points: torch.Tensor,
+        zero_points: Optional[torch.Tensor],
         axis: int,
         quant_min: int,
         quant_max: int,
@@ -538,10 +538,11 @@ def dequantize_per_channel(
     res = torch.zeros_like(input, dtype=out_dtype)
 
     for i in range(input.size(0)):
+        zp = zero_points[i] if zero_points is not None else 0
         # TODO: investigate why
         # (input[i] - zero_points[i]).to(out_dtype) * scales[i]
         # failed the test
-        res[i] = (input[i].to(out_dtype) - zero_points[i]) * scales[i]
+        res[i] = (input[i].to(out_dtype) - zp) * scales[i]
 
     out = res.permute(tuple(permute_axis_list))
     return out
@@ -550,7 +551,7 @@ def dequantize_per_channel(
 def dequantize_per_channel_meta(
         input: torch.Tensor,
         scales: torch.Tensor,
-        zero_points: torch.Tensor,
+        zero_points: Optional[torch.Tensor],
         axis: int,
         quant_min: int,
         quant_max: int,

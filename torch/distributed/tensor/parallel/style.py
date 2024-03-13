@@ -119,7 +119,8 @@ class ColwiseParallel(ParallelStyle):
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
-        outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
 
@@ -220,7 +221,8 @@ class RowwiseParallel(ParallelStyle):
         # Rowwise sharding produces partial output, depending on output layouts:
         # 1. to replicate -> allreduce
         # 2. to shard -> reduce_scatter
-        outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
 
