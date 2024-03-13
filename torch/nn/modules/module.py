@@ -803,23 +803,22 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
             param_grad = param.grad
-            if p_should_use_set_data:
-                if should_use_swap_tensors:
-                    try:
-                        if param_grad is not None:
-                            # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
-                            # Decrement use count of the gradient by setting to None
-                            param.grad = None
-                        param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
-                        torch.utils.swap_tensors(param, param_applied)
-                    except Exception as e:
-                        if param_grad is not None:
-                            param.grad = param_grad
-                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
-                    out_param = param
-                else:
-                    param.data = param_applied
-                    out_param = param
+            if should_use_swap_tensors:
+                try:
+                    if param_grad is not None:
+                        # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
+                        # Decrement use count of the gradient by setting to None
+                        param.grad = None
+                    param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
+                    torch.utils.swap_tensors(param, param_applied)
+                except Exception as e:
+                    if param_grad is not None:
+                        param.grad = param_grad
+                    raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
+                out_param = param
+            elif p_should_use_set_data:
+                param.data = param_applied
+                out_param = param
             else:
                 assert isinstance(param, Parameter)
                 assert param.is_leaf
@@ -830,17 +829,16 @@ class Module:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                if g_should_use_set_data:
-                    if should_use_swap_tensors:
-                        grad_applied.requires_grad_(param_grad.requires_grad)
-                        try:
-                            torch.utils.swap_tensors(param_grad, grad_applied)
-                        except Exception as e:
-                            raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
-                        out_param.grad = param_grad
-                    else:
-                        assert out_param.grad is not None
-                        out_param.grad.data = grad_applied
+                if should_use_swap_tensors:
+                    grad_applied.requires_grad_(param_grad.requires_grad)
+                    try:
+                        torch.utils.swap_tensors(param_grad, grad_applied)
+                    except Exception as e:
+                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
+                    out_param.grad = param_grad
+                elif g_should_use_set_data:
+                    assert out_param.grad is not None
+                    out_param.grad.data = grad_applied
                 else:
                     assert param_grad.is_leaf
                     out_param.grad = grad_applied.requires_grad_(param_grad.requires_grad)
@@ -2048,24 +2046,26 @@ class Module:
 
                 try:
                     with torch.no_grad():
-                        if assign_to_params_buffers:
-                            # Shape checks are already done above
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(input_param, torch.nn.Parameter)):
-                                setattr(self, name, torch.nn.Parameter(input_param))
-                            else:
-                                setattr(self, name, input_param)
-                        elif use_swap_tensors:
-                            param_requires_grad = param.requires_grad
-                            new_input_param = param.module_load(input_param)
+                        if use_swap_tensors:
+                            new_input_param = param.module_load(input_param, assign=assign_to_params_buffers)
                             if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
                                 raise RuntimeError("module_load returned one of self or other, please .detach() "
                                                    "the result if returning one of the inputs in module_load")
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(new_input_param, torch.nn.Parameter)):
-                                new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(new_input_param, torch.nn.Parameter):
+                                    new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param.requires_grad)
+                                else:
+                                    new_input_param.requires_grad_(param.requires_grad)
                             torch.utils.swap_tensors(param, new_input_param)
                             del new_input_param
+                        elif assign_to_params_buffers:
+                            # Shape checks are already done above
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(input_param, torch.nn.Parameter):
+                                    input_param = torch.nn.Parameter(input_param, requires_grad=param.requires_grad)
+                                else:
+                                    input_param.requires_grad_(param.requires_grad)
+                            setattr(self, name, input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
@@ -2105,7 +2105,8 @@ class Module:
 
         .. warning::
             If :attr:`assign` is ``True`` the optimizer must be created after
-            the call to :attr:`load_state_dict`.
+            the call to :attr:`load_state_dict` unless
+            :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -2113,12 +2114,11 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): whether to assign items in the state
-                dictionary to their corresponding keys in the module instead
-                of copying them inplace into the module's current parameters and buffers.
-                When ``False``, the properties of the tensors in the current
-                module are preserved while when ``True``, the properties of the
-                Tensors in the state dict are preserved.
+            assign (bool, optional): When ``False``, the properties of the tensors
+                in the current module are preserved while when ``True``, the
+                properties of the Tensors in the state dict are preserved. The only
+                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
+                for which the value from the module is preserved.
                 Default: ``False``
 
         Returns:
