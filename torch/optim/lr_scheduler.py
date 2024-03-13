@@ -911,7 +911,9 @@ class ChainedScheduler(LRScheduler):
 
     def __init__(self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None):
         if len(schedulers) < 1:
-            raise ValueError("ChainedScheduler expects at least one scheduler to be chained, but got no scheduler.")
+            raise ValueError(
+                f"{self.__class__.__name__} expects at least one scheduler to be chained, but got no scheduler."
+            )
 
         optimizer = optimizer or schedulers[0].optimizer
         for sch_idx, scheduler in enumerate(schedulers):
@@ -923,7 +925,7 @@ class ChainedScheduler(LRScheduler):
 
             if optimizer != scheduler.optimizer:
                 raise ValueError(
-                    "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
+                    f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
                     f"got scheduler {scheduler.__class__.__name__} at index {sch_idx} has {scheduler.optimizer}, "
                     f"which is different from {optimizer.__class__.__name__}."
                 )
