@@ -165,9 +165,6 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         run: |
-          WORKSPACE=$(cd ${GITHUB_WORKSPACE} ; pwd)
-          echo "WORKSPACE=${WORKSPACE}"
-          echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -191,11 +188,11 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
-            -v "${WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" bash -c 'pwd ; ls -la ; ls -la .ci ; ls -la .ci/pytorch/ ; ./.ci/pytorch/build.sh'
+          docker exec -t "${container_name}" bash -c './.ci/pytorch/build.sh'
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
