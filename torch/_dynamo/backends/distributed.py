@@ -525,16 +525,16 @@ class DDPOptimizer:
                         target_mod, buckets[0], processed_modules, node.target
                     )
             elif node.op == "call_method":
-                if not isinstance(node.args[0].target, str):
-                    continue
-                try:
-                    target_mod = gm.get_submodule(node.args[0].target)
-                except AttributeError:
-                    continue
-                if target_mod not in processed_modules:
-                    self.add_module_params_to_bucket(
-                        target_mod, buckets[0], processed_modules, node.target
-                    )
+                if isinstance(node.args[0].target, str):
+                    target_mod = None
+                    try:
+                        target_mod = gm.get_submodule(node.args[0].target)
+                    except AttributeError:
+                        pass
+                    if target_mod is not None and target_mod not in processed_modules:
+                        self.add_module_params_to_bucket(
+                            target_mod, buckets[0], processed_modules, node.target
+                        )
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if (
