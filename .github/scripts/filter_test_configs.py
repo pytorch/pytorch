@@ -62,9 +62,9 @@ SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[Optional[str]], bool]] = {
 }
 
 # The link to the published list of disabled jobs
-DISABLED_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/disabled-jobs.json"
+DISABLED_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/disabled-jobs.json?versionId=qO7aEr.Og33PtLXfNq0j0yj.bbLC7SzR"
 # and unstable jobs
-UNSTABLE_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/unstable-jobs.json"
+UNSTABLE_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/unstable-jobs.json?versionId=7NhgpqKTtGXVUnL1C79KboTW_5qQx8y5"
 
 # Some constants used to handle disabled and unstable jobs
 JOB_NAME_SEP = "/"
