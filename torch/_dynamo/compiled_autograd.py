@@ -219,12 +219,8 @@ class AutogradCompilerInstance:
         counter = itertools.count()
         target = torch.ops.inductor.accumulate_grad_.default
         last = None
-        for node in self.fx_tracer.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == target
-                and node not in order
-            ):
+        for node in [*self.fx_tracer.graph.nodes]:
+            if node.op == "call_function" and node.target == target:
                 arg = max(node.args, key=order.get)  # type: ignore[arg-type]
                 if arg is not last:
                     arg.append(node)
