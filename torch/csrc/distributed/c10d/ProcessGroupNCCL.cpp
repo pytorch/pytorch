@@ -28,6 +28,7 @@
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -1483,6 +1484,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+  auto lastStatusUpdateTime = std::chrono::steady_clock::now();
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
   while (!done || !terminateProcessGroup_.load()) {
@@ -1509,6 +1511,20 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastCompletedSeq_,
         ".");
 #endif
+    auto logger = ::c10d::C10dLogger::getLogger();
+    if (logger &&
+        computeDeltaMS(
+            lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
+            kWorkStatusUpdatePeriodMs) {
+      ::c10d::C10dLoggingData data;
+      data.integers["pg_id"] = uid_;
+      data.integers["rank"] = rank_;
+      data.integers["global_rank"] = globalRank();
+      data.integers["last_enqueued_work"] = lastEnqueuedSeq_;
+      data.integers["last_completed_work"] = lastCompletedSeq_;
+      logger->log(data);
+      lastStatusUpdateTime = std::chrono::steady_clock::now();
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
