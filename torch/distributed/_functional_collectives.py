@@ -29,9 +29,7 @@ if torch._running_with_deploy():
 
 else:
     try:
-        from torch._dynamo.external_utils import (
-            is_compiling as is_torchdynamo_compiling,
-        )
+        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
             "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
@@ -552,8 +550,6 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     __slots__ = ["elem", "completed"]
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -994,6 +990,18 @@ def reduce_scatter_tensor_inplace(
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
 
+REDUCE_OP_TO_STR = {
+    dist.ReduceOp.SUM: "sum",
+    dist.ReduceOp.AVG: "avg",
+    dist.ReduceOp.PRODUCT: "product",
+    dist.ReduceOp.MIN: "min",
+    dist.ReduceOp.MAX: "max",
+    dist.ReduceOp.BAND: "band",
+    dist.ReduceOp.BOR: "bor",
+    dist.ReduceOp.BXOR: "bxor",
+}
+
+
 def all_reduce_inplace(
     tensor: torch.Tensor,
     op: str = "sum",
@@ -1041,7 +1049,7 @@ def all_gather_inplace(
 
     output = all_gather_tensor(tensor, 0, group, tag)
 
-    # Use aten.slice as instead of aten.split because the latter causes
+    # Use aten.slice instead of aten.split because the latter causes
     # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
     output_splits = []
     offset = 0
