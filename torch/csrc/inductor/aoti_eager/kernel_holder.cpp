@@ -1,11 +1,15 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 
 #include <ATen/ATen.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#ifdef USE_CUDA
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -274,7 +278,7 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
         continue;
       }
 
-      std::vector<std::string> tensors_meta_info = element["meta_info"];
+      std::vector<nlohmann::json> tensors_meta_info = element["meta_info"];
       auto kernel_meta_info = TensorMetaInfo::loadFromFile(tensors_meta_info);
       if (kernel_meta_info.size() > 0) {
         aoti_kernel_cache_[kernel_meta_info] =
@@ -299,7 +303,11 @@ void AOTIPythonKernelHolder::canonicalizeOpName() {
 std::shared_ptr<AOTIEagerKernelRunner> AOTIPythonKernelHolder::
     getAOTIEagerKernelRunner(const std::string& so_path) {
   if (device_opt_.value().type() == c10::DeviceType::CUDA) {
+#ifdef USE_CUDA
     return std::make_shared<AOTIEagerKernelRunnerCuda>(so_path);
+#else
+    return nullptr;
+#endif
   } else {
     return nullptr;
   }

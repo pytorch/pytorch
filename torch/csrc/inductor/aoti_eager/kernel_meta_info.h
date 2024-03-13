@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <c10/core/SymIntArrayRef.h>
 
+#include <nlohmann/json.hpp>
 #include <string>
 
 namespace torch::inductor {
@@ -29,7 +30,7 @@ struct TensorMetaInfo {
   bool operator==(const TensorMetaInfo& other) const;
   static bool sanityCheck(const TensorMetaInfo& tensor_meta_info);
   static std::vector<TensorMetaInfo> loadFromFile(
-      const std::vector<std::string>&);
+      const std::vector<nlohmann::json>&);
 };
 
 struct TensorMetaInfoHash {

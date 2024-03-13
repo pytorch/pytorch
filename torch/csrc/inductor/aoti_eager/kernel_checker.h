@@ -3,7 +3,7 @@
 
 #include <ATen/ATen.h>
 
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_meta_info.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/utils/python_dispatch.h>
