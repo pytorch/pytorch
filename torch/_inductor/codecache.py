@@ -1255,6 +1255,8 @@ def optimization_flags() -> str:
         base_flags += " -fno-unsafe-math-optimizations"
     if not config.cpp.enable_floating_point_contract_flag:
         base_flags += " -ffp-contract=off"
+    if not config.cpp.enable_tree_loop_vec_opt_flag:
+        base_flags += " -fno-tree-loop-vectorize"
 
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.

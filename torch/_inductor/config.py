@@ -522,6 +522,9 @@ class cpp:
     # Use ffp-contract when compiling
     enable_floating_point_contract_flag = False
 
+    # Use ftree-loop-vectorize when compiling
+    enable_tree_loop_vec_opt_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
