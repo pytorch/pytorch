@@ -714,45 +714,6 @@ class TestExport(TestCase):
             6,
         )
 
-    def test_dim_1_2(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x * 2
-
-        dx = Dim("dx", min=1, max=2)
-        ep = export(
-            Foo(),
-            (torch.randn(2, 2), ),
-            dynamic_shapes=({0: dx, 1: None}, )
-        )
-        ep.module()(torch.randn(1, 2))
-        ep.module()(torch.randn(2, 2))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected input at .* to be <= 2, but got 3"
-        ):
-            ep.module()(torch.randn(3, 2))
-        vr = list(ep.range_constraints.values())[0]
-        self.assertEquals(vr.lower, 1)
-        self.assertEquals(vr.upper, 2)
-
-    def test_derived_dim_1_2(self):
-        class Bar(torch.nn.Module):
-            def forward(self, x, y):
-                return x + y[1:]
-
-        dx = Dim("dx", min=1, max=2)
-        ep = export(
-            Bar(),
-            (torch.randn(2, 2), torch.randn(3, 2)),
-            dynamic_shapes=({0: dx, 1: None}, {0: dx+1, 1: None})
-        )
-        ep.module()(torch.randn(1, 2), torch.randn(2, 2))
-        range_lower_bounds = sorted(vr.lower for vr in ep.range_constraints.values())
-        range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
-        self.assertEquals(range_lower_bounds, [1, 2])
-        self.assertEquals(range_upper_bounds, [2, 3])
-
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
             def forward(self, x):

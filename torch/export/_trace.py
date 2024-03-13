@@ -701,9 +701,7 @@ def _export(
     _EXPORT_FLAGS = flags
 
     kwargs = kwargs or {}
-    constraints = _process_dynamic_shapes(
-        mod, args, kwargs, dynamic_shapes
-    )  # TODO(avik): remove
+    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
 
     constant_attrs = _gather_constant_attrs(mod)
 
@@ -805,9 +803,6 @@ def _export(
             range_constraints = make_constraints(
                 fake_mode,
                 equalities_inputs,
-                flat_args,
-                ep_non_strict.sig.input_specs,
-                constraints,
                 original_signature,
                 ep_non_strict.gm,
             )
