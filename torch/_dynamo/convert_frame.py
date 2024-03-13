@@ -466,7 +466,6 @@ def _compile(
         translation_validation_enabled,
         ValidationException,
     )
-
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
@@ -529,8 +528,10 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal output
+        nonlocal wasted_compile_time
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
+            attempt_start_time = time.time()
             try:
                 out_code = transform_code_object(code, transform)
                 break
@@ -539,6 +540,7 @@ def _compile(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
                 )
+                wasted_compile_time += time.time() - attempt_start_time
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
@@ -667,6 +669,7 @@ def _compile(
                 )
             },
         )
+        wasted_compile_time = 0.0
         start_time = time.time()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -734,6 +737,12 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
+                if output.compile_subgraph_reason is not None and output.compile_subgraph_reason.graph_break:
+                    graph_break_reason = output.compile_subgraph_reason.reason
+                else:
+                    graph_break_reason = None
+
+
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -746,6 +755,10 @@ def _compile(
                 code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
+                graph_break_reason = fail_reason
+                # If compilation failed, the entire time is wasted
+                wasted_compile_time = time.time() - start_time
+
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -769,6 +782,8 @@ def _compile(
                 fail_user_frame_lineno,
                 non_compliant_ops,
                 compliant_custom_ops,
+                graph_break_reason,
+                wasted_compile_time,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

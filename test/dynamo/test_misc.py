@@ -9547,6 +9547,50 @@ ShapeEnv not equal: field values don't match:
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 
+    def test_graph_break_compilation_metrics(self):
+        def fn(x):
+            x.cos()
+            torch._dynamo.graph_break()
+            x.sin()
+            torch._dynamo.graph_break()
+            return x.cos()
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        x = torch.rand((4, 4))
+        f = torch.compile(fn, backend="eager")
+        f(x)
+        metrics =  torch._dynamo.utils.get_compilation_metrics()
+        subgraph_break_reason = metrics[0].graph_break_reason
+        self.assertTrue("skip function graph_break" in subgraph_break_reason, "Should have logged graph break reason")
+        self.assertTrue(metrics[0].wasted_compile_time_s <= metrics[0].entire_frame_compile_time_s)
+
+        subgraph_break_reason = metrics[1].graph_break_reason
+        self.assertTrue("skip function graph_break" in subgraph_break_reason, "Should have logged graph break reason")
+        self.assertTrue(metrics[1].wasted_compile_time_s <= metrics[1].entire_frame_compile_time_s)
+
+        subgraph_break_reason = metrics[2].graph_break_reason
+        self.assertTrue(subgraph_break_reason is None, "Last compile has no graph break")
+        self.assertTrue(metrics[2].wasted_compile_time_s == 0)
+
+
+
+    def test_graph_break_compilation_metrics_on_failure(self):
+        def fn(x):
+            return x.sin()
+
+        def broken_backend(gm, example_inputs):
+            raise RuntimeError("broken backend")
+
+        x = torch.rand((4, 4))
+        f = torch.compile(fn, backend=broken_backend)
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", True):
+            torch._dynamo.utils.clear_compilation_metrics()
+            f(x)
+            metrics =  torch._dynamo.utils.get_compilation_metrics()
+            for metric in metrics:
+               self.assertTrue(metric.wasted_compile_time_s > 0)
+               self.assertTrue("RuntimeError: broken backend" in metric.graph_break_reason, "Should have logged graph break reason")
+
     def test_compilation_metrics_size_limit(self):
         def fn1(x):
             return x.relu()
