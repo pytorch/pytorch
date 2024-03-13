@@ -1,8 +1,8 @@
 import operator
 from functools import partial
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
-from sympy import Expr
+from sympy import Expr, Symbol
 
 import torch
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
@@ -21,12 +21,12 @@ class BoundVars:
     the case a bounded variable is returned by a kernel and fed into another.
     """
 
-    def __init__(self, loop_body: LoopBody) -> None:
+    def __init__(self, loop_body: LoopBody, ranges: Optional[Dict[Symbol, ValueRanges]] = None) -> None:
         self.loop_body = loop_body
         self.replacement_vals = {
             k: ValueRanges[Expr](0, v - 1)
             if (isinstance(v, int) or v.is_number)
-            else bound_sympy(v)
+            else bound_sympy(v, ranges)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded

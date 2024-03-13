@@ -7061,7 +7061,7 @@ class LoopBody:
         # Doing a local import to avoid dumping all the code here
         from .bounds import BoundVars
 
-        return BoundVars(self)
+        return BoundVars(self, V.graph.sizevars.shape_env.var_to_range)
 
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
