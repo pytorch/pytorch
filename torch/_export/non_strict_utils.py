@@ -262,3 +262,10 @@ def make_constraints(
             range_constraints[symbol] = shape_env.var_to_range[symbol]
 
     return range_constraints
+
+# not sure what to call these, but this feels better than hardcoding it in 2 places
+def get_export_module_name():
+    return "L__self__"
+
+def get_wrapped_export_root_str():
+    return "_export_root"

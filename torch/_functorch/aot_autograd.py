@@ -978,7 +978,6 @@ def aot_export_module(
         **dict(named_buffers),
     }
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
-    # full_args = dict(**params_and_buffers, **args)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
@@ -1092,17 +1091,20 @@ https://github.com/pytorch/pytorch/issues/101192
     # deal with strict/non-strict
     if hasattr(mod, "_export_root"):  # non-strict
         forward_call = mod._export_root.forward
-        prettify_func = lambda x:"__".join(x.split(".")[1:])
+        prettify_func = lambda x:"_".join(x.split(".")[1:])
     else:
         forward_call = mod.forward
-        prettify_func = lambda x:x.split("L__self___")[1].replace(".", "__")
+        prettify_func = lambda x:x.split("L__self___")[1].replace(".", "_")
 
-    # assign parameter names
+    # assign parameter & buffer names
     graph_nodes = list(fx_g.graph.nodes)
-    for i, tensor in enumerate(params_and_buffers_flat):
-        node = graph_nodes[i]
-        name = "param_" + prettify_func(params_spec.context[i])
-        node.name = node.target = name
+    node_index = 0
+    for tensor_dict, tensor_type in zip([named_parameters, named_buffers], ["param", "buf"]):
+        for i, tensor_name in enumerate(tensor_dict.keys()):
+            node = graph_nodes[node_index]
+            name = f"{tensor_type}_{prettify_func(tensor_name)}"
+            node.name = node.target = name
+            node_index += 1
 
     # assign input names
     forward_sig = inspect.signature(forward_call).bind(*args).arguments
@@ -1111,6 +1113,70 @@ https://github.com/pytorch/pytorch/issues/101192
         node = graph_nodes[params_len + i]
         name = "input_" + "_dict_".join(y.key for y in tree_path).replace(".", "__")
         node.name = node.target = name
+
+    # assign input names for submodules
+    def prettify_cond_submodule_names(gm):
+        '''
+        For cond subgraphs
+        - input signature is hard to recover, names are just in order (i.e. input_0, input_1, ...)
+        - param names are passed through from root graph module
+        - input/param order is mixed, determine from args
+        '''
+
+        def _set_subgraph_placeholder_names(names, subgm):
+            # this assumes that placeholder nodes are always at start of graph
+            for i, node in enumerate(subgm.graph.nodes):
+                if node.op == "placeholder":
+                    node.name = node.target = names[i]
+                else:
+                    break
+            # ensure we assigned all names, or ran out of nodes (graph is placeholder-only)
+            assert i == len(names) or i == len(subgm.graph.nodes) - 1
+
+        for node in gm.graph.nodes:
+            if (
+                node.op == "call_function" and
+                node.name.startswith("conditional") and
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+            ):
+                predicate, true_graph_node, false_graph_node, node_args = node._args
+
+                # assign true_graph/false_graph arg names
+
+                # # version with just input_0, input_1, ...
+                # arg_names = [
+                #     arg.name if any(arg.name.startswith(x) for x in ["param_"]) else None
+                #     for arg in node_args
+                # ]
+                # num_inputs = 0
+                # for i, name in enumerate(arg_names):
+                #     if name is None:
+                #         arg_names[i] = f"input_{num_inputs}"
+                #         num_inputs += 1
+
+                # version with original op + nn_module_stack
+                arg_names = []
+                for arg in node_args:
+                    if arg.op == "call_function":
+                        modules = ['_root']
+                        for i, (val, _) in enumerate(arg.meta.get("nn_module_stack").values()):
+                            if i >= 2:
+                                modules.append(val)
+                        modules.append(arg.name)
+                        arg_names.append('_'.join(modules))
+                    else:
+                        arg_names.append(arg.name)
+
+                # both subgraphs have the same args, regardless of whether they're used or not
+                print("set names", arg_names)
+                print()
+                for subgraph_node in [true_graph_node, false_graph_node]:
+                    subgraph = getattr(gm, subgraph_node.target)
+                    _set_subgraph_placeholder_names(arg_names, subgraph)
+                    prettify_cond_submodule_names(subgraph)  # recurse on subgraphs
+                    subgraph.recompile()
+
+    prettify_cond_submodule_names(fx_g)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(

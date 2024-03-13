@@ -18,6 +18,8 @@ from torch._export.non_strict_utils import (
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
+    get_export_module_name,
+    get_wrapped_export_root_str
 )
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -715,13 +717,14 @@ def _export(
         module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
 
         def strip_root(x):
-            if isinstance(x, str) and x.startswith("_export_root"):
-                stripped = x[len("_export_root") :]
+            export_root = get_wrapped_export_root_str()
+            if isinstance(x, str) and x.startswith(export_root):
+                stripped = x[len(export_root) :]
                 return stripped[1:] if stripped.startswith(".") else stripped
             return x
 
         def fixup_key(x):
-            return "L__self__" + strip_root(x)
+            return get_export_module_name() + strip_root(x)
 
         def _tuplify_outputs(aot_export):
             def _aot_export_non_strict(mod, args, kwargs=None, **flags):

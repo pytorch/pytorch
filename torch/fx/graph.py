@@ -1424,6 +1424,8 @@ class Graph:
 
         seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
+        print([(node, node.op) for node in self.nodes])
+        print()
         for node in self.nodes:
             if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
@@ -1433,6 +1435,7 @@ class Graph:
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)
 
+            # print(node.name, node.op)
             if node.name in seen_names:
                 raise RuntimeError(f'Node redefined name {node.name}!')
             seen_names.add(node.name)
