@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import inspect
 import itertools
 from contextlib import nullcontext
 from functools import partial, wraps
@@ -526,8 +527,6 @@ def create_aot_dispatcher_function(
             and torch.is_grad_enabled()
         )
 
-        print("before run_functionalized_fw")
-        breakpoint()
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
@@ -986,8 +985,6 @@ def aot_export_module(
     kwargs = kwargs or {}
 
     functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
-    print("create functional_call()")
-    breakpoint()
 
     num_fw_outs = None
 
@@ -1091,6 +1088,29 @@ https://github.com/pytorch/pytorch/issues/101192
                     assert grad is None
             return *fw_outs, *output_gradients
         fx_g = make_fx(flattened_joint)(*full_args)
+
+    # deal with strict/non-strict
+    if hasattr(mod, "_export_root"):  # non-strict
+        forward_call = mod._export_root.forward
+        prettify_func = lambda x:"__".join(x.split(".")[1:])
+    else:
+        forward_call = mod.forward
+        prettify_func = lambda x:x.split("L__self___")[1].replace(".", "__")
+
+    # assign parameter names
+    graph_nodes = list(fx_g.graph.nodes)
+    for i, tensor in enumerate(params_and_buffers_flat):
+        node = graph_nodes[i]
+        name = "param_" + prettify_func(params_spec.context[i])
+        node.name = node.target = name
+
+    # assign input names
+    forward_sig = inspect.signature(forward_call).bind(*args).arguments
+    flat_args, _ = pytree.tree_flatten_with_path(forward_sig)
+    for i, (tree_path, val) in enumerate(flat_args):
+        node = graph_nodes[params_len + i]
+        name = "input_" + "_dict_".join(y.key for y in tree_path).replace(".", "__")
+        node.name = node.target = name
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
@@ -1208,9 +1228,6 @@ def _aot_export_function(
     kwargs = kwargs or {}
 
     flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
-    # print("before flatten args")
-    # breakpoint()
-    # _, in_spec = pytree.tree_flatten((args, kwargs))
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     dynamic_shapes = False

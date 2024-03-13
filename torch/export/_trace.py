@@ -460,7 +460,7 @@ def _export_non_strict(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    flat_args = pytree.tree_leaves(fake_combined_args)
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -704,8 +704,6 @@ def _export(
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
 
-    print("start _export()")
-    breakpoint()
     if not strict:
         out_spec = None
 
@@ -737,8 +735,6 @@ def _export(
                                     *args, **kwargs
                                 )
                         else:
-                            print("before run _export_root()")
-                            breakpoint()
                             tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
@@ -787,7 +783,6 @@ def _export(
             equalities_inputs,
             original_signature,
         ) = make_fake_inputs(mod, args, kwargs, constraints)
-        breakpoint()
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
@@ -812,8 +807,7 @@ def _export(
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
-        print("ran _export_non_strict()")
-        breakpoint()
+
 
         assert out_spec is not None
 
@@ -847,6 +841,7 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -877,8 +872,6 @@ def _export(
         restore_fqn=False,  # don't need to restore because we will do it later
         _log_export_usage=False,
     )
-    print("ran _export_to_to_ir()")
-    breakpoint()
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
     (
@@ -965,13 +958,10 @@ def _export(
     ep_non_strict = _export_non_strict(
         gm_torch_level,
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
-        {},
         fake_params_buffers,
         constant_attrs,
         pre_dispatch=pre_dispatch,
     )
-    print("ran _export_non_strict()")
-    breakpoint()
 
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig

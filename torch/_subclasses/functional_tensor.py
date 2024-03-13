@@ -487,7 +487,6 @@ def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMo
         with disable_above, mode:
             func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
             func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-            breakpoint()
             func_outputs = func(*func_args, **func_kwargs)
             outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 

@@ -138,7 +138,6 @@ def make_fake_inputs(nn_module, args, kwargs, constraints):
         original_signature = inspect.signature(nn_module.forward)
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
         fake_combined_args = tree_map_with_path(
-        # fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
             original_signature.bind(*args, **kwargs).arguments,
             # (args, kwargs),
