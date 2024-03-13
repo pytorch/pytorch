@@ -10,7 +10,7 @@ in `runtime_wrappers`.
 import logging
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 import torch
 import torch.utils.dlpack
@@ -175,6 +175,12 @@ def aot_dispatch_base(
     return compiled_fn
 
 
+def _output_node(gm: torch.fx.GraphModule) -> torch.fx.Node:
+    """Return the output node of a graph"""
+    # reversed() since we expect output at end of graph
+    return next(n for n in reversed(gm.graph.nodes) if n.op == "output")
+
+
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: List[Any],
@@ -295,8 +301,8 @@ def aot_dispatch_autograd(
         # and we will end up with a zero grad at x.
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
-        _indices_of_inps_to_detach = []
-        bw_outs = next(n for n in bw_module.graph.nodes if n.op == "output").args[0]
+        _indices_of_inps_to_detach: List[int] = []
+        bw_outs: Sequence[torch.fx.Node] = _output_node(bw_module).args[0]  # type: ignore[assignment]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).
