@@ -432,6 +432,7 @@ class TestCutlassBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
