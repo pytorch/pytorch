@@ -267,10 +267,17 @@ class VariableBuilder:
             if dup_guard:
                 self.install_guards(dup_guard)
             return side_effect_result
+
+        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        if cached_vt:
+            return cached_vt
+
         vt = self._wrap(value)
         vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
+
+        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
