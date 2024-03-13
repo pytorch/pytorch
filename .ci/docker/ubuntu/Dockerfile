@@ -169,9 +169,11 @@ RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
-COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
-RUN bash ./install_cache.sh && rm install_cache.sh
+# snadampal: disabling sccache due to the following issue
+# https://github.com/pytorch/pytorch/issues/121559
+#COPY ./common/install_cache.sh install_cache.sh
+#ENV PATH /opt/cache/bin:$PATH
+#RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Add jni.h for java host build
 COPY ./common/install_jni.sh install_jni.sh
@@ -188,7 +190,8 @@ ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+# snadampal: disabling it to get aarch64 linux working
+#COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell

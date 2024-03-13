@@ -354,4 +354,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   python tools/stats/export_test_times.py
 fi
 
-print_sccache_stats
+# snadampal: skipping it till sccache support added for aarch64
+# https://github.com/pytorch/pytorch/issues/121559
+#print_sccache_stats
