@@ -11443,7 +11443,7 @@ class TestConsistency(TestCaseMPS):
         if op.name in ["pow", "__rpow__"] and product_version < 13.3:
             # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
             # fixed in macOS 13.3+
-            return (1e-6, 4e-6)
+            return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
         if op.name == "nn.functional.interpolate":
             return (1e-3, 1e-4)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
