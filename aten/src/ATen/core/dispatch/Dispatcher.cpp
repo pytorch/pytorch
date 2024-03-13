@@ -522,13 +522,13 @@ bool Dispatcher::profilingOperatorEvents() {
   return TORCH_SDT_IS_ENABLED(operator_start) || TORCH_SDT_IS_ENABLED(operator_end);
 }
 
-void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+C10_NOINLINE void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
   if (TORCH_SDT_IS_ENABLED(operator_start)) {
     TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str());
   }
 }
 
-void Dispatcher::fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+C10_NOINLINE void Dispatcher::fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref) {
   if (TORCH_SDT_IS_ENABLED(operator_end)) {
     TORCH_SDT_WITH_SEMAPHORE(operator_end, schema_ref.get().name().c_str());
   }

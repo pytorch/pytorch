@@ -66,7 +66,7 @@ def _promote_type_fft(
         dtype = torch.get_default_dtype()
 
     allowed_types = [torch.float32, torch.float64]
-    maybe_support_half = device.type in ["cuda", "meta"] and not torch.version.hip
+    maybe_support_half = device.type in ["cuda", "meta"]
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
@@ -312,7 +312,7 @@ def _canonicalize_fft_shape_and_dim_args(
 
         # Translate any -1 values in shape to the default length
         ret_shape = tuple(
-            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)
+            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
         )
     elif dim is None:
         # No shape, no dim
@@ -320,12 +320,12 @@ def _canonicalize_fft_shape_and_dim_args(
         ret_shape = tuple(input_sizes)
     else:
         # No shape, has dim
-        ret_shape = tuple(input_sizes[d] for d in ret_dims)
+        ret_shape = tuple(input_sizes[d] for d in ret_dims)  # type: ignore[possibly-undefined]
 
     for n in ret_shape:
         torch._check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
 
-    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
+    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)  # type: ignore[possibly-undefined]
 
 
 def _prod(xs: Iterable[int]) -> int:

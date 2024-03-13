@@ -1,6 +1,9 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
+#include <algorithm>
+#include <utility>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -11,12 +14,12 @@ namespace api {
 //
 
 DescriptorSet::DescriptorSet(
-    const VkDevice device,
-    const VkDescriptorSet handle,
-    const ShaderLayout::Signature& shader_layout_signature)
+    VkDevice device,
+    VkDescriptorSet handle,
+    ShaderLayout::Signature shader_layout_signature)
     : device_(device),
       handle_(handle),
-      shader_layout_signature_(shader_layout_signature),
+      shader_layout_signature_(std::move(shader_layout_signature)),
       bindings_{} {}
 
 DescriptorSet::DescriptorSet(DescriptorSet&& other) noexcept
@@ -41,14 +44,18 @@ DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
-  DescriptorSet::ResourceBinding binder;
+  VK_CHECK_COND(
+      buffer.has_memory(),
+      "Buffer must be bound to memory for it to be usable");
+
+  DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
   binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
   binder.is_image = false; // is_image
   binder.resource_info.buffer_info.buffer = buffer.handle(); // buffer
   binder.resource_info.buffer_info.offset = buffer.mem_offset(); // offset
   binder.resource_info.buffer_info.range = buffer.mem_range(); // range
-  add_binding(std::move(binder));
+  add_binding(binder);
 
   return *this;
 }
@@ -56,25 +63,28 @@ DescriptorSet& DescriptorSet::bind(
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanImage& image) {
+  VK_CHECK_COND(
+      image.has_memory(), "Image must be bound to memory for it to be usable");
+
   VkImageLayout binding_layout = image.layout();
   if (shader_layout_signature_[idx] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
     binding_layout = VK_IMAGE_LAYOUT_GENERAL;
   }
 
-  DescriptorSet::ResourceBinding binder;
+  DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
   binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
   binder.is_image = true; // is_image
   binder.resource_info.image_info.sampler = image.sampler(); // buffer
   binder.resource_info.image_info.imageView = image.image_view(); // imageView
   binder.resource_info.image_info.imageLayout = binding_layout; // imageLayout
-  add_binding(std::move(binder));
+  add_binding(binder);
 
   return *this;
 }
 
 VkDescriptorSet DescriptorSet::get_bind_handle() const {
-  c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
+  std::vector<VkWriteDescriptorSet> write_descriptor_sets;
 
   for (const ResourceBinding& binding : bindings_) {
     VkWriteDescriptorSet write{
@@ -132,9 +142,9 @@ void DescriptorSet::add_binding(const ResourceBinding& binding) {
 
 DescriptorSetPile::DescriptorSetPile(
     const uint32_t pile_size,
-    const VkDescriptorSetLayout descriptor_set_layout,
-    const VkDevice device,
-    const VkDescriptorPool descriptor_pool)
+    VkDescriptorSetLayout descriptor_set_layout,
+    VkDevice device,
+    VkDescriptorPool descriptor_pool)
     : pile_size_{pile_size},
       set_layout_{descriptor_set_layout},
       device_{device},
@@ -149,7 +159,7 @@ VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
   // No-ops if there are descriptor sets available
   allocate_new_batch();
 
-  const VkDescriptorSet handle = descriptors_[in_use_];
+  VkDescriptorSet handle = descriptors_[in_use_];
   descriptors_[in_use_] = VK_NULL_HANDLE;
 
   in_use_++;
@@ -157,7 +167,7 @@ VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
 }
 
 void DescriptorSetPile::allocate_new_batch() {
-  // No-ops if there are still descriptor sets availble
+  // No-ops if there are still descriptor sets available
   if (in_use_ < descriptors_.size() &&
       descriptors_[in_use_] != VK_NULL_HANDLE) {
     return;
@@ -185,14 +195,33 @@ void DescriptorSetPile::allocate_new_batch() {
 //
 
 DescriptorPool::DescriptorPool(
-    const VkDevice device,
+    VkDevice device,
     const DescriptorPoolConfig& config)
     : device_(device),
       pool_(VK_NULL_HANDLE),
       config_(config),
       mutex_{},
       piles_{} {
-  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes{
+  if (config.descriptorPoolMaxSets > 0) {
+    init(config);
+  }
+}
+
+DescriptorPool::~DescriptorPool() {
+  if (VK_NULL_HANDLE == pool_) {
+    return;
+  }
+  vkDestroyDescriptorPool(device_, pool_, nullptr);
+}
+
+void DescriptorPool::init(const DescriptorPoolConfig& config) {
+  VK_CHECK_COND(
+      pool_ == VK_NULL_HANDLE,
+      "Trying to init a DescriptorPool that has already been created!");
+
+  config_ = config;
+
+  std::vector<VkDescriptorPoolSize> type_sizes{
       {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           config_.descriptorUniformBufferCount,
@@ -223,16 +252,12 @@ DescriptorPool::DescriptorPool(
   VK_CHECK(vkCreateDescriptorPool(device_, &create_info, nullptr, &pool_));
 }
 
-DescriptorPool::~DescriptorPool() {
-  if (VK_NULL_HANDLE == pool_) {
-    return;
-  }
-  vkDestroyDescriptorPool(device_, pool_, nullptr);
-}
-
 DescriptorSet DescriptorPool::get_descriptor_set(
-    const VkDescriptorSetLayout set_layout,
+    VkDescriptorSetLayout set_layout,
     const ShaderLayout::Signature& signature) {
+  VK_CHECK_COND(
+      pool_ != VK_NULL_HANDLE, "DescriptorPool has not yet been initialized!");
+
   auto it = piles_.find(set_layout);
   if (piles_.cend() == it) {
     it = piles_
@@ -250,8 +275,10 @@ DescriptorSet DescriptorPool::get_descriptor_set(
 }
 
 void DescriptorPool::flush() {
-  VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
-  piles_.clear();
+  if (pool_ != VK_NULL_HANDLE) {
+    VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
+    piles_.clear();
+  }
 }
 
 } // namespace api

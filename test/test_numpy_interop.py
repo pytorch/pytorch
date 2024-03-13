@@ -1,9 +1,12 @@
+# mypy: ignore-errors
+
 # Owner(s): ["module: numpy"]
 
 import torch
 import numpy as np
 
 from itertools import product
+import sys
 
 from torch.testing._internal.common_utils import \
     (skipIfTorchDynamo, TestCase, run_tests)
@@ -220,7 +223,7 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array([1, 2, 3, 4], dtype=np.uint16)
+        array = np.array(['foo', 'bar'], dtype=np.dtype(np.str_))
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 
@@ -254,6 +257,18 @@ class TestNumPyInterop(TestCase):
         x = np.array([3., 5., 8.])
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
+
+    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
+    def test_from_numpy_no_leak_on_invalid_dtype(self):
+        # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
+        # object. See https://github.com/pytorch/pytorch/issues/121138
+        x = np.array("value".encode('ascii'))
+        for _ in range(1000):
+            try:
+                torch.from_numpy(x)
+            except TypeError:
+                pass
+        self.assertTrue(sys.getrefcount(x) == 2)
 
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
@@ -417,7 +432,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(RuntimeError, "Overflow",
+        self.assertRaisesRegex(RuntimeError, "(Overflow|an integer is required)",
                                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:

@@ -1,8 +1,15 @@
 #pragma once
 
+#include <c10/util/Exception.h>
+#include <cstddef>
 #include <functional>
 #include <iomanip>
+#include <ios>
 #include <sstream>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <c10/util/ArrayRef.h>
@@ -233,6 +240,17 @@ struct sha1 {
   std::size_t bit_count_high{};
 };
 
+constexpr uint64_t twang_mix64(uint64_t key) noexcept {
+  key = (~key) + (key << 21); // key *= (1 << 21) - 1; key -= 1;
+  key = key ^ (key >> 24);
+  key = key + (key << 3) + (key << 8); // key *= 1 + (1 << 3) + (1 << 8)
+  key = key ^ (key >> 14);
+  key = key + (key << 2) + (key << 4); // key *= 1 + (1 << 2) + (1 << 4)
+  key = key ^ (key >> 28);
+  key = key + (key << 31); // key *= 1 + (1 << 31)
+  return key;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // c10::hash implementation
 ////////////////////////////////////////////////////////////////////////////////
@@ -244,8 +262,7 @@ template <typename T>
 size_t simple_get_hash(const T& o);
 
 template <typename T, typename V>
-using type_if_not_enum =
-    typename std::enable_if<!std::is_enum<T>::value, V>::type;
+using type_if_not_enum = std::enable_if_t<!std::is_enum_v<T>, V>;
 
 // Use SFINAE to dispatch to std::hash if possible, cast enum types to int
 // automatically, and fall back to T::hash otherwise. NOTE: C++14 added support
@@ -259,9 +276,8 @@ auto dispatch_hash(const T& o)
 }
 
 template <typename T>
-typename std::enable_if<std::is_enum<T>::value, size_t>::type dispatch_hash(
-    const T& o) {
-  using R = typename std::underlying_type<T>::type;
+std::enable_if_t<std::is_enum_v<T>, size_t> dispatch_hash(const T& o) {
+  using R = std::underlying_type_t<T>;
   return std::hash<R>()(static_cast<R>(o));
 }
 

@@ -61,6 +61,23 @@ def _may_generate_pattern_with_reshape(pattern, reshape_size=Arg(), with_reshape
         return pattern
 
 
+def _generate_linear_t_pattern(
+    _dequant_per_channel_pattern,
+    dtype,
+):
+    assert dtype in [torch.float32, torch.bfloat16]
+    t_pattern = CallFunction(
+        aten.permute.default,
+        _may_generate_pattern_with_dtype_convert(
+            _dequant_per_channel_pattern,
+            KeywordArg("autocast_wgt_dtype"),
+            dtype == torch.bfloat16,
+        ),
+        KeywordArg("permute_axes"),
+    )
+    return t_pattern
+
+
 def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
     # only insert to_dtype if is_bf16 is True
     computation_call = _may_generate_pattern_with_dtype_convert(
@@ -119,31 +136,39 @@ dequantize_per_channel_to_bf16_clone_weight_pattern = CallFunction(
     memory_format=KeywordArg("memory_format"),
 )
 
-dequantize_qconv_pt2e_pattern = CallFunction(
-    torch.ops.onednn.qconv2d_pointwise.default,
-    KeywordArg("x"),
-    KeywordArg("x_scale"),  # x_scale
-    KeywordArg("x_zp"),  # x_zp
-    KeywordArg("packed_weight"),  # packed_weight
-    KeywordArg("w_scale"),  # w_scale
-    KeywordArg("w_zp"),  # w_zp
-    KeywordArg("b"),  # bias
-    KeywordArg("stride"),
-    KeywordArg("padding"),
-    KeywordArg("dilation"),
-    KeywordArg("groups"),
-    KeywordArg("inv_output_scale"),  # inv_output_scale = 1.0
-    KeywordArg("output_zero_point"),  # output_zero_point = 0
-    KeywordArg("output_dtype"),  # output_dtype = None
-    KeywordArg("attr"),  # attr = "none"
-    Arg(),  # scalars
-    Arg(),  # algorithm
-)
 
-
-def qlinear_pt2e_pattern(users=1):
+def get_dequantize_qconv_pt2e_pattern(users=1):
     return CallFunction(
-        torch.ops.onednn.qlinear_pointwise.default,
+        torch.ops.onednn.qconv2d_pointwise.default,
+        KeywordArg("x"),
+        KeywordArg("x_scale"),  # x_scale
+        KeywordArg("x_zp"),  # x_zp
+        KeywordArg("packed_weight"),  # packed_weight
+        KeywordArg("w_scale"),  # w_scale
+        KeywordArg("w_zp"),  # w_zp
+        KeywordArg("b"),  # bias
+        KeywordArg("stride"),
+        KeywordArg("padding"),
+        KeywordArg("dilation"),
+        KeywordArg("groups"),
+        KeywordArg("inv_output_scale"),  # inv_output_scale = 1.0
+        KeywordArg("output_zero_point"),  # output_zero_point = 0
+        KeywordArg("output_dtype"),  # output_dtype = None
+        KeywordArg("attr"),  # attr = "none"
+        Arg(),  # scalars
+        Arg(),  # algorithm
+        _users=users,
+    )
+
+
+def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):
+    qlinear_op = (
+        torch.ops.onednn.qlinear_pointwise.tensor
+        if x_scale_zp_are_tensors
+        else torch.ops.onednn.qlinear_pointwise.default
+    )
+    return CallFunction(
+        qlinear_op,
         KeywordArg("x"),
         KeywordArg("x_scale"),
         KeywordArg("x_zp"),
@@ -202,6 +227,24 @@ def generate_pattern_with_unary(computation_call, unary_post_op):
                 CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
                 KeywordArg("max_value"),
             )
+        if unary_post_op == aten.hardswish.default:
+            return CallFunction(
+                aten.div,
+                CallFunction(
+                    aten.mul,
+                    computation_call,
+                    CallFunction(
+                        aten.clamp_max,
+                        CallFunction(
+                            aten.clamp_min,
+                            CallFunction(aten.add, computation_call, 3),
+                            0,
+                        ),
+                        6,
+                    ),
+                ),
+                6,
+            )
         else:
             return CallFunction(
                 unary_post_op,
@@ -235,7 +278,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                             _may_generate_pattern_with_dtype_convert(
                                 computation_call,
                                 KeywordArg("autocast_output_quant_dtype"),
-                                dtype != torch.float32,
+                                dtype == torch.bfloat16,
                             ),
                             KeywordArg("o_inv_scale"),
                         ),
@@ -434,44 +477,67 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
     # * Extra input of binary node comes from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
     # * the two inputs of binary node should have the same shape
+    # * All users of the extra input in this pattern should be
+    #   ancestor nodes of the compute node, except for the binary node
+    #   connected to the compute node.
     def fn(match):
-        qconv2d_node_after_weight_prepack = filter_nodes(
-            match.nodes, torch.ops.onednn.qconv2d_pointwise
-        )[0]
-        if len(qconv2d_node_after_weight_prepack.users) != 1:
+        compute_node = filter_nodes(match.nodes, torch.ops.onednn.qconv2d_pointwise)[0]
+        # qconv2d_pointwise should only have one user
+        if len(compute_node.users) != 1:
             return False
+        binary_node_inputs = next(iter(compute_node.users)).args
+        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
         if output_dtype is not None:
-            binary_node_inputs = next(
-                iter(qconv2d_node_after_weight_prepack.users)
-            ).args
-            assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-            extra_input_node = None
+            extra_input_of_binary_node = None
             for arg in binary_node_inputs:
-                if arg != qconv2d_node_after_weight_prepack:
-                    extra_input_node = arg
+                if arg != compute_node:
+                    extra_input_of_binary_node = arg
                     break
-            assert extra_input_node is not None
-            if (not isinstance(extra_input_node, torch.fx.Node)) or (
-                extra_input_node.target != aten.mul.Tensor
+            assert extra_input_of_binary_node is not None
+            # Extra input of binary node comes from dequant pattern
+            if (not isinstance(extra_input_of_binary_node, torch.fx.Node)) or (
+                extra_input_of_binary_node.target != aten.mul.Tensor
             ):
                 return False
-            if not (
-                hasattr(binary_node_inputs[0], "meta")
-                and isinstance(
-                    binary_node_inputs[0].meta.get("val", None), torch.Tensor
+
+        # the two inputs of binary node should have attribute "meta" and should be tensors
+        if not (
+            hasattr(binary_node_inputs[0], "meta")
+            and isinstance(binary_node_inputs[0].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+        ) or not (
+            hasattr(binary_node_inputs[1], "meta")
+            and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+        ):
+            return False
+        # the two inputs of binary node should have the same shape
+        if (
+            binary_node_inputs[0].meta["val"].size()  # type: ignore[union-attr]
+            != binary_node_inputs[1].meta["val"].size()  # type: ignore[union-attr]
+        ):
+            return False
+
+        # All users of the extra input in this pattern should be
+        # ancestor nodes of the compute node, except for the binary node
+        # connected to the compute node.
+
+        from .mkldnn_fusion import _get_remaining_users
+
+        extra_input_of_pattern = (
+            match.kwargs["accum"]
+            if output_dtype is None
+            else match.kwargs["accum_after_dequant"]
+        )
+        if (
+            len(
+                _get_remaining_users(
+                    extra_input_of_pattern,
+                    compute_node,
                 )
-            ) or not (
-                hasattr(binary_node_inputs[1], "meta")
-                and isinstance(
-                    binary_node_inputs[1].meta.get("val", None), torch.Tensor
-                )
-            ):
-                return False
-            if (
-                binary_node_inputs[0].meta["val"].size()
-                != binary_node_inputs[1].meta["val"].size()
-            ):
-                return False
+            )
+            > 1
+            or extra_input_of_pattern == compute_node.args[0]
+        ):
+            return False
         return True
 
     return fn
@@ -511,6 +577,13 @@ def _register_quantized_conv_binary_lowering(
         # Output QParams
         o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
         o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+
+        accum.realize()
+        from .mkldnn_fusion import _can_be_inplace
+
+        assert _can_be_inplace(
+            accum
+        ), "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
 
         computation_args = (
             x,
@@ -562,18 +635,24 @@ def _register_quantization_unary_fusion():
         # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
         conv_unary_replace_patterns = {
             UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                dequantize_qconv_pt2e_pattern,
+                get_dequantize_qconv_pt2e_pattern(1),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
-                    dequantize_qconv_pt2e_pattern, aten.relu.default
+                    get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
                 ),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
-                    dequantize_qconv_pt2e_pattern, aten.hardtanh.default
+                    get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+                ),
+                dtype=original_pattern_output_dtype,
+            ),
+            UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
+                generate_pattern_with_unary(
+                    get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
                 ),
                 dtype=original_pattern_output_dtype,
             ),
@@ -593,10 +672,13 @@ def _register_quantization_unary_fusion():
         # Priority 2 to match: QConv2d Unary pattern with fp32/bfloat16 output
         conv_unary_replace_float_out_patterns = {
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                dequantize_qconv_pt2e_pattern, aten.relu.default
+                get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
-                dequantize_qconv_pt2e_pattern, aten.hardtanh.default
+                get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+            ),
+            UnaryAttr("hardswish", [], ""): generate_pattern_with_unary(
+                get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
             ),
         }
 
@@ -614,68 +696,84 @@ def _register_quantization_unary_fusion():
         is_bf16 = True if original_pattern_output_dtype == torch.bfloat16 else False
 
         # QLinear
-        # Priority 1 to match: QLinear Unary pattern with int8 output
-        linear_unary_replace_patterns = {
-            UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                qlinear_pt2e_pattern(1),
-                dtype=original_pattern_output_dtype,
-            ),
-            UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(qlinear_pt2e_pattern(1), aten.relu.default),
-                dtype=original_pattern_output_dtype,
-            ),
-            UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                _unary_fusion_pattern(
+        for x_scale_zp_are_tensors in (False, True):
+            qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
+            # Priority 1 to match: QLinear Unary pattern with int8 output
+            linear_unary_replace_patterns = {
+                UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+                    qlinear_pattern,
+                    dtype=original_pattern_output_dtype,
+                ),
+                UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+                    generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
+                    dtype=original_pattern_output_dtype,
+                ),
+                UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_erf,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        2,
+                        is_bf16,
+                    ),
+                    dtype=torch.float32,
+                ),
+                UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_tanh,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        4,
+                        is_bf16,
+                    ),
+                    dtype=torch.float32,
+                ),
+            }
+
+            for unary_attr, patterns in linear_unary_replace_patterns.items():
+                _register_quantized_linear_lowering(
+                    patterns,
+                    1,  # pass_number
+                    torch.ops.onednn.qlinear_pointwise,  # computation_op
+                    None,  # output_dtype
+                    unary_attr,  # unary_attr
+                    original_pattern_output_dtype=original_pattern_output_dtype,
+                )
+
+            # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
+            linear_unary_replace_float_out_patterns = {
+                UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+                    qlinear_pattern, aten.relu.default
+                ),
+                UnaryAttr("gelu", [], "none"): _unary_fusion_pattern(
                     _gelu_fusion_erf,
-                    qlinear_pt2e_pattern(1 if is_bf16 else 2),
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                    ),
                     2,
                     is_bf16,
                 ),
-                dtype=torch.float32,
-            ),
-            UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
-                _unary_fusion_pattern(
+                UnaryAttr("gelu", [], "tanh"): _unary_fusion_pattern(
                     _gelu_fusion_tanh,
-                    qlinear_pt2e_pattern(1 if is_bf16 else 2),
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 4
+                    ),
                     4,
                     is_bf16,
                 ),
-                dtype=torch.float32,
-            ),
-        }
+            }
 
-        for unary_attr, patterns in linear_unary_replace_patterns.items():
-            _register_quantized_linear_lowering(
-                patterns,
-                1,  # pass_number
-                torch.ops.onednn.qlinear_pointwise,  # computation_op
-                None,  # output_dtype
-                unary_attr,  # unary_attr
-                original_pattern_output_dtype=original_pattern_output_dtype,
-            )
-
-        # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
-        linear_unary_replace_float_out_patterns = {
-            UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                qlinear_pt2e_pattern(1), aten.relu.default
-            ),
-            UnaryAttr("gelu", [], "none"): _unary_fusion_pattern(
-                _gelu_fusion_erf, qlinear_pt2e_pattern(1 if is_bf16 else 2), 2, is_bf16
-            ),
-            UnaryAttr("gelu", [], "tanh"): _unary_fusion_pattern(
-                _gelu_fusion_tanh, qlinear_pt2e_pattern(1 if is_bf16 else 4), 4, is_bf16
-            ),
-        }
-
-        for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
-            _register_quantized_linear_lowering(
-                patterns,
-                2,  # pass_number
-                torch.ops.onednn.qlinear_pointwise,  # computation_op
-                original_pattern_output_dtype,  # output_dtype
-                unary_attr,  # unary_attr
-                original_pattern_output_dtype=original_pattern_output_dtype,
-            )
+            for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
+                _register_quantized_linear_lowering(
+                    patterns,
+                    2,  # pass_number
+                    torch.ops.onednn.qlinear_pointwise,  # computation_op
+                    original_pattern_output_dtype,  # output_dtype
+                    unary_attr,  # unary_attr
+                    original_pattern_output_dtype=original_pattern_output_dtype,
+                )
 
 
 def _register_quantization_binary_fusion():
@@ -698,11 +796,11 @@ def _register_quantization_binary_fusion():
         # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
         binary_replace_patterns = {
             BinaryUnaryAttr(
-                "add", 1.0, "none", [], ""
+                "sum", 1.0, "none", [], ""
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
-                    dequantize_qconv_pt2e_pattern,
+                    get_dequantize_qconv_pt2e_pattern(1),
                     dequantize_accum_pattern,
                     int8_mixed_bf16_with_inplace_add,
                 ),
@@ -711,12 +809,12 @@ def _register_quantization_binary_fusion():
                 else torch.float32,
             ),
             BinaryUnaryAttr(
-                "add", 1.0, "relu", [], ""
+                "sum", 1.0, "relu", [], ""
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
                     generate_pattern_with_binary(
                         aten.add.Tensor,
-                        dequantize_qconv_pt2e_pattern,
+                        get_dequantize_qconv_pt2e_pattern(1),
                         dequantize_accum_pattern,
                         int8_mixed_bf16_with_inplace_add,
                     ),
@@ -739,10 +837,10 @@ def _register_quantization_binary_fusion():
 
         # Priority 2 to match: QConv2d Binary-Unary pattern with fp32/bfloat16 output
         binary_replace_float_out_patterns = {
-            BinaryUnaryAttr("add", 1.0, "relu", [], ""): generate_pattern_with_unary(
+            BinaryUnaryAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
-                    dequantize_qconv_pt2e_pattern,
+                    get_dequantize_qconv_pt2e_pattern(1),
                     KeywordArg("accum_after_dequant"),
                     int8_mixed_bf16_with_inplace_add,
                 ),
@@ -777,9 +875,9 @@ def _register_quantization_binary_fusion():
 
         # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
         binary_replace_float_out_patterns = {
-            BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_binary(
+            BinaryUnaryAttr("sum", 1.0, "none", [], ""): generate_pattern_with_binary(
                 aten.add.Tensor,
-                dequantize_qconv_pt2e_pattern,
+                get_dequantize_qconv_pt2e_pattern(1),
                 KeywordArg("accum_after_dequant"),
                 int8_mixed_bf16_with_inplace_add,
             ),
@@ -919,12 +1017,12 @@ def _is_input_output_same_scale_zp(check_node):
         scales = [
             (
                 mul_node.args[1]
-                if mul_node.args[0].target is check_node
-                else 1.0 / mul_node.args[1]
+                if mul_node.args[0].target is check_node  # type: ignore[union-attr]
+                else 1.0 / mul_node.args[1]  # type: ignore[operator]
             )
             for mul_node in mul_nodes
         ]
-        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):
+        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):  # type: ignore[arg-type]
             return False
 
         return True
@@ -1146,7 +1244,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
             _user_node = user_node
             while _source_node != dequant_pattern_start_node.args[0]:
                 _user_node = clone_to_new_node(graph, _source_node, _user_node)
-                _source_node = _source_node.args[0]
+                _source_node = _source_node.args[0]  # type: ignore[assignment]
 
         counters["inductor"]["dequant_promotion_matcher_count"] += 1
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
@@ -1224,11 +1322,11 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             mul_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
-            mul_node = convert_to_bf16.args[0]
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
+            mul_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
+        sub_node = mul_node.args[0]  # type: ignore[union-attr]
+        to_fp32_node = sub_node.args[0]  # type: ignore[union-attr]
         has_clone_to_channel_last_node_in_pattern = (
-            conv_node.args[1].target is aten.clone.default
+            conv_node.args[1].target is aten.clone.default  # type: ignore[union-attr]
         )
         clone_node = (
             conv_node.args[1] if has_clone_to_channel_last_node_in_pattern else None
@@ -1236,20 +1334,20 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
 
         if dtype == torch.float32:
             dequant_per_channel = (
-                clone_node.args[0]
+                clone_node.args[0]  # type: ignore[union-attr]
                 if has_clone_to_channel_last_node_in_pattern
                 else conv_node.args[1]
             )
         else:
             weight_to_bf16_node = (
-                clone_node.args[0]
+                clone_node.args[0]  # type: ignore[union-attr]
                 if has_clone_to_channel_last_node_in_pattern
                 else conv_node.args[1]
             )
-            dequant_per_channel = weight_to_bf16_node.args[0]
+            dequant_per_channel = weight_to_bf16_node.args[0]  # type: ignore[union-attr]
 
         assert (
-            dequant_per_channel.target
+            dequant_per_channel.target  # type: ignore[union-attr]
             is quantized_decomposed.dequantize_per_channel.default
         )
 
@@ -1328,7 +1426,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
             # Erase the dequant pattern
             graph.erase_node(mul_node)
             graph.erase_node(sub_node)
@@ -1337,7 +1435,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             if clone_node is not None:
                 graph.erase_node(clone_node)
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
             graph.erase_node(dequant_per_channel)
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
@@ -1354,7 +1452,7 @@ def _generate_dequant_convolution_node_pattern(
         _may_generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
             KeywordArg("autocast_act_dtype"),
-            dtype != torch.float32,
+            dtype == torch.bfloat16,
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1390,38 +1488,84 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
     )
 
 
-def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two):
-    def _inner(match):
-        # Check dequant pattern has only 1 user.
-        if input_dim_exceeds_two:
+def _get_linear_node(match, input_dim_exceeds_two, input_contiguous):
+    output_reshape_node = None
+    if input_dim_exceeds_two:
+        if input_contiguous:
             output_reshape_node = match.output_node()
             assert output_reshape_node.target is aten.reshape.default
             linear_node = output_reshape_node.args[0]
         else:
-            linear_node = match.output_node()
+            linear_nodes = filter_nodes(match.nodes, aten.bmm.default)
+            assert len(linear_nodes) == 1
+            linear_node = linear_nodes[0]
+    else:
+        linear_node = match.output_node()
 
-        assert linear_node.target in (aten.addmm.default, aten.mm.default)
-        input_index = 0 if linear_node.target is aten.mm.default else 1
-        assert dtype in [torch.float32, torch.bfloat16]
+    assert linear_node.target in (
+        aten.addmm.default,
+        aten.mm.default,
+        aten.bmm.default,
+    )
+    return linear_node, output_reshape_node
 
-        if input_dim_exceeds_two:
+
+def _get_linear_dq_mul_node(
+    linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+):
+    act_reshape_node = None
+    activation_to_bf16_node = None
+    act_expand_node = None
+    if input_dim_exceeds_two:
+        if input_contiguous:
             act_reshape_node = linear_node.args[input_index]
             assert act_reshape_node.target is aten.reshape.default
-            mul_node = (
-                act_reshape_node.args[0]  # pattern: linear -> reshape -> mul
-                if dtype == torch.float32
-                else act_reshape_node.args[0].args[
-                    0
-                ]  # pattern: linear -> reshape -> to_bf16 -> mul
-            )
+            if dtype == torch.float32:
+                # pattern: linear -> reshape -> mul
+                mul_node = act_reshape_node.args[0]
+            else:
+                # pattern: linear -> reshape -> to_bf16 -> mul
+                activation_to_bf16_node = act_reshape_node.args[0]
+                mul_node = activation_to_bf16_node.args[0]
         else:
-            mul_node = (
-                linear_node.args[input_index]  # pattern: linear -> mul
-                if dtype == torch.float32
-                else linear_node.args[input_index].args[
-                    0
-                ]  # pattern: linear -> to_fb16 -> mul
-            )
+            # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
+            act_expand_node = linear_node.args[input_index]
+            assert act_expand_node.target is aten.expand.default
+            if dtype == torch.float32:
+                mul_node = act_expand_node.args[0]
+            else:
+                activation_to_bf16_node = act_expand_node.args[0]
+                mul_node = activation_to_bf16_node.args[0]
+    else:
+        if dtype == torch.float32:
+            # pattern: linear -> mul
+            mul_node = linear_node.args[input_index]
+        else:
+            # pattern: linear -> to_bf16 -> mul
+            activation_to_bf16_node = linear_node.args[input_index]
+            mul_node = activation_to_bf16_node.args[0]
+    return mul_node, act_reshape_node, activation_to_bf16_node, act_expand_node
+
+
+def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contiguous):
+    def _inner(match):
+        # Check dequant pattern has only 1 user.
+        (
+            linear_node,
+            _,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        assert dtype in [torch.float32, torch.bfloat16]
+
+        (
+            mul_node,
+            _,
+            _,
+            _,
+        ) = _get_linear_dq_mul_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
 
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
@@ -1437,6 +1581,45 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two):
             # Ensure the dequant pattern only has 1 user
             # since we will delete the dequant pattern here
             return False
+
+        # Extra check for bmm pattern
+        if input_dim_exceeds_two and not input_contiguous:
+            # Check for act
+            # Act expand size should be exactly same as act size
+            act_expand_size = match.kwargs["act_expand_size"]
+            act_node = match.kwargs["x"]
+            if not (
+                hasattr(act_node, "meta")
+                and isinstance(act_node.meta.get("val", None), torch.Tensor)
+                and (act_node.meta["val"].size() == torch.Size(act_expand_size))
+            ):
+                return False
+
+            # Check for wgt
+            # wgt permute dims should be [1, 0]
+            wgt_permute_dims = match.kwargs["permute_axes"]
+            if wgt_permute_dims != [1, 0]:
+                return False
+
+            # Check below wgt size items:
+            # wgt before expand should with dim 2
+            # Expand size should with dim 3
+            # Expand size[0] should same as act size[0]
+            # Expand size[1] should same as wgt size[1]
+            # Expand size[2] should same as wgt size[0]
+            qweight_node = match.kwargs["q_weight"]
+            wgt_expand_size = match.kwargs["wgt_expand_size"]
+            if not (
+                hasattr(qweight_node, "meta")
+                and isinstance(qweight_node.meta.get("val", None), torch.Tensor)
+                and len(qweight_node.meta["val"].size()) == 2
+                and len(wgt_expand_size) == 3
+                and wgt_expand_size[0] == act_node.meta["val"].size()[0]
+                and wgt_expand_size[1] == qweight_node.meta["val"].size()[1]
+                and wgt_expand_size[2] == qweight_node.meta["val"].size()[0]
+            ):
+                return False
+
         return True
 
     return _inner
@@ -1447,10 +1630,13 @@ def _register_qlinear_weight_prepack_pass(
     pass_number,
     dtype=torch.float32,
     input_dim_exceeds_two=False,
+    input_contiguous=True,
 ):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two),
+        extra_check=_is_valid_dequant_linear_pattern(
+            dtype, input_dim_exceeds_two, input_contiguous
+        ),
         pass_number=pass_number,
     )
     def qlinear_weight_prepack(match: Match, *args, **kwargs):
@@ -1468,39 +1654,32 @@ def _register_qlinear_weight_prepack_pass(
         onednn.qlinear_pointwise <- onednn.qlinear_prepack <- int8_weight
         """
         assert dtype in [torch.float32, torch.bfloat16]
-        if input_dim_exceeds_two:
-            output_reshape_node = match.output_node()
-            assert output_reshape_node.target is aten.reshape.default
-            linear_node = output_reshape_node.args[0]
-        else:
-            linear_node = match.output_node()
-
-        assert linear_node.target in (aten.addmm.default, aten.mm.default)
-        input_index = 0 if linear_node.target is aten.mm.default else 1
+        (
+            linear_node,
+            output_reshape_node,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
         weight_index = input_index + 1
 
-        if input_dim_exceeds_two:
-            act_reshape_node = linear_node.args[input_index]
-            assert act_reshape_node.target is aten.reshape.default
-            if dtype == torch.float32:
-                # pattern: linear -> reshape -> mul
-                mul_node = act_reshape_node.args[0]
-            else:
-                # pattern: linear -> reshape -> to_bf16 -> mul
-                activation_to_bf16_node = act_reshape_node.args[0]
-                mul_node = activation_to_bf16_node.args[0]
-        else:
-            if dtype == torch.float32:
-                # pattern: linear -> mul
-                mul_node = linear_node.args[input_index]
-            else:
-                # pattern: linear -> to_bf16 -> mul
-                activation_to_bf16_node = linear_node.args[input_index]
-                mul_node = activation_to_bf16_node.args[0]
+        (
+            mul_node,
+            act_reshape_node,
+            activation_to_bf16_node,
+            act_expand_node,
+        ) = _get_linear_dq_mul_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
 
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
-        t_node = linear_node.args[weight_index]
+
+        if input_dim_exceeds_two and not input_contiguous:
+            wgt_expand_node = linear_node.args[weight_index]
+            assert wgt_expand_node.target is aten.expand.default
+            t_node = wgt_expand_node.args[0]
+        else:
+            t_node = linear_node.args[weight_index]
+
         if dtype == torch.float32:
             dequant_per_channel = t_node.args[0]
         else:
@@ -1559,22 +1738,45 @@ def _register_qlinear_weight_prepack_pass(
                 [],  # post op args
                 "",  # post op algorithm
             )
-            new_linear_node = graph.call_function(
-                torch.ops.onednn.qlinear_pointwise.default, args=new_args
-            )
+            Node = torch.fx.node.Node
+            if isinstance(x_scale, Node) and isinstance(x_zp, Node):
+                new_linear_node = graph.call_function(
+                    torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
+                )
+            else:
+                new_linear_node = graph.call_function(
+                    torch.ops.onednn.qlinear_pointwise.default, args=new_args
+                )
             if input_dim_exceeds_two:
-                output_reshape_node.replace_all_uses_with(new_linear_node)
-                new_linear_node.meta.update(output_reshape_node.meta)
+                if input_contiguous:
+                    output_reshape_node.replace_all_uses_with(new_linear_node)
+                    new_linear_node.meta.update(output_reshape_node.meta)
+                else:
+                    if bias:
+                        output_add_node_for_bias = match.output_node()
+                        assert output_add_node_for_bias.target is aten.add.Tensor
+                        output_add_node_for_bias.replace_all_uses_with(new_linear_node)
+                        new_linear_node.meta.update(output_add_node_for_bias.meta)
+                    else:
+                        linear_node.replace_all_uses_with(new_linear_node)
+                        new_linear_node.meta.update(linear_node.meta)
             else:
                 linear_node.replace_all_uses_with(new_linear_node)
                 new_linear_node.meta.update(linear_node.meta)
 
             # Erase the original linear node
             if input_dim_exceeds_two:
-                graph.erase_node(output_reshape_node)
+                if input_contiguous:
+                    graph.erase_node(output_reshape_node)
+                elif not input_contiguous and bias:
+                    graph.erase_node(output_add_node_for_bias)  # type: ignore[possibly-undefined]
             graph.erase_node(linear_node)
             if input_dim_exceeds_two:
-                graph.erase_node(act_reshape_node)
+                if input_contiguous:
+                    graph.erase_node(act_reshape_node)
+                else:
+                    graph.erase_node(act_expand_node)
+                    graph.erase_node(wgt_expand_node)  # type: ignore[possibly-undefined]
             if dtype == torch.bfloat16:
                 graph.erase_node(activation_to_bf16_node)
             # Erase the dequant pattern
@@ -1584,7 +1786,7 @@ def _register_qlinear_weight_prepack_pass(
             # Erase the dequant per channel pattern
             graph.erase_node(t_node)
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
             graph.erase_node(dequant_per_channel)
 
             counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
@@ -1596,15 +1798,8 @@ def _register_qlinear_weight_prepack_pass(
 def _generate_dequant_linear_node_pattern(
     _dequant_per_channel_pattern, dtype=torch.float32, input_dim_exceeds_two=False
 ):
-    t_pattern = CallFunction(
-        aten.permute.default,
-        _may_generate_pattern_with_dtype_convert(
-            _dequant_per_channel_pattern,
-            KeywordArg("autocast_wgt_dtype"),
-            dtype != torch.float32,
-        ),
-        KeywordArg("permute_axes"),
-    )
+    assert dtype in [torch.float32, torch.bfloat16]
+    t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
     dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
         CallFunction(
             aten.addmm.default,
@@ -1613,7 +1808,7 @@ def _generate_dequant_linear_node_pattern(
                 _may_generate_pattern_with_dtype_convert(
                     dequantize_per_tensor_activation_pattern,
                     KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
+                    dtype == torch.bfloat16,
                 ),
                 KeywordArg("act_reshape_size"),
                 input_dim_exceeds_two,
@@ -1630,7 +1825,7 @@ def _generate_dequant_linear_node_pattern(
                 _may_generate_pattern_with_dtype_convert(
                     dequantize_per_tensor_activation_pattern,
                     KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
+                    dtype == torch.bfloat16,
                 ),
                 KeywordArg("act_reshape_size"),
                 input_dim_exceeds_two,
@@ -1643,13 +1838,62 @@ def _generate_dequant_linear_node_pattern(
     return dequant_linear_bias_pattern, dequant_linear_no_bias_pattern
 
 
+def _generate_dequant_bmm_node_pattern(
+    _dequant_per_channel_pattern,
+    dtype=torch.float32,
+    with_bias=False,
+):
+    # When activation of linear dim exceed 2 and not contiguous
+    t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
+
+    assert dtype in [torch.float32, torch.bfloat16]
+    dequant_bmm_pattern = CallFunction(
+        aten.bmm.default,
+        CallFunction(
+            aten.expand.default,
+            _may_generate_pattern_with_dtype_convert(
+                dequantize_per_tensor_activation_pattern,
+                KeywordArg("autocast_act_dtype"),
+                dtype == torch.bfloat16,
+            ),
+            KeywordArg("act_expand_size"),
+        ),
+        CallFunction(
+            aten.expand.default,
+            t_pattern,
+            KeywordArg("wgt_expand_size"),
+        ),
+    )
+
+    def _generate_pattern_with_output_add(_dequant_bmm_pattern, _with_bias):
+        if _with_bias:
+            return CallFunction(
+                aten.add.Tensor,
+                _dequant_bmm_pattern,
+                KeywordArg("b"),
+            )
+        else:
+            return _dequant_bmm_pattern
+
+    return _generate_pattern_with_output_add(dequant_bmm_pattern, with_bias)
+
+
 def _generate_qlinear_weight_prepack_patterns(
     dtype=torch.float32,
     input_dim_exceeds_two=False,
+    input_contiguous=True,
+    with_bias=False,
 ):
-    return _generate_dequant_linear_node_pattern(
-        dequantize_per_channel_weight_pattern, dtype, input_dim_exceeds_two
-    )
+    if input_dim_exceeds_two and not input_contiguous:
+        return _generate_dequant_bmm_node_pattern(
+            dequantize_per_channel_weight_pattern,
+            dtype,
+            with_bias,
+        )
+    else:
+        return _generate_dequant_linear_node_pattern(
+            dequantize_per_channel_weight_pattern, dtype, input_dim_exceeds_two
+        )
 
 
 def _register_dequant_promotion():
@@ -1682,7 +1926,7 @@ def _register_dequant_promotion():
                 _may_generate_pattern_with_dtype_convert(
                     dequantize_per_tensor_activation_pattern,
                     KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
+                    dtype == torch.bfloat16,
                 ),
                 KeywordArg("act_reshape_size"),
                 with_reshape=input_dim_exceeds_two,
@@ -1703,9 +1947,45 @@ def _register_qconv_weight_prepack():
 
 
 def _register_qlinear_weight_prepack():
+    # 6 Linear related patterns will be matched based on the dtype, input dimension size and input contiguous.
+    # Then convert the pattern into a QLinear node with int8_fp32/bf16.
+    # Case 1: int8-mixed-fp32, input dim size is 2
+    # Case 2: int8-mixed-fp32, input dim size exceeds 2 and contiguous
+    # Case 3: int8-mixed-bf16, input dim size is 2
+    # Case 4: int8-mixed-bf16, input dim size exceeds 2 and contiguous
+
+    #   + - - - - | - - - - - - | - - - - - +
+    #   |    dq_per_tensor  dq_per_channel  |
+    #   |         |              |          |
+    #   |    OPT(to_bf16)    OPT(to_bf16)   |
+    #   |         |              |          |
+    #   |     OPT(reshape)   permute        |
+    #   |            \        /             |
+    #   |             addmm/mm              |
+    #   |                |                  |
+    #   |           OPT(reshape)            |
+
+    # Case 5: int8-mixed-fp32, input dim size exceeds 2 and not contiguous
+    # Case 6: int8-mixed-bf16, input dim size exceeds 2 and not contiguous
+
+    #   + - - - - | - - - - - - | - - - - - +
+    #   |    dq_per_tensor  dq_per_channel  |
+    #   |         |              |          |
+    #   |    OPT(to_bf16)    OPT(to_bf16)   |
+    #   |         |              |          |
+    #   |       expand       permute        |
+    #   |          \             |          |
+    #   |                    expand         |
+    #   |                    /              |
+    #   |               bmm                 |
+    #   |                |                  |
+    #   |            OPT(add)               |
+
     linear_weight_prepack_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False]
     )
+
+    # Step 1: register patterns from mm and addmm
     for dtype, input_dim_exceeds_two in linear_weight_prepack_cases:
         weight_prepack_patterns = _generate_qlinear_weight_prepack_patterns(
             dtype, input_dim_exceeds_two
@@ -1718,6 +1998,31 @@ def _register_qlinear_weight_prepack():
                 dtype=dtype,
                 input_dim_exceeds_two=input_dim_exceeds_two,
             )
+
+    # Step 2: register patterns from bmm
+    # Linear might be decomposed into bmm when input dim exceeds 2 and not contiguous
+    # refer to:
+    # https://github.com/pytorch/pytorch/blob/
+    # 80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
+    # in this case, we can convert it back to qlinear
+    for dtype, with_bias in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    ):
+        bmm_pattern = _generate_qlinear_weight_prepack_patterns(
+            dtype=dtype,
+            input_dim_exceeds_two=True,
+            input_contiguous=False,
+            with_bias=with_bias,
+        )
+        _register_qlinear_weight_prepack_pass(
+            bmm_pattern,
+            pass_number=1
+            if with_bias
+            else 2,  # if with_bias, there is an output add, so we should try to match it firstly
+            dtype=dtype,
+            input_dim_exceeds_two=True,
+            input_contiguous=False,
+        )
 
 
 @functools.lru_cache(None)

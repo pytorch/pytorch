@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import re
 import sys
 import time
