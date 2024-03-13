@@ -263,7 +263,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 self.events.append(event)
                 try:
                     return event.run(self)
-                except:
+                except Exception:
                     self.events.pop()
                     raise
 
