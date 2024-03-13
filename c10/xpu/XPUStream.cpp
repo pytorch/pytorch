@@ -103,11 +103,17 @@ void initDeviceStreamState(DeviceIndex device) {
       {sycl::property::queue::in_order(), queue::priority_high()}};
   for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
     for (const auto i : c10::irange(kStreamsPerPool)) {
-      streams[device][p][i] = std::make_unique<sycl::queue>(sycl::queue(
+      auto& stream = streams[device][p][i];
+      stream = std::make_unique<sycl::queue>(sycl::queue(
           c10::xpu::get_device_context(),
           c10::xpu::get_raw_device(device),
           c10::xpu::asyncHandler,
           properties[p]));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_stream_creation(
+            c10::kXPU, reinterpret_cast<uintptr_t>(stream.get()));
+      }
     }
     priority_counters[device][p] = 0;
   }
@@ -126,10 +132,11 @@ void initXPUStreamsOnce() {
   current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
     // Assigning the current stream to the last one in the pool can be
-    // beneficial in certain scenarios, particularly when users initialize their
-    // workload to perform computations with the current stream (the last one)
-    // and utilize stream (the first one) from the pool for communication, it
-    // allows for different streams to overlap in computation and communication.
+    // beneficial in certain scenarios, particularly when users initialize
+    // their workload to perform computations with the current stream (the
+    // last one) and utilize stream (the first one) from the pool for
+    // communication, it allows for different streams to overlap in
+    // computation and communication.
     current_streams[i] =
         makeStreamId(StreamIdType::NORMAL, kStreamsPerPool - 1);
   }
@@ -279,6 +286,10 @@ void syncStreamsOnDevice(DeviceIndex device) {
     for (const auto i : c10::irange(kStreamsPerPool)) {
       streams[device][p][i]->wait();
     }
+  }
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
   }
 }
 
