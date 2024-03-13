@@ -1033,6 +1033,10 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
+def check_unspec_or_constant_args(args, kwargs):
+    return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+
+
 def check_numpy_ndarray_args(args, kwargs):
     from .variables.tensor import NumpyNdarrayVariable
 
