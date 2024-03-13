@@ -597,9 +597,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         @register(torch.nested.nested_tensor)
-        def handle_nested_tensor(self, tx, *args, layout=None, **kwargs):
+        def handle_nested_tensor(
+            self, tx, tensor_list=None, *args, layout=None, **kwargs
+        ):
+            from .lists import BaseListVariable
+
             if layout and layout.as_python_constant() == torch.strided:
                 unimplemented("torch.compile does not support strided NestedTensor")
+            if not isinstance(tensor_list, BaseListVariable):
+                unimplemented("nested_tensor with non-list input")
 
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(self, tx, *args, **kwargs):
