@@ -1255,6 +1255,9 @@ def optimization_flags() -> str:
         base_flags += " -fno-unsafe-math-optimizations"
     if not config.cpp.enable_floating_point_contract_flag:
         base_flags += " -ffp-contract=off"
+    # Disable to fix the following accuracy issues:
+    #   https://github.com/pytorch/pytorch/issues/113017
+    #   https://github.com/pytorch/pytorch/issues/115261
     if not config.cpp.enable_tree_loop_vec_opt_flag:
         base_flags += " -fno-tree-loop-vectorize"
 
