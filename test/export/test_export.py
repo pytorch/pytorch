@@ -1462,7 +1462,6 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
-    @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
@@ -1489,14 +1488,14 @@ class TestExport(TestCase):
                     setattr(config, k, v)
 
         inp = (torch.rand(5, 4),)
-        exported_program = export(mod, inp)
+        exported_program = export(mod, inp, strict=True)
 
         with _patch_config({"allow_rnn": False}):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs",
             ):
-                _ = export(mod, inp)
+                _ = export(mod, inp, strict=True)
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
@@ -1589,7 +1588,6 @@ class TestExport(TestCase):
             torch.allclose(ep.module()(*inp_test)["b"], ep_rexported.module()(*inp_test)["b"])
         )
 
-    @testing.expectedFailureNonStrict
     def test_args_type_checked(self):
         class M(torch.nn.Module):
             def forward(self, x):
