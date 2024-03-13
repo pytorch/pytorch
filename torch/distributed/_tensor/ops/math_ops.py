@@ -123,6 +123,20 @@ class _NormPartial(_Partial):
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _NormPartial):
+            return False
+
+        # if either data is not None, we invalidate the sharding cache, as this indicates
+        # the current MaskPartial placement is still in use and should not be used for cache hit.
+        if self.norm_type != other.norm_type:
+            return False
+
+        return True
+
+    def __hash__(self) -> int:
+        return 1 + hash(self.norm_type)
+
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
     if dims_arg is None:
