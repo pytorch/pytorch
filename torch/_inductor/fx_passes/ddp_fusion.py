@@ -96,29 +96,29 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     # to be a part of the output.
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 
-    # The MAX_WAIT_DISTANCE is 2 because there is a getitem between the
-    # collective op and wait if the collective op is a coalesced op.
-    MAX_WAIT_DISTANCE = 2
-    distance = -1
-    nodes = collections.deque([comm_node, None])
-    while nodes and distance < MAX_WAIT_DISTANCE:
-        node = nodes.popleft()
-        if node is None:
-            distance += 1
-            if nodes:
-                nodes.append(None)
-            continue
-
-        node_list.append(node)
-        if node.name.startswith(wait_prefixes):
-            wait_nodes.append(node)
-        else:
-            nodes.extend(child for child in node.users if isinstance(child, fx.Node))
-
-    if not wait_nodes:
-        logger.warning(
-            "%s does not have the wait node or the wait node is too far way.", comm_node
-        )
+    first_user = next(iter(comm_node.users))
+    if (
+        len(comm_node.users) == 1
+        and first_user.target == torch.ops._c10d_functional.wait_tensor.default
+    ):
+        # Collective with only one output
+        node_list = [comm_node, first_user]
+        wait_nodes.append(first_user)
+    elif len(comm_node.users) > 1 and first_user.target == operator.getitem:
+        # Collective with only more than one output
+        node_list.append(comm_node)
+        for user in comm_node.users:
+            if user.target != operator.getitem:
+                return None
+            if len(user.users) != 1:
+                return None
+            wait_node = next(iter(user.users))
+            if wait_node.target != torch.ops._c10d_functional.wait_tensor.default:
+                return None
+            wait_nodes.append(wait_node)
+            node_list.append(user)
+        node_list.extend(wait_nodes)
+    else:
         return None
 
     # Identify all the outputs of this collective block.

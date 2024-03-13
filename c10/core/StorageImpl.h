@@ -257,11 +257,20 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 using StorageImplCreateHelper = intrusive_ptr<StorageImpl> (*)(
     StorageImpl::use_byte_size_t,
     SymInt size_bytes,
+    DataPtr data_ptr,
     Allocator* allocator,
     bool resizable);
 
 C10_API void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr);
 
 C10_API StorageImplCreateHelper GetStorageImplCreate(DeviceType t);
+
+C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
+    c10::StorageImpl::use_byte_size_t use_byte_size,
+    c10::SymInt size_bytes,
+    c10::DataPtr data_ptr,
+    c10::Allocator* allocator,
+    bool resizable,
+    c10::optional<at::Device> device_opt);
 
 } // namespace c10

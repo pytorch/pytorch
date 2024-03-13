@@ -79,6 +79,20 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class SyntheticLocalSource(Source):
+    local_name: str
+
+    def reconstruct(self, codegen):
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    def guard_source(self):
+        return GuardSource.SYNTHETIC_LOCAL
+
+    def name(self):
+        return f"SYNTHETIC_LOCAL[{self.local_name!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -160,6 +174,32 @@ class AttrSource(ChainedSource):
 class ParamBufferSource(AttrSource):
     def guard_source(self):
         return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
+
+
+# This source is intended to be used in places where a source is needed but it is expected
+# that the symbol will be simplified out later on. Symbols with ephemeral sources are
+# prioritized to be simplified out when e.g. compared against a symbol without an ephemeral
+# source. Guarding on this source is an error.
+#
+# Example: During subclass view fake-ification, any close-over ViewFunc state should be
+# symbolicized / fake-ified to avoid invalid specialization during view replay. This source
+# is useful for symbols utilized in the middle of the view chain that are not expected to be
+# present within the final view shape metadata.
+@dataclasses.dataclass(frozen=True)
+class EphemeralSource(Source):
+    desc: Optional[str] = None
+
+    def guard_source(self):
+        return GuardSource.EPHEMERAL
+
+    def name(self):
+        return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
+
+    def make_guard(self):
+        raise NotImplementedError()
+
+    def is_ephemeral(self):
+        return True
 
 
 class TensorProperty(enum.Enum):
