@@ -33,7 +33,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 
 
-def test_subclass(c):
+def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
 
 
@@ -549,7 +549,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.x + torch.ones(2, 2)
 
-        with test_subclass(AttrSubclass):
+        with traceable_subclass(AttrSubclass):
             input = torch.ones(2, 2).as_subclass(AttrSubclass)
             fn_opt = compile_full_eager(fn)
 
