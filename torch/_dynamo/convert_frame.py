@@ -8,7 +8,6 @@ import random
 import sys
 import threading
 import time
-import traceback
 import types
 import typing
 import weakref
@@ -17,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
 )
+from torch.utils._traceback import CapturedTraceback
 
 try:
     import numpy as np
@@ -656,14 +656,14 @@ def _compile(
             code.co_firstlineno,
             skip + 2,
             # -2: omit current frame, omit contextlib decorator
-            "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
+            "".join(CapturedTraceback.extract(skip=2 + skip).format()),
         )
         # -4: -2 as above, plus trace_structured frames
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
                 "stack": structured.from_traceback(
-                    traceback.extract_stack()[: -4 - skip]
+                    CapturedTraceback.extract(skip=4 + skip).summary()
                 )
             },
         )
@@ -883,9 +883,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                 skip_reason = (
                     "traced frame already"
                     if frame.f_lasti >= first_real_inst_idx(frame.f_code)
-                    else "in skipfiles"
-                    if trace_rules.check(frame.f_code)
-                    else "dynamo tracing is disabled"
+                    else (
+                        "in skipfiles"
+                        if trace_rules.check(frame.f_code)
+                        else "dynamo tracing is disabled"
+                    )
                 )
                 if not is_skipfile or config.verbose:
                     log.debug(
