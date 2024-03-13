@@ -282,6 +282,10 @@ sam,fail_to_run,0
 
 
 
+sam_fast,fail_to_run,0
+
+
+
 shufflenet_v2_x1_0,pass,0
 
 
