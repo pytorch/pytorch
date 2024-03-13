@@ -12,7 +12,9 @@ EventDeletionCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
 EventRecordCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
     "XPU event record"
 )
-EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry("XPU event wait")
+EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
+    "XPU event wait"
+)
 MemoryAllocationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "XPU memory allocation"
 )
@@ -65,9 +67,7 @@ def register_callback_for_device_synchronization(cb: Callable[[], None]) -> None
     DeviceSynchronizationCallbacks.add_callback(cb)
 
 
-def register_callback_for_stream_synchronization(
-    cb: Callable[[int], None]
-) -> None:
+def register_callback_for_stream_synchronization(cb: Callable[[int], None]) -> None:
     StreamSynchronizationCallbacks.add_callback(cb)
 
 
