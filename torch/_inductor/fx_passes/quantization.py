@@ -36,12 +36,15 @@ quantization.
 """
 
 
-def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert=True):
+def _may_generate_pattern_with_dtype_convert(
+    pattern, dtype=Arg(), dtype_convert=True, users=1
+):
     if dtype_convert:
         return CallFunction(
             prims.convert_element_type.default,
             pattern,
             dtype,
+            _users=users,
         )
     else:
         return pattern
@@ -73,6 +76,14 @@ def _generate_linear_t_pattern(
         KeywordArg("permute_axes"),
     )
     return t_pattern
+
+
+def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
+    # only insert to_dtype if is_bf16 is True
+    computation_call = _may_generate_pattern_with_dtype_convert(
+        call_fn, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=users
+    )
+    return unary_fusion(computation_call)
 
 
 """
@@ -682,6 +693,8 @@ def _register_quantization_unary_fusion():
                 original_pattern_output_dtype=original_pattern_output_dtype,
             )
 
+        is_bf16 = True if original_pattern_output_dtype == torch.bfloat16 else False
+
         # QLinear
         for x_scale_zp_are_tensors in (False, True):
             qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
@@ -696,16 +709,26 @@ def _register_quantization_unary_fusion():
                     dtype=original_pattern_output_dtype,
                 ),
                 UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                    _gelu_fusion_erf(
-                        get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 2)
+                    _unary_fusion_pattern(
+                        _gelu_fusion_erf,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        2,
+                        is_bf16,
                     ),
-                    dtype=original_pattern_output_dtype,
+                    dtype=torch.float32,
                 ),
                 UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
-                    _gelu_fusion_tanh(
-                        get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 4)
+                    _unary_fusion_pattern(
+                        _gelu_fusion_tanh,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        4,
+                        is_bf16,
                     ),
-                    dtype=original_pattern_output_dtype,
+                    dtype=torch.float32,
                 ),
             }
 
@@ -724,11 +747,21 @@ def _register_quantization_unary_fusion():
                 UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                     qlinear_pattern, aten.relu.default
                 ),
-                UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(
-                    get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 2)
+                UnaryAttr("gelu", [], "none"): _unary_fusion_pattern(
+                    _gelu_fusion_erf,
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                    ),
+                    2,
+                    is_bf16,
                 ),
-                UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(
-                    get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, 4)
+                UnaryAttr("gelu", [], "tanh"): _unary_fusion_pattern(
+                    _gelu_fusion_tanh,
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 4
+                    ),
+                    4,
+                    is_bf16,
                 ),
             }
 
