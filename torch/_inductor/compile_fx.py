@@ -1313,16 +1313,20 @@ def compile_fx(
     )
 
     if V.aot_compilation is True:
-        gm, graph_signature = aot_export_module(
-            model_, example_inputs_, trace_joint=False, decompositions=decompositions
-        )
-        unlifted_gm = _unlift_graph(model_, gm, graph_signature)
-        if "dynamo_flat_name_to_original_fqn" in model_.meta:
-            unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
-                "dynamo_flat_name_to_original_fqn"
-            ]
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return inference_compiler(unlifted_gm, example_inputs_)
+        with V.set_fake_mode(fake_mode), torch._guards.tracing(tracing_context):
+            gm, graph_signature = aot_export_module(
+                model_,
+                example_inputs_,
+                trace_joint=False,
+                decompositions=decompositions,
+            )
+            unlifted_gm = _unlift_graph(model_, gm, graph_signature)
+            if "dynamo_flat_name_to_original_fqn" in model_.meta:
+                unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
+                    "dynamo_flat_name_to_original_fqn"
+                ]
+            with compiled_autograd.disable():
+                return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context

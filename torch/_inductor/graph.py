@@ -1167,10 +1167,11 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
-            if tracing_context := torch._guards.TracingContext.try_get():
-                if tracing_context.output_strides:
-                    tracing_context.output_strides.clear()
+            tracing_context = torch._guards.TracingContext.try_get()
+            if tracing_context and tracing_context.output_strides:
+                tracing_context.output_strides.clear()
 
+            if tracing_context and tracing_context.params_flat:
                 params_flat = [
                     param
                     for param in tracing_context.params_flat  # type: ignore[union-attr]

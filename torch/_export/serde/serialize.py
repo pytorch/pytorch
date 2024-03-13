@@ -1211,6 +1211,7 @@ class GraphModuleDeserializer:
                 # on deserialization? Probably deserves a follow-up.
 
                 # Here we force symbols corresponding to SymInts to be at least integers.
+                # This is required by downstream Inductor, as it asserts symbols to be integers.
                 # Otherwise some expressions that the shape env would otherwise evaluate to False,
                 # e.g., 2*s = 9, can have rational solutions, e.g., 9/2.
                 sym = sym.subs({s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols})
