@@ -30,6 +30,8 @@ from torch.utils.checkpoint import checkpoint
 
 
 DIM = 2000
+# TODO: figure out why buffer reuse conflicts with bucketing
+torch._inductor.config.allow_buffer_reuse = False
 
 
 class Net(nn.Module):
