@@ -1,8 +1,6 @@
 import functools
 import hashlib
 
-from torch._dynamo.device_interface import get_interface_for_device
-
 
 @functools.lru_cache(None)
 def has_triton_package() -> bool:
@@ -16,6 +14,8 @@ def has_triton_package() -> bool:
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
+    from torch._dynamo.device_interface import get_interface_for_device
+
     def cuda_extra_check(device_interface):
         return device_interface.Worker.get_device_properties().major >= 7
 
@@ -59,3 +59,23 @@ def triton_hash_with_backend():
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def dtype_to_string(dtype):
+    if dtype.name.startswith("fp"):
+        suffix = "float" + dtype.name[2:]
+    elif dtype.name.startswith("bf"):
+        suffix = "bfloat" + dtype.name[2:]
+    else:
+        suffix = dtype.name
+    return "triton.language." + suffix
+
+
+def patch_triton_dtype_repr():
+    import triton
+
+    # Hack to get triton dtype repr to produce an evaluatable expression
+    # triton.language.float32 emits triton.language.fp32 which does not
+    # exist
+    # REMOVE when https://github.com/openai/triton/pull/3342 lands
+    triton.language.dtype.__repr__ = lambda self: dtype_to_string(self)
