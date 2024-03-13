@@ -1222,6 +1222,13 @@ class CheckFunctionManager:
         # guard_fn.__globals__ becomes equal to builder.scope. This causes
         # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
         globals_for_guard_fn = {"G": builder.scope["G"]}
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton
+
+            globals_for_guard_fn[triton.__name__] = triton
+
         try:
             exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
