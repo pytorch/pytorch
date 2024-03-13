@@ -926,22 +926,21 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
         kernel_meta_info = {}
-        config.aot_inductor.eager_op_name = "neg"
         if config.aot_inductor.eager_mode and config.aot_inductor.eager_op_name:
-            lines = []
+            kernel_meta_info_items = []
             for value in V.graph.graph_inputs.values():
                 if isinstance(value, ir.TensorBox) and isinstance(
                     value.layout, ir.FixedLayout
                 ):
-                    device_type = value.get_device().type
-                    dtype = value.get_dtype()
-                    sizes = value.get_size()
-                    strides = value.get_stride()
-                    kernel_meta_info_item = (
-                        f"false;{device_type};{dtype};{sizes};{strides}"
-                    )
-                    lines.append(kernel_meta_info_item)
-            kernel_meta_info[config.aot_inductor.eager_op_name] = lines
+                    meta_info_item = {}
+                    # TODO(Eikan):We only support symbloic shape now and will support it later.
+                    meta_info_item["is_symbloic"] = "false"
+                    meta_info_item["device_type"] = f"{value.get_device().type}"
+                    meta_info_item["dtype"] = f"{value.get_dtype()}"
+                    meta_info_item["sizes"] = f"{value.get_size()}"
+                    meta_info_item["strides"] = f"{value.get_stride()}"
+                    kernel_meta_info_items.append(meta_info_item)
+            kernel_meta_info[config.aot_inductor.eager_op_name] = kernel_meta_info_items
 
         result.splice(
             f"""
