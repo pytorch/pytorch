@@ -130,6 +130,17 @@ class FakeTensorUpdater:
                 return True
             return False
 
+        def should_process_node(node):
+            # node.target for nodes returning true from this function
+            # are called under fake mode and does not work for inductor
+            # lowerings. We check if the node.target is an aten operator
+            # or operator.getitem which is used when returning multiple
+            # tensors from an op.
+            return node.op == "call_function" and (
+                isinstance(node.target, torch._ops.OpOverload)
+                or node.target == operator.getitem
+            )
+
         to_process = set()
         for node in self.graph.nodes:
             if (
@@ -138,18 +149,14 @@ class FakeTensorUpdater:
             ):
                 continue
 
-            if node.op != "call_function":
+            if not should_process_node(node):
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            try:
-                with V.fake_mode:
-                    new_fake_tensor = node.target(*args, **kwargs)
-            except (ValueError, AttributeError, AssertionError, RuntimeError):
-                # inductor lowerings fail to run under fake mode
-                continue
+            with V.fake_mode:
+                new_fake_tensor = node.target(*args, **kwargs)
             if "val" in node.meta and is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"]
             ):
