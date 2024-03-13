@@ -83,7 +83,7 @@ bool SimpleValue::hasAttr(
       return false;
     } else {
       throw ErrorReport(loc) << "hasattr's first argument must be a object "
-                             << "or NamedTuple, but got normal Tuple "
+                             << "or NamedTuple, but got a normal Tuple "
                              << value_->type()->repr_str() << " instead";
     }
   }
