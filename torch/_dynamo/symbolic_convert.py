@@ -605,7 +605,7 @@ class BytecodeDistpatchTableMeta(type):
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
 
-        def _missing(opname, inst):
+        def _missing(opname, *args):
             unimplemented(f"missing: {opname}")
 
         dispatch_table = {
