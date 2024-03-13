@@ -82,7 +82,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       proxy_executor_handle_));
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-      output_handles);
+      output_handles.data(), output_handles.size());
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::
