@@ -1826,6 +1826,12 @@ class CheckFunctionManager:
             **CLOSURE_VARS,
         }
         globals_for_guard_fn = {"G": builder.scope["G"]}
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton
+
+            globals_for_guard_fn[triton.__name__] = triton
 
         if config.enable_cpp_guard_manager:
             # Guard manager construction is complete
