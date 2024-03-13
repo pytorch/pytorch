@@ -33,6 +33,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 
 
+def traceable_subclass(c):
+    return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
+
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
@@ -51,6 +55,18 @@ class MockSubclass(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        return func(*args, **kwargs)
+
+
+class AttrSubclass(torch.Tensor):
+    x: int = 10
+    size: int = 10
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
         return func(*args, **kwargs)
 
 
@@ -518,6 +534,29 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
+    def test_tensor_subclass_custom_attr(self):
+        class AttrSubclass(torch.Tensor):
+            x: int = 10
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.x + torch.ones(2, 2)
+
+        with traceable_subclass(AttrSubclass):
+            input = torch.ones(2, 2).as_subclass(AttrSubclass)
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(input)
+            res_act = fn_opt(input)
+            self.assertEqual(res_exp, res_act)
+
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
 
@@ -832,24 +871,19 @@ class GraphModule(torch.nn.Module):
 
                 return DoubleSizeMaybeAddGeThreeTensor(out_inner)
 
-        lower_bound_str = None
-        upper_bound_str = None
         curr_var_to_val = None
         curr_var_to_sources = None
+        guards = None
 
         def backend(gm, args):
-            print(gm.code)
             context = torch._guards.TracingContext.get()
-            val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
             # Grab info on sources and guards from the shapeenv
-            nonlocal lower_bound_str
-            nonlocal upper_bound_str
             nonlocal curr_var_to_val
             nonlocal curr_var_to_sources
+            nonlocal guards
 
-            lower_bound_str = str(val_to_guards[0][0].expr)
-            upper_bound_str = str(val_to_guards[0][1].expr)
+            guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
             curr_var_to_val = {
                 str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
             }
@@ -881,14 +915,15 @@ class GraphModule(torch.nn.Module):
             "s0": "L['x'].size()[0]",
             "s1": "L['x'].inner_elem.size()[0]",
         }
-        # lower bound comes from code underneath torch_dispatch  (operating on the inner tensor size)
-        expected_lower_bound = "s1 > 3"
-        # upper bound comes from user code (operating on the wrapper size)
-        expected_upper_bound = "2*s1 < 10"
         self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
-        self.assertEqual(lower_bound_str, expected_lower_bound)
-        self.assertEqual(upper_bound_str, expected_upper_bound)
+        self.assertExpectedInline(
+            "\n".join(guards),
+            """\
+Eq(2*s1, s0)
+2*s1 < 10
+s1 > 3""",
+        )
 
     def test_wrapper_subclass_with_same_sized_inner_tensor(self):
         # shouldn't recompile for different sizes when dynamic=True
@@ -1072,6 +1107,31 @@ class GraphModule(torch.nn.Module):
             return typ.__bases__
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
+    @parametrize("dynamic", [False, True])
+    def test_subclass_views(self, dynamic):
+        def _get_views(t):
+            # Note that any closed-over SymInts will be symbolicized during fake-ification.
+            yield t.narrow(dim=-1, start=3, length=8)
+            yield t.split(5, -1)
+            yield t.split_with_sizes([9, 6], -1)
+            yield t.unsqueeze(-1).expand(4, 15, 10)
+            yield t.select(-1, 6)
+            yield t[2:3, 5:9]
+
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(
+            f, backend="aot_eager", fullgraph=True, dynamic=dynamic
+        )
+
+        # Take a view of a subclass to pass as input.
+        t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
+        for view in _get_views(t):
+            out_ref = f(view)
+            out_test = compiled_f(view)
+            self.assertEqual(out_ref, out_test)
 
 
 instantiate_parametrized_tests(SubclassTests)
@@ -1286,11 +1346,23 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             self.assertTrue(out.stride() == out_ref.stride())
             self.assertTrue(torch.allclose(out.values(), out_ref.values()))
 
-            # Check that no guards are incurred
+            # Check that no upper/lower bound guards are incurred
             def backend(gm, args):
                 context = torch._guards.TracingContext.get()
-                val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
-                self.assertEqual(len(val_to_guards), 0)
+                guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
+                ranges = [
+                    f"{s}: [{vr.lower}, {vr.upper}]"
+                    for s, vr in context.fake_mode.shape_env.var_to_range.items()
+                ]
+                self.assertExpectedInline("\n".join(guards), """Eq(s3 - 1, s0)""")
+                self.assertExpectedInline(
+                    "\n".join(ranges),
+                    """\
+s0: [2, 9223372036854775805]
+s2: [2, 9223372036854775806]
+s3: [3, 9223372036854775806]
+s5: [2, 9223372036854775806]""",
+                )
                 return gm
 
             torch._dynamo.reset()

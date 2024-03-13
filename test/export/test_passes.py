@@ -22,7 +22,7 @@ from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
-from torch.export import export, WrapperModule
+from torch.export import export
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
@@ -119,7 +119,6 @@ def _set_grad_enabled_tests():
         "op_under_no_grad" : (_get_predispatch_module(SetGradOp(), (x,), False), (x,))
     }
 
-SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
 def _sequential_split_inline_tests():
     from torch.export._trace import _export
@@ -170,12 +169,20 @@ def _sequential_split_inline_tests():
         'multi_dep_step3': (_insert_dilimiter_nodes(multi_dep1, 3), (x, x.sin())),
     }
 
-SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
-
 
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
+        self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
+
+    def tearDown(self):
+        self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
+        self.SET_GRAD_ENABLED_TESTS.clear()
+        super().tearDown()
+
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -298,15 +305,16 @@ class TestPasses(TestCase):
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
-        def foo(x):
-            y = x + 4
-            y.add_(4)
-            z = y.view(y.shape)
-            return x.cos() + z.cos()
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x + 4
+                y.add_(4)
+                z = y.view(y.shape)
+                return x.cos() + z.cos()
 
         x = torch.zeros(4, 2, 3)
-
-        ep = export(WrapperModule(foo), (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
+        foo = Module()
+        ep = export(foo, (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -454,18 +462,20 @@ class TestPasses(TestCase):
         ).run(gm.code)
 
     def test_math_ops(self):
-        def func(x):
-            return (
-                torch.tensor([math.ceil(x.item())]),
-                torch.tensor([math.floor(x.item())]),
-            )
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    torch.tensor([math.ceil(x.item())]),
+                    torch.tensor([math.floor(x.item())]),
+                )
 
+        func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(WrapperModule(func), args=(x,))
+        ep = torch.export.export(func, args=(x,))
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatceh_set_grad(self):
-        mod, args = SET_GRAD_ENABLED_TESTS["op"]
+        mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -477,7 +487,7 @@ def forward(self, arg_0):
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
-        mod, args = SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
+        mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -490,7 +500,7 @@ def forward(self, arg_0):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
 
-        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager"]
+        mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -502,7 +512,7 @@ def forward(self, arg_0):
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
-        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
+        mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -514,7 +524,7 @@ def forward(self, arg_0):
     sub = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1);  submod_6 = None
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
-        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
+        mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -531,7 +541,7 @@ def forward(self, arg_0):
     sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
     """)  # noqa: B950
-        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
+        mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -550,7 +560,7 @@ def forward(self, arg_0):
     """)  # noqa: B950
 
     def test_sequential_split(self):
-        for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
+        for gm, args in self.SEQUENTIAL_SPLIT_INLINE_TESTS.values():
             set_grad_counts = nodes_count(gm.graph.nodes, _is_set_grad_enabled_node)
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             new_set_grad_counts = nodes_count(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod)
@@ -558,7 +568,7 @@ def forward(self, arg_0):
             self.assertEqual(gm(*args), new_gm(*args))
 
     def test_sequential_split_graph(self):
-        gm, args = SEQUENTIAL_SPLIT_INLINE_TESTS["multi_dep_step2"]
+        gm, args = self.SEQUENTIAL_SPLIT_INLINE_TESTS["multi_dep_step2"]
 
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
         self.assertEqual(gm(*args), new_gm(*args))
@@ -602,7 +612,7 @@ def forward(self, sin, cos):
     """)
 
     def test_inline_(self):
-        for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
+        for gm, args in self.SEQUENTIAL_SPLIT_INLINE_TESTS.values():
             before_str = gm.print_readable(print_output=False)
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
