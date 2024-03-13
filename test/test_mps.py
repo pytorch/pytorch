@@ -6909,9 +6909,9 @@ class TestMPS(TestCaseMPS):
         # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
         self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
 
-        def compare_mm(m, n, k):
-            x = torch.rand(m, n, device="mps")
-            y = torch.rand(n, k, device="mps")
+        def compare_mm(m, n, k, dtype=torch.float):
+            x = torch.rand(m, n, device="mps", dtype=dtype)
+            y = torch.rand(n, k, device="mps", dtype=dtype)
             z = torch.mm(x, y).cpu()
             z_cpu = torch.mm(x.cpu(), y.cpu())
             self.assertEqual(z, z_cpu)
@@ -6924,11 +6924,7 @@ class TestMPS(TestCaseMPS):
 
         if product_version >= 14.0:
             # Test bfloat16 mm
-            x = torch.rand(182, 182, 4, dtype=torch.bfloat16, device='mps')
-            y = torch.rand(4, 3, dtype=torch.bfloat16, device='mps')
-            z = torch.matmul(x, y).cpu()
-            z_cpu = torch.matmul(x.cpu(), y.cpu())
-            self.assertEqual(z, z_cpu)
+            compare_mm(1024, 1, 32769, torch.bfloat16)
 
     # Test flip
     def test_flip(self):
