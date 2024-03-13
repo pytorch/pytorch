@@ -1278,6 +1278,10 @@ def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
+def get_max_y_grid():
+    return 65535
+
+
 def is_linux() -> bool:
     return platform.system() == "Linux"
 
