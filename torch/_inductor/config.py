@@ -332,8 +332,8 @@ worker_start_method = "fork"
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
-fuse_ddp_communication = False
-fuse_ddp_bucket_size = 25
+_fuse_ddp_communication = False
+_fuse_ddp_bucket_size = 25
 
 # Flag to control which fusion passes to apply. Functions in the list will
 # be applied in order. There are two different different fusion passes
@@ -348,7 +348,7 @@ fuse_ddp_bucket_size = 25
 # overlapping. At this moment, this pass performs better than
 # reorder_for_compute_comm_overlap_passes but we will add the logic of
 # "schedule_comm_wait" in the future and remove the one here.
-fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
+_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
@@ -441,7 +441,9 @@ freezing_discard_parameters: bool = False
 
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = True
+allow_stack_allocation: bool = (
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+)
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
 # to maximize performance for use cases that it can accommodate at the expense of

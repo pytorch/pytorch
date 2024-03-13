@@ -36,6 +36,8 @@ from torch.utils.checkpoint import checkpoint
 
 
 DIM = 2000
+# TODO: figure out why buffer reuse conflicts with bucketing
+torch._inductor.config.allow_buffer_reuse = False
 
 
 class Net(nn.Module):
@@ -166,7 +168,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     def test_compile_cpu(self):
         # Test the coalesced_op with CPU.
-        torch._inductor.config.fuse_ddp_communication_passes = [
+        torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
@@ -174,7 +176,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     def test_compile_cpu_no_sync(self):
         # Test the coalesced_op with CPU.
-        torch._inductor.config.fuse_ddp_communication_passes = [
+        torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
@@ -257,7 +259,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     @run_with_native_funcol
     def test_bucketing_coalesced_op(self):
-        torch._inductor.config.fuse_ddp_communication_passes = [
+        torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
@@ -290,7 +292,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     @run_with_native_funcol
     def test_bucketing_concat_op(self):
-        torch._inductor.config.fuse_ddp_communication_passes = [
+        torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",
         ]

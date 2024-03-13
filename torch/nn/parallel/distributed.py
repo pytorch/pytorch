@@ -887,8 +887,8 @@ class DistributedDataParallel(Module, Joinable):
             "python_reducer_without_compiled_forward",
         )
         if self._use_python_reducer:
-            torch._inductor.config.fuse_ddp_communication = True
-            torch._inductor.config.fuse_ddp_bucket_size = bucket_cap_mb
+            torch._inductor.config._fuse_ddp_communication = True
+            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )

@@ -670,8 +670,6 @@ class FakeTensor(torch.Tensor):
             out.append(s)
         return out
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
 
 @dataclass(frozen=True)
 class TensorMetadata:
@@ -1219,7 +1217,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        log.debug("%s %s %s", func, args, kwargs)
+        with no_dispatch():
+            log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)
