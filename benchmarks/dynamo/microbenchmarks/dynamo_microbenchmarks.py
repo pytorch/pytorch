@@ -2,12 +2,13 @@ import timeit
 
 import torch
 
+
 @torch.compile(backend="eager", fullgraph=True)
 def symbolic_convert_overhead_stress_test(x, y, n):
     while n > 0:
         n -= 1
-        x,y = y,x
-    return x+y
+        x, y = y, x
+    return x + y
 
 
 def main():
