@@ -37,13 +37,13 @@ class TestComplexTensor(TestCase):
     def test_all(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/120875
         x = torch.tensor([1 + 2j, 3 - 4j, 5j, 6], device=device, dtype=dtype)
-        assert torch.all(x)
+        self.assertTrue(torch.all(x))
 
     @dtypes(*complex_types())
     def test_any(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/120875
         x = torch.tensor([0, 0j, -0 + 0j, -0 - 0j, 0 + 0j, 0 - 0j], device=device, dtype=dtype)
-        assert not torch.any(x)
+        self.assertFalse(torch.any(x))
 
     @onlyCPU
     @dtypes(*complex_types())
