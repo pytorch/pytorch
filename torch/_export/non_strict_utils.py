@@ -245,6 +245,8 @@ def make_constraints(
     tensor_id_to_dim_constraint: Dict[int, Dict[int, Dict[str, int]]] = defaultdict(
         defaultdict
     )
+    if constraints is None:
+        constraints = []
     for const in constraints:
         tensor_id_to_dim_constraint[const.t_id][const.dim] = {
             "lower": const.constraint_range.vr.lower,
