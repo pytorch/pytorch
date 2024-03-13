@@ -2127,6 +2127,203 @@ def cudnn_batch_norm_backward(
     )
 
 
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+    x_out = (x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1)) // stride[i]
+
+    if ceil_mode:
+        x_alt = (
+            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1)
+        ) // stride[i]
+        if (x_alt - 1) * stride[i] - x - padding[i] >= 0:
+            # Sliding windows must start within the input or left padding
+            x_alt -= 1
+        if x_out == x_alt:
+            # ceil mode is actually a no-op
+            ceil_mode = False
+        else:
+            x_out = x_alt
+    return x_out, ceil_mode
+
+
+@register_decomposition(aten.avg_pool2d)
+@out_wrapper()
+@pw_cast_for_opmath
+def avg_pool2d(
+    x: Tensor,
+    kernel_size: Union[Tuple[int, int], int],
+    stride: Optional[Union[Tuple[int, int], int]] = None,
+    padding: Union[Tuple[int, int], int] = 0,
+    ceil_mode: bool = False,
+    count_include_pad: bool = True,
+    divisor_override: Optional[int] = None,
+):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=2,
+    )
+
+
+@register_decomposition(aten.avg_pool3d)
+@out_wrapper()
+@pw_cast_for_opmath
+def avg_pool3d(
+    x: Tensor,
+    kernel_size: Union[Tuple[int, int, int], int],
+    stride: Optional[Union[Tuple[int, int, int], int]] = None,
+    padding: Union[Tuple[int, int, int], int] = 0,
+    ceil_mode: bool = False,
+    count_include_pad: bool = True,
+    divisor_override: Optional[int] = None,
+):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=3,
+    )
+
+
+def pad_listlike(l: Union[Tuple[int, ...], int], d: int) -> Tuple[int, ...]:
+    if isinstance(l, IntLike):
+        return tuple([l] * d)
+    elif len(l) == 1:
+        return l * d
+    else:
+        assert len(l) == d
+        return l
+
+
+def _unrolled_sum(x: Tensor, dim: Tuple[int, ...]) -> Tensor:
+    result = 0
+    for reduction_idx in product(*[range(x.shape[d]) for d in dim]):
+        idx: List[Any] = [None] * x.dim()
+        for i, d in enumerate(dim):
+            idx[d] = torch.tensor(reduction_idx[i], device=x.device)
+        result = result + aten._unsafe_index(x, idx)
+
+    assert isinstance(result, Tensor)
+    return result
+
+
+def _avg_poolnd(
+    x: Tensor,
+    kernel_size: Union[Tuple[int, ...], int],
+    stride: Optional[Union[Tuple[int, ...], int]],
+    padding: Union[Tuple[int, ...], int],
+    ceil_mode: bool,
+    count_include_pad: bool,
+    divisor_override: Optional[int],
+    dim: int,
+    unroll_threshold: Optional[int] = None,
+):
+    if not stride:
+        stride = kernel_size
+
+    kernel_size = pad_listlike(kernel_size, dim)
+    stride = pad_listlike(stride, dim)
+    padding = pad_listlike(padding, dim)
+
+    assert len(x.shape) in (dim + 1, dim + 2)
+
+    window_size = functools.reduce(operator.mul, kernel_size)
+
+    batch = x.shape[:-dim]
+    dhw = x.shape[-dim:]
+    h_out, ceil_modes = zip(
+        *[
+            pooling_size(dhw[i], i, kernel_size, stride, padding, ceil_mode)
+            for i in range(dim)
+        ]
+    )
+
+    had_padding = any(padding) or any(ceil_modes)
+
+    out_indices = []
+    reshape = []
+    for i in range(dim):
+        idx = torch.arange(h_out[i] * kernel_size[i], device=x.device)
+        if stride[i] != kernel_size[i]:
+            h_range = (
+                torch.arange(h_out[i], device=x.device)
+                .view(h_out[i], 1)
+                .expand(h_out[i], kernel_size[i])
+            )
+            m_range = (
+                torch.arange(kernel_size[i], device=x.device)
+                .view(1, kernel_size[i])
+                .expand(h_out[i], kernel_size[i])
+            )
+            idx = (h_range * stride[i] + m_range).reshape(h_out[i] * kernel_size[i])
+        idx = idx - padding[i]
+        idx = idx.reshape(idx.shape[0], *[1] * (dim - 1 - i))
+        out_indices.append(idx)
+        reshape += [h_out[i], kernel_size[i]]
+
+    def get_cond(padding):
+        conds = []
+        for i in range(dim):
+            view_shape = [1] * x.dim()
+            view_shape[len(batch) + i] = out_indices[i].shape[0]
+            idx = out_indices[i].view(view_shape)
+            conds.append(
+                torch.logical_and(idx >= -padding[i], idx < dhw[i] + padding[i])
+            )
+        return functools.reduce(torch.logical_and, conds)
+
+    if had_padding:
+        cond = get_cond([0] * dim)
+        out = aten._unsafe_masked_index(
+            x,
+            cond,
+            [*[None] * len(batch), *out_indices],
+            0,
+        )
+    else:
+        out = aten._unsafe_index(x, [*[None] * len(batch), *out_indices])
+
+    out = out.reshape(*batch, *reshape)
+
+    if unroll_threshold and window_size < unroll_threshold:
+        sum_func = _unrolled_sum  # type: ignore[assignment]
+    else:
+        sum_func = torch.sum  # type: ignore[assignment]
+
+    out = sum_func(out, dim=tuple(len(batch) + 1 + 2 * i for i in range(dim)))
+
+    if not had_padding or divisor_override:
+        if divisor_override:
+            scale = 1 / divisor_override
+        else:
+            scale = 1.0 / window_size
+        return out * scale
+    else:
+        divide_factors = []
+        for i in range(dim):
+            bh = torch.arange(h_out[i], device=x.device)
+            hstart = bh * stride[i] - padding[i]
+            hend = torch.clamp_min(hstart + kernel_size[i], h_out[i] + padding[i])
+            if not count_include_pad:
+                hstart = torch.clamp_max(hstart, 0)
+                hend = torch.clamp_min(hend, h_out[i])
+            factor = hend - hstart
+            shape = [1] * x.dim()
+            shape[-dim + i] = h_out[i]
+            divide_factors.append(factor.view(shape))
+
+        divide_factor = functools.reduce(operator.mul, divide_factors)
+        return out / divide_factor
+
+
 @register_decomposition(aten._adaptive_avg_pool2d)
 @out_wrapper()
 @pw_cast_for_opmath

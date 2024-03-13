@@ -1,13 +1,15 @@
 import functools
 import logging
 import math
+import operator
 import sys
 import typing
-from typing import Optional
+from typing import Optional, Tuple, Union
 
 import torch
 import torch._decomp as decomp
 import torch._prims_common as utils
+
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -15,7 +17,9 @@ from torch._decomp import (
     remove_decompositions,
 )
 from torch._decomp.decompositions import (
+    _avg_poolnd as decomp_avg_poolnd,
     _grid_sampler_2d as decomp_grid_sampler_2d,
+    pad_listlike,
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
@@ -26,6 +30,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 
+from torch._prims_common.wrappers import out_wrapper
 from . import config, inductor_prims
 
 log = logging.getLogger(__name__)
@@ -76,6 +81,7 @@ decomps_to_exclude = [
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
+    aten.avg_pool2d,
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
@@ -648,3 +654,33 @@ def masked_scatter(self, mask, source):
         source_idx = mask.reshape(-1).cumsum(0) - 1
         return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
     return NotImplemented
+
+
+@out_wrapper()
+@register_decomposition(aten.avg_pool2d)
+def avg_pool2d(
+    x: torch.Tensor,
+    kernel_size: Union[Tuple[int, int], int],
+    stride: Optional[Union[Tuple[int, int], int]] = None,
+    padding: Union[Tuple[int, int], int] = 0,
+    ceil_mode: bool = False,
+    count_include_pad: bool = True,
+    divisor_override: Optional[int] = None,
+):
+    kernel_size = pad_listlike(kernel_size, 2)
+    window_size = functools.reduce(operator.mul, kernel_size)
+
+    # TODO: remove this when #100331 is merged. We only do this
+    # for window_size <=25 to avoid performance regressions compared
+    # to the previous algorithm which unrolled manually for <=25
+    return decomp_avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=2,
+        unroll_threshold=25,
+    )
