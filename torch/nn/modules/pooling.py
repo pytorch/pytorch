@@ -524,6 +524,10 @@ class AvgPool1d(_AvgPoolNd):
               L_{out} = \left\lfloor \frac{L_{in} +
               2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
+          Per the note above, if ``ceil_mode`` is True and :math:`(L_{out} - 1) \times \text{stride} \geq L_{in}
+          + \text{padding}`, we skip the last window as it would start in the right padded region, resulting in
+          :math:`L_{out}` being reduced by one.
+
     Examples::
 
         >>> # pool with window of size=3, stride=2
@@ -598,6 +602,12 @@ class AvgPool2d(_AvgPoolNd):
           .. math::
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+
+          Per the note above, if ``ceil_mode`` is True and :math:`(H_{out} - 1)\times \text{stride}[0]\geq H_{in}
+          + \text{padding}[0]`, we skip the last window as it would start in the bottom padded region,
+          resulting in :math:`H_{out}` being reduced by one.
+
+          The same applies for :math:`W_{out}`.
 
     Examples::
 
@@ -685,6 +695,12 @@ class AvgPool3d(_AvgPoolNd):
               W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] -
                     \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
+          Per the note above, if ``ceil_mode`` is True and :math:`(D_{out} - 1)\times \text{stride}[0]\geq D_{in}
+          + \text{padding}[0]`, we skip the last window as it would start in the padded region,
+          resulting in :math:`D_{out}` being reduced by one.
+
+          The same applies for :math:`W_{out}` and :math:`H_{out}`.
+
     Examples::
 
         >>> # pool of square window of size=3, stride=2
@@ -739,9 +755,12 @@ class FractionalMaxPool2d(Module):
         kernel_size: the size of the window to take a max over.
                      Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
         output_size: the target output size of the image of the form `oH x oW`.
-                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
+                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`.
+                     Note that we must have :math:`kH + oH - 1 <= H_{in}` and :math:`kW + oW - 1 <= W_{in}`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
-                      This has to be a number or tuple in the range (0, 1)
+                      This has to be a number or tuple in the range (0, 1).
+                      Note that we must have :math:`kH + (output\_ratio\_H * H_{in}) - 1 <= H_{in}`
+                      and :math:`kW + (output\_ratio\_W * W_{in}) - 1 <= W_{in}`
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
@@ -1081,7 +1100,7 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 
     output_size: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 

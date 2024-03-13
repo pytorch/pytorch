@@ -2,7 +2,8 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _view_as_real,
-                        _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _default_to_fused_or_foreach, _get_scalar_dtype, _differentiable_doc,
+                        _foreach_doc, _maximize_doc)
 from typing import List, Optional
 
 __all__ = ["Adagrad", "adagrad"]
@@ -50,7 +51,7 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                state["step"] = torch.tensor(0.0, dtype=torch.float32)
+                state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
                 init_value = (
                     complex(initial_accumulator_value, initial_accumulator_value)
                     if torch.is_complex(p)
@@ -73,7 +74,7 @@ class Adagrad(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
+                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
 
     def share_memory(self):
         for group in self.param_groups:
@@ -343,12 +344,12 @@ def _multi_tensor_adagrad(
             )
             continue
 
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
         # Handle complex parameters
         if has_complex:
             _view_as_real(device_params, device_grads, device_state_sums)
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
