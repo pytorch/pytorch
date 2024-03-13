@@ -80,14 +80,6 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 
 } // namespace cuda::detail
 
-CUDAGeneratorState::CUDAGeneratorState(
-    uint64_t seed,
-    uint64_t philox_offset_per_thread,
-    uint32_t offset_intragraph)
-    : seed_(seed),
-      philox_offset_per_thread_(philox_offset_per_thread),
-      offset_intragraph_(offset_intragraph) {}
-
 /**
  * Creates a clone of this CUDA Generator State.
  */
@@ -149,15 +141,15 @@ void CUDAGeneratorState::register_to_graph(cuda::CUDAGraph* graph) {
   // reused across different graphs.
   if (!is_gpu_tensor_allocated_) {
     auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-    seed_extragraph_ = std::make_unique<at::Tensor>(at::empty({1}, options));
-    offset_extragraph_ = std::make_unique<at::Tensor>(at::empty({1}, options));
+    seed_extragraph_ = at::empty({1}, options);
+    offset_extragraph_ = at::empty({1}, options);
   }
   is_gpu_tensor_allocated_ = true;
 
   // Resets graph-related state variables.
   offset_intragraph_ = 0;
-  seed_extragraph_->fill_(int64_t(seed_));
-  offset_extragraph_->fill_(int64_t(0));
+  seed_extragraph_.fill_(int64_t(seed_));
+  offset_extragraph_.fill_(int64_t(0));
 }
 
 /**
@@ -178,8 +170,8 @@ void CUDAGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
   // Ensures the generator is not in capturing mode.
   at::cuda::assertNotCapturing(
       "Cannot prepare for replay during capturing stage.");
-  seed_extragraph_->fill_(int64_t(seed_));
-  offset_extragraph_->fill_(int64_t(philox_offset_per_thread_));
+  seed_extragraph_.fill_(int64_t(seed_));
+  offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
   // Applies the total increment achieved during previous captures to update the
   // offset.
   increase(wholegraph_increment);
@@ -417,8 +409,8 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     uint32_t offset = state_->offset_intragraph_;
     state_->increase(increment);
     return PhiloxCudaState(
-        state_->seed_extragraph_->data_ptr<int64_t>(),
-        state_->offset_extragraph_->data_ptr<int64_t>(),
+        state_->seed_extragraph_.data_ptr<int64_t>(),
+        state_->offset_extragraph_.data_ptr<int64_t>(),
         offset);
   } else {
     uint64_t offset = state_->philox_offset_per_thread_;

@@ -2,6 +2,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/core/Generator.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/cuda/PhiloxCudaState.h>
 #include <atomic>
 #include <limits>
@@ -98,14 +99,18 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint32_t offset_intragraph_;
   bool capturing_{};
   bool is_gpu_tensor_allocated_{};
-  std::unique_ptr<at::Tensor> seed_extragraph_{};
-  std::unique_ptr<at::Tensor> offset_extragraph_{};
   cuda::CUDAGraph* current_graph_{};
+  at::TensorBase seed_extragraph_{};
+  at::TensorBase offset_extragraph_{};
 
   CUDAGeneratorState(
       uint64_t seed = default_rng_seed_val,
       uint64_t philox_offset_per_thread = 0,
-      uint32_t offset_intragraph = 0);
+      uint32_t offset_intragraph = 0)
+      : seed_(seed),
+        philox_offset_per_thread_(philox_offset_per_thread),
+        offset_intragraph_(offset_intragraph) {}
+
   void increase(uint64_t increment);
   void register_to_graph(cuda::CUDAGraph* graph);
   // capture_epilogue returns the wholegraph_increment

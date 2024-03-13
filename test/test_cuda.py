@@ -255,7 +255,6 @@ class TestCuda(TestCase):
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
 
-
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -2406,8 +2405,28 @@ exit(2)
         gc.collect()
         torch.cuda.empty_cache()
 
-        first_cuda_generator_allocate = False
+        # Warm up the RNG seed and offset by creating and executing a simple CUDA graph.
+        # This process ensures that the one-element RNG seed and offset holders are allocated
+        # within the default generator. After this initial setup, these elements will be
+        # present and correctly initialized in the generator.
+
         s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin()
+            torch.rand(1, device="cuda")  # Execute a simple random number generation.
+            g.capture_end()
+
+        torch.cuda.current_stream().wait_stream(s)
+        g.replay()
+
+        torch.cuda.current_stream().wait_stream(s)
+        del g
+        gc.collect()
+        torch.cuda.empty_cache()
+        # Since the RNG seed and offset holders have been initialized during the warmup,
+        # there is no need to track or calculate any changes (delta) to these buffers afterwards.
+
         for (
             numel,
             delta_cudaMallocs,
@@ -2415,17 +2434,8 @@ exit(2)
             delta_cudaMalloc_bytes_post_del_g,
             pool_string,
         ) in cases:
-            delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
+            delta_active_blocks = 1
             delta_active_bytes = numel * elem
-
-            # since the CUDAGraph's one-element rng seed and offset holders should be allocated in the generator,
-            # we don't need to count the delta of these two buffers
-            if first_cuda_generator_allocate:
-                # two from CUDAGraph's one-element rng seed and offset holders
-                delta_active_blocks += 2
-                # for CUDAGraph's rng seed and offset holders each
-                delta_active_bytes += 1024
-                first_cuda_generator_allocate = False
 
             g = torch.cuda.CUDAGraph()
             s.wait_stream(torch.cuda.current_stream())
@@ -2454,10 +2464,7 @@ exit(2)
                          delta_active_bytes)
             # Double checks replay and stats before and after a call to empty_cache
             for i in range(2):
-                for stat, expected in zip(
-                    stats_to_check,
-                    expecteds,
-                ):
+                for stat, expected in zip(stats_to_check, expecteds):
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
                     self.assertEqual(current, expected, "Pre to post capture delta of " +
@@ -2477,13 +2484,7 @@ exit(2)
             self.assertEqual(b.sum().item(), 6 * numel)
 
             # b should be the only live reference remaining from the graph's private pool
-            # the CUDA Graph's RNG seed and offset tensor still alive within the CUDA generators
-            expecteds = (
-                1,
-                delta_cudaMalloc_bytes_post_del_g,
-                delta_active_blocks,
-                delta_active_bytes,
-            )
+            expecteds = (1, delta_cudaMalloc_bytes_post_del_g, 1, numel * elem)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
@@ -2494,7 +2495,6 @@ exit(2)
             # can throw off its allocation/deallocation counts.
             del a, b
             # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
-            gc.collect()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
