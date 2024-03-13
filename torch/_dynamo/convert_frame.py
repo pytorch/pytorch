@@ -466,8 +466,9 @@ def _compile(
         translation_validation_enabled,
         ValidationException,
     )
+
     # Time spent compiling this frame before restarting or failing analysis
-    wasted_compile_time : float = 0.0
+    wasted_compile_time: float = 0.0
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
