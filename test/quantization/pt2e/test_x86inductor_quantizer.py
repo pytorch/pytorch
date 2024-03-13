@@ -1013,7 +1013,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
-    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_linear_unary_gelu(self):
         """
@@ -1052,6 +1051,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d(self):
         """
