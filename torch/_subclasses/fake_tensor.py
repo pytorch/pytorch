@@ -670,8 +670,6 @@ class FakeTensor(torch.Tensor):
             out.append(s)
         return out
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
 
 @dataclass(frozen=True)
 class TensorMetadata:

@@ -330,13 +330,13 @@ def _export_to_torch_ir(
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
-    kwargs = kwargs or {}
-
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
+
+    kwargs = kwargs or {}
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
@@ -346,7 +346,7 @@ def _export_to_torch_ir(
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
-                    constraints=constraints,
+                    constraints=constraints,  # type: ignore[arg-type]
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
@@ -460,11 +460,15 @@ def _export_non_strict(
     # since these become specialized, we replace such metadata with the original values
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
     index = 0
-    total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
+    total_non_user_inputs = (
+        len(graph_signature.parameters)
+        + len(graph_signature.buffers)
+        + len(graph_signature.input_tokens)
+    )
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if index >= total_param_buffers:
-                user_arg = flat_args[index - total_param_buffers]
+            if index >= total_non_user_inputs:
+                user_arg = flat_args[index - total_non_user_inputs]
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
@@ -512,6 +516,8 @@ def _export_non_strict(
             make_argument_spec(node)
             for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
         ],
+        input_tokens=graph_signature.input_tokens,
+        output_tokens=graph_signature.output_tokens,
     )
     export_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
@@ -681,6 +687,12 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    if not isinstance(args, tuple):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
+        )
+
     global _EXPORT_FLAGS
     flags = set()
     flags.add("strict" if strict else "non_strict")
@@ -721,7 +733,13 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        tree_out = self._export_root(*args, **kwargs)
+                        if isinstance(self._export_root, torch.fx.GraphModule):
+                            with torch.fx.traceback.preserve_node_meta():
+                                tree_out = torch.fx.Interpreter(self._export_root).run(
+                                    *args, **kwargs
+                                )
+                        else:
+                            tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
@@ -824,7 +842,6 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
-
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
