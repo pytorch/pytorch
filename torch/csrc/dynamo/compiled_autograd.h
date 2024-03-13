@@ -456,8 +456,6 @@ class CompiledNodeArgs {
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
     if (C10_UNLIKELY(s >= encode_as_u16)) {
       // first write a byte indicating the path we followed, then the data
-
-
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
         specialize_on_bytes(encode_as_u16);
