@@ -2182,7 +2182,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                     if update_json:
                         json_data.append(kernel_meta_info)
                         with open(op_conf, "w") as f:
-                            json.dump(json_data, f)
+                            json.dump(json_data, f, indent=4)
 
             _extra_parse_arg = cls.extra_parse_arg % (
                 output_so_path,

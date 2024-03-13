@@ -1,8 +1,8 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_meta_info.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_checker.h>
-#include <torch/csrc/inductor/aoti_eager/aoti_static_checker.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_checker.h>
+#include <torch/csrc/inductor/aoti_eager/static_checker.h>
 
 #include <filesystem>
 #include <fstream>
@@ -72,9 +72,16 @@ bool TensorMetaInfo::sanityCheck(const TensorMetaInfo& tensor_meta_info) {
 }
 
 AOTIKernelMetaInfo TensorMetaInfo::loadFromFile(
-    const std::vector<std::string>& tensors_meta_info) {
+    const std::vector<nlohmann::json>& tensors_meta_info) {
   auto parse_symbolic = [](const std::string& symbolic_str) -> bool {
-    return symbolic_str == "true";
+    std::string upper_symbolic_str;
+    upper_symbolic_str.resize(symbolic_str.size());
+    std::transform(
+        symbolic_str.begin(),
+        symbolic_str.end(),
+        upper_symbolic_str.begin(),
+        [](unsigned char c) -> unsigned char { return std::toupper(c); });
+    return upper_symbolic_str == "TRUE";
   };
 
   auto parse_dtype = [](const std::string& dtype_str) -> c10::ScalarType {
@@ -128,44 +135,44 @@ AOTIKernelMetaInfo TensorMetaInfo::loadFromFile(
     }
   };
 
-  auto parse_sizes_or_strides =
-      [](const std::string& sizes_or_strides_str) -> std::vector<c10::SymInt> {
-    std::vector<c10::SymInt> sizes_or_strides;
-    std::stringstream ss(sizes_or_strides_str);
-    std::string size_or_stride_str;
-    while (getline(ss, size_or_stride_str, ',')) {
-      // TODO: Support dynamic shape.
-      sizes_or_strides.push_back(c10::SymInt(atoi(size_or_stride_str.c_str())));
-    }
-    return sizes_or_strides;
-  };
-
   // config file is in the following format:
   //  ${is_symbolic};${dtype};${device};[${sizes}];[${strides}]
-  auto parse_tensor_meta_info = [&](const std::string& line) -> TensorMetaInfo {
-    std::stringstream ss(line);
-    std::string symbolic_str, dtype_str, device_str, sizes_str, strides_str;
-    getline(ss, symbolic_str, ';');
-    getline(ss, device_str, ';');
-    getline(ss, dtype_str, ';');
-    getline(ss, sizes_str, ';');
-    getline(ss, strides_str, ';');
-    sizes_str.erase(
-        std::remove(sizes_str.begin(), sizes_str.end(), '['), sizes_str.end());
-    sizes_str.erase(
-        std::remove(sizes_str.begin(), sizes_str.end(), ']'), sizes_str.end());
-    strides_str.erase(
-        std::remove(strides_str.begin(), strides_str.end(), '['),
-        strides_str.end());
-    strides_str.erase(
-        std::remove(strides_str.begin(), strides_str.end(), ']'),
-        strides_str.end());
+  auto parse_tensor_meta_info =
+      [&](const nlohmann::json& line) -> TensorMetaInfo {
+    std::string symbolic_str = line["is_symbloic"];
+    std::string device_str = line["device_type"];
+    std::string dtype_str = line["dtype"];
+    std::string sizes_str = line["sizes"];
+    std::string strides_str = line["strides"];
+    nlohmann::json sizes_json = nlohmann::json::parse(sizes_str);
+    nlohmann::json strides_json = nlohmann::json::parse(strides_str);
+
+    auto is_symbolic = parse_symbolic(symbolic_str);
+    TORCH_INTERNAL_ASSERT(
+        is_symbolic == false,
+        "Eager through torch.compile does not support symbolic shape now");
+    std::vector<int> sizes_vec = sizes_json.get<std::vector<int>>();
+    std::vector<int> strides_vec = strides_json.get<std::vector<int>>();
+
+    std::vector<c10::SymInt> sizes;
+    std::vector<c10::SymInt> strides;
+    std::transform(
+        sizes_vec.begin(),
+        sizes_vec.end(),
+        std::back_inserter(sizes),
+        [](int size) { return c10::SymInt(size); });
+    std::transform(
+        strides_vec.begin(),
+        strides_vec.end(),
+        std::back_inserter(strides),
+        [](int stride) { return c10::SymInt(stride); });
+
     return TensorMetaInfo(
-        parse_symbolic(symbolic_str),
+        is_symbolic,
         parse_dtype(dtype_str),
         parse_device(device_str),
-        parse_sizes_or_strides(sizes_str),
-        parse_sizes_or_strides(strides_str));
+        sizes,
+        strides);
   };
 
   // Suppose there are 3 input tensors, and the config file format will be as
@@ -196,13 +203,13 @@ size_t TensorMetaInfoHash::operator()(
       hash, std::hash<c10::DeviceType>()(tensor_meta_info.device.type()));
 
   for (auto& e : tensor_meta_info.sizes) {
-    if (e.is_symbolic()) {
+    if (!e.is_symbolic()) {
       hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
     }
   }
 
   for (auto& e : tensor_meta_info.strides) {
-    if (e.is_symbolic()) {
+    if (!e.is_symbolic()) {
       hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
     }
   }

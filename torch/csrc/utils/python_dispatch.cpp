@@ -23,7 +23,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
-#include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 
 #include <iostream>
 #include <utility>
