@@ -364,6 +364,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 else:
                     self.prefix.splice(run_impl_proto)
         else:
+            # cpp entry function for JIT with cpp wrapper
             self.prefix.splice(
                 """
                 void inductor_entry_impl(
@@ -386,11 +387,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
-                        self.prefix.splice(
-                            """
-                                pybind11::gil_scoped_release release;
-                            """
-                        )
+                        self.prefix.splice("pybind11::gil_scoped_release release;")
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -897,26 +894,11 @@ class CppWrapperCpu(WrapperCodeGen):
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
+                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
             """
         )
 
-        # unwrap output tensor back to python scalar
-        if all(x for x in self.output_is_tensor.values()):
-            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
-            return_str = "return f(args_tensor)"
-        else:
-            outputs = [
-                f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
-                for i in range(len(V.graph.graph_outputs))
-            ]
-            outputs_str = f"[{', '.join(outputs)}]"
-            return_str = f"""
-                    outputs = f(args_tensor)
-                    return {outputs_str}
-            """
-
-        args_str = "args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -926,19 +908,42 @@ class CppWrapperCpu(WrapperCodeGen):
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
             constants_str = f"[{', '.join(V.graph.constants.keys())}]"
-            args_str += f"""
+            wrapper_body += f"""
                     constants_tensor = {constants_str}
-                    args_tensor.extend(constants_tensor)
+                    input_tensors.extend(constants_tensor)
             """
+        # Convert vector of at::Tensor to vector of AtenTensorHandle.
+        # If we pass at::Tensor, the compilation will be too slow.
+        wrapper_body += """
+                    input_handles = torch._C._aoti.unsafe_alloc_void_ptr_from_tensors(input_tensors)
+        """
+
+        # unwrap output tensor back to python scalar
+        if all(x for x in self.output_is_tensor.values()):
+            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
+            outputs_str = "output_tensors"
+        else:
+            outputs = [
+                f"output_tensors[{i}]"
+                if self.output_is_tensor[i]
+                else f"output_tensors[{i}].item()"
+                for i in range(len(V.graph.graph_outputs))
+            ]
+            outputs_str = f"[{', '.join(outputs)}]"
+        wrapper_body += f"""
+                    output_handles = f(input_handles)
+                    output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptr(output_handles)
+                    return {outputs_str}
+        """
 
         # Wrap the func to support setting result._boxed_call = True
         result.splice(
             f"""
             def _wrap_func(f):
                 def g(args):
-                    {args_str}
-                    {return_str}
+                    {wrapper_body}
                 return g
+
             call = _wrap_func(inductor_entry)
             """
         )
