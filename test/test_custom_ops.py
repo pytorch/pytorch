@@ -1852,7 +1852,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
-      const torch::Tensor& x) {
+      torch::Tensor x) {
     return x;
   }
 
@@ -1863,7 +1863,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   }
 };
 
-torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
