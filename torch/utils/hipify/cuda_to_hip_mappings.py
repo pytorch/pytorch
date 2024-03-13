@@ -3037,6 +3037,13 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuIpcOpenMemHandle",
             ("hipIpcOpenMemHandle", CONV_MEM, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cuMemAddressReserve", ("hipMemAddressReserve", CONV_MEM, API_DRIVER)),
+        ("cuMemRelease", ("hipMemRelease", CONV_MEM, API_DRIVER)),
+        ("cuMemMap", ("hipMemMap", CONV_MEM, API_DRIVER)),
+        ("cuMemAddressFree", ("hipMemAddressFree", CONV_MEM, API_DRIVER)),
+        ("cuMemSetAccess", ("hipMemSetAccess", CONV_MEM, API_DRIVER)),
+        ("cuMemUnmap", ("hipMemUnmap", CONV_MEM, API_DRIVER)),
+        ("cuMemCreate", ("hipMemCreate", CONV_MEM, API_DRIVER)),
         ("cuMemAlloc_v2", ("hipMalloc", CONV_MEM, API_DRIVER)),
         ("cuMemAllocHost", ("hipMemAllocHost", CONV_MEM, API_DRIVER, HIP_UNSUPPORTED)),
         (
