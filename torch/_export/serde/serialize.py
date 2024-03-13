@@ -78,6 +78,7 @@ from .schema import (  # type: ignore[attr-defined]
     SymIntArgument,
     TensorArgument,
     TensorMeta,
+    TokenArgument,
     TREESPEC_VERSION,
     UserInputMutationSpec,
     UserInputSpec,
@@ -794,10 +795,10 @@ class GraphModuleSerializer:
                 )
             )
         elif spec.kind == ep.InputKind.TOKEN:
-            assert isinstance(spec.arg, ep.TensorArgument)
+            assert isinstance(spec.arg, ep.TokenArgument)
             return InputSpec.create(
                 token=InputTokenSpec(
-                    arg=TensorArgument(name=spec.arg.name),
+                    arg=TokenArgument(name=spec.arg.name),
                 )
             )
         else:
@@ -854,10 +855,10 @@ class GraphModuleSerializer:
                 )
             )
         elif spec.kind == ep.OutputKind.TOKEN:
-            assert isinstance(spec.arg, ep.TensorArgument)
+            assert isinstance(spec.arg, ep.TokenArgument)
             return OutputSpec.create(
                 token=OutputTokenSpec(
-                    arg=TensorArgument(name=spec.arg.name),
+                    arg=TokenArgument(name=spec.arg.name),
                 )
             )
         else:
@@ -1467,7 +1468,7 @@ class GraphModuleDeserializer:
         if i.type == "token":
             return ep.InputSpec(
                 kind=ep.InputKind.TOKEN,
-                arg=ep.TensorArgument(name=i.token.arg.name),
+                arg=ep.TokenArgument(name=i.token.arg.name),
                 target=None
             )
         else:
@@ -1513,7 +1514,7 @@ class GraphModuleDeserializer:
         elif o.type == "token":
             return ep.OutputSpec(
                 kind=ep.OutputKind.TOKEN,
-                arg=ep.TensorArgument(name=o.token.arg.name),
+                arg=ep.TokenArgument(name=o.token.arg.name),
                 target=None
             )
         else:
@@ -2422,8 +2423,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         elif spec.type == "custom_obj":
             return
         elif spec.type == "token":
-            t = spec.token.arg
-            t.name = replace_table[t.name]
+            tok = spec.token.arg
+            tok.name = replace_table[tok.name]
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2464,8 +2465,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             u.arg.name = replace_table[u.arg.name]
             u.user_input_name = replace_table[u.user_input_name]
         elif spec.type == "token":
-            t = spec.token.arg
-            t.name = replace_table[t.name]
+            tok = spec.token.arg
+            tok.name = replace_table[tok.name]
         else:
             raise AssertionError(f"Unknown output type: {spec}")
 

@@ -123,6 +123,11 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class TokenArgument:
+    name: str
+
+
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
 # type List[OptionalTensorArgument], with tensor values seiralized to the
@@ -238,7 +243,7 @@ class InputToCustomObjSpec:
 
 @dataclass
 class InputTokenSpec:
-    arg: TensorArgument
+    arg: TokenArgument
 
 
 @dataclass(repr=False)
@@ -287,7 +292,7 @@ class UserInputMutationSpec:
 
 @dataclass
 class OutputTokenSpec:
-    arg: TensorArgument
+    arg: TokenArgument
 
 
 @dataclass(repr=False)
