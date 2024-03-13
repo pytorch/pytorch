@@ -21,7 +21,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 namespace c10 {
 
 template <typename dest_t, typename src_t>
-struct needs_real {
+struct needs_real_or_bool {
   constexpr static bool value =
       (is_complex<src_t>::value && !is_complex<dest_t>::value);
 };
@@ -40,6 +40,21 @@ struct maybe_real<true, src_t> {
   }
 };
 
+template <bool, typename src_t>
+struct maybe_bool {
+  C10_HOST_DEVICE static inline src_t apply(src_t src) {
+    return src;
+  }
+};
+
+template <typename src_t>
+struct maybe_bool<true, src_t> {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+    // Don't use bool operator so as to to also compile for ComplexHalf.
+    return src.real() || src.imag();
+  }
+};
+
 // Note: deliberately ignores undefined behavior, consistent with NumPy.
 // PyTorch's type conversions can cause a variety of undefined behavior,
 // including float to integral overflow and signed to unsigned integer overflow.
@@ -48,9 +63,21 @@ template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(
       src_t src) {
-    constexpr bool real = needs_real<dest_t, src_t>::value;
+    constexpr bool real = needs_real_or_bool<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
     return static_cast<dest_t>(r);
+  }
+};
+
+// Partial template specialization for casting to bool.
+// Need to handle complex types separately, as we don't 
+// simply want to cast the real part to bool. 
+template <typename src_t>
+struct static_cast_with_inter_type<bool, src_t> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline bool apply(
+      src_t src) {
+    constexpr bool complex = needs_real_or_bool<bool, src_t>::value;
+    return static_cast<bool>(maybe_bool<complex, src_t>::apply(src));
   }
 };
 
@@ -67,7 +94,7 @@ template <typename src_t>
 struct static_cast_with_inter_type<uint8_t, src_t> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(
       src_t src) {
-    constexpr bool real = needs_real<uint8_t, src_t>::value;
+    constexpr bool real = needs_real_or_bool<uint8_t, src_t>::value;
     return static_cast<uint8_t>(
         static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
   }
