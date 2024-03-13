@@ -44,7 +44,7 @@ void initAOTIRunnerBindings(PyObject* module) {
 
   m.def(
       "unsafe_alloc_void_ptr_from_tensors",
-      [](const std::vector<at::Tensor>& tensors) {
+      [](std::vector<at::Tensor>& tensors) {
         std::vector<AtenTensorHandle> handles =
             torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(tensors);
         std::vector<void*> result(
@@ -56,12 +56,9 @@ void initAOTIRunnerBindings(PyObject* module) {
   m.def(
       "alloc_tensors_by_stealing_from_void_ptr",
       [](std::vector<void*>& raw_handles) {
-        std::vector<AtenTensorHandle> handles(
-            reinterpret_cast<AtenTensorHandle*>(raw_handles.data()),
-            reinterpret_cast<AtenTensorHandle*>(raw_handles.data()) +
-                raw_handles.size());
         return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-            handles);
+            reinterpret_cast<AtenTensorHandle*>(raw_handles.data()),
+            raw_handles.size());
       });
 }
 } // namespace torch::inductor
