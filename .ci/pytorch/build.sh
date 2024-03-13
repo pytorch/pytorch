@@ -7,7 +7,7 @@ set -ex
 # need to set it yourself.
 
 if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] ; then
-  echo "Sometimes in kernel 5+ anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
+  # Forces build to rely on system libstdc++ rather then anaconda provided one see https://github.com/pytorch/pytorch/issues/121796
   sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
 fi
 
