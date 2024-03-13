@@ -525,6 +525,8 @@ class DDPOptimizer:
                         target_mod, buckets[0], processed_modules, node.target
                     )
             elif node.op == "call_method":
+                if not isinstance(node.args[0].target, str):
+                    continue
                 target_mod = gm.try_get_submodule(node.args[0].target)
                 if target_mod is not None and target_mod not in processed_modules:
                     self.add_module_params_to_bucket(
