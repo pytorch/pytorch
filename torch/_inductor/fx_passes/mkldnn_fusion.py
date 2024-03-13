@@ -1196,6 +1196,7 @@ if torch._C._has_mkldnn:
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
+            _register_woq_lowerings()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():
@@ -1203,4 +1204,3 @@ if torch._C._has_mkldnn:
             _register_weight_pack_pass()
             _recover_linear()
             _register_quantization_weight_pack_pass()
-            _register_woq_lowerings()

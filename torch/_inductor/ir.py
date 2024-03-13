@@ -6704,7 +6704,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
 
 
-class WOQ_INT8(ExternKernelAlloc):
+class WeightOnlyQuantizedMatMulInt8(ExternKernelAlloc):
     def __init__(
         self,
         layout,
@@ -6760,7 +6760,7 @@ class WOQ_INT8(ExternKernelAlloc):
         n, k = weight.get_size()
         inputs = [x, weight, scales]
 
-        return WOQ_INT8(
+        return WeightOnlyQuantizedMatMulInt8(
             layout=FlexibleLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),

@@ -1092,7 +1092,7 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
     return woq
 
 
-def _register_woq_int8():
+def _register_woq_mm_int8():
     # torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
@@ -1125,7 +1125,7 @@ def _register_quantization_lowerings():
 
 
 def _register_woq_lowerings():
-    _register_woq_int8()
+    _register_woq_mm_int8()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
