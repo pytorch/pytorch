@@ -546,7 +546,7 @@ REDUCTION_COMBINE_FN = {
 }
 
 
-def get_reduction_combine_fn(reduction_type, dtype):
+def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
     if reduction_type in REDUCTION_COMBINE_FN:
         combine_fn = REDUCTION_COMBINE_FN[reduction_type]
     elif reduction_type in {"argmax", "argmin"}:
@@ -567,9 +567,12 @@ def get_reduction_combine_fn(reduction_type, dtype):
                 mask = ops.logical_or(mask, ops.gt(a_isnan, b_isnan))
                 equal = ops.logical_or(equal, ops.logical_and(a_isnan, b_isnan))
 
-            mask = ops.logical_or(
-                mask, ops.logical_and(equal, ops.lt(a_index, b_index))
+            tie = (
+                ops.lt(a_index, b_index)
+                if arg_break_ties_left
+                else ops.gt(a_index, b_index)
             )
+            mask = ops.logical_or(mask, ops.logical_and(equal, tie))
             return (
                 ops.where(mask, a_value, b_value),
                 ops.where(mask, a_index, b_index),

@@ -5412,7 +5412,9 @@ def cummax(x, axis=None):
         return clone(x), torch.empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
-    combine_fn = ir.get_reduction_combine_fn("argmax", dtype=dtype)
+    combine_fn = ir.get_reduction_combine_fn(
+        "argmax", dtype=dtype, arg_break_ties_left=False
+    )
 
     min_value = (
         False
@@ -5442,7 +5444,9 @@ def cummin(x, axis=None):
         return clone(x), torch.empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
-    combine_fn = ir.get_reduction_combine_fn("argmin", dtype=dtype)
+    combine_fn = ir.get_reduction_combine_fn(
+        "argmin", dtype=dtype, arg_break_ties_left=False
+    )
 
     max_value = (
         True
