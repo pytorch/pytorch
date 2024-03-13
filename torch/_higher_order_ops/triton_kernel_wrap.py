@@ -238,8 +238,9 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 for fn_op in fn_op_list:
                     for i in range(len(fn_op.args)):
                         arg = fn_op.args[i]
-                        if isinstance(arg, Intermediate) and arg.idx in replacements:
-                            fn_op.args[i] = replacements[arg.idx]
+                        # there can be transitive replacements, but no cycles
+                        while isinstance(arg, Intermediate) and arg.idx in replacements:
+                            arg = fn_op.args[i] = replacements[arg.idx]
 
             # next function capture starts
             # with empty replacements
@@ -288,7 +289,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                             continue
                         last_ret, last_ops = block_ops.popitem()
                         if all(
-                            op.name in ("scf.yield", "tt.reduce.return")
+                            op.name in ("scf.yield", "tt.reduce.return", "tt.scan.return")
                             for op in last_ops
                         ):
                             # if last_ops are all return ops, treat them separately
