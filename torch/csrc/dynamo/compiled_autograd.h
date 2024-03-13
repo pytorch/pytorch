@@ -454,16 +454,23 @@ class CompiledNodeArgs {
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wtautological-type-limit-compare"
     if (C10_UNLIKELY(s >= encode_as_u16)) {
       // first write a byte indicating the path we followed, then the data
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
         specialize_on_bytes(encode_as_u16);
         specialize_on_bytes(static_cast<uint16_t>(s));
+      } else if (
+          std::numeric_limits<uint32_t>::max() ==
+          std::numeric_limits<size_t>::max()) {
+        // Need to repeat this condition to silence internal build errors due to
+        // a mix of -Werror, -Wtautological-type-limit-compare and
+        // -Wunknown-pragmas
+
+        // 5 bytes
+        specialize_on_bytes(encode_as_u32);
+        specialize_on_bytes(static_cast<uint32_t>(s));
       } else if (s <= std::numeric_limits<uint32_t>::max()) {
-#pragma clang diagnostic pop
         // 5 bytes
         specialize_on_bytes(encode_as_u32);
         specialize_on_bytes(static_cast<uint32_t>(s));
