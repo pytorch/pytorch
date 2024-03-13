@@ -5,7 +5,7 @@ from typing import Dict, List
 
 import torch
 
-from ..exc import Unsupported
+from ..exc import unimplemented, Unsupported
 
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
@@ -28,6 +28,23 @@ class GuardInstallException(Exception):
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
+    @classmethod
+    def throw_if_unsupported_step(cls, symbolic_locals, f_name):
+        """
+        We don't support calling the step with closure argument, so graph break if
+        if that's the case.
+        """
+        if (
+            "closure" in symbolic_locals
+            and not isinstance(symbolic_locals["closure"], ConstantVariable)
+            and "self" in symbolic_locals
+            and isinstance(symbolic_locals["self"], OptimizerVariable)
+            and f_name == "step"
+        ):
+            unimplemented(
+                "Optimizer step with closure not supported by torch.compile()"
+            )
+
     def __init__(
         self,
         value,
@@ -94,6 +111,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
+        # Note: this allows us to intercept the call in call_method
+        # in the typical case, we return a UserMethodVariable
+        # which will directly inline
         if name in ("_init_group", "step"):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 

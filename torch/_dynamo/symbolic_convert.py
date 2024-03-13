@@ -2109,7 +2109,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
-            self._check_for_optimizer_step_closure()
+            self._throw_if_unsupported_optimizer_step()
 
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
@@ -2124,18 +2124,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
 
-    def _check_for_optimizer_step_closure(self):
+    def _throw_if_unsupported_optimizer_step(self):
         from .variables import OptimizerVariable
 
-        if (
-            "closure" in self.symbolic_locals
-            and not isinstance(self.symbolic_locals["closure"], ConstantVariable)
-            and "self" in self.symbolic_locals
-            and isinstance(self.symbolic_locals["self"], OptimizerVariable)
-            and isinstance(self.symbolic_locals["self"].value, torch.optim.Optimizer)
-            and self.code_options["co_name"] == "step"
-        ):
-            unimplemented("Optimizer step with closure not supported.")
+        OptimizerVariable.throw_if_unsupported_step(
+            self.symbolic_locals, self.code_options["co_name"]
+        )
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
