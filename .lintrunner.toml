@@ -2434,7 +2434,6 @@ exclude_patterns = [
     'torch/utils/_contextlib.py',
     'torch/utils/_cpp_extension_versioner.py',
     'torch/utils/_crash_handler.py',
-    'torch/utils/_cuda_trace.py',
     'torch/utils/_device.py',
     'torch/utils/_foreach_utils.py',
     'torch/utils/_freeze.py',

@@ -98,7 +98,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
-          reinterpret_cast<uintptr_t>(cuda_event));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
   }
 
@@ -113,7 +113,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_deletion(
-          reinterpret_cast<uintptr_t>(cuda_event));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
     C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
@@ -148,6 +148,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
+          c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
           reinterpret_cast<uintptr_t>(cuda_stream.stream()));
     }
@@ -170,6 +171,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(
+          c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
           reinterpret_cast<uintptr_t>(cuda_stream.stream()));
     }

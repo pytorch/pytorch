@@ -94,17 +94,32 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   }
 
   // Just swallow the event, don't do anything
-  void trace_gpu_event_creation(uintptr_t event) const override {}
-  void trace_gpu_event_deletion(uintptr_t event) const override {}
-  void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
+  void trace_gpu_event_creation(at::DeviceType device_type, uintptr_t event)
       const override {}
-  void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {}
-  void trace_gpu_memory_allocation(uintptr_t ptr) const override {}
-  void trace_gpu_memory_deallocation(uintptr_t ptr) const override {}
-  void trace_gpu_stream_creation(uintptr_t stream) const override {}
-  void trace_gpu_device_synchronization() const override {}
-  void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
-  void trace_gpu_event_synchronization(uintptr_t event) const override {}
+  void trace_gpu_event_deletion(at::DeviceType device_type, uintptr_t event)
+      const override {}
+  void trace_gpu_event_record(
+      at::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {}
+  void trace_gpu_event_wait(
+      at::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {}
+  void trace_gpu_memory_allocation(at::DeviceType device_type, uintptr_t ptr)
+      const override {}
+  void trace_gpu_memory_deallocation(at::DeviceType device_type, uintptr_t ptr)
+      const override {}
+  void trace_gpu_stream_creation(at::DeviceType device_type, uintptr_t stream)
+      const override {}
+  void trace_gpu_device_synchronization(
+      at::DeviceType device_type) const override {}
+  void trace_gpu_stream_synchronization(
+      at::DeviceType device_type,
+      uintptr_t stream) const override {}
+  void trace_gpu_event_synchronization(
+      at::DeviceType device_type,
+      uintptr_t event) const override {}
 
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
