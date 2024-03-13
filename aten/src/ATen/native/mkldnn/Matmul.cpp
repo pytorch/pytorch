@@ -78,6 +78,13 @@ bool use_mkldnn_matmul(
     return false;
 }
 
+void mkldnn_matmul_i8i8i32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  TORCH_CHECK(false, __func__, ": ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
@@ -400,6 +407,70 @@ bool use_mkldnn_matmul(
     const Tensor& mat2,
     const Tensor& result) {
   return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result) || use_mkldnn_bf32_matmul(mat1, mat2, result));
+}
+
+void mkldnn_matmul_i8i8i32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  // x:s8 * w:s8 -> y:s32
+  TORCH_CHECK(
+      mat1.scalar_type() == c10::kChar,
+      __func__, ": mat1 dtype should be signed int8 but found ",
+      mat1.scalar_type());
+  TORCH_CHECK(
+      mat2.scalar_type() == c10::kChar,
+      __func__, ": mat2 dtype should be signed int8 but found ",
+      mat2.scalar_type());
+  TORCH_CHECK(
+      mat1.dim() == 2 && mat2.dim() == 2,
+      __func__, ": Expect mat1 and mat2 are 2d but got ",
+      mat1.dim(),
+      " and ",
+      mat2.dim());
+  TORCH_CHECK(
+      mat1.size(1) == mat2.size(0),
+      "matmul_i8i8i32: mat1 shape and mat2 shape do not match, got ",
+      mat1.sizes(),
+      " and ",
+      mat2.sizes());
+  // Create ideep tensors for oneDNN computation
+  auto src = ideep::tensor(
+      {mat1.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat1.strides().vec()},
+      mat1.data_ptr());
+  auto wei = ideep::tensor(
+      {mat2.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat2.strides().vec()},
+      mat2.data_ptr());
+  auto dst = ideep::tensor(
+      {result.sizes().vec(),
+       ideep::tensor::data_type::s32,
+       result.strides().vec()},
+      result.data_ptr());
+  // Create primitive desc
+  auto engine = ideep::engine::cpu_engine();
+  ideep::attr_t op_attr;
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  auto src_desc = src.get_desc();
+  auto wei_desc = wei.get_desc();
+  auto dst_desc = dst.get_desc();
+  auto prim_desc = dnnl::matmul::primitive_desc(
+      engine, src_desc, wei_desc, dst_desc, op_attr);
+  // Reorder mat2 if needed
+  auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
+  // Prepare args for primitive
+  ideep::tensor scratchpad(prim_desc.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  // Create primitve and execute
+  auto primitive = dnnl::matmul(prim_desc);
+  primitive.execute(ideep::stream::default_stream(), args);
 }
 
 } // namespace native
