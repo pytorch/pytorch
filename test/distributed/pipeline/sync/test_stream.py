@@ -21,12 +21,12 @@ from torch.distributed.pipeline.sync.stream import (
     use_stream,
     wait_stream,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
 
-class TestNewStream:
+class TestNewStream(TestCase):
     def test_new_stream_cpu(self):
         stream = new_stream(torch.device("cpu"))
         assert stream is CPUStream
@@ -38,7 +38,7 @@ class TestNewStream:
         assert stream != torch.cuda.default_stream()
 
 
-class TestCurrentStream:
+class TestCurrentStream(TestCase):
     def test_current_stream_cpu(self):
         stream = current_stream(torch.device("cpu"))
         assert stream is CPUStream
@@ -50,7 +50,7 @@ class TestCurrentStream:
         assert stream == torch.cuda.current_stream()
 
 
-class TestDefaultStream:
+class TestDefaultStream(TestCase):
     def test_default_stream_cpu(self):
         stream = default_stream(torch.device("cpu"))
         assert stream is CPUStream
@@ -62,7 +62,7 @@ class TestDefaultStream:
         assert stream == torch.cuda.default_stream()
 
 
-class TestUseDevice:
+class TestUseDevice(TestCase):
     def test_use_device_cpu(self):
         with use_device(torch.device("cpu")):
             pass
@@ -73,7 +73,7 @@ class TestUseDevice:
             pass
 
 
-class TestUseStream:
+class TestUseStream(TestCase):
     def test_use_stream_cpu(self):
         with use_stream(CPUStream):
             pass
@@ -85,7 +85,7 @@ class TestUseStream:
             assert current_stream(torch.device("cuda")) == stream
 
 
-class TestGetDevice:
+class TestGetDevice(TestCase):
     def test_get_device_cpu(self):
         assert get_device(CPUStream).type == "cpu"
 
@@ -95,7 +95,7 @@ class TestGetDevice:
         assert get_device(stream).type == "cuda"
 
 
-class TestWaitStream:
+class TestWaitStream(TestCase):
     def _test_wait_stream(self, source, target, cuda_sleep=None):
         with use_stream(target):
             if is_cuda(target):
@@ -131,7 +131,7 @@ class TestWaitStream:
         self._test_wait_stream(source, target, cuda_sleep)
 
 
-class TestRecordStream:
+class TestRecordStream(TestCase):
     def test_record_stream_cpu(self):
         # It should silently ignore CPU tensors.
         x = torch.rand(1, device=torch.device("cpu"))
