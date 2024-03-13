@@ -734,7 +734,7 @@ def min_cut_rematerialization_partition(
     view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
     if compiler == "inductor":
         default_recomputable_ops += [prims.div, prims.convert_element_type, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.arange, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum, prims.iota]  # noqa: E501,B950
-        view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided, aten.split_with_sizes, aten.split]
+        view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided]
         # Natalia said that we should allow recomputing indexing :)
         default_recomputable_ops += [aten.index, aten.gather]
     default_recomputable_ops += view_ops
@@ -749,7 +749,6 @@ def min_cut_rematerialization_partition(
         method_to_operator(m)
         for m in magic_methods
     ]
-
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
@@ -767,15 +766,15 @@ def min_cut_rematerialization_partition(
         print()
 
     def is_materialized_backwards(node):
-        # if get_aten_target(node) in view_ops:
-        #     return False
+        if get_aten_target(node) in view_ops:
+            return False
         cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
             for user in cur.users:
                 if user not in required_fw_nodes and not is_fusible(cur, user):
                     return True
-                if user not in required_fw_nodes and get_aten_target(user) in view_ops:
+                if get_aten_target(user) in view_ops:
                     cur_nodes.add(user)
 
         return False
@@ -928,10 +927,14 @@ def min_cut_rematerialization_partition(
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
-        bw_module = reordering_to_mimic_autograd_engine(bw_module)
+    bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
+        from torch._inductor.fx_utils import get_node_storage
+        storages = set([get_node_storage(node) for node in saved_values])
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
+        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
+        # for i in sorted_sizes: print(i)
         fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
         bw_module_nodes = {node.name for node in bw_module.graph.nodes if node.op == 'call_function'}
         remat_nodes = fw_module_nodes & bw_module_nodes
