@@ -466,6 +466,8 @@ def _compile(
         translation_validation_enabled,
         ValidationException,
     )
+    # Time spent compiling this frame before restarting or failing analysis
+    wasted_compile_time : float = 0.0
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
@@ -669,7 +671,6 @@ def _compile(
                 )
             },
         )
-        wasted_compile_time = 0.0
         start_time = time.time()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -737,11 +738,13 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
-                if output.compile_subgraph_reason is not None and output.compile_subgraph_reason.graph_break:
+                if (
+                    output.compile_subgraph_reason is not None
+                    and output.compile_subgraph_reason.graph_break
+                ):
                     graph_break_reason = output.compile_subgraph_reason.reason
                 else:
                     graph_break_reason = None
-
 
             else:
                 guard_count = None
