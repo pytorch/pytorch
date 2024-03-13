@@ -1121,7 +1121,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "amin"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "amax"),  # aten::scatter_reduce.two hit the vmap fallback
-        xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
         xfail('linalg.lu', ''),
@@ -1169,7 +1168,6 @@ class TestOperators(TestCase):
         xfail('linalg.householder_product'),
         xfail('lu'),
         xfail('lu_solve'),
-        xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
