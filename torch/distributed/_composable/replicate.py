@@ -72,6 +72,7 @@ class _ReplicateState(_State):
         device_mesh = kwargs.get("device_mesh", None)
         if device_mesh is not None:
             from torch.distributed.device_mesh import _mesh_resources
+
             if _mesh_resources.get_parent_mesh(device_mesh) is not None:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is

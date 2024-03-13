@@ -665,6 +665,7 @@ class DistributedDataParallel(Module, Joinable):
             self.device_mesh = device_mesh
             self.process_group = device_mesh.get_group(mesh_dim=0)
             from torch.distributed.device_mesh import _mesh_resources
+
             if _mesh_resources.get_parent_mesh(device_mesh) is not None:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
