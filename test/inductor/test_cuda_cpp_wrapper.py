@@ -98,7 +98,6 @@ if config.abi_compatible:
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_conv_backward_cuda",
         "test_custom_op_cuda",  # needs custom op support
-        "test_index_put_deterministic_fallback_cuda",
         "test_profiler_mark_wrapper_call_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
