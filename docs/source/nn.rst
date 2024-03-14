@@ -207,6 +207,7 @@ Normalization Layers
     nn.LazyInstanceNorm3d
     nn.LayerNorm
     nn.LocalResponseNorm
+    nn.RMSNorm
 
 Recurrent Layers
 ----------------
