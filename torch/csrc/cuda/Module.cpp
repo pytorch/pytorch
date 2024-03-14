@@ -1233,6 +1233,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
               return target == stream;
             });
       });
+  m.def(
+      "_cuda_startUsingUserPool",
+      [](int device) {
+        c10::cuda::CUDACachingAllocator::startUsingUserPool(
+            device);
+      });
 
   m.def(
       "_cuda_endAllocateCurrentStreamToPool",
@@ -1245,6 +1251,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
       });
+
+  m.def("_cuda_stopUsingUserPool", [](int device) {
+    c10::cuda::CUDACachingAllocator::stopUsingUserPool(device);
+  });
+
+  m.def("_cuda_emptyUserPool", [](int device, c10::cuda::MemPool& mempool) {
+    c10::cuda::CUDACachingAllocator::emptyUserPool(device, mempool);
+  });
 
   m.def(
       "_cuda_checkPoolLiveAllocations",

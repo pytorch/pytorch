@@ -166,6 +166,13 @@ void CUDAPluggableAllocator::emptyCache() {
   }
 }
 
+void CUDAPluggableAllocator::emptyUserPool(c10::DeviceIndex device, c10::cuda::MemPool& mempool) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support emptyUserPool. "
+      "If you need it, please file an issue describing your use case.");
+}
+
 void CUDAPluggableAllocator::cacheInfo(
     c10::DeviceIndex device,
     size_t* largestBlock) {
@@ -221,6 +228,14 @@ c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
       "If you need it, please file an issue describing your use case.");
 }
 
+c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
+    snapshot(c10::DeviceIndex device, c10::cuda::MemPool& mempool) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support snapshot. "
+      "If you need it, please file an issue describing your use case.");
+}
+
 std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
   TORCH_CHECK(
       false,
@@ -238,6 +253,13 @@ void CUDAPluggableAllocator::beginAllocateToPool(
   }
 }
 
+void CUDAPluggableAllocator::startUsingUserPool(
+    c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not support startUsingUserPool. ");
+}
+
 void CUDAPluggableAllocator::endAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id) {
@@ -252,6 +274,13 @@ void CUDAPluggableAllocator::releasePool(
   if (relase_pool_fn_) {
     relase_pool_fn_(device, mempool_id);
   }
+}
+
+void CUDAPluggableAllocator::stopUsingUserPool(
+    c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not support stopUsingUserPool. ");
 }
 
 void CUDAPluggableAllocator::recordHistory(

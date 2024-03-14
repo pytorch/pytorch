@@ -915,6 +915,28 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #endif
 }
 
+void ProcessGroupNCCL::registerUserBuffers(at::Device device, c10::cuda::MemPool& pool) {
+  std::vector<at::Device> rankDevices = {device};
+  const auto key = getKeyFromDevices(rankDevices);
+  LOG(INFO) << logPrefix() << "Performing user buffer registration on backend device "
+            << device << ", key " << key << ", i am " << this;
+  auto ncclComm = getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      ncclComm.size() == 1,
+      "exactly one communicator found for device ",
+      device);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(device.index(), pool);
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+      segmentInfo.device == device.index(),
+      "Mismatch between CUDA memory segment device and current device");
+    ncclComm[0]->registerSegment(
+            reinterpret_cast<void*>(segmentInfo.address),
+            segmentInfo.total_size);
+  }
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;

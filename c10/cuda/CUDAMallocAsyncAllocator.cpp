@@ -498,6 +498,12 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
+  void emptyUserPool(c10::DeviceIndex device, MemPool& mempool) override {
+    TORCH_CHECK(
+          false,
+          "Not implemented.")
+  }
+
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {
     // The only consumer of cacheInfo is getMaxWorkspaceSize in Conv_v7.cpp.
     // Afaict, the role of cacheInfo is to give getMaxWorkspaceSize a reasonable
@@ -760,6 +766,17 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return {};
   }
 
+  SnapshotInfo snapshot(c10::DeviceIndex device, MemPool& mempool) override {
+    TORCH_CHECK(
+        false,
+        "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
+        "(For backend:native, snapshot returns a detailed summary of all "
+        "blocks tracked by the allocator, but the cudaMallocAsync backend "
+        "does not track individual blocks.)");
+    // Alternative: TORCH_WARN
+    return {};
+  }
+
   // CUDAGraph interactions
   void beginAllocateToPool(
       c10::DeviceIndex device,
@@ -772,6 +789,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         !capture_underway,
         "Only one capture at a time is allowed in a process.")
     capture_underway = true;
+  }
+
+  void startUsingUserPool(
+      c10::DeviceIndex device) override {
+    TORCH_CHECK(
+        false,
+        "Not implemented.")
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
@@ -822,6 +846,12 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     //    The freeAsync()s will probably incur
     //    TORCH_WARN("Attempting uncaptured free of a captured allocation..."
     //    but stale ptrs will not permanently leak into ptr_info.
+  }
+
+  void stopUsingUserPool(c10::DeviceIndex device) override {
+    TORCH_CHECK(
+        false,
+        "Not implemented.");
   }
 
   void* raw_alloc(size_t nbytes) override {

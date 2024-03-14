@@ -34,6 +34,7 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
+from .mem_pool import MemPool, use_mem_pool
 from .streams import Event, ExternalStream, Stream
 
 try:
@@ -1552,6 +1553,8 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

@@ -30,6 +30,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/MemPool.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -641,6 +642,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void eagerConnectSingleDevice(at::Device device) override;
 
   void performNocolorSplit(at::Device device);
+
+  void registerUserBuffers(at::Device device, c10::cuda::MemPool& pool);
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store

@@ -82,6 +82,7 @@ struct CUDAPluggableAllocator
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
   void emptyCache() override;
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
+  void emptyUserPool(c10::DeviceIndex device, c10::cuda::MemPool& mempool) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
   void recordStream(const c10::DataPtr&, streamType stream) override;
@@ -91,6 +92,7 @@ struct CUDAPluggableAllocator
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
   c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
+  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot(c10::DeviceIndex device, c10::cuda::MemPool& mempool) override;
   void beginAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,
@@ -100,6 +102,8 @@ struct CUDAPluggableAllocator
       c10::cuda::MempoolId_t mempool_id) override;
   void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
+  void startUsingUserPool(c10::DeviceIndex device) override;
+  void stopUsingUserPool(c10::DeviceIndex device) override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
   void recordHistory(
       bool enabled,

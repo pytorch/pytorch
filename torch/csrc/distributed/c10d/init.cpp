@@ -2620,7 +2620,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setBoundDeviceId)
           .def(
               "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+              &::c10d::ProcessGroupNCCL::performNocolorSplit)
+	  .def("register_user_buffers",
+	      &::c10d::ProcessGroupNCCL::registerUserBuffers);
 
   module.def(
       "_get_intra_node_comm_usage_counter",
