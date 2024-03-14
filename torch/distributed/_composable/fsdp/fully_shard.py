@@ -180,6 +180,7 @@ class FSDP:
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is None:
             return None
+        fsdp_param_group.lazy_init()
         fsdp_param_group.unshard(async_op=async_op)
         handle = UnshardHandle(fsdp_param_group)
         if async_op:
