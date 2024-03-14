@@ -570,7 +570,7 @@ class FxGraphHashDetails:
         self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
-        except TypeError as e:
+        except (TypeError, AttributeError) as e:
             # Some configs options are callables, e.g., post_grad_custom_pre_pass,
             # and may not pickle.
             log.debug("Can't pickle inductor config: %s", e)
@@ -1745,7 +1745,7 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
-            cmd = cpp_compile_command(
+            compile_cmd = cpp_compile_command(
                 input=input_path,
                 output=output_o,
                 vec_isa=picked_vec_isa,
@@ -1754,12 +1754,12 @@ class AotCodeCompiler:
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
             )
-            log.debug("aot compilation command: %s", cmd)
+            log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
-                compile_file(input_path, output_o, cmd.split())
+                compile_file(input_path, output_o, compile_cmd.split())
                 os.chmod(output_o, 0o644)
             else:
-                run_command_and_check(cmd)
+                run_command_and_check(compile_cmd)
 
             def _to_bytes(t: torch.Tensor) -> bytes:
                 # This serializes the tensor's untyped_storage to bytes by accessing
@@ -1787,7 +1787,7 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
-            cmd = cpp_compile_command(
+            link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
                 vec_isa=picked_vec_isa,
@@ -1795,12 +1795,18 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
-            log.debug("aot linkage command: %s", cmd)
+            log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
-                compile_file([output_o, consts_o], output_so, cmd.split())
+                compile_file([output_o, consts_o], output_so, link_cmd.split())
                 os.chmod(output_so, 0o755)
             else:
-                run_command_and_check(cmd)
+                run_command_and_check(link_cmd)
+
+            # Append cmds to the end of codegen-ed wrapper file
+            with open(input_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
 
         return output_so
 
