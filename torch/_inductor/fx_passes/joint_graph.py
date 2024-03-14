@@ -282,6 +282,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
+
+    import time
+    start = time.time()
+
     lazy_init()
     count = 0
 
@@ -298,6 +302,14 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         stable_topological_sort(graph.graph)
         graph.graph.lint()
         graph.recompile()
+
+    end = time.time()
+
+    print("joint_graph_passes:", end - start)
+
+    # import sys
+    # sys.exit(1)
+
     return graph
 
 
