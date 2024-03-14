@@ -26,7 +26,7 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    check_1d_sharded_parity,
+    check_sharded_parity,
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
@@ -210,7 +210,7 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
         for param in model.parameters():
             self.assertEqual(param.dtype, dtype)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
-        check_1d_sharded_parity(self, ref_model, model)
+        check_sharded_parity(self, ref_model, model)
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((2, mlp_dim), device="cuda", dtype=dtype)
         for iter_idx in range(10):
@@ -219,7 +219,7 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
             self.assertEqual(losses[0], losses[1])
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -528,7 +528,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # Reuse the same input across iterations to avoid loss explosion from
         # trying to learn from random inputs
         inp = torch.randint(0, vocab_size, (3, 64), device="cuda")
-        check_1d_sharded_parity(
+        check_sharded_parity(
             self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
         )
         for iter_idx in range(10):
@@ -537,14 +537,14 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 torch.manual_seed(iter_idx + 1)  # for dropout determinism
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
-            check_1d_sharded_parity(
+            check_sharded_parity(
                 self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
             )
             self.assertEqual(losses[0], losses[1])
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            check_1d_sharded_parity(
+            check_sharded_parity(
                 self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
             )
 
@@ -697,7 +697,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             for param in ref_model.parameters():
                 if param.grad is not None:
                     param.grad.div_(self.world_size)
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
             for _optim in (optim, ref_optim):
                 _optim.step()
                 # When `set_to_none=False`, we are exercising mixing
