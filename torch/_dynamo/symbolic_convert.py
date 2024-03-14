@@ -761,16 +761,33 @@ class InstructionTranslatorBase(
         if log.isEnabledFor(logging.DEBUG):
             log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
 
-        # 3.11 no longer uses a block stack, but we still keep track of one
-        # so that we know which contexts are currently active.
-        # For our purposes, all exception table entries with the same target
-        # are considered to be part of the same "block".
-        if sys.version_info >= (3, 11):
+        self.update_block_stack(inst)
+
+        try:
+            self.dispatch_table[inst.opcode](self, inst)
+            return True
+        except ReturnValueOp:
+            return False
+        except Unsupported:
+            if self.current_speculation is None:
+                log.debug("empty checkpoint")
+                raise
+            log.debug("step triggered compile", exc_info=True)
+
+        self.current_speculation.fail_and_restart_analysis()
+
+    if sys.version_info >= (3, 11):
+
+        def update_block_stack(self, inst):
+            # 3.11 no longer uses a block stack, but we still keep track of one
+            # so that we know which contexts are currently active.
+            # For our purposes, all exception table entries with the same target
+            # are considered to be part of the same "block".
             entry = inst.exn_tab_entry
             if not (
                 # still in the same block
-                self.block_stack
-                and entry
+                entry
+                and self.block_stack
                 and self.block_stack[-1].target is entry.target
             ):
                 if not entry:
@@ -801,18 +818,10 @@ class InstructionTranslatorBase(
                         BlockStackEntry(entry.target, len(self.stack))
                     )
 
-        try:
-            self.dispatch_table[inst.opcode](self, inst)
-            return True
-        except ReturnValueOp:
-            return False
-        except Unsupported:
-            if self.current_speculation is None:
-                log.debug("empty checkpoint")
-                raise
-            log.debug("step triggered compile", exc_info=True)
+    else:
 
-        self.current_speculation.fail_and_restart_analysis()
+        def update_block_stack(self, inst):
+            pass
 
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
