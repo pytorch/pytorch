@@ -196,13 +196,13 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_size.int, (proxy, i), {}), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
-    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
