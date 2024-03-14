@@ -34,12 +34,13 @@ on:
         default: "5.2"
         description: |
           List of CUDA architectures CI build should target.
-      runner:
+      runner-group:
         required: false
         type: string
-        default: "linux.2xlarge"
+        default: ""
         description: |
-          List of CUDA architectures CI build should target.
+          If defined, overrides `runner` property and selects a runner from the
+          specified group.
       test-matrix:
         required: false
         type: string
@@ -66,7 +67,8 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner }}
+    runs-on:
+      group: ${{ inputs.runner-group }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}

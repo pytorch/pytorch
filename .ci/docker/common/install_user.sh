@@ -6,6 +6,7 @@ set -ex
 # jenkins user as ec2-user should have the same user-id
 echo "jenkins:x:1000:1000::/var/lib/jenkins:" >> /etc/passwd
 echo "jenkins:x:1000:" >> /etc/group
+
 # Needed on focal or newer
 echo "jenkins:*:19110:0:99999:7:::" >>/etc/shadow
 

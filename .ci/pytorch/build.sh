@@ -241,6 +241,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
   ( ! get_exit_code python setup.py bad_argument )
@@ -248,6 +250,9 @@ else
   ( ! get_exit_code python setup.py clean bad_argument )
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+    pushd ..
+    sudo chown -R jenkins workspace
+    popd
 
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
