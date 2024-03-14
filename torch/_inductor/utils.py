@@ -1426,3 +1426,8 @@ def collect_defined_kernels(kernel_list):
 
     with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
         yield
+
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    return device in ["cuda", "xpu"]

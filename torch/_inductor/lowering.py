@@ -434,7 +434,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if i.get_device().type in ["cuda", "xpu"]:
                     device = i.get_device()
                     break
             if not device:
@@ -513,7 +513,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach and realize_outputs:
+                if device.type in ["cuda", "xpu"] and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -3325,7 +3325,8 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
-            and src.get_device().type == torch.device("cuda").type
+            and src.get_device().type
+            in [torch.device("cuda").type, torch.device("xpu").type]
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (

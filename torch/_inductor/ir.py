@@ -245,7 +245,7 @@ def get_device_type(x):
 
 
 def is_triton(x):
-    return get_device_type(x) == "cuda"
+    return get_device_type(x) in ["cuda", "xpu"]
 
 
 def is_cpu(x):
@@ -679,7 +679,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            is_triton(device)
+            get_device_type(device) == "cuda"
             and reduction_type
             not in {
                 "argmax",
@@ -1651,7 +1651,7 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if device.type != "cuda":
+        if device.type not in ["cuda", "xpu"]:
             # TODO: CPU support
             return None
 
@@ -3593,7 +3593,7 @@ class ConcatKernel(NopKernel):
 
             if (
                 input_unwrapped.is_input_buffer()
-                and inputs[i].get_device().type == "cuda"
+                and inputs[i].get_device().type in ["cuda", "xpu"]
                 and not is_dynamic(input_buffer)
             ):
                 buffer_names.append(input_buffer.get_name())
@@ -4999,7 +4999,7 @@ class FallbackKernel(ExternKernelAlloc):
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
-                if device.type == "cuda":
+                if device.type in ["cuda", "xpu"]:
                     return device
             return devices[0]
         return None

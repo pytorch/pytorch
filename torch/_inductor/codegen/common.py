@@ -164,6 +164,11 @@ def get_device_op_overrides(device: str):
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
 
+    elif device == "xpu":
+        from .xpu.device_op_overrides import XPUDeviceOpOverrides
+
+        return XPUDeviceOpOverrides()
+
     return DeviceOpOverrides()
 
 
