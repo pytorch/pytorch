@@ -11,7 +11,8 @@ namespace torch::jit {
 namespace {
 size_t hashType(const Type& type) {
   if (auto named_type = type.castRaw<ClassType>()) {
-    return get_hash(named_type->name().value());
+    return c10::get_hash(
+        named_type->name().value(), named_type->compilation_unit());
   }
   size_t hash = 0;
   for (const auto& containedType : type.containedTypes()) {
