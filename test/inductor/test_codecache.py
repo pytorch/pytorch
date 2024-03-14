@@ -253,6 +253,8 @@ class TestFxGraphCache(TestCase):
         """
         Test that different constants are recognized correctly.
         """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn1(x):
             return x + torch.tensor(list(range(0, 12)), device=device)
