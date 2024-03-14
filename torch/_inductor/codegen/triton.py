@@ -30,6 +30,7 @@ import sympy
 
 import torch
 import torch._logging
+import torch.utils._pytree as pytree
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
@@ -2482,29 +2483,14 @@ class TritonKernel(Kernel):
         )
 
         if not self.persistent_reduction:
-            # TODO(isuruf): remove the else branch when rocm-triton pin is updated
-            if torch.version.hip is None:
-                partial_reduce = cse_multiple(
-                    f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, keep_dims=True)",
-                    len(values),
-                    None,
-                )
-            else:
-                partial_reduce = cse_multiple(
+            partial_reduce = pytree.tree_map(
+                self.reduction_resize,
+                cse_multiple(
                     f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
                     len(values),
                     None,
-                )
-                reduced_sizes = self.dense_size_list()
-                reduced_sizes[dim] = "1"
-                reduced_size_str = f"[{', '.join(reduced_sizes)}]"
-                partial_reduce = [
-                    self.cse.generate(
-                        self.compute,
-                        f"tl.reshape({p}, {reduced_size_str})",
-                    )
-                    for p in partial_reduce
-                ]
+                ),
+            )
             accs_next = combine_fn(tuple(accumulators), partial_reduce)
             new_result_vars = combine_fn(tuple(accumulators), result_vars)
             result_vars = [
