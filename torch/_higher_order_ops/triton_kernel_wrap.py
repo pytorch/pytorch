@@ -2,7 +2,8 @@ import dataclasses
 import logging
 import threading
 import warnings
-from typing import Any, Dict, List, Union
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Union
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -79,8 +80,9 @@ class Intermediate:
 @dataclasses.dataclass(frozen=True)
 class Op:
     name: str
-    fn_call_name: str
+    fn_call_name: Optional[str]
     args: List[Union[Param, Intermediate]]
+    ret: Intermediate = dataclasses.field(repr=False)
 
     def __post_init__(self):
         if self.name == "tt.call":
@@ -111,7 +113,7 @@ def generate_ttir(kernel, kwargs):
     assert isinstance(kernel, JITFunction)
 
     if len(kwargs) != len(kernel.arg_names):
-        raise Exception("Incorrect number of arguments passed to kernel")
+        raise ValueError("Incorrect number of arguments passed to kernel")
 
     # Replace all SymExprs with a regular value for TTIR generation
     # Replace all FakeTensor with real tensors
@@ -152,7 +154,188 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
     ttir_module = src.make_ir(options, context)
-    return str(ttir_module), ordered_tensor_names
+    if not ttir_module.verify():
+        raise RuntimeError("Verification for TTIR module has failed")
+
+    return ttir_module, ordered_tensor_names
+
+
+def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
+    """
+    Walk the `ttir_module` bottom up to mine the `functions` from
+    the structured MLIR entities representing the Triton kernel
+    (mlir::Operation, mlir::Block, mlir::Region).
+    """
+    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
+
+    # block id --> op result (Intermediate) --> one or more ops
+    op_stack: Dict[int, Dict[Intermediate, List[Op]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    region_id_to_block_ids: Dict[int, List[int]] = defaultdict(list)
+    block_id_to_block_arg_ids: Dict[int, List[int]] = {}
+    replacements: Dict[int, Union[Intermediate, Param]] = {}
+    reindex_map: Dict[int, int] = {}
+    next_fake_intermediate = 0
+
+    def reindex(idx):
+        if idx not in reindex_map:
+            reindex_map[idx] = len(reindex_map)
+        return reindex_map[idx]
+
+    def mlir_to_functions(op) -> None:
+        name: str = op.get_name()
+        if name == "builtin.module":
+            # this wraps all tt.func ops
+            return
+
+        operand_ids: List[int] = [
+            reindex(op.get_operand(i).id()) for i in range(op.get_num_operands())
+        ]
+        result_ids: List[int] = [
+            reindex(op.get_result(i).id()) for i in range(op.get_num_results())
+        ]
+
+        child_block_ids: List[int] = []
+        for i in [op.get_region(i).id() for i in range(op.get_num_regions())]:
+            # as the walk is bottom-up, the region_id_to_block_ids[i]
+            # must be populated by the time we process the enclosing op
+            child_block_ids.extend(region_id_to_block_ids[i])
+
+        parent_block_id = -1
+        parent_block = op.get_block()
+        if parent_block is not None:
+            parent_block_id = parent_block.id()
+            if parent_block_id not in block_id_to_block_arg_ids:
+                block_id_to_block_arg_ids[parent_block_id] = []
+                for i in range(parent_block.get_num_arguments()):
+                    block_id_to_block_arg_ids[parent_block_id].append(
+                        reindex(parent_block.get_argument(i).id()),
+                    )
+                # the region info is collected via ops' parent blocks to be
+                # used later when the region's encloding op is traversed
+                parent_region = parent_block.get_parent()
+                if parent_region is not None:
+                    region_id_to_block_ids[parent_region.id()].append(parent_block_id)
+
+        nonlocal next_fake_intermediate
+
+        if name == "tt.func":
+            # for function ops: gather and inline
+            # the ops from all child blocks
+            fn_ops = defaultdict(list)
+            for child_block_id in child_block_ids:
+                for result, block_fn_ops in op_stack.pop(child_block_id).items():
+                    for block_fn_op in block_fn_ops:
+                        fn_ops[result].append(block_fn_op)
+
+            # replace the corresponding Intermediates in the
+            # child op args with the function args (Params)
+            for i, idx in enumerate(block_id_to_block_arg_ids[child_block_ids[0]]):
+                replacements[idx] = Param(i)
+
+            for fn_op_list in fn_ops.values():
+                for fn_op in fn_op_list:
+                    for i in range(len(fn_op.args)):
+                        arg = fn_op.args[i]
+                        seen = set()  # to break cycles
+                        # there can be transitive replacements, but likely
+                        # no cycles (we keep the `seen` set just in case)
+                        while (
+                            isinstance(arg, Intermediate)
+                            and arg.idx in replacements
+                            and arg.idx not in seen
+                        ):
+                            seen.add(arg.idx)
+                            arg = fn_op.args[i] = replacements[arg.idx]
+
+            # next function capture starts
+            # with empty replacements
+            replacements.clear()
+
+            fn_name = op.get_str_attr("sym_name")
+            functions[fn_name] = fn_ops
+        elif child_block_ids:
+            if name in {"scf.if", "scf.for", "scf.while", "tt.reduce", "tt.scan"}:
+                # for blocked ops: inline the enclosed ops into
+                # the parent block + rewire the last op in each
+                # child block to return the block result
+                return_ops = []
+                for block_id in child_block_ids:
+                    if name.startswith("scf."):
+                        # the scf block args are ignored by the pass. but, as they
+                        # may be used as operands of the ops inside the block
+                        # (and nested blocks inlined in the current block by now),
+                        # they are replaced by new fake Intermediates to avoid "this
+                        # operand is not returned by any other op in the fn" error
+                        # in the downstream analysis
+                        for idx in block_id_to_block_arg_ids[block_id]:
+                            next_fake_intermediate -= 1
+                            replacements[idx] = Intermediate(next_fake_intermediate)
+                    else:
+                        assert name in ("tt.reduce", "tt.scan")
+                        # wire the block arguments to the op arguments
+                        num_operands = len(operand_ids)
+                        block_arg_ids = block_id_to_block_arg_ids[block_id]
+                        assert len(block_arg_ids) == 2 * num_operands, (
+                            f"{name} is expected to have twice as "
+                            "many block arguments as op arguments: "
+                            f"{operand_ids=}, {block_arg_ids=}."
+                        )
+                        for i, idx in enumerate(block_arg_ids):
+                            # for a tt.reduce/tt.scan op with N arguments, the block
+                            # arguments comprise N reduced values followed by
+                            # N current values corresponding to the N op args
+                            replacements[idx] = Intermediate(
+                                operand_ids[i % num_operands]
+                            )
+
+                    if block_id in op_stack:
+                        block_ops = op_stack.pop(block_id)
+                        if not block_ops:
+                            continue
+                        last_ret, last_ops = block_ops.popitem()
+                        if all(
+                            op.name
+                            in ("scf.yield", "tt.reduce.return", "tt.scan.return")
+                            for op in last_ops
+                        ):
+                            # if last_ops are all return ops, treat them separately
+                            return_ops.extend(last_ops)
+                        else:
+                            # otherwise, return last_ops to the block
+                            block_ops[last_ret] = last_ops
+                        for op_result, child_ops in block_ops.items():
+                            op_stack[parent_block_id][op_result].extend(child_ops)
+
+                scf_results = [Intermediate(idx) for idx in result_ids]
+                for scf_result in scf_results:
+                    for return_op in return_ops:
+                        op_stack[parent_block_id][scf_result].append(return_op)
+            else:
+                raise RuntimeError(
+                    f"Unknown blocked function: {name}. Can't capture the TTIR."
+                )
+        else:
+            callee = None
+            if name == "tt.call":
+                callee = op.get_flat_symbol_ref_attr("callee")
+            args: List[Union[Param, Intermediate]] = [
+                Intermediate(operand) for operand in operand_ids
+            ]
+            block_ops = op_stack[parent_block_id]
+            if result_ids:
+                for result_id in result_ids:
+                    res = Intermediate(result_id)
+                    block_ops[res].append(Op(name, callee, args, res))
+            else:
+                next_fake_intermediate -= 1
+                fake_res = Intermediate(next_fake_intermediate)
+                block_ops[fake_res].append(Op(name, callee, args, fake_res))
+
+    ttir_module.walk(mlir_to_functions)
+
+    return functions
 
 
 def parse_ttir(ttir, kwargs):
@@ -165,9 +348,7 @@ def parse_ttir(ttir, kwargs):
     parser which further makes parsing much simpler.
     """
     # TODO(oulgen):
-    # - Support parsing of conditionals
-    # - Support parsing for/while loops
-    # - Support ops with multiple return value (e.g. %4:2 = "tt.reduce")
+    # - Support closures (e.g. "tt.reduce")
 
     try:
         import lark  # type: ignore[import-not-found]
@@ -177,11 +358,6 @@ def parse_ttir(ttir, kwargs):
             "Using slow path for user-defined Triton kernels. `pip install lark` to fix this."
         )
         raise
-
-    functions: Dict[str, Dict[Intermediate, Op]] = {}
-    ops: Dict[Intermediate, Op] = {}
-    current_function = None
-    next_fake_intermediate = 0
 
     # Ops looks like one of the following forms:
     #
@@ -195,42 +371,82 @@ def parse_ttir(ttir, kwargs):
 
         module_block: "module" "{" func_block+ "}" LOC
 
-        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE op+ "}" LOC -> process_func
+        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
 
-        op: "tt.return" LOC
-          | [assign_lhs "="] OP_NAME [FN_NAME] args rest  -> process_op
+        ?stmt: op | if | for | while | condition_stmt | label_stmt | cf_stmt
 
-        ?rest: (":" | "{" | "\\"" | "->" | "<") /.+/ NEWLINE
+        if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
+        for: [assign_lhs "="] "scf.for" args rest stmt* "}" divisibility_annot? LOC -> process_for
+        while: [assign_lhs "="] "scf.while" args rest stmt* "}" "do" "{" stmt* "}" LOC -> process_while
 
-        args: | "("? arg ("," arg)* ")"?
+        condition_stmt: "scf.condition" "(" arg ")" args rest
+        label_stmt: LABEL ":" "// pred:" LABEL
+                  | LABEL "(" /.+/ NEWLINE
+        cf_stmt: "cf" "." NAME /.+/ NEWLINE
 
-        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]"
+        op: OP_NAME LOC
+          | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
 
-        ?assign_lhs: INTERMEDIATE | CONSTANT
+        ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
+        divisibility_annot: "{" "tt.divisibility_arg1" /[^}]+/ "}"
+
+        args: | "(" ")" | "("? arg ("," arg)* ")"?
+
+        ?arg: INTERMEDIATE
+            | INTERMEDIATE_CONSTANT
+            | CONSTANT
+            | PARAM
+            | "[" args "]"
+            | arg_with_index
+
+        ?arg_with_index: arg "#" DIGIT+
+
+        ?assign_lhs: (INTERMEDIATE | INTERMEDIATE_CONSTANT) [":" DIGIT+]
 
         PARAM.5: "%arg" DIGIT+
         INTERMEDIATE.4: "%" DIGIT+
+        INTERMEDIATE_CONSTANT.3: "%" NAME
+        CONSTANT: FLOAT | DIGIT+ | NAME ("<" DIGIT+ ">")?
+        LABEL: "^bb" DIGIT+
+
         NAME: (LETTER | DIGIT | "_")+
-        CONSTANT: "%"? NAME+ ("<" DIGIT+ ">")?
+        NON_CF_NAME: /(?!(cf))/ NAME
+        FN_NAME: "@" (NAME | ESCAPED_STRING)
+        OP_NAME: "\\""? NON_CF_NAME ("." NAME)+ "\\""?
 
-        FN_NAME: "@" NAME+
-        OP_NAME: "\\""? NAME "." NAME "\\""?
-
-        LOC: "loc(#loc" DIGIT* ")"
+        LOC.5: "loc(#loc" DIGIT* ")"
 
         %import common.LETTER
         %import common.DIGIT
         %import common.WS
         %import common.NEWLINE
         %import common.ESCAPED_STRING
+        %import common.FLOAT
         %ignore WS
     """
 
+    next_fake_intermediate = 0
+
     def convert(token):
         if isinstance(token, lark.tree.Tree):
-            return [convert(a) for a in token.children]
+            if token.data == "args":
+                res = []
+                for a in token.children:
+                    c = convert(a)
+                    if isinstance(c, list):
+                        res.extend(c)
+                    else:
+                        res.append(c)
+                return res
+            elif token.data in {"assign_lhs", "arg_with_index"}:
+                # Drop length/index qualifier
+                return convert(token.children[0])
+            else:
+                raise AssertionError(f"Tree node with {token.data}")
+
         if token is None or (
-            isinstance(token, lark.lexer.Token) and token.type == "CONSTANT"
+            isinstance(token, lark.lexer.Token)
+            and token.type in ("CONSTANT", "INTERMEDIATE_CONSTANT")
         ):
             nonlocal next_fake_intermediate
             next_fake_intermediate -= 1
@@ -255,20 +471,55 @@ def parse_ttir(ttir, kwargs):
             return s[1:-1]
         return s
 
+    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
+
+    def extend_dict_list(d1, d2):
+        for key, values in d2.items():
+            d1[key].extend(values)
+
     @v_args(inline=True)
-    class CalculateOps(Transformer):
+    class TransformOps(Transformer):
         def process_op(self, ret, op_name, fn_name, args, *rest):
-            ops[convert(ret)] = Op(
-                convert_name(op_name), convert_name(fn_name), convert(args)
+            return Op(
+                convert_name(op_name),
+                convert_name(fn_name),
+                convert(args),
+                convert(ret),
             )
 
-        def process_func(self, name, *rest):
-            nonlocal ops
+        def process_func(self, name, _args, *stmts):
+            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
+            for e in stmts:
+                if isinstance(e, Op):
+                    ops[e.ret].append(e)
+                elif isinstance(e, dict):
+                    extend_dict_list(ops, e)
             functions[name.value] = ops
-            ops = {}
+
+        def _process_scf(self, ret, stmts):
+            ret = convert(ret)
+            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
+            for e in stmts:
+                if isinstance(e, Op):
+                    if e.name == "scf.yield":
+                        ops[ret].append(Op(e.name, None, e.args, ret))
+                    else:
+                        ops[e.ret].append(e)
+                elif isinstance(e, dict):
+                    extend_dict_list(ops, e)
+            return ops
+
+        def process_if(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+        def process_for(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+        def process_while(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
 
     parser = Lark(
-        grammar, parser="lalr", maybe_placeholders=True, transformer=CalculateOps()
+        grammar, parser="lalr", maybe_placeholders=True, transformer=TransformOps()
     )
     parser.parse(ttir)
     return functions
@@ -276,8 +527,8 @@ def parse_ttir(ttir, kwargs):
 
 class MemoizeWithCycleCheck:
     def __init__(self, fn):
-        self.cache = {}
         self.fn = fn
+        self.reset()
 
     def __call__(self, functions, fn_name, num_args):
         key = (fn_name, num_args)
@@ -285,8 +536,11 @@ class MemoizeWithCycleCheck:
             self.cache[key] = None
             self.cache[key] = self.fn(functions, fn_name, num_args)
         if self.cache[key] is None:
-            raise Exception("Recursion is not supported")
+            raise RuntimeError("Recursion is not supported")
         return self.cache[key]
+
+    def reset(self):
+        self.cache = {}
 
 
 @MemoizeWithCycleCheck
@@ -295,7 +549,7 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
     Analyzes the graph to detect all sinks from a predefined list of sinks
     by using triton's MemWrite trait list. NOTE: What if triton exposed this?
     From each sink, it traverses the CFG backwards to identify all the input
-    pointers that are mutated
+    pointers that are mutated.
     """
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
@@ -308,37 +562,42 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
     stack: List[Union[Param, Intermediate]] = []
     visited = set()
     ops = functions[fn_name]
-    for op in ops.values():
-        if op.name in UNKNOWN_OPS:
-            raise Exception(
-                f"ttir analysis hit an op we do not know how to analyze: {op.name}"
-            )
+    for op_list in ops.values():
+        for op in op_list:
+            if op.name in UNKNOWN_OPS:
+                raise RuntimeError(
+                    f"ttir analysis hit an op we do not know how to analyze: {op.name}"
+                )
 
-        if op.name == "tt.call":
-            assert op.fn_call_name in functions
-            mutations = analyze_kernel_mutations(
-                functions, op.fn_call_name, len(op.args)
-            )
-            for idx, mutated in enumerate(mutations):
-                if mutated:
+            if op.name == "tt.call":
+                assert op.fn_call_name in functions
+                mutations = analyze_kernel_mutations(
+                    functions, op.fn_call_name, len(op.args)
+                )
+                stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
+            else:
+                for idx in MUTATION_OPS.get(op.name, []):
                     stack.append(op.args[idx])
-        else:
-            for idx in MUTATION_OPS.get(op.name, []):
-                stack.append(op.args[idx])
 
     # The following is an iterative DFS algorithm
     mutated = [False] * num_args
-    while len(stack):
+    while stack:
         arg = stack.pop()
         if arg in visited:
             continue
-        else:
-            visited.add(arg)
+
+        visited.add(arg)
 
         if isinstance(arg, Param):
+            if arg.idx >= num_args:
+                # This is an argument defined in the kernel, not passed in
+                continue
             mutated[arg.idx] = True
         elif isinstance(arg, Intermediate) and not arg.fake():
-            stack.extend(ops[arg].args)
+            for op in ops[arg]:
+                # Skip arguments to load
+                if op.name != "tt.load":
+                    stack.extend(op.args)
     return mutated
 
 
@@ -350,34 +609,52 @@ def identify_mutated_tensors(kernel, kwargs):
     3) Analyzes the graph to detect all input tensor mutations
     """
 
+    ttir_module = None
+    functions = None
     try:
         from torch._dynamo import config
 
         if not config.optimize_user_defined_triton_kernels:
-            raise Exception("optimize_user_defined_triton_kernels is False")
+            raise ValueError("optimize_user_defined_triton_kernels is False")
 
-        ttir, ordered_tensor_names = generate_ttir(kernel, kwargs)
-        functions = parse_ttir(ttir, kwargs)
+        ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
 
+        # extract functions from TTIR
+        if hasattr(ttir_module, "walk"):
+            # use MLIR bindings exposed by Triton code
+            functions = ttir_to_functions(ttir_module)
+        else:
+            # parse string representation of Triton IR
+            functions = parse_ttir(str(ttir_module), kwargs)
+
+        assert functions is not None
         kernel_name = next(iter(functions.keys()))
         # Triton codegen modifies the name
         assert kernel.fn.__name__ in kernel_name
-        mutations = analyze_kernel_mutations(functions, kernel_name, len(kwargs))
+        # Reset the cache between top level invocations
+        # The cache for analyze kernel mutations is mainly used for cycle
+        # detection, so each top level invocation needs a clean cache
+        analyze_kernel_mutations.reset()
+        mutations = analyze_kernel_mutations(
+            functions, kernel_name, len(ordered_tensor_names)
+        )
 
         return [
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
     except Exception as e:
-        import traceback
-
-        log.debug(
-            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
+        log.warning(
+            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
+            exc_info=True,
         )
-        log.debug(
-            "".join(
-                traceback.TracebackException.from_exception(e).format()  # noqa: G001
-            )
-        )
+        if ttir_module is not None:
+            log.debug("TTIR:\n%s", str(ttir_module))
+        if functions is not None:
+            log.debug("functions:")
+            for name, fn in functions.items():
+                log.debug("===\t%s\t===", name)
+                for ret, ops in fn.items():
+                    log.debug("%s\t=>\t%s", ret, ops)
         return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
 

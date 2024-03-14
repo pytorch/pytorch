@@ -11,6 +11,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
@@ -415,7 +416,7 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s device index.
-  int64_t get_device() const {
+  DeviceIndex get_device() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->get_device();
   }
@@ -919,7 +920,7 @@ private:
   TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
-inline int64_t get_device(const TensorBase& self) {
+inline DeviceIndex get_device(const TensorBase& self) {
   return self.get_device();
 }
 

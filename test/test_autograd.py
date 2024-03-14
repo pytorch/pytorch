@@ -510,6 +510,47 @@ class TestAutograd(TestCase):
                 # if forward AD ends up being implemented for torch.igamma, choose a different op
                 torch.igamma(dual_x, dual_x)
 
+    def test_traceable_deprecated(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 2
+
+        with self.assertWarnsRegex(UserWarning, "is_traceable .*is deprecated"):
+            MyFunction.is_traceable
+
+        with self.assertWarnsRegex(UserWarning, "is_traceable .*is deprecated"):
+            MyFunction.is_traceable = True
+
+        with self.assertWarnsRegex(UserWarning, "is_traceable .*is deprecated"):
+            class MyFunction(Function):
+                is_traceable = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    return x * 2
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO * 2
+
+        with self.assertWarnsRegex(UserWarning, "traceable .*is deprecated"):
+            @torch.autograd.function.traceable
+            class MyFunction(Function):
+                is_traceable = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    return x * 2
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO * 2
+
     def test_will_engine_execute_node(self):
         counter = [0]
 
@@ -5718,7 +5759,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA or torch.backends.mps.is_available():
+        if TEST_CUDA or torch.backends.mps.is_available() or torch.xpu.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
@@ -8765,8 +8806,12 @@ get_out().sum().backward()
         except subprocess.TimeoutExpired as e:
             self.fail(msg="Example code timed out! See the code sample in the test for details.")
         except subprocess.CalledProcessError as e:
-            err_msg = "RuntimeError: one of the variables needed for gradient computation"
-            self.assertTrue(err_msg in e.output.decode("utf-8"))
+            if e.returncode < 0:
+                # Sometimes we segfault instead of deadlocking
+                self.fail("Subprocess exited with a fatal signal")
+            else:
+                err_msg = "RuntimeError: one of the variables needed for gradient computation"
+                self.assertTrue(err_msg in e.output.decode("utf-8"))
 
     def test_view_func_replay(self):
         with torch.autograd._force_original_view_tracking(True):
@@ -9312,8 +9357,6 @@ class TestAutogradForwardMode(TestCase):
         class MySubclass(torch.Tensor):
             def __new__(cls, data=None):
                 return torch.Tensor._make_subclass(cls, data)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
