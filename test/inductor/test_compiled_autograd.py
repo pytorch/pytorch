@@ -58,22 +58,41 @@ class TestCompiledAutograd(TestCase):
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
-    def test_do_not_land_test_ci_segfault(self):
-        def fn():
-            x = torch.randn(1000, 3000, device="cuda")
-            w = torch.randn(1000, 3000, requires_grad=True, device="cuda")
-
-            def model(i):
-                return torch.nn.functional.linear(i, w)
-
-            out = model(x)
-            loss = out.sum()
-            with torch._dynamo.compiled_autograd.enable(compiler_fn):
-                loss.backward()
-
-            yield w.grad
-
-        self.check_output_and_recompiles(fn)
+    def test_dynamo_flaky_segfault(self):
+        import subprocess
+        import os
+        script = """
+import torch
+def main():
+    def compiler_fn(gm):
+        return torch.compile(gm, backend="eager")
+    def inner():
+        x = torch.randn(1000, 3000)#, device="cuda")
+        w = torch.randn(1000, 3000, requires_grad=True)#, device="cuda")
+        def model(i):
+            return torch.nn.functional.linear(i, w)
+        out = model(x)
+        loss = out.sum()
+        with torch._dynamo.compiled_autograd.enable(compiler_fn):
+            loss.backward()
+        assert(w.grad is not None)
+    inner()
+    torch._dynamo.reset()
+    inner()
+main()
+        """
+        # Run it three times to catch bad dynamo state resets
+        for _ in range(3):
+            try:
+                subprocess.check_output(
+                    [sys.executable, '-c', script],
+                    stderr=subprocess.STDOUT,
+                    # On Windows, opening the subprocess with the default CWD makes `import torch`
+                    # fail, so just set CWD to this script's directory
+                    cwd=os.path.dirname(os.path.realpath(__file__)))
+            except subprocess.CalledProcessError as e:
+                if e.returncode < 0:
+                    self.fail("Subprocess exited with a fatal signal")
 
     def test_basic(self):
         def fn():
