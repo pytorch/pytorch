@@ -379,31 +379,6 @@ def pointwise_ops():
 
     return ops
 
-def get_depth(node, depth_map):
-    if node in depth_map:
-        return depth_map[node]
-
-    # Base case
-    if node.op == "placeholder":
-        depth_map[node] = 0
-        return depth_map[node]
-
-    # Handle output node
-    if node.op == "output":
-        args = node.args[0]
-        for arg in args:
-            if isinstance(arg, torch.fx.node.Node):
-                get_depth(arg, depth_map)
-        return
-
-    # Get the depth of args and set the depth of this node
-    arg_depths = [get_depth(arg, depth_map) for arg in node.all_input_nodes if isinstance(arg, torch.fx.node.Node)]
-    # factory ops like full, rand might not have any input args
-    if len(arg_depths) == 0:
-        arg_depths = [0]
-    depth_map[node] = max(arg_depths) + 1
-    return depth_map[node]
-
 
 def sort_depths(args, depth_map):
     arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
@@ -448,7 +423,11 @@ def reordering_to_mimic_autograd_engine(gm):
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
     output_node = next(node for node in gm.graph.nodes if node.op == "output")
-    get_depth(output_node, depths)
+    for node in gm.graph.nodes:
+        if node.op == 'placeholder':
+            depths[node] = 0
+        else:
+            depths[node] = max([depths[arg] for arg in node.all_input_nodes if isinstance(arg, torch.fx.Node)], default=0)
 
     def insert_node_in_graph(node):
         if node in env:
