@@ -136,8 +136,8 @@ check out the note :ref:`complex_autograd-doc`.
 Optimizers
 ----------
 
-Semantically, stepping through a PyTorch optimizer with complex parameters is equivalent to stepping through the
-same optimizer on the :func:`torch.view_as_real` equivalent of the complex params. More concretely:
+Semantically, we define stepping through a PyTorch optimizer with complex parameters as being equivalent to stepping
+through the same optimizer on the :func:`torch.view_as_real` equivalent of the complex params. More concretely:
 
 ::
 
@@ -148,12 +148,17 @@ same optimizer on the :func:`torch.view_as_real` equivalent of the complex param
      >>> real_optim = torch.optim.AdamW(real_params)
 
 
-`real_optim` and `complex_optim` will compute the same updates on the parameters. Note that the :func:`torch.view_as_real`
-equivalent will convert a complex tensor to a real tensor with shape :math:`(..., 2)`, which is distinct from splitting
-every complex parameter into `p.real` and `p.imag` and feeding twice the number of parameters into the optimizer. This
-distinction is trivial for pointwise optimizers (like AdamW) but will cause slight discrepancy in second order optimizers
-like LBFGS where there are reductions across all the gradients of the parameters. Reductions like sum are programmatically
-not associative--the order in which you reduce matters!
+`real_optim` and `complex_optim` will compute the same updates on the parameters, though there may be slight numerical
+discrepancies between the two optimizers, similar to numerical discrepancies between foreach vs forloop optimizers
+and capturable vs default optimizers. For more details, see https://pytorch.org/docs/stable/notes/numerical_accuracy.html.
+
+Specifically, while you can think of our optimizer's handling of complex tensors as the same as optimizing over their
+`p.real` and `p.imag` pieces separately, the implementation details are not precisely that. Note that the
+:func:`torch.view_as_real` equivalent will convert a complex tensor to a real tensor with shape :math:`(..., 2)`,
+whereas splitting a complex tensor into two tensors is more like :math:`(2, ...)`. This distinction has no impact on
+pointwise optimizers (like AdamW) but will cause slight discrepancy in optimizers that do per-Tensor reductions. We
+currently do not have such optimizers and do not yet define this behavior. Open an issue if you have a use case that
+requires precisely defining this behavior.
 
 
 We do not fully support the following subsystems:
