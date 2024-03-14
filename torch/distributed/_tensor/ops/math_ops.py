@@ -127,11 +127,8 @@ class _NormPartial(_Partial):
         if not isinstance(other, _NormPartial):
             return False
 
-        # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current MaskPartial placement is still in use and should not be used for cache hit.
         if self.norm_type != other.norm_type:
             return False
-
         return True
 
     def __hash__(self) -> int:
