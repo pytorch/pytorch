@@ -456,6 +456,7 @@ class FunctionEvent(FormattedTimesMixin):
         node_id=-1,
         device_type=DeviceType.CPU,
         device_index=0,
+        device_resource_id=None,
         is_legacy=False,
         flops=None,
         trace_name=None,
@@ -485,6 +486,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.sequence_nr: int = sequence_nr
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
+        self.device_resource_id: int = (
+            thread if device_resource_id is None else device_resource_id
+        )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
 
