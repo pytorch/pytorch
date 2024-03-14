@@ -18,7 +18,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     CheckpointWrapper,
 )
-from torch.distributed.checkpoint.state_dict import get_optimizer_state_dict
+from torch.distributed.checkpoint.state_dict import get_optimizer_state_dict, get_model_state_dict
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -849,7 +849,7 @@ class TestFullyShard2DTraining(FSDPTest):
         self.assertEqual(loss_no_cp1, loss_cp1)
 
         sharded_sd = {
-            "model": model_cp.state_dict(),
+            "model": get_model_state_dict(model_cp),
             # Use `get_optimizer_state_dict` to handle eager optim state init
             # when constructing a new optimizer instance
             "optim": get_optimizer_state_dict(model_cp, optim_cp),
@@ -876,7 +876,7 @@ class TestFullyShard2DTraining(FSDPTest):
         self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
 
         sharded_sd = {
-            "model": model_cp.state_dict(),
+            "model": get_model_state_dict(model_cp),
             "optim": get_optimizer_state_dict(model_cp, optim_cp),
         }
         dcp.load(
