@@ -112,8 +112,9 @@ install_no_tensor_aliasing_guard = (
 class GuardManager:
     """
     A helper class that contains the root guard manager. An instance of this
-    class is stored in the Dynamo cache entry, so that the cache entry can call
-    __call__ method to perform a guard check.
+    class is stored in the Dynamo cache entry, so that the cache entry can
+    access the RootGuardManager stored in the "root" attribute and directly call
+    the check_nopybind from C++.
     """
 
     def __init__(self):
@@ -191,16 +192,12 @@ class GuardManager:
             body.writelines(self.get_guard_lines(guard))
         return body.getvalue()
 
-    def __call__(self, x):
-        # TODO - This is used in eval_frame.c, as we save GuardManager in
-        # cache_entry, instead of check_fn. This is suboptimal because we are
-        # doing a few unnecessary operations - going from C++ to Python,
-        # LOAD_ATTR of check. What we really want is to directly call
-        # check_nopybind from guard_manager. Follow up with this change in a
-        # separate PR.
+    def check(self, x):
+        # Only needed for debugging purposes.
         return self.root.check(x)
 
     def check_verbose(self, x):
+        # Only needed for debugging purposes.
         return self.root.check_verbose(x)
 
 
@@ -1676,15 +1673,19 @@ class CheckFunctionManager:
 
         guards_log.debug("GUARDS:")
 
-        # Don't report this guard, it's always the same, useless!
-        code_parts = ["___check_global_state()"]
-        verbose_code_parts = code_parts[:]
+        code_parts = []
+        verbose_code_parts = []
         structured_guard_fns = []
 
         if config.enable_cpp_guard_manager:
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
+        else:
+            # Don't report this guard, it's always the same, useless!
+            global_guard = "___check_global_state()"
+            code_parts.append(global_guard)
+            verbose_code_parts.append(global_guard)
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
@@ -1727,13 +1728,15 @@ class CheckFunctionManager:
         for gcl in builder.code:
             for code in gcl.code_list:
                 if code not in seen:
-                    add_code_part(code, gcl.guard)
+                    # If Cpp guard manager is enabled, we don't need to add to
+                    # code_parts.
+                    add_code_part(code, gcl.guard, config.enable_cpp_guard_manager)
                     seen.add(code)
 
         tensor_check_names = builder.tensor_check_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
-        if tensor_check_names:
+        if tensor_check_names and not config.enable_cpp_guard_manager:
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
@@ -1792,12 +1795,21 @@ class CheckFunctionManager:
             else []
         )
 
+        # TODO(anijain2305) - There is a duplicate logic in Dynamo to find
+        # aliased input tensors. So most probably we don't need this here.
+        # Revisit.
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
-                add_code_part(code_part, None)
+                if config.enable_cpp_guard_manager:
+                    install_tensor_aliasing_guard(
+                        builder.get_guard_manager_from_source(source_a),
+                        builder.get_guard_manager_from_source(source_b),
+                        [code_part],
+                    )
+                add_code_part(code_part, None, config.enable_cpp_guard_manager)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
@@ -1805,7 +1817,9 @@ class CheckFunctionManager:
         # which is useless.  Get ShapeEnv to pass in more provenance.
         for gcl in builder.shape_env_code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                # Shape env guards are already added for CPP guard manager in
+                # SHAPE_ENV implementation.
+                add_code_part(code, gcl.guard, config.enable_cpp_guard_manager)
 
         # OK, all done generating guards
         torch._logging.trace_structured(
@@ -1836,7 +1850,12 @@ class CheckFunctionManager:
         if config.enable_cpp_guard_manager:
             # Guard manager construction is complete
             assert self.guard_manager  # to make mypy happy
+            # TODO (anijain2305) - When enable_cpp_guard_manager is ON by
+            # default, change the guard_fn name to be guard_manager everywhere
+            # to avoid confusion.
             guard_fn = self.guard_manager
+            # Ensure we did not miss to insert a guard in cpp guard manager.
+            assert len(code_parts) == 0
         else:
             unique_code_parts = list(unique(code_parts))
             make_guard_fn_args = ", ".join(closure_vars.keys())
