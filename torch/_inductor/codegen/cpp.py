@@ -25,10 +25,11 @@ from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
+    BaseSchedulerNode,
     BaseScheduling,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
-    OuterFusedSchedulerNode,
+    Scheduler,
     SchedulerNode,
 )
 from ..utils import (
@@ -359,6 +360,51 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
     index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
     return stride_at(index_vec_simplified, var)
+
+
+# TODO<Leslie>: Find a better name
+class OuterFusedSchedulerNode(FusedSchedulerNode):
+    @classmethod
+    def fuse(  # type: ignore[override]
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode, outer_loop_fusion_depth
+    ):
+        assert node1.scheduler is node2.scheduler
+        assert type(node1) in (
+            OuterFusedSchedulerNode,
+            SchedulerNode,
+            FusedSchedulerNode,
+        ) and type(node2) in (SchedulerNode, FusedSchedulerNode)
+
+        if type(node1) is OuterFusedSchedulerNode:
+            return cls(
+                node1.scheduler,
+                list(node1.get_outer_nodes())
+                + [
+                    node2,
+                ],
+                outer_loop_fusion_depth,
+            )
+        else:
+            return cls(node1.scheduler, [node1, node2], outer_loop_fusion_depth)  # type: ignore[list-item]
+
+    def __init__(
+        self,
+        scheduler: "Scheduler",
+        outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]],
+        outer_loop_fusion_depth,
+    ):
+        self.outer_fused_nodes: List[
+            Union[FusedSchedulerNode, SchedulerNode]
+        ] = outer_fused_nodes
+        self.outer_loop_fusion_depth = outer_loop_fusion_depth
+        flatten_snodes = []
+        for _node in self.outer_fused_nodes:
+            assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
+            flatten_snodes.extend(list(_node.get_nodes()))
+        super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
+
+    def get_outer_nodes(self):
+        return self.outer_fused_nodes
 
 
 class CppPrinter(ExprPrinter):

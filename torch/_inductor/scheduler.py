@@ -999,51 +999,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return "\n".join(lines).rstrip()
 
 
-# TODO<Leslie>: Find a better name
-class OuterFusedSchedulerNode(FusedSchedulerNode):
-    @classmethod
-    def fuse(  # type: ignore[override]
-        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode, outer_loop_fusion_depth
-    ):
-        assert node1.scheduler is node2.scheduler
-        assert type(node1) in (
-            OuterFusedSchedulerNode,
-            SchedulerNode,
-            FusedSchedulerNode,
-        ) and type(node2) in (SchedulerNode, FusedSchedulerNode)
-
-        if type(node1) is OuterFusedSchedulerNode:
-            return cls(
-                node1.scheduler,
-                list(node1.get_outer_nodes())
-                + [
-                    node2,
-                ],
-                outer_loop_fusion_depth,
-            )
-        else:
-            return cls(node1.scheduler, [node1, node2], outer_loop_fusion_depth)  # type: ignore[list-item]
-
-    def __init__(
-        self,
-        scheduler: "Scheduler",
-        outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]],
-        outer_loop_fusion_depth,
-    ):
-        self.outer_fused_nodes: List[
-            Union[FusedSchedulerNode, SchedulerNode]
-        ] = outer_fused_nodes
-        self.outer_loop_fusion_depth = outer_loop_fusion_depth
-        flatten_snodes = []
-        for _node in self.outer_fused_nodes:
-            assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
-            flatten_snodes.extend(list(_node.get_nodes()))
-        super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
-
-    def get_outer_nodes(self):
-        return self.outer_fused_nodes
-
-
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
     """Scheduler node which consists of a list of scheduler nodes that each operate on a
     distinct tensor in a list of tensors."""
@@ -1738,7 +1693,7 @@ class Scheduler:
             # Perform outer loop fusion for the left nodes with lower priority when backend support is available.
             ctx_manager = (
                 self.get_backend(torch.device("cpu")).enable_outer_loop_fusion()
-                if (all_node_in_cpu and _check_outer_loop_fusion)
+                if _check_outer_loop_fusion
                 else contextlib.nullcontext()
             )
             with ctx_manager:
@@ -2398,9 +2353,7 @@ class Scheduler:
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)  # type: ignore[possibly-undefined]
-            elif isinstance(
-                node, (OuterFusedSchedulerNode, FusedSchedulerNode, SchedulerNode)
-            ):
+            elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node)  # type: ignore[possibly-undefined]
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
@@ -2477,9 +2430,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def codegen_nodes(
-        self, node: Union[OuterFusedSchedulerNode, FusedSchedulerNode, SchedulerNode]
-    ):
+    def codegen_nodes(self, node: Union[FusedSchedulerNode, SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
