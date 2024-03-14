@@ -126,10 +126,7 @@ class _NormPartial(_Partial):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _NormPartial):
             return False
-
-        if self.norm_type != other.norm_type:
-            return False
-        return True
+        return self.norm_type == other.norm_type:
 
     def __hash__(self) -> int:
         return 1 + hash(self.norm_type)
