@@ -4336,6 +4336,29 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
             args=(normalized_shape, None, None, eps),
         )
 
+def sample_inputs_rms_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, normalized_shape and a kwarg dict for eps
+    cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+        ((1, 2, 3), (1, 2, 3), {'eps': 0.5}),
+        ((2, 2, 3), (2, 3), {'eps': -0.5}),
+        ((1,), (1,), {}),
+        ((1, 2), (2,), {}),
+        ((0, 1), (1,), {}),
+    )
+
+    for input_shape, normalized_shape, kwargs in cases:
+        # Shape of weight and bias should be the same as normalized_shape
+        weight = make_arg(normalized_shape)
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, weight),
+            kwargs=kwargs
+        )
+    # Without any optional args
+    yield SampleInput(make_arg((1, 2)), args=((2,),))
+
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
 
@@ -4377,6 +4400,31 @@ def error_inputs_native_layer_norm(opinfo, device, **kwargs):
     err_msg4 = "Given normalized_shape="
     s4 = SampleInput(
         make_arg((2, 2, 3)), args=((2, 2), None, None, 1e-5)
+    )
+    yield ErrorInput(s4, error_regex=err_msg4)
+
+def error_inputs_rms_norm(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+    input_shape = (1, 2, 3)
+
+    err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
+    s1 = SampleInput(
+        make_arg(input_shape), args=(tuple(), None, 1e-5)
+    )
+    yield ErrorInput(s1, error_regex=err_msg1)
+
+    normalized_shape = (1, 2, 3)
+    weight = make_arg((1, 2))
+    err_msg2 = "Expected weight to be of same shape as normalized_shape"
+    s2 = SampleInput(
+        make_arg(input_shape), args=(normalized_shape, weight, 1e-5)
+    )
+    yield ErrorInput(s2, error_regex=err_msg2)
+
+
+    err_msg4 = "Given normalized_shape="
+    s4 = SampleInput(
+        make_arg((2, 2, 3)), args=((2, 2), None, 1e-5)
     )
     yield ErrorInput(s4, error_regex=err_msg4)
 
@@ -9874,6 +9922,16 @@ def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], w
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
+def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, eps=1e-6):
+    feature_size = np.prod(normalized_shape)
+    inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
+    rms = np.sqrt((inp_view**2).mean(axis=-1, keepdims=True) + eps)
+    Y = inp_view / rms
+    if weight is not None:
+        Y = Y * weight.reshape(-1)
+    return Y.reshape(*inp.shape)
+
+
 def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
     if np.prod(inp.shape) != 0:
@@ -13502,6 +13560,14 @@ op_db: List[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_layer_norm,
            supports_expanded_weight=True,),
+    OpInfo('nn.functional.rms_norm',
+           aten_name='rms_norm',
+           aliases=('rms_norm',),
+           ref=reference_rms_norm,
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_rms_norm,
+           error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),

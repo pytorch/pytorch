@@ -7,7 +7,7 @@ from .. import functional as F
 from .. import init
 
 from torch import Tensor, Size
-from typing import Union, List, Tuple
+from typing import Union, List, Optional, Tuple
 
 __all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm', 'RMSNorm']
 
@@ -316,7 +316,7 @@ class RMSNorm(Module):
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
-        eps: a value added to the denominator for numerical stability. Default: 1e-6
+        eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
@@ -328,10 +328,10 @@ class RMSNorm(Module):
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]
-    eps: float
+    eps: Optional[float]
     elementwise_affine: bool
 
-    def __init__(self, normalized_shape: _shape_t, eps: float = 1e-6, elementwise_affine: bool = True,
+    def __init__(self, normalized_shape: _shape_t, eps: Optional[float] = None, elementwise_affine: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()

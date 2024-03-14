@@ -303,7 +303,7 @@ def rms_norm(
     input: Tensor,
     normalized_shape: Sequence[int],
     weight: Optional[Tensor] = ...,
-    eps: float = ...,
+    eps: Optional[float] = ...,
 ) -> Tensor: ...
 def group_norm(
     input: Tensor,

@@ -4287,6 +4287,7 @@ class TestFunctionalTracing(JitTestCase):
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
+        "rms_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,

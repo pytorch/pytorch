@@ -2576,20 +2576,18 @@ def rms_norm(
     input: Tensor,
     normalized_shape: List[int],
     weight: Optional[Tensor] = None,
-    eps: float = 1e-6,
+    eps: Optional[float] = None,
 ) -> Tensor:
     r"""Apply Root Mean Square Layer Normalization.
 
     See :class:`~torch.nn.RMSNorm` for details.
     """
+    if eps is None:
+        eps = torch.finfo(input.dtype).eps
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
             rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
         )
-    if input.shape[-len(normalized_shape):] != normalized_shape:
-        raise ValueError("Input must have shape that ends with normalized_shape")
-    if weight is not None and weight.shape != normalized_shape:
-        raise ValueError("Weight must be of normalized shape")
     return torch.rms_norm(input, normalized_shape, weight, eps)
 
 def group_norm(
