@@ -1,6 +1,6 @@
 import inspect
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Tuple, Union
 
 import torch
 from torch._dynamo.source import (
@@ -15,7 +15,6 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _Constraint, _DerivedConstraint
 from torch.export.exported_program import InputKind
 from torch.export.graph_signature import CustomObjArgument, InputSpec, TensorArgument
 from torch.fx.experimental.symbolic_shapes import (
@@ -31,6 +30,7 @@ from torch.utils._pytree import (
     KeyPath,
     MappingKey,
     SequenceKey,
+    tree_flatten,
     tree_map_with_path,
 )
 
@@ -176,7 +176,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
 def make_constraints(
     fake_mode: FakeTensorMode,
     equalities_inputs: EqualityConstraint,
-    flat_args: List[Any],
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
     input_specs: List[InputSpec],
     original_signature: inspect.Signature,
     gm: torch.fx.GraphModule,
@@ -197,6 +197,18 @@ def make_constraints(
     #   - guards.py produces guards.
     #   - eval_frame.py solves constraints
     #   - _trace.py installs shape metadata in IR.
+
+    if dynamic_shapes is None:
+        return {}
+
+    flat_dynamic_shapes, _ = tree_flatten(
+        dynamic_shapes,
+        is_leaf=lambda x: x is None
+        or all(
+            not isinstance(y, Iterable)
+            for y in (x.values() if isinstance(x, dict) else x)
+        ),
+    )
 
     shape_env = fake_mode.shape_env
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
@@ -235,20 +247,11 @@ def make_constraints(
     if constraint_violation_error:
         raise constraint_violation_error
 
-    # create mapping from tensor id -> (dim -> user-specified constraint spec) for user tensor inputs
     user_tensor_input_names = {
         spec.arg.name
         for spec in input_specs
         if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
     }
-    tensor_id_to_dim_constraint: Dict[int, Dict[int, Dict[str, int]]] = defaultdict(
-        defaultdict
-    )
-    for const in constraints:
-        tensor_id_to_dim_constraint[const.t_id][const.dim] = {
-            "lower": const.constraint_range.vr.lower,
-            "upper": const.constraint_range.vr.upper,
-        }
 
     range_constraints = {}
     input_dims = defaultdict(list)
@@ -261,7 +264,7 @@ def make_constraints(
             node.meta["val"], CustomObjArgument
         ):
             continue
-        tensor_constraints = tensor_id_to_dim_constraint[id(flat_args[input_index])]
+        shape_spec = flat_dynamic_shapes[input_index]
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):
                 # Look up the range constraint for the symbol corresponding to this shape dimension
@@ -269,16 +272,12 @@ def make_constraints(
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                constraint = (
-                    tensor_constraints[i]
-                    if tensor_constraints and i in tensor_constraints
-                    else None
-                )
-                if constraint:  # user-specified
+                dim = shape_spec[i] if shape_spec else None
+                if dim:
                     range_constraints[d.node.expr] = ValueRanges(
-                        lower=constraint["lower"], upper=constraint["upper"]
+                        lower=dim.min, upper=dim.max
                     )
-                else:  # from analysis
+                else:
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]
