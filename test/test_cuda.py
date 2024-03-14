@@ -247,6 +247,15 @@ class TestCuda(TestCase):
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_copy_non_blocking_type_conversion(self):
+        a = torch.ones(1, device="cuda")
+        b = torch.zeros(1, device="cpu", pin_memory=True)
+        c = torch.empty(1, device="cuda", dtype=torch.long)
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        b.copy_(a, non_blocking=True)
+        c.copy_(b, non_blocking=True)
+        self.assertEqual(a, c, exact_dtype=False)
+
 
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
@@ -1627,7 +1636,6 @@ torch.cuda.synchronize()
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_rnn(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
@@ -1676,7 +1684,7 @@ torch.cuda.synchronize()
                 # Autocast wrapper requires at::_cudnn_rnn is autograd-exposed.  This check can't guarantee
                 # at::_cudnn_rnn is autograd-exposed, but if it fires, it indicates some funny business has
                 # occurred and we should double check that at::_cudnn_rnn remains autograd-exposed.
-                self.assertEqual(out.grad_fn.name(), "CudnnRnnBackward0")
+                self.assertEqual(out.grad_fn.name(), "MiopenRnnBackward0" if torch.version.hip else "CudnnRnnBackward0")
                 out.sum().backward()
                 grads = [p.grad.clone() for p in rnn.parameters()]
 

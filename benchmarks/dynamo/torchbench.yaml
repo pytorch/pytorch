@@ -94,6 +94,7 @@ slow:
 non_deterministic:
   # https://github.com/pytorch/pytorch/issues/98355
   - mobilenet_v3_large
+  - sam_fast
 
 
 dtype:
@@ -173,6 +174,8 @@ skip:
       # timeout
       - sam
       # model is CUDA only
+      - sam_fast
+      # model is CUDA only
       - llama_v2_7b_16h
       # flaky
       - stable_diffusion
@@ -197,6 +200,7 @@ skip:
       - llama
       - llama_v2_7b_16h
       - simple_gpt
+      - sam_fast
       # Model's DEFAULT_TRAIN_BSIZE is not implemented
       - cm3leon_generate
       - hf_T5_generate
