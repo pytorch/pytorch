@@ -15,7 +15,7 @@ from torch import _C
 
 from torch.types import Device
 from .._utils import _dummy_type
-from . import _get_device_index, _get_nvml_device_index, _lazy_init, is_initialized
+from . import _get_device_index, _get_nvml_device_index, _lazy_init
 
 from ._memory_viz import memory as _memory, segments as _segments
 
@@ -158,8 +158,8 @@ def empty_cache() -> None:
         of GPU memory in certain cases. See :ref:`cuda-memory-management` for
         more details about GPU memory management.
     """
-    if is_initialized():
-        torch._C._cuda_emptyCache()
+    _lazy_init()
+    torch._C._cuda_emptyCache()
 
 
 def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
@@ -264,8 +264,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
 
 def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
     r"""Return the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
-    if not is_initialized():
-        return {}
+    _lazy_init()
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_memoryStats(device)
 
