@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch._inductor.compile_fx import compile_fx
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
@@ -37,7 +38,6 @@ from inductor.test_torchinductor import (
     copy_tests,
     run_and_get_cpp_code,
     run_and_get_triton_code,
-    TestCaseBase as TestCase,
     TestFailure,
 )
 from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
