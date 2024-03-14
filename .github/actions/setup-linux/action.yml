@@ -29,12 +29,7 @@ runs:
     - name: Check if in a ARC runner
       shell: bash
       id: check_arc_runner
-      run: |
-        if [[ -f /.inarc ]] ; then
-          echo "IN_ARC_RUNNER=true" >> $GITHUB_OUTPUT
-        else
-          echo "IN_ARC_RUNNER=false" >> $GITHUB_OUTPUT
-        fi
+      run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
 
     - name: Start docker if docker deamon is not running
       shell: bash

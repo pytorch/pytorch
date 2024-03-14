@@ -249,9 +249,9 @@ else
   ( ! get_exit_code python setup.py clean] )
   ( ! get_exit_code python setup.py clean bad_argument )
 
-  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-    sudo chown -R jenkins ../workspace
+  sudo chown -R jenkins ../workspace
 
+  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
