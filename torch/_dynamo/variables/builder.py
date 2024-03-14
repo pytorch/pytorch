@@ -1942,41 +1942,49 @@ class SourcelessBuilder:
     """
 
     def __call__(self, tx, value) -> VariableTracker:
+        cached_vt = tx.output.sourceless_variable_tracker_cache.lookup(value)
+        if cached_vt:
+            return cached_vt
+
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-            return UserDefinedObjectVariable(value)
-        if ConstantVariable.is_literal(value):
-            return SourcelessBuilder.wrap_constant_literal(value)
+        elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+            ret = UserDefinedObjectVariable(value)
+        elif ConstantVariable.is_literal(value):
+            ret = SourcelessBuilder.wrap_constant_literal(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
-            return trace_rules.lookup_callable(value)(value)
+            ret = trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
-            return trace_rules.lookup(value)(value)
+            ret = trace_rules.lookup(value)(value)
         elif isinstance(value, enum.Enum):
-            return EnumVariable(value)
+            ret = EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
-            return UserDefinedClassVariable(value)
+            ret = UserDefinedClassVariable(value)
         elif isinstance(value, dict):
             items = {self(tx, k): self(tx, v) for k, v in value.items()}
-            return ConstDictVariable(items, mutable_local=MutableLocal())
+            ret = ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
             # Nb. value is a set here so the iteration below is non-deterministic!
-            return SetVariable(
+            ret = SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()
             )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
-            return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
+            ret = cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(value)
+            ret = MethodWrapperVariable(value)
         elif PlacementVariable.is_placement(value):
-            return PlacementVariable(value)
+            ret = PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
-            return DeviceMeshVariable(value)
-        unimplemented(f"Unexpected type in sourceless builder {type(value)}")
+            ret = DeviceMeshVariable(value)
+        else:
+            unimplemented(f"Unexpected type in sourceless builder {type(value)}")
+
+        tx.output.sourceless_variable_tracker_cache.add(value, ret)
+        return ret
 
     @staticmethod
     def wrap_constant_literal(value):

@@ -1308,9 +1308,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_ATTR(self, inst):
         obj = self.pop()
-        result = BuiltinVariable(getattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}
-        )
+        argval = variables.builder.SourcelessBuilder()(self, inst.argval)
+        result = BuiltinVariable(getattr).call_function(self, [obj, argval], {})
         self.push(result)
 
     def STORE_ATTR(self, inst):

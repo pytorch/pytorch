@@ -146,6 +146,35 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
+@dataclass(frozen=True)
+class SourcelessVariableTrackerCacheKey:
+    value: Any
+
+
+class SourcelessVariableTrackerCache:
+    def __init__(self):
+        self.cache = {}
+
+    def lookup(self, value):
+        key = SourcelessVariableTrackerCacheKey(value)
+        if key not in self.cache:
+            return None
+        return self.cache[key]
+
+    def add(self, value, vt):
+        key = SourcelessVariableTrackerCacheKey(value)
+        self.cache[key] = vt
+
+    def clone(self):
+        # Needed for copy and restore graph state
+        new_cache = SourcelessVariableTrackerCache()
+        new_cache.cache.update(self.cache)
+        return new_cache
+
+    def clear(self):
+        self.cache.clear()
+
+
 class OutputGraphState(NamedTuple):
     input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
@@ -156,6 +185,7 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     variable_tracker_cache: VariableTrackerCache
+    sourceless_variable_tracker_cache: SourcelessVariableTrackerCache
     timestamp: int
     non_compliant_ops: Set[torch._ops.OpOverload]
     compliant_custom_ops: Set[torch._ops.OpOverload]
@@ -357,6 +387,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache = VariableTrackerCache()
+        self.sourceless_variable_tracker_cache = SourcelessVariableTrackerCache()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
         # used to track nodes that are added between calls of copy_graphstate
@@ -630,6 +661,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.variable_tracker_cache.clone(),
+            self.sourceless_variable_tracker_cache.clone(),
             self.timestamp,
             set(self.non_compliant_ops),
             set(self.compliant_custom_ops),
@@ -649,6 +681,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.variable_tracker_cache,
+            self.sourceless_variable_tracker_cache,
             self.timestamp,
             self.non_compliant_ops,
             self.compliant_custom_ops,
@@ -1611,6 +1644,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
+        self.sourceless_variable_tracker_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
