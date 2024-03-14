@@ -978,20 +978,6 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
                 "TestOptimRenewed",
@@ -1017,13 +1003,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1074,20 +1053,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115607"
                 ),
                 "TestOptimRenewed",
@@ -1116,13 +1081,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "fails, https://github.com/pytorch/pytorch/issues/117165"
                 ),
                 "TestOptimRenewed",
@@ -1141,20 +1099,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1183,13 +1127,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
