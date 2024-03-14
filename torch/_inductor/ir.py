@@ -1663,6 +1663,10 @@ class Scan(Loops):
             # TODO: CPU support
             return [None] * len(dtypes)
 
+        if torch.version.hip is not None and len(dtypes) > 1:
+            # TODO: Remove this when ROCm triton adds support for multiple inputs
+            return [None] * len(dtypes)
+
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
