@@ -597,6 +597,17 @@ at::Tensor post_process_flash_output(
   return out;
 }
 
+int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
+  try {
+    choice_int = _fused_sdp_choice_stub(query_.device().type(),
+        query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+  } catch(const ::c10::Error& e){
+  }
+  return choice_int;
+}
+
 } // namespace
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -643,14 +654,11 @@ Tensor scaled_dot_product_attention(
       || query_.device().type() == DeviceType::HIP
       || query_.device().type() == DeviceType::PrivateUse1){
     if (query_.device().type() == DeviceType::PrivateUse1){
-      try {
-        choice_int = _fused_sdp_choice_stub(query_.device().type(),
-        query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-      } catch(const ::c10::Error& e){
-      }
+      choice_int = handle_private_use(
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
     } else {
       choice_int = _fused_sdp_choice_stub(query_.device().type(),
-      query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
     }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
