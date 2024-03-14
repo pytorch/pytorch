@@ -10,8 +10,6 @@ from typing import Optional
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
-# TODO: Remove me once Triton version is again in sync for vanilla and ROCm
-ROCM_TRITION_VERSION = "2.1.0"
 
 
 def read_triton_pin(rocm_hash: bool = False) -> str:
@@ -163,7 +161,6 @@ def build_triton(
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
-            expected_version=ROCM_TRITION_VERSION if build_rocm else None,
         )
 
         if build_rocm:
@@ -172,7 +169,6 @@ def build_triton(
                 triton_pythondir / "setup.py",
                 name=triton_pkg_name,
                 version=f"{version}",
-                expected_version=ROCM_TRITION_VERSION,
             )
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
             print("ROCm libraries setup for triton installation...")
