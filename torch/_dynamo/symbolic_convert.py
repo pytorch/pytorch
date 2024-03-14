@@ -503,8 +503,15 @@ def break_graph_if_unsupported(*, push):
 
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                try:
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                except IndexError:
+                    # first instruction
+                    code_options = self.code_options
+                    frame_loc = (
+                        code_options["co_filename"],
+                        code_options["co_firstlineno"],
+                    )
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
@@ -512,6 +519,7 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
                     # This log line is exercised from
                     #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
@@ -812,7 +820,7 @@ class InstructionTranslatorBase(
 
     else:
 
-        def update_block_stack(self):
+        def update_block_stack(self, inst):
             pass
 
     def step_graph_break(self, continue_inst):
