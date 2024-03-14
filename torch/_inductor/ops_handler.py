@@ -653,3 +653,18 @@ class OpCounterCSE:
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
     return h
+
+
+class ExtractConstantsHandler(KernelFormatterHandler):
+    def __init__(self, device):
+        self.device = device
+        super().__init__(MockHandler())
+
+    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+        from torch._inductor import ir
+
+        return ir.Constant(value=value, dtype=dtype, device=self.device)
+
+
+def _typecheck_ExtractConstantsHandler(h: ExtractConstantsHandler) -> OpsHandler[Any]:
+    return h

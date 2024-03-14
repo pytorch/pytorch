@@ -6,6 +6,7 @@ import os
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -56,6 +57,7 @@ from .utils import (
     is_pointwise_use,
     pad_listlike,
     parallel_num_threads,
+    sympy_index_symbol,
     sympy_product,
 )
 from .virtualized import ops, V
@@ -5331,6 +5333,32 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
+def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
+    """Try convert an arbitrary IR node into an ir.Constant value"""
+    if isinstance(x, ir.MutableBox):
+        return get_constant_value(x.data)
+    if isinstance(x, ir.BaseView):
+        return get_constant_value(x.unwrap_view())
+    if isinstance(x, ir.Constant):
+        return x
+
+    loader = x.make_loader()
+    if hasattr(x, "inner_fn_args"):
+        inner_fn_args = x.inner_fn_args()
+    else:
+        size = x.get_size()
+        idx = [sympy_index_symbol(f"i{n}") for n, s in enumerate(size)]
+        inner_fn_args = (idx,)
+
+    handler = torch._inductor.ops_handler.ExtractConstantsHandler(x.get_device())
+    with V.set_ops_handler(handler), patch.object(
+        ir.FlexibleLayout, "allow_indexing", True
+    ):
+        out = loader(*inner_fn_args)
+
+    return None if not isinstance(out, ir.Constant) else out
+
+
 # NOTE: prims.div maps to a / b in C, so performs truncation division on
 #   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
@@ -5339,6 +5367,11 @@ def div_prim(a, b):
 
     if is_integral:
         return truncdiv(a, b)
+
+    if (divisor := get_constant_value(b)) is not None:
+        # Replace divide by constant with multiply by reciprocal
+        reciprocal = 1.0 / divisor.value
+        return mul(a, reciprocal)
 
     def fn(*args):
         return ops.truediv(*args)

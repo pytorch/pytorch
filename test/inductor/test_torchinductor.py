@@ -2044,6 +2044,18 @@ class CommonTemplate:
             fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
         )
 
+    def test_div_precision(self):
+        # Reproducer for https://github.com/pytorch/pytorch/issues/101039
+
+        def forward(y):
+            z = y.div(1e-06)
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        y = torch.matmul(query, key.transpose(-2, -1))
+        self.common(forward, (y,))
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
