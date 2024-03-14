@@ -48,6 +48,7 @@
   _(nvmlDeviceGetNvLinkRemoteDeviceType) \
   _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
+#endif
 
 namespace c10::cuda {
 
@@ -56,9 +57,12 @@ struct DriverAPI {
   C10_LIBCUDA_DRIVER_API(CREATE_MEMBER)
   C10_LIBCUDA_DRIVER_API_12030(CREATE_MEMBER)
   C10_NVML_DRIVER_API(CREATE_MEMBER)
+#endif
 #undef CREATE_MEMBER
   static DriverAPI* get();
+#ifndef USE_ROCM
   static void* get_nvml_handle();
+#endif
 };
 
 } // namespace c10::cuda
