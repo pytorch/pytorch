@@ -9183,7 +9183,14 @@ class CommonTemplate:
         view_dtypes = [torch.int16, torch.int32, torch.int64]
         for dtype in view_dtypes:
             x = torch.randint(0, 2**4, [4096, 4096], dtype=torch.uint8)
-            self.common(fn, (x, dtype,))
+            self.common(
+                fn,
+                (
+                    x,
+                    dtype,
+                ),
+            )
+
 
 @dataclasses.dataclass
 class TestFailure:
