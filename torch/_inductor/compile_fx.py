@@ -1194,7 +1194,7 @@ def compile_fx(
         example_inputs: List[torch.Tensor],
         is_inference: bool,
     ):
-        print("forwards memory (start): ", torch.cuda.memory_allocated()/1e9)
+        print("forwards memory (start): ", torch.cuda.memory_allocated() / 1e9)
         if is_inference:
             # partition_fn won't be called
             _recursive_joint_graph_passes(model)
@@ -1290,7 +1290,7 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-        print("backwards memory (start): ", torch.cuda.memory_allocated()/1e9)
+        print("backwards memory (start): ", torch.cuda.memory_allocated() / 1e9)
         fixed = count_tangents(model)
         return inner_compile(
             model,

@@ -470,7 +470,8 @@ def reordering_to_mimic_autograd_engine(gm):
             if order[user] < minimum_order:
                 minimum_order = order[user]
                 first_node_in_bwd = user
-    assert first_node_in_bwd is not None
+    if first_node_in_bwd is None:
+        return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
     for node in list(gm.graph.nodes)[order[first_node_in_bwd]:]:
@@ -761,7 +762,7 @@ def min_cut_rematerialization_partition(
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention]
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten.upsample_bilinear2d] # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
@@ -959,7 +960,7 @@ def min_cut_rematerialization_partition(
 
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
-        storages = set([get_node_storage(node) for node in saved_values])
+        storages = set(get_node_storage(node) for node in saved_values)
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         # for i in sorted_sizes: print(i)
