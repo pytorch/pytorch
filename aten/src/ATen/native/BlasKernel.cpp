@@ -106,22 +106,26 @@ void fp16_gemv_trans(
 #endif
 
 template <typename scalar_t>
-bool scal_use_fast_path(int64_t n, int64_t incx) {
+bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+bool gemv_use_fast_path(C10_UNUSED int64_t m, C10_UNUSED int64_t n,
+                        C10_UNUSED int64_t lda, C10_UNUSED int64_t incx, C10_UNUSED int64_t incy) {
   return false;
 }
 
 template <typename scalar_t>
-void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx) {
+void scal_fast_path(C10_UNUSED int *n, C10_UNUSED scalar_t *a, C10_UNUSED scalar_t *x, C10_UNUSED int *incx) {
   TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
 }
 
 template <typename scalar_t>
-void gemv_fast_path(const char *trans, const int *m, const int *n, const scalar_t *alpha, const scalar_t *a, const int *lda, const scalar_t *x, const int *incx, const scalar_t *beta, scalar_t *y, const int *incy) {
+void gemv_fast_path(C10_UNUSED const char *trans, C10_UNUSED const int *m, C10_UNUSED const int *n,
+                    C10_UNUSED  const scalar_t *alpha, C10_UNUSED const scalar_t *a, C10_UNUSED const int *lda,
+                    C10_UNUSED  const scalar_t *x, C10_UNUSED const int *incx, C10_UNUSED const scalar_t *beta,
+                    C10_UNUSED  scalar_t *y, C10_UNUSED const int *incy) {
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
@@ -187,28 +191,24 @@ INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 template <>
-bool scal_use_fast_path<at::Half>(int64_t n, int64_t incx) {
+bool scal_use_fast_path<at::Half>(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
   return false;
 }
 
 template <>
 bool gemv_use_fast_path<at::Half>(
-    int64_t m,
-    int64_t n,
-    int64_t lda,
-    int64_t incx,
-    int64_t incy) {
+    C10_UNUSED int64_t m,
+    C10_UNUSED int64_t n,
+    C10_UNUSED int64_t lda,
+    C10_UNUSED int64_t incx,
+    C10_UNUSED int64_t incy) {
   return true;
 }
 
+#ifndef FBCODE_CAFFE2
 static inline float16_t reduce(float16x4_t x) {
         auto sum = vpadd_f16(x, x);
         return vget_lane_f16(vpadd_f16(sum, sum), 0);
-}
-
-static inline float reduce(float32x4_t x) {
-        auto sum = vpaddq_f32(x, x);
-        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
 }
 
 
@@ -238,6 +238,12 @@ static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t
     y[(i + 2) * incy] = reduce(sum2Vec);
     y[(i + 3) * incy] = reduce(sum3Vec);
   }
+}
+#endif
+
+static inline float reduce(float32x4_t x) {
+        auto sum = vpaddq_f32(x, x);
+        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
 }
 
 static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
@@ -280,8 +286,12 @@ void fp16_gemv_trans(
     float16_t* y,
     const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && n % 4 == 0) {
+#ifndef FBCODE_CAFFE2
     return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_trans_fp16_arith(m, n, a, lda, x, y, incy)
                                                        : fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+#else
+    return fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+#endif
   }
   for (const auto i : c10::irange(n)) {
     float sum = 0;
@@ -298,6 +308,7 @@ void fp16_gemv_trans(
 }
 
 
+#ifndef FBCODE_CAFFE2
 static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
   for (auto j = 0; j < n; j++) {
     auto vecCol = vdup_n_f16(x[j]);
@@ -311,6 +322,7 @@ static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const
     }
   }
 }
+#endif
 
 static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
   std::vector<float> sum(m);
@@ -343,8 +355,12 @@ void fp16_gemv_notrans(
     float16_t* y,
     const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
+#ifndef FBCODE_CAFFE2
     return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
                                                        : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+#else
+    return fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+#endif
   }
   std::vector<float> sum(m);
   for (const auto j : c10::irange(n)) {
