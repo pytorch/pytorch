@@ -570,7 +570,7 @@ class FxGraphHashDetails:
         self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
-        except TypeError as e:
+        except (TypeError, AttributeError) as e:
             # Some configs options are callables, e.g., post_grad_custom_pre_pass,
             # and may not pickle.
             log.debug("Can't pickle inductor config: %s", e)
