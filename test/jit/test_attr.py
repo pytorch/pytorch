@@ -58,5 +58,5 @@ class TestGetDefaultAttr(JitTestCase):
         def fn(x: Tuple[str, int]) -> int:
             return getattr(x, "x", 2)
 
-        self.assertRaisesRegex(RuntimeError, "but got a normal Tuple"):
+        with self.assertRaisesRegex(RuntimeError, "but got a normal Tuple"):
             torch.jit.script(fn)
