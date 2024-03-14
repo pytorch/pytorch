@@ -39,6 +39,8 @@ class TestGetDefaultAttr(JitTestCase):
         FileCheck().check("float[] = prim::ListConstruct").run(graph)
 
     def test_getattr_named_tuple(self):
+        global MyTuple
+
         class MyTuple(NamedTuple):
             x: str
             y: torch.Tensor
@@ -51,7 +53,6 @@ class TestGetDefaultAttr(JitTestCase):
         fn_s = torch.jit.script(fn)
         res = fn_s(inp)
         self.assertEqual(res, ref)
-
 
     def test_getattr_tuple(self):
         def fn(x: Tuple[str, int]) -> int:
