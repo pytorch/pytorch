@@ -5,7 +5,7 @@ from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, Iterator, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -269,12 +269,20 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        root, direction = self.graph._root, self.direction
-        cur = getattr(root, direction)
-        while cur is not root:
-            if not cur._erased:
-                yield cur
-            cur = getattr(cur, direction)
+        root = self.graph._root
+        if self.direction == "_next":
+            cur = root._next
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._next
+        else:
+            assert self.direction == "_prev"
+            cur = root._prev
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._prev
 
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
@@ -372,10 +380,18 @@ class CodeGen:
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
+        from torch.utils._triton import has_triton
+
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
+
+        if has_triton():
+            import triton
+            globals_[triton.__name__] = triton
+            from torch.utils._triton import patch_triton_dtype_repr
+            patch_triton_dtype_repr()
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -750,29 +766,33 @@ class _GraphSideTable:
     Side table for the graph for the purpose of doing fast queries
     """
     def __init__(self):
-        self.table: Dict[str, Dict[Target, List[Node]]] = defaultdict(lambda: defaultdict(list))
+        self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(dict)
+
+    def _key(self, node) -> Tuple[str, Optional[Target]]:
+        return (node.op, node.target if node.op == "call_function" else None)
 
     def __contains__(self, node) -> bool:
-        return node in self.table[node.op][node.target]
+        return node in self.table[self._key(node)]
 
     def insert(self, node: Node) -> None:
-        self.table[node.op][node.target].append(node)
+        self.table[self._key(node)][node] = None
 
     def remove(self, node: Node) -> None:
-        self.table[node.op][node.target].remove(node)
+        self.table[self._key(node)].pop(node)
 
-    def find_nodes(self, *, op: Optional[str] = None, target: Optional['Target'] = None) -> Iterator[Node]:
-        assert op is not None or target is not None
-        if target is None:
-            assert op is not None
-            for nodes in self.table[op].values():
-                yield from nodes
-        elif op is None:
+    def find_nodes(self, *, op: str, target: Optional['Target'] = None):
+        if op == "call_function":
             assert target is not None
-            for targets in self.table.values():
-                yield from targets[target]
-        else:
-            yield from self.table[op][target]
+            return dict(self.table[(op, target)]).keys()
+
+        if op in ("placeholder", "output"):
+            assert target is None
+
+        if target is None:
+            return dict(self.table[(op, None)]).keys()
+
+        # op is call_method, get_attr, call_module
+        return [node for node in self.table[(op, None)].keys() if node.target == target]
 
 @compatibility(is_backward_compatible=True)
 class Graph:
@@ -861,7 +881,20 @@ class Graph:
         return _node_list(self)
 
     @compatibility(is_backward_compatible=False)
-    def find_nodes(self, *, op: Optional[str] = None, target: Optional['Target'] = None) -> Iterator[Node]:
+    def find_nodes(self, *, op: str, target: Optional['Target'] = None):
+        """
+        Allows for fast query of nodes
+
+        Args:
+
+            op: the name of the operation
+            target: the target of the node. For call_function, the target is
+                required. For other ops, the target is optional.
+
+        Returns:
+
+            Iteratable of nodes with the requested op and target
+        """
         return self._side_table.find_nodes(op=op, target=target)
 
     @compatibility(is_backward_compatible=True)

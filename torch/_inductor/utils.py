@@ -693,9 +693,9 @@ try:
 
     attrs_descriptor_available = True
     # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    ids_of_folded_args_available = "ids_of_folded_args" in [
-        f.name for f in fields(AttrsDescriptor)
-    ]
+    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
+    ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
+    divisible_by_8_available = "divisible_by_8" in attr_desc_fields
 except ImportError:
     attrs_descriptor_available = False
 
@@ -712,12 +712,13 @@ if attrs_descriptor_available:
         kwargs = {
             "divisible_by_16": divisible_by_16,
             "equal_to_1": equal_to_1,
-            "divisible_by_8": divisible_by_8,
         }
 
         # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
         if ids_of_folded_args_available:
             kwargs["ids_of_folded_args"] = ids_of_folded_args
+        if divisible_by_8_available:
+            kwargs["divisible_by_8"] = divisible_by_8
 
         # Instantiate AttrsDescriptor with the prepared arguments
         return AttrsDescriptor(**kwargs)
@@ -1275,6 +1276,10 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def get_max_y_grid():
+    return 65535
 
 
 def is_linux() -> bool:

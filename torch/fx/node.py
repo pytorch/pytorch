@@ -694,7 +694,13 @@ class Node:
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
         update = False
-        if hasattr(self, name) and hasattr(self.graph, "_side_table") and self in self.graph._side_table:
+        if (
+                name == "target" and
+                hasattr(self, name) and
+                self.target != value and
+                hasattr(self.graph, "_side_table") and
+                self in self.graph._side_table
+        ):
             update = True
             self.graph._side_table.remove(self)
         object.__setattr__(self, name, value)

@@ -192,8 +192,8 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
     """Replace _generalized_scatter with normal aten ops"""
     for node in itertools.chain(
-        graph.find_nodes(target=_generalized_scatter),
-        graph.find_nodes(target=_inplace_generalized_scatter),
+        graph.find_nodes(op="call_function", target=_generalized_scatter),
+        graph.find_nodes(op="call_function", target=_inplace_generalized_scatter),
     ):
         use_mutation = (
             node.target is _inplace_generalized_scatter
