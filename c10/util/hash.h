@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <c10/util/complex.h>
 
 namespace c10 {
@@ -376,4 +377,13 @@ struct hash<c10::complex<T>> {
   }
 };
 
+template <typename T>
+struct hash<c10::optional<T>> {
+  size_t operator()(const c10::optional<T>& o) const {
+    if (!o.has_value()) {
+      return hash<size_t>()(198345);
+    }
+    return hash<T>()(*o);
+  }
+};
 } // namespace c10

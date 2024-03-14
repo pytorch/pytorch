@@ -7,6 +7,7 @@
 #include <ATen/core/symbol.h>
 #include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
+#include <c10/util/hash.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 #include <c10/core/SymFloat.h>
@@ -287,6 +288,10 @@ struct TORCH_API Stride {
 
   bool isComplete() const {
     return stride_index_ && contiguous_ && stride_;
+  }
+
+  static size_t hash(const Stride& s) {
+    return c10::get_hash(s.stride_index_, s.contiguous_, s.stride_);
   }
 
   c10::optional<size_t> stride_index_;
@@ -570,6 +575,18 @@ struct VaryingShape {
 
  private:
   c10::optional<ListOfOptionalElements> dims_;
+};
+
+template<typename T>
+struct hash<VaryingShape<T>> {
+  size_t operator()(const VaryingShape<T>& v) const {
+    if (!v.sizes()) {
+      // random number which should be unique to VaryingShape
+      return c10::get_hash(5858287);
+    }
+    ArrayRef<c10::optional<T>> array_ref(*v.sizes());
+    return c10::get_hash(array_ref);
+  }
 };
 
 struct TensorType;
