@@ -46,6 +46,7 @@ def patch_setup_py(
     # Replace version
     if not expected_version:
         expected_version = read_triton_version()
+
     orig = check_and_replace(
         orig, f'version="{expected_version}",', f'version="{version}",'
     )
@@ -116,7 +117,7 @@ def build_triton(
                 print("source:\n  path: .\n", file=meta)
                 print(
                     "build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
-                    "python setup.py install --record=record.txt\n",
+                    "python setup.py install --single-version-externally-managed --record=record.txt\n",
                     " script_env:\n   - MAX_JOBS\n",
                     file=meta,
                 )
