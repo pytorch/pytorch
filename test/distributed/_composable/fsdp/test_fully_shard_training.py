@@ -786,12 +786,14 @@ class TestFullyShard2DTraining(FSDPTest):
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
     def world_size(self) -> int:
-        return 4
+        return min(4, torch.cuda.device_count())
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_train_parity_hsdp(self):
+        shard_size = 2 if self.world_size > 2 else 1
+        replicate_size = self.world_size // shard_size
         global_mesh = init_device_mesh(
-            "cuda", (2, 2), mesh_dim_names=("replicate", "shard")
+            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
         )
         self.run_subtests(
             {
@@ -814,7 +816,6 @@ class TestFullyShardHSDPTraining(FSDPTest):
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.LayerNorm(mlp_dim, bias=False),
-            # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
             MLP(mlp_dim, dim_multiplier=3),
@@ -822,7 +823,6 @@ class TestFullyShardHSDPTraining(FSDPTest):
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
         for mlp in model:
             if use_activation_checkpointing:
                 checkpoint(mlp)
@@ -833,15 +833,11 @@ class TestFullyShardHSDPTraining(FSDPTest):
             model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
+        check_sharded_parity(self, ref_model, model)
         torch.manual_seed(42 + self.rank + 1)
         device = torch.device("cuda")
         num_microbatches = 3
         for iter_idx in range(5):
-            if iter_idx > 0:
-                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                    _optim.step()
-                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             for microbatch_idx in range(num_microbatches):
                 is_last_microbatch = microbatch_idx == num_microbatches - 1
                 if sync_gradients_at_last_batch:
@@ -852,6 +848,11 @@ class TestFullyShardHSDPTraining(FSDPTest):
                     losses.append(_model(inp).sum())
                     losses[-1].backward()
                 self.assertEqual(losses[0], losses[1])
+            check_sharded_parity(self, ref_model, model)
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.step()
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            check_sharded_parity(self, ref_model, model)
 
 
 if __name__ == "__main__":
