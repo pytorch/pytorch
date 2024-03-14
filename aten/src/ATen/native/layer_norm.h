@@ -71,9 +71,9 @@ void layer_norm_cpu_out(
     int64_t M,
     int64_t N);
 
-Tensor rms_norm_symint(
+Tensor rms_norm(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape,
+    IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
     double eps);
 
