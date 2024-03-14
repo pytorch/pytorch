@@ -650,7 +650,7 @@ void TensorIteratorBase::coalesce_dimensions() {
         }
       }
     }
-    
+
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
     if (shape0 == 1 || shape1 == 1) {
