@@ -781,11 +781,12 @@ class _GraphSideTable:
         self.table[self._key(node)].pop(node)
 
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
+        assert op != "placeholder"
         if op == "call_function":
             assert target is not None
             return dict(self.table[(op, target)]).keys()
 
-        if op in ("placeholder", "output"):
+        if op == "output":
             assert target is None
 
         if target is None:
@@ -894,9 +895,18 @@ class Graph:
         Returns:
 
             Iteratable of nodes with the requested op and target.
-            The nodes are not guaranteed to be in order they appear on the
-            graph.
+            The nodes is only guaranteed to be in order they appear on the
+            graph for placeholder nodes.
         """
+        if op == "placeholder":
+            l: List[Node] = list()
+            num_placeholders = len(self._side_table.table[("placeholder", None)])
+            _iterator = iter(self.nodes)
+            while len(l) < num_placeholders:
+                node = next(_iterator)
+                if node.op == "placeholder":
+                    l.append(node)
+            return l
         return self._side_table.find_nodes(op=op, target=target)
 
     @compatibility(is_backward_compatible=True)
