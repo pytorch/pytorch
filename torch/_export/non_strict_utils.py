@@ -144,7 +144,6 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         fake_combined_args = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
             original_signature.bind(*args, **kwargs).arguments,
-            # (args, kwargs),
         )
         fake_combined_args = list(fake_combined_args.values())
 
@@ -263,9 +262,11 @@ def make_constraints(
 
     return range_constraints
 
+
 # not sure what to call these, but this feels better than hardcoding it in 2 places
 def get_export_module_name():
     return "L__self__"
+
 
 def get_wrapped_export_root_str():
     return "_export_root"

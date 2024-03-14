@@ -579,6 +579,7 @@ class Tracer(TracerBase):
         total_args = co.co_argcount + co.co_kwonlyargcount
         orig_args = list(co.co_varnames)
         names_iter = iter(co.co_varnames)
+        # names_iter = iter(co.co_varnames)
         args: List[Any] = []
         skip_arg_idx = 0
         if is_module:
@@ -591,7 +592,6 @@ class Tracer(TracerBase):
             args.append(self.root)
 
         sig = inspect.signature(fn_for_analysis)
-
 
         # This covers the very specific case where we are passing in flat
         # concrete_args as a tuple, but our traced fn takes (*args, **kwargs).

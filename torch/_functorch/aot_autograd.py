@@ -1094,17 +1094,17 @@ https://github.com/pytorch/pytorch/issues/101192
         prettify_func = lambda x:"_".join(x.split(".")[1:])
     else:
         forward_call = mod.forward
-        prettify_func = lambda x:x.split("L__self___")[1].replace(".", "_")
+        prettify_func = lambda x:x.split("L__self___")[1].replace(".", "__")
 
     # assign parameter & buffer names
     graph_nodes = list(fx_g.graph.nodes)
     node_index = 0
-    for tensor_dict, tensor_type in zip([named_parameters, named_buffers], ["param", "buf"]):
+    for tensor_dict, tensor_type in zip([named_parameters, named_buffers], ["p", "b"]):
         for i, tensor_name in enumerate(tensor_dict.keys()):
             node = graph_nodes[node_index]
             name = f"{tensor_type}_{prettify_func(tensor_name)}"
-            # node.name = node.target = name
-            node.name = name
+            node.name = node.target = name
+            # node.name = name
             node_index += 1
 
     # assign input names
@@ -1112,9 +1112,9 @@ https://github.com/pytorch/pytorch/issues/101192
     flat_args, _ = pytree.tree_flatten_with_path(forward_sig)
     for i, (tree_path, val) in enumerate(flat_args):
         node = graph_nodes[params_len + i]
-        name = "input_" + "_dict_".join(y.key for y in tree_path).replace(".", "__")
-        # node.name = node.target = name
-        node.name = name
+        name = "_".join((y.key if isinstance(y, pytree.MappingKey) else str(y.idx)) for y in tree_path).replace(".", "__")
+        node.name = node.target = name
+        # node.name = name
 
     # assign input names for submodules
     def prettify_cond_submodule_names(gm):
@@ -1129,8 +1129,8 @@ https://github.com/pytorch/pytorch/issues/101192
             # this assumes that placeholder nodes are always at start of graph
             for i, node in enumerate(subgm.graph.nodes):
                 if node.op == "placeholder":
-                    # node.name = node.target = names[i]
-                    node.name = names[i]
+                    node.name = node.target = names[i]
+                    # node.name = names[i]
                 else:
                     break
             # ensure we assigned all names, or ran out of nodes (graph is placeholder-only)
