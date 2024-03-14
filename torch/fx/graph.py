@@ -893,7 +893,9 @@ class Graph:
 
         Returns:
 
-            Iteratable of nodes with the requested op and target
+            Iteratable of nodes with the requested op and target.
+            The nodes are not guaranteed to be in order they appear on the
+            graph.
         """
         return self._side_table.find_nodes(op=op, target=target)
 
