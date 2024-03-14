@@ -43,6 +43,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   py::object check_fn;
   // modified user bytecode (protected by check_fn's guards)
   py::object code;
+  // root guard manager if exists
+  void* root_mgr{nullptr};
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list

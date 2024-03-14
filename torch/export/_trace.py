@@ -45,7 +45,7 @@ from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 
-from .dynamic_shapes import _process_constraints, Constraint
+from .dynamic_shapes import _process_constraints
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -315,7 +315,7 @@ def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -330,13 +330,13 @@ def _export_to_torch_ir(
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
-    kwargs = kwargs or {}
-
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
+
+    kwargs = kwargs or {}
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
@@ -346,7 +346,7 @@ def _export_to_torch_ir(
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
-                    constraints=constraints,
+                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
@@ -460,11 +460,15 @@ def _export_non_strict(
     # since these become specialized, we replace such metadata with the original values
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
     index = 0
-    total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
+    total_non_user_inputs = (
+        len(graph_signature.parameters)
+        + len(graph_signature.buffers)
+        + len(graph_signature.input_tokens)
+    )
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if index >= total_param_buffers:
-                user_arg = flat_args[index - total_param_buffers]
+            if index >= total_non_user_inputs:
+                user_arg = flat_args[index - total_non_user_inputs]
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
@@ -512,6 +516,8 @@ def _export_non_strict(
             make_argument_spec(node)
             for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
         ],
+        input_tokens=graph_signature.input_tokens,
+        output_tokens=graph_signature.output_tokens,
     )
     export_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
@@ -681,6 +687,12 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    if not isinstance(args, tuple):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
+        )
+
     global _EXPORT_FLAGS
     flags = set()
     flags.add("strict" if strict else "non_strict")
@@ -688,9 +700,8 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
     _EXPORT_FLAGS = flags
 
-    constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes) or []
-
     kwargs = kwargs or {}
+    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
 
     constant_attrs = _gather_constant_attrs(mod)
 
@@ -773,7 +784,7 @@ def _export(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, constraints)
+        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
@@ -830,7 +841,6 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
-
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -856,7 +866,7 @@ def _export(
         mod,
         args,
         kwargs,
-        constraints,
+        dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
         _log_export_usage=False,
