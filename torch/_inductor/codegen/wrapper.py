@@ -1013,6 +1013,10 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+        from torch.utils._triton import patch_triton_dtype_repr
+
+        patch_triton_dtype_repr()
+
         original_name = kernel.__name__
 
         from .common import KernelArgType, SizeArg, TensorArg
@@ -1101,21 +1105,9 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        compile_wrapper.splice(
-            """
-            import triton
-            import triton.language as tl
-            from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import user_autotune
-            """,
-            strip=True,
-        )
+        from .triton import gen_common_triton_imports
 
-        from .triton import TritonKernel
-
-        if TritonKernel.gen_attr_descriptor_import():
-            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
-        compile_wrapper.newline()
+        compile_wrapper.splice(gen_common_triton_imports())
 
         inductor_meta = {
             "kernel_name": name,
@@ -1133,7 +1125,7 @@ class WrapperCodeGen(CodeGen):
 
         compile_wrapper.splice(
             f"""
-            @user_autotune(
+            @triton_heuristics.user_autotune(
                 configs={configs!r},
                 inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
@@ -1311,6 +1303,11 @@ class WrapperCodeGen(CodeGen):
         raise NotImplementedError()
 
     def val_to_arg_str(self, s):
+        from torch.utils._triton import dtype_to_string, has_triton
+
+        if has_triton():
+            import triton
+
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
         elif isinstance(s, sympy.Expr):
@@ -1329,6 +1326,8 @@ class WrapperCodeGen(CodeGen):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
+        elif has_triton() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
+            return dtype_to_string(s)
         else:
             return repr(s)
 
