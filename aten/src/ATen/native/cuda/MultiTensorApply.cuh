@@ -204,7 +204,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     // Query the currently capturing graph
     cudaStreamCaptureStatus capture_status;
     cudaGraph_t graph;
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
         at::cuda::getCurrentCUDAStream(),
         &capture_status,
         nullptr, // id_out

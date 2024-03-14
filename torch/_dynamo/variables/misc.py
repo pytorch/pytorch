@@ -11,6 +11,7 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
+import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
@@ -31,7 +32,14 @@ from .user_defined import UserDefinedObjectVariable
 class SuperVariable(VariableTracker):
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super().__init__(**kwargs)
+        # typevar is the fist argument to super(). In the case where no argument
+        # is provided to super(), it is the __class__ object where
+        # the super() function is being called
         self.typevar = typevar
+        # objvar here must be an instance or subtype of typevar.
+        # In the case where super() is called without arguments, it is the first argument
+        # to the current function where super() is called from (self for regular method,
+        # cls for a classmethod)
         self.objvar = objvar
         self.specialized = specialized  # directly get attr from self.typevar if true
 
@@ -50,9 +58,13 @@ class SuperVariable(VariableTracker):
             return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        # We default to the python type of the object. However, if this is
-        # a `type` or subclass of `type`, then the original object represents
-        # the user defined type.
+        # The rest of this function does two things:
+        #   - Walk the mro to find where the attribute comes from to be
+        #     able to provide accurate source
+        #   - Call the getattr to get the object
+
+        # Find the class object, where the function lives.
+        # When objvar is "self", use type(self), when objvar is "cls", use it as-is
         type_to_use = self.objvar.python_type()
         type_to_use_source = (
             TypeSource(self.objvar.source) if self.objvar.source else None
@@ -817,3 +829,58 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
+
+
+class DebuggingVariable(VariableTracker):
+    """
+    Represents a call to a debugging function like print(), or something
+    registered to config.reorderable_logging_functions.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    @staticmethod
+    def is_reorderable_logging_function(obj):
+        return (
+            callable(obj)
+            and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
+            and obj in torch._dynamo.config.reorderable_logging_functions
+        )
+
+    def call_function(self, tx, args, kwargs):
+        if tx.export:
+            # For export cases, we can just make debugging functions no-ops
+            return
+
+        if not self.can_reorder_logs(self.value, args, kwargs):
+            unimplemented(
+                f"Reordering debugging function {self.value} "
+                f"with inputs {args} {kwargs} is not yet implemented."
+            )
+
+        tx.debug_locals.append((self, list(args)))
+
+    def reconstruct(self, codegen):
+        return self.source.reconstruct(codegen)
+
+    @staticmethod
+    def can_reorder_logs(fn, args, kwargs) -> True:
+        """
+        Run some additional checks for what sort of function calls can we
+        actually reorder.
+        """
+
+        allowed_input_types = (
+            variables.TensorVariable,
+            variables.ConstantVariable,
+            StringFormatVariable,
+        )
+
+        flat_args = pytree.tree_leaves([args, kwargs])
+        for arg in flat_args:
+            if not isinstance(arg, allowed_input_types):
+                return False
+
+        return True

@@ -11,7 +11,8 @@ import sys
 # see scripts/compile_tests/update_failures.py
 #
 # If you're adding a new test, and it's failing PYTORCH_TEST_WITH_DYNAMO=1,
-# either add the appropriate decorators to your test or list them in this file.
+# either add the appropriate decorators to your test or add skips for them
+# via test/dynamo_skips and test/dynamo_expected_failures.
 #
 # *These are not exactly unittest.expectedFailure and unittest.skip. We'll
 # always execute the test and then suppress the signal, if necessary.
