@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/BlasBackend.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
@@ -120,6 +121,9 @@ class TORCH_API Context {
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }
+  static bool hasCuBLASLt() {
+    return detail::getCUDAHooks().hasCuBLASLt();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -207,6 +211,9 @@ class TORCH_API Context {
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
+
+  at::BlasBackend blasPreferredBackend() const;
+  void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -371,6 +378,11 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
+  at::BlasBackend blas_preferred_backend =
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
+       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
+      ? at::BlasBackend::Cublaslt
+      : at::BlasBackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
