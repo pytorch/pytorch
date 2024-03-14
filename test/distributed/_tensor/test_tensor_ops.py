@@ -5,6 +5,7 @@ import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
@@ -230,6 +231,7 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_stack(self):
         mesh_2d = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
