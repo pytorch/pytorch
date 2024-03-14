@@ -1990,18 +1990,11 @@ def categorize_checks(
     ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     ignorable_failed_checks: Dict[str, List[Any]] = defaultdict(list)
 
-    # If required_checks is not set or empty, consider all names are relevant
-    relevant_checknames = [
-        name
-        for name in check_runs.keys()
-        if not required_checks or any(x in name for x in required_checks)
-    ]
-
     for checkname in required_checks:
         if all(checkname not in x for x in check_runs.keys()):
             pending_checks.append((checkname, None, None))
 
-    for checkname in relevant_checknames:
+    for checkname in required_checks:
         status = check_runs[checkname].status
         url = check_runs[checkname].url
         classification = check_runs[checkname].classification
