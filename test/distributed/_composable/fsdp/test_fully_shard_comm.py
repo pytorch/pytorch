@@ -8,9 +8,10 @@ from typing import Callable, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 
-from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable.fsdp import FSDP, fully_shard, MixedPrecisionPolicy
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -24,18 +25,21 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import DTensor
+from torch.distributed._tensor.experimental import implicit_replication
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DoubleLinear,
     FSDPTest,
     FSDPTestMultiThread,
+    MLP,
     patch_all_gather,
     patch_post_backward,
     patch_reduce_scatter,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, wrapSwapTensorsTest
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -568,6 +572,92 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             return ret
 
         return post_backward_with_record
+
+
+class TestFullyShardUnshard(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(torch.cuda.device_count(), 2)
+
+    @skip_if_lt_x_gpu(2)
+    @wrapSwapTensorsTest(True)
+    def test_unshard_async(self):
+        class ReduceModule(nn.Module):
+            def __init__(self, dim: int, mesh: DeviceMesh):
+                super().__init__()
+                self.mesh = mesh
+                self.weight = nn.Parameter(torch.randn(dim, dim))
+
+            def forward(self, x: torch.Tensor):
+                y = F.relu(x @ self.weight)
+                # NOTE: This all-reduce is not differentiable and is included
+                # to exercise the overlap.
+                work = dist.all_reduce(y, group=self.mesh.get_group(), async_op=True)
+                return y, work
+
+        class MLPs(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.mlp1 = MLP(dim)
+                self.mlp2 = MLP(dim)
+                self.mlp3 = MLP(dim)
+
+            def forward(self, ys: List[torch.Tensor], works: List[dist.Work]):
+                (y1, y2, y3), (work1, work2, work3) = ys, works
+                work1.wait()
+                z1 = self.mlp1(y1)
+                work2.wait()
+                z2 = self.mlp2(y2)
+                work3.wait()
+                z3 = self.mlp3(y3)
+                return z1 + z2 + z3
+
+        class ReduceModel(nn.Module):
+            def __init__(self, dim: int, mesh: DeviceMesh):
+                super().__init__()
+                self.reduce_module1 = ReduceModule(dim, mesh)
+                self.reduce_module2 = ReduceModule(dim, mesh)
+                self.reduce_module3 = ReduceModule(dim, mesh)
+                self.mlps = MLPs(dim)
+
+            def forward(self, x: torch.Tensor):
+                y1, work1 = self.reduce_module1(x)
+                if isinstance(self.mlps.mlp1, FSDP):
+                    self.mlps.mlp1.unshard(async_op=True)
+                y2, work2 = self.reduce_module2(x)
+                if isinstance(self.mlps.mlp2, FSDP):
+                    self.mlps.mlp2.unshard(async_op=True)
+                y3, work3 = self.reduce_module3(x)
+                if isinstance(self.mlps.mlp3, FSDP):
+                    self.mlps.mlp3.unshard(async_op=True)
+                return self.mlps([y1, y2, y3], [work1, work2, work3])
+
+        mesh = init_device_mesh("cuda", (self.world_size,))
+        batch_size, dim = 2, 8
+        torch.manual_seed(42)
+        ref_model = replicate(ReduceModel(dim, mesh).cuda())
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        torch.manual_seed(42)
+        model = ReduceModel(dim, mesh)
+        fully_shard(model.mlps.mlp1, reshard_after_forward=False)
+        fully_shard(model.mlps.mlp2, reshard_after_forward=False)
+        fully_shard(model.mlps.mlp3, reshard_after_forward=False)
+        fully_shard(model.mlps)
+        replicate(model.cuda())
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        if self.rank == 0:
+            print(model)
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((batch_size, dim), device="cuda")
+        for _ in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                with implicit_replication():
+                    _optim.step()
+                _optim.zero_grad()
+            self.assertEqual(losses[0], losses[1])
 
 
 if __name__ == "__main__":

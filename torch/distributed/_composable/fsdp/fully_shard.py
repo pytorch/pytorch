@@ -161,6 +161,33 @@ class FSDP:
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
 
+    def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
+        """
+        Unshards the module's parameters by allocating memory and all-gathering
+        the parameters. This method is *not* recursive.
+
+        Args:
+            async_op (bool): If ``True``, then returns a :class:`UnshardHandle`
+                that has a :meth:`wait` method to wait on the unshard op. If
+                ``False``, then returns ``None`` and waits on the handle inside
+                this function.
+
+        .. note:: If ``async_op=True``, then the user does not have to call
+            :meth:`wait` on the returned handle if the unshard op can be waited
+            on in the module's pre-forward. FSDP will wait on the pending
+            unshard op in the pre-forward automatically.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is None:
+            return None
+        fsdp_param_group.lazy_init()
+        fsdp_param_group.unshard(async_op=async_op)
+        handle = UnshardHandle(fsdp_param_group)
+        if async_op:
+            return handle
+        handle.wait()
+        return None
+
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """
         Sets whether the next backward is the last one, meaning that FSDP
@@ -244,3 +271,14 @@ class FSDP:
                     : fsdp_param.sharded_size[0]
                 ]
         return ret
+
+
+class UnshardHandle:
+    def __init__(self, fsdp_param_group: FSDPParamGroup):
+        self._fsdp_param_group = fsdp_param_group
+
+    def wait(self):
+        if hasattr(self, "_fsdp_param_group"):
+            self._fsdp_param_group.wait_for_unshard()
+            # Avoid keeping a reference
+            delattr(self, "_fsdp_param_group")
