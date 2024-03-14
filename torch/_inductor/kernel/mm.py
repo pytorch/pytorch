@@ -275,23 +275,37 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
-    if (
+
+    fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
+
+    choices = [fallback]
+
+    # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
+    skip_triton = (
         mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
-    ) or _is_sm7x_or_older_gpu(layout.device.index):
-        # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
-        return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+    ) or _is_sm7x_or_older_gpu(layout.device.index)
+
     if inductor_config.force_mixed_mm:
         choices = []
-    b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-    has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-    for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
-        mm_template.maybe_append_choice(
-            choices,
-            input_nodes=(mat1, mat2),
-            layout=layout,
-            **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+    if not skip_triton:
+        b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+        has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
+        for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+            )
+
+    if m * n != 0 and use_cutlass_template(layout):
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
+
+    if skip_triton and not choices:
+        choices = [fallback]
+
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
 
 
