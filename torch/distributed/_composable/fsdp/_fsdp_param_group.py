@@ -126,6 +126,7 @@ class FSDPParamGroup:
         # (can be set to false to save communication during gradient
         # accumulation); all-reducing without reduce-scatter is disallowed
         self.reduce_scatter_grads: bool = True
+        # TODO: whether use all_reduce_grads or if isinstance(self.mesh_info, HSDPMeshInfo):
         self.all_reduce_grads: bool = True
 
         # - CUDA events for stream synchronization
