@@ -149,7 +149,8 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
   }
 }
 
-static void normal_fill_16_vectorize(float *data,const Vectorized<float> &two_pi,const Vectorized<float> &one,const Vectorized<float> &minus_two,const Vectorized<float> &mean,const Vectorized<float> &std) {
+#if defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+static void normal_fill_16_VSX(float *data,const Vectorized<float> &two_pi,const Vectorized<float> &one,const Vectorized<float> &minus_two,const Vectorized<float> &mean,const Vectorized<float> &std) {
   using Vec = Vectorized<float>;
   Vec u1=one-Vec::loadu(data);
   Vec u2=Vec::loadu(data+8);
@@ -163,7 +164,7 @@ static void normal_fill_16_vectorize(float *data,const Vectorized<float> &two_pi
 }
 
 template <typename scalar_t, typename RNG>
-void normal_fill_vectorize(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
+void normal_fill_VSX(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
   float *data = self.data_ptr<float>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -181,7 +182,7 @@ void normal_fill_vectorize(const TensorBase &self, const scalar_t mean, const sc
 
   for (int64_t i = 0; i < size - 15; i += 16) {
     if(Vec::size()==8) {
-      normal_fill_16_vectorize(data + i, two_pi, one, minus_two, mean_vec, var_vec);
+      normal_fill_16_VSX(data + i, two_pi, one, minus_two, mean_vec, var_vec);
     }
     else{
       normal_fill_16<scalar_t>(data + i, mean, std);
@@ -195,13 +196,14 @@ void normal_fill_vectorize(const TensorBase &self, const scalar_t mean, const sc
       data[i] = uniform(generator);
     }
     if(Vec::size()==8){
-      normal_fill_16_vectorize(data, two_pi, one, minus_two, mean_vec, var_vec);
+      normal_fill_16_VSX(data, two_pi, one, minus_two, mean_vec, var_vec);
     }
     else{
       normal_fill_16<scalar_t>(data, mean, std);
     }
   }
 }
+#endif //VSX
 
 template <typename scalar_t, typename RNG>
 void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
@@ -233,8 +235,10 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef CPU_CAPABILITY_AVX2
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
+#elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+    normal_fill_VSX(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
-    normal_fill_vectorize(self, static_cast<float>(mean), static_cast<float>(std), generator);
+    normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
