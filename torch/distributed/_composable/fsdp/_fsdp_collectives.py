@@ -1,4 +1,4 @@
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -97,7 +97,7 @@ def foreach_all_gather_copy_out(
 
 
 @torch.no_grad()
-def foreach_reduce_scatter_and_all_reduce(
+def foreach_reduce(
     fsdp_params: List[FSDPParam],
     unsharded_grads: List[torch.Tensor],
     reduce_scatter_group: dist.ProcessGroup,
@@ -105,9 +105,9 @@ def foreach_reduce_scatter_and_all_reduce(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    divide_factors: Optional[Tuple[float, float]],
-    all_reduce_group: Optional[dist.ProcessGroup] = None,
-    all_reduce_stream: Optional[torch.cuda.Stream] = None,
+    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
+    all_reduce_group: Optional[dist.ProcessGroup],
+    all_reduce_stream: torch.cuda.Stream,
 ) -> torch.cuda.Event:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
@@ -122,10 +122,7 @@ def foreach_reduce_scatter_and_all_reduce(
         )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
-    if divide_factors:
-        predivide_factor, postdivide_factor = divide_factors
-    else:
-        predivide_factor, postdivide_factor = None, None
+    predivide_factor, postdivide_factor = divide_factors
     world_size = reduce_scatter_group.size()
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
@@ -156,11 +153,11 @@ def foreach_reduce_scatter_and_all_reduce(
             divide_factors,
         )
     view_out_stream = reduce_scatter_stream
-    if all_reduce_stream is not None:
+    if all_reduce_group is not None:
         view_out_stream = all_reduce_stream
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with torch.cuda.stream(all_reduce_stream):
-            _all_reduce(post_reduce_output, all_reduce_group, divide_factors)  # type: ignore[arg-type]
+            _all_reduce(post_reduce_output, all_reduce_group, divide_factors)
     with torch.cuda.stream(view_out_stream):
         _div_if_needed(post_reduce_output, postdivide_factor)
         post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
@@ -217,9 +214,9 @@ def _reduce_scatter(
     output: torch.Tensor,
     input: torch.Tensor,
     group: dist.ProcessGroup,
-    divide_factors: Optional[Tuple[float, float]],
+    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
 ) -> None:
-    if divide_factors:
+    if divide_factors[0]:
         dist.reduce_scatter_tensor(output, input, group=group)
     else:
         # Using NCCL's reduce-scatter to do the division by world size saves
@@ -230,9 +227,9 @@ def _reduce_scatter(
 def _all_reduce(
     tensor: torch.Tensor,
     group: dist.ProcessGroup,
-    divide_factors: Optional[Tuple[float, float]],
+    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
 ) -> None:
-    if divide_factors:
+    if divide_factors[0]:
         dist.all_reduce(tensor, group=group)
     else:
         # saves extra memory read/write from a separate division kernel
