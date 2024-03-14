@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import logging
@@ -372,6 +374,21 @@ def speculate_subgraph(
                 else contextlib.nullcontext()
             )
 
+            # For handling side effects, we can make an argument that we don't
+            # have to do anything here. The side effects infra does a good job
+            # of graph breaking if we mutate any nonlocal or global variable
+            # while subtracing. As a result if tracing succeeds, side effects
+            # data structure will only contain read-only data structures that
+            # are put there for tracking purposes.
+            # But on the other hand, there is an argument that if we ever write
+            # a new side effect in Dynamo which does not go through the side
+            # effect infra, we can end up in bad state.
+            # Therefore we restore the side effects after tracing. The catch is
+            # that we have to special handle tensor variables. If we have seen a
+            # nonlocal variable tensor during subtracing, we want to keep a
+            # track of that tensor, so that later subtracing or the root tracer
+            # itself does not create a new proxy for the already observed tensor
+            # variable.
             if restore_side_effects:
                 prev_side_effects = tx.output.side_effects.clone()
 
@@ -379,11 +396,10 @@ def speculate_subgraph(
                 output = f.call_function(tx, args, sub_kwargs)
 
             if restore_side_effects:
-                # Captured variables are tracked in side-effects
-                # and they show up in output graph incorrectly.
-                # It is ok to undo this side-effect tracking
-                # as speculate_subgraph will allow only
-                # pure functions.
+                new_side_effects = tx.output.side_effects.clone()
+                prev_side_effects.track_tensor_variables_from_runahead_side_effects(
+                    new_side_effects
+                )
                 tx.output.side_effects = prev_side_effects
 
             treespec = None
@@ -446,12 +462,9 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.warning(msg)
-        log.exception(ex)
-        raise Unsupported(
-            f"{msg} Scroll up for the stack trace "
-            f"of the initial exception. The reason was: {ex.msg}"
-        ) from ex
+        log.info(msg)
+        log.info(ex)
+        raise ex
 
 
 def make_attr(tx, name):
@@ -494,6 +507,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def make(value, source=None, **kwargs):
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "while_loop":
+            return WhileLoopHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in ("map", "map_impl"):
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
@@ -727,6 +742,144 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="while_loop doesn't work unless it is captured completely with torch.compile."
+    )
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
+
+        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+
+        for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
+            if v := kwargs.pop(k, None):
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
+                args.append(v)
+
+        if kwargs:
+            unimplemented(
+                f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
+            )
+
+        if len(args) != 3:
+            unimplemented(
+                f"Expected 3 arguments but got {len(args)}.\n"
+                f"Usage: while_loop(cond_fn, body_fn, operands)",
+            )
+
+        def _check_supported_callable(fn_var):
+            assert isinstance(
+                fn_var,
+                (
+                    UserFunctionVariable,
+                    NestedUserFunctionVariable,
+                    NNModuleVariable,
+                    UnspecializedNNModuleVariable,
+                ),
+            ), str(type(fn_var))
+
+        _check_supported_callable(args[0])
+        _check_supported_callable(args[1])
+
+        # operands
+        if not isinstance(args[2], (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected a tuple but got {args[2].python_type()}",
+            )
+
+        operands = args[2].unpack_var_sequence(tx)
+        if not only_consist_of(args[2], (TensorVariable,)):
+            unimplemented(
+                "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
+            )
+
+        (
+            (cond_r, cond_treespec),
+            cond_graph,
+            cond_lifted_freevars,
+        ) = speculate_subgraph(
+            tx, args[0], operands, {}, "while_loop", source_target=self.value
+        )
+        cond_nn_modules = dict(tx.output.nn_modules)
+        if not isinstance(cond_r, TensorVariable):
+            unimplemented(
+                f"Expected cond_fn to return a tensor but got {cond_r.python_type()}",
+            )
+
+        cond_r_meta = _extract_tensor_metadata(
+            cond_r.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
+            []
+        ):
+            unimplemented(
+                f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
+            )
+
+        (
+            (body_r, body_treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[1],
+            operands,
+            {},
+            "while_loop",
+            source_target=self.value,
+            should_flatten_outputs=True,
+        )
+        body_nn_modules = dict(tx.output.nn_modules)
+
+        (
+            cond_graph,
+            body_graph,
+            cond_shared,
+            body_shared,
+            cond_unique,
+            body_unique,
+        ) = _merge_graph_inputs(
+            cond_graph,
+            cond_lifted_freevars,
+            "cond_fn",
+            body_graph,
+            body_lifted_freevars,
+            "body_fn",
+        )
+        # We pick cond_shared but it shouldn't matter
+        merged_input = tuple(cond_shared + cond_unique + body_unique)
+
+        cond_name = add_subgraph(
+            tx,
+            self.source,
+            "cond_fn",
+            torch.fx.GraphModule(cond_nn_modules, cond_graph),
+        )
+        body_name = add_subgraph(
+            tx,
+            self.source,
+            "body_fn",
+            torch.fx.GraphModule(body_nn_modules, body_graph),
+        )
+
+        cond_node = make_attr(tx, cond_name)
+        body_node = make_attr(tx, body_name)
+
+        p_args = (
+            cond_node,
+            body_node,
+            merged_input,
+        )
+
+        return _call_function_and_unflatten_output(
+            tx, torch.ops.higher_order.while_loop, p_args, {}, body_r, body_treespec
+        )
+
+
 def non_single_tensor_return_unsupported(api, ret):
     from . import TensorVariable
 
@@ -833,7 +986,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
 
-        example_res = lowered_module.original_module(*real_sub_args)
+        example_res = lowered_module.original_module.module()(*real_sub_args)
 
         # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
         # executorch modules promise not to alias inputs and outputs.
@@ -1027,13 +1180,16 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
+class FunctorchHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
+            name = self.get_name()
+            assert name in ("grad_impl", "vmap_impl")
+            fn = name.split("_")[0]
             unimplemented(
-                "torch.func.vmap capture is disabled, "
+                f"torch.func.{fn} capture is disabled, "
                 "it can be turned on by setting "
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
@@ -1287,18 +1443,19 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    """
+    Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
+    by unwrapping the higher order op and inlining through it.  This op
+    is created by dynamo to survive through AotAutograd, then unwrapped
+    here in the call to dynamo from compiled autograd.
+    """
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import TensorVariable
-
-        assert "fn" in kwargs
-        fn = kwargs["fn"]
-        assert len(args) == 1
-        grad = args[0]
-        assert isinstance(grad, TensorVariable)
-
-        return fn.call_function(tx, args, {})
+        kwargs = dict(kwargs)
+        fn = kwargs.pop("fn")
+        return fn.call_function(tx, args, kwargs)
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
@@ -1424,7 +1581,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer):
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode():
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
                 bwd_fn,

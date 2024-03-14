@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# mypy: ignore-errors
 
 import contextlib
 import enum

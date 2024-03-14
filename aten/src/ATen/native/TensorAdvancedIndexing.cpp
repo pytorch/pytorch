@@ -408,9 +408,9 @@ static void build_index_op(
   config.set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .add_output(result)
-      .add_owned_input(info.src);
+      .add_owned_const_input(info.src);
   for (auto& index : info.indices) {
-    config.add_owned_input(index);
+    config.add_owned_const_input(index);
   }
   if (!result.defined()) {
     config.declare_static_dtype_and_device(info.src.scalar_type(), info.src.device());
@@ -614,9 +614,9 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
   config.resize_outputs(false);
   config.check_all_same_dtype(false);
   config.add_output(info.src);
-  config.add_input(value);
+  config.add_const_input(value);
   for (auto& index : info.indices) {
-    config.add_input(index);
+    config.add_const_input(index);
   }
   return config.build();
 }
@@ -689,8 +689,8 @@ Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const b
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
-    .add_input(source)
-    .add_input(index_reshaped)
+    .add_const_input(source)
+    .add_const_input(index_reshaped)
     .build();
 
   put_stub(iter.device_type(), iter, self, accumulate);
@@ -769,7 +769,7 @@ Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .add_output(out)
-    .add_input(index)
+    .add_const_input(index)
     .build();
 
   // Early return after out has been resized
@@ -848,8 +848,8 @@ TORCH_IMPL_FUNC(index_copy_out)
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_restrided)
-      .add_input(index_restrided)
-      .add_input(source_nonzero)
+      .add_const_input(index_restrided)
+      .add_const_input(source_nonzero)
       .build();
 
     auto result_dim_size = result_nonzero.size(dim);
@@ -943,15 +943,15 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
-      auto index_data = index_contig.data_ptr<index_t>();
+      auto index_data = index_contig.const_data_ptr<index_t>();
       for (const auto i : c10::irange(numel)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
           auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+          auto source_data = static_cast<const char*>(sourceSlice.const_data_ptr()) + i * source_stride_bytes;
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
-          iter.unsafe_replace_operand(2, source_data);
+          iter.unsafe_replace_operand(2, const_cast<char*>(source_data));
           add_stub(iter.device_type(), iter, alpha);
       }
     });
@@ -967,10 +967,10 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can be used here?
       auto* result_ptr = result.data_ptr<scalar_t>();
-      auto* source_ptr = source.data_ptr<scalar_t>();
+      auto* source_ptr = source.const_data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
         [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &alpha_value] {
-        auto index_data = index_contig.data_ptr<index_t>();
+        auto index_data = index_contig.const_data_ptr<index_t>();
         for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
@@ -1040,15 +1040,15 @@ static void index_reduce_func_impl(
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_func_cpu_", [&] () {
-      auto index_data = index_contig.data_ptr<index_t>();
+      auto index_data = index_contig.const_data_ptr<index_t>();
       for (const auto i : c10::irange(numel)) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
         auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+        auto source_data = static_cast<const char*>(sourceSlice.const_data_ptr()) + i * source_stride_bytes;
         iter.unsafe_replace_operand(0, self_data);
         iter.unsafe_replace_operand(1, self_data);
-        iter.unsafe_replace_operand(2, source_data);
+        iter.unsafe_replace_operand(2, const_cast<char*>(source_data));
 
         switch (op) {
           case ReductionType::PROD :
@@ -1090,11 +1090,11 @@ static void index_reduce_func_impl(
       auto counts_stride = counts.dim() == 0 ? 1 : counts.stride(dim);
       // TODO: Maybe TensorAccessor can be used here?
       auto* result_ptr = result.data_ptr<scalar_t>();
-      auto* source_ptr = source.data_ptr<scalar_t>();
+      auto* source_ptr = source.const_data_ptr<scalar_t>();
       auto counts_ptr = counts.data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_func_cpu_",
         [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &op, &counts_ptr, &counts_stride] {
-        auto index_data = index_contig.data_ptr<index_t>();
+        auto index_data = index_contig.const_data_ptr<index_t>();
         for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
@@ -1175,7 +1175,7 @@ static Tensor & index_select_out_cpu_dim1_(
 
   auto out = static_cast<char*>(result_contig.data_ptr());
 
-  auto src_base = static_cast<const char*>(self_contig.data_ptr());
+  auto src_base = static_cast<const char*>(self_contig.const_data_ptr());
 
   auto self_sizes = self_contig.sizes();
   auto outer_dims_product = c10::size_to_dim_(1, self_sizes);
@@ -1191,7 +1191,7 @@ static Tensor & index_select_out_cpu_dim1_(
   AT_DISPATCH_INDEX_TYPES(
     index_contig.scalar_type(), "batch_index_select_compute", [&]() {
 
-      const auto* idxs = index_contig.data_ptr<index_t>();
+      const auto* idxs = index_contig.const_data_ptr<index_t>();
       check_indexarray_range<index_t>(idxs, N, src_indexing_axis_dim);
 
       // Special-case single-float copy for efficiency
@@ -1256,7 +1256,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
                   "index_select(): self indexing axis dim should be positive");
       AT_DISPATCH_INDEX_TYPES(
       index_contig.scalar_type(), "index_select_empty_self_bound_check", [&]() {
-        const auto* idxs = index_contig.data_ptr<index_t>();
+        const auto* idxs = index_contig.const_data_ptr<index_t>();
         check_indexarray_range<index_t>(idxs, numel, src_indexing_axis_dim);
       });
       return result;
@@ -1269,7 +1269,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
 
     auto selfSlice = self.select(dim, 0);
     auto resultSlice = result.select(dim, 0);
-    auto selfSlice_data = selfSlice.data_ptr();
+    auto selfSlice_data = selfSlice.const_data_ptr();
     auto resultSlice_data = resultSlice.data_ptr();
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -1280,7 +1280,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(resultSlice)
-      .add_input(selfSlice)
+      .add_const_input(selfSlice)
       .build();
 
     auto grain_size = at::internal::GRAIN_SIZE;
@@ -1293,14 +1293,14 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
         [&index_contig, &start, &end, &sub_iter, &self_dim_size, &selfSlice_data, &self_stride_bytes,
           &resultSlice_data, &result_stride_bytes] () {
-        auto index_data = index_contig.data_ptr<index_t>();
+        auto index_data = index_contig.const_data_ptr<index_t>();
         for (const auto i : c10::irange(start, end)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+          auto self_data = static_cast<const char*>(selfSlice_data) + self_i * self_stride_bytes;
           auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
           sub_iter.unsafe_replace_operand(0, result_data);
-          sub_iter.unsafe_replace_operand(1, self_data);
+          sub_iter.unsafe_replace_operand(1, const_cast<char*>(self_data));
           copy_stub(sub_iter.device_type(), sub_iter, false);
         };
       });
@@ -1322,11 +1322,11 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
           AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
             [&index_contig, &slice_size_bytes, &self_dim_size, &selfSlice_data,
               &self_stride_bytes, &resultSlice_data, &result_stride_bytes, &start, &end] () {
-            auto index_data = index_contig.data_ptr<index_t>();
+            auto index_data = index_contig.const_data_ptr<index_t>();
             for (const auto i : c10::irange(start, end)) {
               auto self_i = index_data[i];
               TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-              auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+              auto self_data = static_cast<const char*>(selfSlice_data) + self_i * self_stride_bytes;
               auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
               memcpy(result_data, self_data, slice_size_bytes);
             }
@@ -1344,16 +1344,16 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
       AT_DISPATCH_QINT_TYPES(self.scalar_type(), "index_select_quant", [&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
-        auto self_data_ptr = self.data_ptr<scalar_t>();
+        auto self_data_ptr = self.const_data_ptr<scalar_t>();
         auto result_data_ptr = result.data_ptr<scalar_t>();
         auto self_numel = self.numel();
         AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_quant_",
           [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
-          auto index_data = index_contig.data_ptr<index_t>();
+          auto index_data = index_contig.const_data_ptr<index_t>();
           for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
-            scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+            const scalar_t *self_ip = self_data_ptr + self_i * self_stride;
             *(result_data_ptr + i * result_stride) = *self_ip;
           }
         });
@@ -1364,16 +1364,16 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
-        auto self_data_ptr = self.data_ptr<scalar_t>();
+        auto self_data_ptr = self.const_data_ptr<scalar_t>();
         auto result_data_ptr = result.data_ptr<scalar_t>();
         auto self_numel = self.numel();
         AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
           [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
-          auto index_data = index_contig.data_ptr<index_t>();
+          auto index_data = index_contig.const_data_ptr<index_t>();
           for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
-            scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+            const scalar_t *self_ip = self_data_ptr + self_i * self_stride;
             *(result_data_ptr + i * result_stride) = *self_ip;
           }
         });
@@ -1462,7 +1462,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(self_restrided)
-    .add_input(index_restrided)
+    .add_const_input(index_restrided)
     .build();
 
   auto self_dim_size = (self_nonzero_dim.sizes())[dim];
@@ -1880,8 +1880,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  c10::MaybeOwned<Tensor> _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
+  auto [_mask, _self] = expand_outplace(mask, self);
   return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
@@ -1924,7 +1923,7 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const S
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(self)
-    .add_input(mask)
+    .add_const_input(mask)
     .build();
 
   masked_fill_stub(iter.device_type(), iter, value);
@@ -1954,8 +1953,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& sourc
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
+    auto [_mask, _self] = expand_outplace(mask, self);
     result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
@@ -1968,8 +1966,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
+    auto [_mask, _self] = expand_outplace(mask, self);
     result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
@@ -1989,8 +1986,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
 
-  c10::MaybeOwned<Tensor> _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
+  auto [_mask, _self] = expand_outplace(mask, self);
 
   auto shape = _self->sizes();
   int64_t numel = _mask->sum().item().toLong();
@@ -2017,8 +2013,8 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
-      .add_input(*_self)
-      .add_input(*_mask)
+      .add_const_input(*_self)
+      .add_const_input(*_mask)
       .build();
 
     masked_select_serial_stub(iter.device_type(), iter, orig_stride);
@@ -2041,9 +2037,9 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
-    .add_input(*_self)
-    .add_input(*_mask)
-    .add_input(mask_prefix_sum)
+    .add_const_input(*_self)
+    .add_const_input(*_mask)
+    .add_const_input(mask_prefix_sum)
     .build();
 
   masked_select_stub(iter.device_type(), iter, orig_stride);
@@ -2130,10 +2126,7 @@ static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Devi
 Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
   checkDevice("torch.take_along_dim():", {self, indices}, self.device());
   if (opt_dim.has_value()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t dim;
-    Tensor self_broadcasted, indices_broadcasted;
-    std::tie(self_broadcasted, indices_broadcasted, dim) =
+    auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     return self_broadcasted.gather(dim, indices_broadcasted);
   }
@@ -2145,10 +2138,7 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
   checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
   if (opt_dim.has_value()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t dim;
-    Tensor self_broadcasted, indices_broadcasted;
-    std::tie(self_broadcasted, indices_broadcasted, dim) =
+    auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
   }
@@ -2228,7 +2218,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
 
   // Optimized all-reduce
   auto iter = TensorIteratorConfig()
-      .add_input(self)
+      .add_const_input(self)
       .build();
 
   const auto num_threads = at::get_num_threads();
@@ -2267,7 +2257,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   at::assert_no_overlap(result, self);
 
   auto iter = TensorIteratorConfig()
-    .add_input(self)
+    .add_const_input(self)
     .enforce_linear_iteration()
     .build();
 
@@ -2303,6 +2293,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
     return result;
   }
 
+  auto out_accessor = result.accessor<int64_t, 2>();
+
   // Pass 2: Write indexes
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
@@ -2323,7 +2315,6 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
         }
       }
 
-      auto out_accessor = result.accessor<int64_t, 2>();
       auto out_ptr = out_accessor[thread_count_nonzero[tid]].data();
 
       auto loop = [&](char** data, const int64_t* strides, int64_t n1, int64_t n2) {
@@ -2495,7 +2486,7 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       // order of indexing matters
       .enforce_linear_iteration()
       .add_output(self)
-      .add_input(*b_mask)
+      .add_const_input(*b_mask)
       .build();
 
   masked_scatter_stub(iter.device_type(), iter, src_cont);

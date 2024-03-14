@@ -11,8 +11,11 @@
 #include <ATen/native/vulkan/api/Utils.h>
 
 #include <mutex>
+#include <ostream>
 #include <stack>
 #include <unordered_map>
+
+std::ostream& operator<<(std::ostream& out, VmaTotalStatistics stats);
 
 namespace at {
 namespace native {
@@ -38,22 +41,42 @@ struct MemoryBarrier final {
       const VkAccessFlags dst_access_flags);
 };
 
+struct MemoryAllocation final {
+  explicit MemoryAllocation();
+
+  explicit MemoryAllocation(
+      const VmaAllocator,
+      const VkMemoryRequirements&,
+      const VmaAllocationCreateInfo&);
+
+  MemoryAllocation(const MemoryAllocation&) = delete;
+  MemoryAllocation& operator=(const MemoryAllocation&) = delete;
+
+  MemoryAllocation(MemoryAllocation&&) noexcept;
+  MemoryAllocation& operator=(MemoryAllocation&&) noexcept;
+
+  ~MemoryAllocation();
+
+  VkMemoryRequirements memory_requirements;
+  // The properties this allocation was created with
+  VmaAllocationCreateInfo create_info;
+  // The allocator object this was allocated from
+  VmaAllocator allocator;
+  // Handles to the allocated memory
+  VmaAllocation allocation;
+
+  operator bool() const {
+    return (allocation != VK_NULL_HANDLE);
+  }
+};
+
 class VulkanBuffer final {
  public:
-  struct MemoryProperties final {
-    VmaAllocationCreateFlags create_flags;
-
-    VmaMemoryUsage memory_usage;
-    VkMemoryPropertyFlags required_mem_flags;
-    VkMemoryPropertyFlags preferred_mem_flags;
-
-    VkBufferUsageFlags buffer_usage;
-  };
-
   struct BufferProperties final {
     VkDeviceSize size;
     VkDeviceSize mem_offset;
     VkDeviceSize mem_range;
+    VkBufferUsageFlags buffer_usage;
   };
 
   explicit VulkanBuffer();
@@ -61,7 +84,9 @@ class VulkanBuffer final {
   explicit VulkanBuffer(
       const VmaAllocator,
       const VkDeviceSize,
-      const MemoryProperties&);
+      const VmaAllocationCreateInfo&,
+      const VkBufferUsageFlags,
+      const bool allocate_memory = true);
 
   VulkanBuffer(const VulkanBuffer&) = delete;
   VulkanBuffer& operator=(const VulkanBuffer&) = delete;
@@ -80,21 +105,30 @@ class VulkanBuffer final {
   friend struct BufferMemoryBarrier;
 
  private:
-  MemoryProperties memory_properties_;
   BufferProperties buffer_properties_;
-  // The allocator object this was allocated from
   VmaAllocator allocator_;
-  // Handles to the allocated memory
-  VmaAllocation allocation_;
+  MemoryAllocation memory_;
+  // Indicates whether the underlying memory is owned by this resource
+  bool owns_memory_;
   VkBuffer handle_;
 
  public:
+  inline VkDevice device() const {
+    VmaAllocatorInfo allocator_info{};
+    vmaGetAllocatorInfo(allocator_, &allocator_info);
+    return allocator_info.device;
+  }
+
   inline VmaAllocator vma_allocator() const {
     return allocator_;
   }
 
   inline VmaAllocation allocation() const {
-    return allocation_;
+    return memory_.allocation;
+  }
+
+  inline VmaAllocationCreateInfo allocation_create_info() const {
+    return VmaAllocationCreateInfo(memory_.create_info);
   }
 
   inline VkBuffer handle() const {
@@ -113,9 +147,25 @@ class VulkanBuffer final {
     return buffer_properties_.size;
   }
 
-  operator bool() const {
-    return (allocation_ != VK_NULL_HANDLE);
+  inline bool has_memory() const {
+    return (memory_.allocation != VK_NULL_HANDLE);
   }
+
+  inline bool owns_memory() const {
+    return owns_memory_;
+  }
+
+  operator bool() const {
+    return (handle_ != VK_NULL_HANDLE);
+  }
+
+  inline void bind_allocation(const MemoryAllocation& memory) {
+    VK_CHECK_COND(!memory_, "Cannot bind an already bound allocation!");
+    VK_CHECK(vmaBindBufferMemory(allocator_, memory.allocation, handle_));
+    memory_.allocation = memory.allocation;
+  }
+
+  VkMemoryRequirements get_memory_requirements() const;
 };
 
 class MemoryMap final {
@@ -201,20 +251,11 @@ class ImageSampler final {
 
 class VulkanImage final {
  public:
-  struct MemoryProperties final {
-    VmaAllocationCreateFlags create_flags;
-
-    VmaMemoryUsage memory_usage;
-    VkMemoryPropertyFlags required_mem_flags;
-    VkMemoryPropertyFlags preferred_mem_flags;
-
-    VkImageUsageFlags image_usage;
-  };
-
   struct ImageProperties final {
     VkImageType image_type;
     VkFormat image_format;
     VkExtent3D image_extents;
+    VkImageUsageFlags image_usage;
   };
 
   struct ViewProperties final {
@@ -234,13 +275,13 @@ class VulkanImage final {
 
   explicit VulkanImage(
       const VmaAllocator,
-      VkDevice,
-      const MemoryProperties&,
+      const VmaAllocationCreateInfo&,
       const ImageProperties&,
       const ViewProperties&,
       const SamplerProperties&,
       const VkImageLayout layout,
-      VkSampler);
+      VkSampler,
+      const bool allocate_memory = true);
 
   VulkanImage(const VulkanImage&) = delete;
   VulkanImage& operator=(const VulkanImage&) = delete;
@@ -260,25 +301,38 @@ class VulkanImage final {
   friend struct ImageMemoryBarrier;
 
  private:
-  MemoryProperties memory_properties_;
   ImageProperties image_properties_;
   ViewProperties view_properties_;
   SamplerProperties sampler_properties_;
   // The allocator object this was allocated from
   VmaAllocator allocator_;
   // Handles to the allocated memory
-  VmaAllocation allocation_;
+  MemoryAllocation memory_;
+  // Indicates whether the underlying memory is owned by this resource
+  bool owns_memory_;
   Handles handles_;
   // Layout
   VkImageLayout layout_;
 
  public:
+  void create_image_view();
+
+  inline VkDevice device() const {
+    VmaAllocatorInfo allocator_info{};
+    vmaGetAllocatorInfo(allocator_, &allocator_info);
+    return allocator_info.device;
+  }
+
   inline VmaAllocator vma_allocator() const {
     return allocator_;
   }
 
   inline VmaAllocation allocation() const {
-    return allocation_;
+    return memory_.allocation;
+  }
+
+  inline VmaAllocationCreateInfo allocation_create_info() const {
+    return VmaAllocationCreateInfo(memory_.create_info);
   }
 
   inline VkFormat format() const {
@@ -318,9 +372,28 @@ class VulkanImage final {
     layout_ = layout;
   }
 
-  inline operator bool() const {
-    return (allocation_ != VK_NULL_HANDLE);
+  inline bool has_memory() const {
+    return (memory_.allocation != VK_NULL_HANDLE);
   }
+
+  inline bool owns_memory() const {
+    return owns_memory_;
+  }
+
+  inline operator bool() const {
+    return (handles_.image != VK_NULL_HANDLE);
+  }
+
+  inline void bind_allocation(const MemoryAllocation& memory) {
+    VK_CHECK_COND(!memory_, "Cannot bind an already bound allocation!");
+    VK_CHECK(vmaBindImageMemory(allocator_, memory.allocation, handles_.image));
+    memory_.allocation = memory.allocation;
+
+    // Only create the image view if the image has been bound to memory
+    create_image_view();
+  }
+
+  VkMemoryRequirements get_memory_requirements() const;
 };
 
 struct ImageMemoryBarrier final {
@@ -385,6 +458,10 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
+  MemoryAllocation create_allocation(
+      const VkMemoryRequirements& memory_requirements,
+      const VmaAllocationCreateInfo& create_info);
+
   VulkanImage create_image(
       const VkExtent3D&,
       const VkFormat,
@@ -392,11 +469,13 @@ class MemoryAllocator final {
       const VkImageViewType,
       const VulkanImage::SamplerProperties&,
       VkSampler,
-      const bool allow_transfer = false);
+      const bool allow_transfer = false,
+      const bool allocate_memory = true);
 
   VulkanBuffer create_storage_buffer(
       const VkDeviceSize,
-      const bool gpu_only = true);
+      const bool gpu_only = true,
+      const bool allocate_memory = true);
 
   VulkanBuffer create_staging_buffer(const VkDeviceSize);
 
@@ -410,6 +489,12 @@ class MemoryAllocator final {
    */
   template <typename Block>
   VulkanBuffer create_params_buffer(const Block& block);
+
+  VmaTotalStatistics get_memory_statistics() const {
+    VmaTotalStatistics stats = {};
+    vmaCalculateStatistics(allocator_, &stats);
+    return stats;
+  }
 };
 
 class VulkanFence final {

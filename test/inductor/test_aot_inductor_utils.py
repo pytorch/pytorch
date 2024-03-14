@@ -10,6 +10,15 @@ from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils import _pytree as pytree
 
 
+class WrapperModule(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+
 class AOTIRunnerUtil:
     @classmethod
     def compile(
@@ -20,6 +29,8 @@ class AOTIRunnerUtil:
         dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
         # The exact API is subject to change
         so_path = torch._export.aot_compile(
             model,
@@ -52,11 +63,11 @@ class AOTIRunnerUtil:
         if IS_FBCODE:
             runner = AOTIRunnerUtil.load_runner(device, so_path)
 
-            def optimized(*args):
+            def optimized(*args, **kwargs):
                 call_spec = runner.get_call_spec()
                 in_spec = pytree.treespec_loads(call_spec[0])
                 out_spec = pytree.treespec_loads(call_spec[1])
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
+                flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
                 flat_outputs = runner.run(flat_inputs)
                 return pytree.tree_unflatten(flat_outputs, out_spec)
 
@@ -82,7 +93,7 @@ class AOTIRunnerUtil:
             disable_constraint_solver=disable_constraint_solver,
         )
         optimized = AOTIRunnerUtil.load(device, so_path)
-        return optimized(example_inputs)
+        return optimized(*example_inputs)
 
     @classmethod
     def run_multiple(
@@ -102,5 +113,5 @@ class AOTIRunnerUtil:
         optimized = AOTIRunnerUtil.load(device, so_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:
-            list_output_tensors.append(optimized(example_inputs))
+            list_output_tensors.append(optimized(*example_inputs))
         return list_output_tensors

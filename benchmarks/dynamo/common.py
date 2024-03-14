@@ -60,7 +60,6 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from torch._dynamo.utils import (
@@ -136,6 +135,10 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -734,6 +737,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+
+    if "cache_lookup_latency" in kwargs:
+        headers.append("cache_lookup_latency")
+        row.append(kwargs["cache_lookup_latency"])
+
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
@@ -1149,7 +1157,7 @@ def export_aot_inductor(model, example_inputs, device):
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(example_args, example_kwargs)
+        return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
 
@@ -1222,6 +1230,31 @@ class OnnxModel(abc.ABC):
         self.model_path = str(
             self.model_dir / f"{model_name}_{self._COMPILER_NAME}.onnx"
         )
+
+    def _determine_deepcopy_target_device(self):
+        if current_device == "cpu":
+            target_device = "cpu"
+        else:
+            if torch.cuda.device_count() > 1:
+                # Copy to another cuda device to avoid OOM.
+                target_device = "cuda:1"
+            else:
+                target_device = "cuda"
+        return target_device
+
+    def deepcopy_model_and_inputs_to_device(self, model, example_inputs, target_device):
+        # Deepcopy model before export to avoid modification to baseline model.
+        # To avoid OOM, the model is first moved to CPU. Both models are then moved to device.
+        model_device = next(model.parameters()).device
+        model.to("cpu")
+        model_copy = copy.deepcopy(model).to(target_device)
+        model.to(model_device)
+
+        target_device_example_inputs = tree_map_only(
+            torch.Tensor, lambda x: x.to(device=target_device), example_inputs
+        )
+
+        return model_copy, target_device_example_inputs
 
     @classmethod
     def _generate_onnx_model_directory(
@@ -1405,7 +1438,9 @@ class OnnxModelFromTorchScript(OnnxModel):
     def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
         if self.copy_before_export:
             # Deepcopy model before export to avoid modification to baseline model.
-            model = copy.deepcopy(model)
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
 
         # Hack for huggingface models (kwargs only).
         if isinstance(example_inputs, dict):
@@ -1487,7 +1522,9 @@ class OnnxModelFromDynamo(OnnxModel):
     ) -> torch.onnx.ONNXProgram:
         if self.copy_before_export:
             # Deepcopy model before export to avoid modification to baseline model.
-            model = copy.deepcopy(model)
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
 
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
@@ -1514,6 +1551,12 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
     def _export(
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
+
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
         onnx_program = torch.onnx.dynamo_export(
@@ -2016,6 +2059,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -2195,7 +2242,7 @@ class BenchmarkRunner:
         )
         return start, end
 
-    def get_fsdp_auto_wrap_policy(self, model_name: str) -> Optional[ModuleWrapPolicy]:
+    def get_fsdp_auto_wrap_policy(self, model_name: str):
         from diffusers.models.transformer_2d import Transformer2DModel
 
         from torch.distributed.fsdp.wrap import (
@@ -2636,6 +2683,21 @@ class BenchmarkRunner:
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
 
+            if self.args.profile_dynamo_cache_lookup:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU]
+                ) as prof:
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+
+                events = list(
+                    filter(
+                        lambda event: "TorchDynamo Cache Lookup" in event.key,
+                        prof.key_averages(),
+                    )
+                )
+                dynamo_cache_lookup_latency = events[0].self_cpu_time_total
+
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
@@ -2653,6 +2715,10 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                if self.args.profile_dynamo_cache_lookup:
+                    experiment_kwargs[
+                        "cache_lookup_latency"
+                    ] = dynamo_cache_lookup_latency
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -2952,9 +3018,10 @@ def parse_args(args=None):
     """,
     )
     parser.add_argument(
-        "--no-optimize-ddp",
-        action="store_true",
-        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+        "--optimize-ddp-mode",
+        type=str,
+        default="ddp_optimizer",
+        help="Specify the DDP optimization mode -- the value of torch._dynamo.config.optimize_ddp.",
     )
     parser.add_argument(
         "--distributed-master-port",
@@ -3156,6 +3223,13 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+    )
+
+    parser.add_argument(
+        "--profile_dynamo_cache_lookup",
+        "--profile-dynamo-cache-lookup",
+        action="store_true",
+        help="profiles TorchDynamo cache lookup",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3404,11 +3478,7 @@ def run(runner, args, original_dir=None):
         )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
-        if args.no_optimize_ddp:
-            torch._dynamo.config.optimize_ddp = False
-        else:
-            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
-            torch._dynamo.config.optimize_ddp = True
+        torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
         if args.only == "dlrm":
             log.error(
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
@@ -3444,6 +3514,9 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "sam_fast",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -3541,6 +3614,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()

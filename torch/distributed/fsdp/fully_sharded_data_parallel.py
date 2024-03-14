@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import copy
 import functools
@@ -245,6 +247,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         the all-reduce times over the replication process group for some
         cluster setups.
 
+    .. warning::
+        FSDP does not work with double backwards due to how it registers
+        backward hooks.
+
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
@@ -470,7 +476,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "ignored_states": self._ignored_params,
                 "device_mesh": device_mesh,
             }
-            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            if sharding_strategy in HYBRID_SHARDING_STRATEGIES and device_mesh is None:
                 # Share root process groups with children to maintain
                 # the invariant that all FSDP modules will have the same
                 # process groups.
@@ -1168,7 +1174,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
         for grad in grads:
-            grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
+            grad.mul_(clip_coef_clamped.to(grad.device, grad.dtype))
         # Use the "largest" dtype by type promotion semantics to use the same
         # dtype as if we did not force local norm computation to be in FP32
         if len(grads) == 0:
@@ -1806,7 +1812,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 

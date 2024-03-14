@@ -1,6 +1,7 @@
+# mypy: ignore-errors
+
 import functools
 import itertools
-import math
 import unittest
 from copy import deepcopy
 from enum import Enum
@@ -107,6 +108,8 @@ class OptimizerInfo:
         supports_sparse_on: Tuple[str] = (),
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
+        # the optim supports complex parameters
+        supports_complex: bool = True,
         # whether the optimizer.step() function requires a closure to be passed
         step_requires_closure: bool = False,
         # whether the optimizer supports per-param options with parameter groups
@@ -122,6 +125,7 @@ class OptimizerInfo:
         self.supported_impls = supported_impls
         self.supports_sparse_on = supports_sparse_on
         self.only_supports_sparse_grads = only_supports_sparse_grads
+        self.supports_complex = supports_complex
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
         self.supports_multiple_devices = supports_multiple_devices
@@ -261,23 +265,21 @@ def get_error_inputs_for_all_optims(device, dtype):
 # global-cliquey flags to individual tests and fully expect tests to edit OptimizerInput.kwargs.
 
 
-def optim_inputs_func_adadelta(device=None):
+def optim_inputs_func_adadelta(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
-            params=None, kwargs={"lr": 0.01}, desc="non-default lr"
-        ),  # TODO: Move out to testing in param_group?
-        OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "maximize": True},
+            kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
-        ),  # TODO: Move out to testing in param_group?
+        ),
     ]
 
 
@@ -298,25 +300,26 @@ def optim_error_inputs_func_adadelta(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_adagrad(device=None):
+def optim_inputs_func_adagrad(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "maximize": True},
+            kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
+        OptimizerInput(params=None, kwargs={"lr": 0.1}, desc="non-default lr"),
         OptimizerInput(
             params=None,
-            kwargs={"initial_accumulator_value": 0.1, "weight_decay": 0.9},
+            kwargs={"initial_accumulator_value": 0.1, "weight_decay": 0.1},
             desc="initial_accumulator_value",
         ),
         OptimizerInput(
             params=None,
-            kwargs={"lr": 0.1, "lr_decay": 0.5, "weight_decay": 0.9},
+            kwargs={"lr": 0.1, "lr_decay": 0.5, "weight_decay": 0.1},
             desc="lr_decay",
         ),  # TODO: Move out to testing in param_group?
     ]
@@ -341,12 +344,12 @@ def optim_error_inputs_func_adagrad(device, dtype):
 
 # TODO: consider tensor LR! See multi_tensor_optimizer_configs in test_optim.py --> tensor LR should work
 # with all implementation code paths...
-def optim_inputs_func_adam(device=None):
+def optim_inputs_func_adam(device):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "amsgrad": True, "capturable": True},
+            kwargs={"weight_decay": 0.1, "amsgrad": True, "capturable": True},
             desc="capturable, amsgrad",
         ),
         OptimizerInput(
@@ -360,17 +363,17 @@ def optim_inputs_func_adam(device=None):
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "maximize": True},
+            kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9, "amsgrad": True}, desc="amsgrad"
+            params=None, kwargs={"weight_decay": 0.1, "amsgrad": True}, desc="amsgrad"
         ),
-    ] + (cuda_supported_configs if str(device) == "cuda" else [])
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_adam(device, dtype):
@@ -405,7 +408,7 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
             ),
         ]
-    if str(device) == "cuda":
+    if "cuda" in str(device):
         sample_tensor = torch.empty((), device=device, dtype=dtype)
         error_inputs += [
             ErrorOptimizerInput(
@@ -430,7 +433,7 @@ def optim_error_inputs_func_adam(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_adamax(device=None):
+def optim_inputs_func_adamax(device):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -452,16 +455,16 @@ def optim_inputs_func_adamax(device=None):
 
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
-        OptimizerInput(params=None, kwargs={"lr": 0.001}, desc="non-default lr"),
+        OptimizerInput(params=None, kwargs={"lr": 0.1}, desc="non-default lr"),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "maximize": True},
+            kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if str(device) == "cuda" else [])
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
@@ -481,28 +484,47 @@ def optim_error_inputs_func_adamax(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_adamw(device=None):
-    return optim_inputs_func_adam(device=device)
+def optim_inputs_func_adamw(device):
+    return optim_inputs_func_adam(device)
 
 
 def optim_error_inputs_func_adamw(device, dtype):
     return optim_error_inputs_func_adam(device, dtype)
 
 
-def optim_inputs_func_asgd(device=None):
+def optim_inputs_func_asgd(device):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True, "capturable": True},
+            desc="maximize, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "capturable": True},
+            desc="weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True, "capturable": True},
+            desc="maximize, weight_decay, capturable",
+        ),
+    ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"t0": 100}, desc="t0"),
+        OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize, nonzero weight_decay",
         ),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_asgd(device, dtype):
@@ -522,12 +544,12 @@ def optim_error_inputs_func_asgd(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_lbfgs(device=None):
+def optim_inputs_func_lbfgs(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
-            params=None, kwargs={"tolerance_grad": math.inf}, desc="tolerance_grad"
+            params=None, kwargs={"tolerance_grad": 1e-6}, desc="tolerance_grad"
         ),
         OptimizerInput(
             params=None,
@@ -538,13 +560,29 @@ def optim_inputs_func_lbfgs(device=None):
 
 
 def optim_error_inputs_func_lbfgs(device, dtype):
-    return get_error_inputs_for_all_optims(device, dtype)
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    return error_inputs
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
-def optim_inputs_func_nadam(device=None):
+def optim_inputs_func_nadam(device):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "momentum_decay": 6e-3, "capturable": True},
+            desc="weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "weight_decay": 0.9,
+                "momentum_decay": 6e-3,
+                "decoupled_weight_decay": True,
+                "capturable": True,
+            },
+            desc="decoupled_weight_decay, capturable",
+        ),
     ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
@@ -556,19 +594,19 @@ def optim_inputs_func_nadam(device=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "momentum_decay": 6e-3},
+            kwargs={"weight_decay": 0.1, "momentum_decay": 6e-3},
             desc="weight_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={
-                "weight_decay": 0.9,
+                "weight_decay": 0.1,
                 "momentum_decay": 6e-3,
                 "decoupled_weight_decay": True,
             },
             desc="decoupled_weight_decay",
         ),
-    ] + (cuda_supported_configs if str(device) == "cuda" else [])
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_nadam(device, dtype):
@@ -599,19 +637,39 @@ def optim_error_inputs_func_nadam(device, dtype):
 
 # Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_radam(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.1,
+            },
+            desc="capturable, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.1,
+                "decoupled_weight_decay": True,
+            },
+            desc="capturable, weight_decay, decoupled_weight_decay",
+        ),
+    ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-3}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"eps": 1e-6}, desc="non-default eps"),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "decoupled_weight_decay": True},
+            kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
@@ -640,27 +698,27 @@ def optim_error_inputs_func_radam(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_rmsprop(device=None):
+def optim_inputs_func_rmsprop(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 1e-3}, desc="non-default lr"),
         OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
+            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "centered": True},
+            kwargs={"weight_decay": 0.1, "centered": True},
             desc="centered",
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.9, "centered": True, "momentum": 0.1},
+            kwargs={"weight_decay": 0.1, "centered": True, "momentum": 0.1},
             desc="momentum",
         ),
         OptimizerInput(
             params=None,
             kwargs={
-                "weight_decay": 0.9,
+                "weight_decay": 0.1,
                 "centered": True,
                 "momentum": 0.1,
                 "maximize": True,
@@ -687,7 +745,7 @@ def optim_error_inputs_func_rmsprop(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_rprop(device=None):
+def optim_inputs_func_rprop(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-4}, desc="non-default lr"),
@@ -720,31 +778,29 @@ def optim_error_inputs_func_rprop(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_sgd(device=None):
+def optim_inputs_func_sgd(device):
     return [
-        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="default"),
-        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="Tensor lr"),
-        OptimizerInput(
-            params=None, kwargs={"lr": 1e-2, "momentum": 0.9}, desc="momentum"
-        ),
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="non-default lr"),
+        OptimizerInput(params=None, kwargs={"momentum": 0.9}, desc="momentum"),
         OptimizerInput(
             params=None,
-            kwargs={"lr": 1e-2, "momentum": 0.9, "dampening": 0.5},
+            kwargs={"momentum": 0.9, "dampening": 0.5},
             desc="dampening",
         ),
         OptimizerInput(
             params=None,
-            kwargs={"lr": 1e-2, "momentum": 0.9, "weight_decay": 0.9},
+            kwargs={"momentum": 0.9, "weight_decay": 0.1},
             desc="non-zero weight_decay",
         ),
         OptimizerInput(
             params=None,
-            kwargs={"lr": 1e-2, "momentum": 0.9, "nesterov": True, "weight_decay": 0.9},
+            kwargs={"momentum": 0.9, "nesterov": True, "weight_decay": 0.1},
             desc="nesterov",
         ),
         OptimizerInput(
             params=None,
-            kwargs={"lr": 1e-2, "weight_decay": 0.9, "maximize": True},
+            kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
     ]
@@ -767,7 +823,7 @@ def optim_error_inputs_func_sgd(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_sparseadam(device=None):
+def optim_inputs_func_sparseadam(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(
@@ -831,8 +887,25 @@ def optim_error_inputs_func_sparseadam(device, dtype):
                 error_type=ValueError,
                 error_regex="SparseAdam requires dense parameter tensors",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
+                    kwargs=dict(),
+                    desc="complex not supported",
+                ),
+                error_type=ValueError,
+                error_regex="SparseAdam does not support complex parameters",
+            ),
         ]
     return error_inputs
+
+
+def _get_device_type(device: Union[str, torch.device]) -> str:
+    # Returns the device type as a string, e.g., "cpu" or "cuda"
+    if isinstance(device, torch.device):
+        device = str(device.type)
+    assert isinstance(device, str)
+    return device.split(":")[0]
 
 
 def _get_optim_inputs_including_global_cliquey_kwargs(
@@ -853,14 +926,20 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
         x in ["foreach", "fused", "differentiable"] for x in skip
     ), "skip must be a subset of ['foreach', 'fused', 'differentiable']"
 
-    optim_inputs = optim_info.optim_inputs_func(device=device)
+    optim_inputs = optim_info.optim_inputs_func(device)
 
     supported_impls = tuple(
         x
         for x in optim_info.supported_impls
         if x not in skip
-        and (str(device) in _get_fused_kernels_supported_devices() or x != "fused")
-        and (str(device) in _get_foreach_kernels_supported_devices() or x != "foreach")
+        and (
+            _get_device_type(device) in _get_fused_kernels_supported_devices()
+            or x != "fused"
+        )
+        and (
+            _get_device_type(device) in _get_foreach_kernels_supported_devices()
+            or x != "foreach"
+        )
     )
 
     all_optim_inputs = []
@@ -899,6 +978,20 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
                 "TestOptimRenewed",
@@ -920,7 +1013,14 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -939,6 +1039,24 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            # Note on tolerances:
+            # test_correctness_Adadelta_cuda_float32
+            # Mismatched elements: 10 / 100 (10.0%)
+            # Greatest absolute difference: 4.838220775127411e-05 at index (7, 4) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.007270356640219688 at index (7, 2) (up to 1e-05 allowed)
+            # This is due to floating point ordering error + usage of sqrt
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(
+                            rtol=5.5e-4,
+                            atol=5e-5,
+                        )
+                    }
+                ),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -948,6 +1066,26 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115607"
@@ -971,7 +1109,14 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -991,6 +1136,26 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1014,7 +1179,14 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1034,6 +1206,31 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
+                "TestOptimRenewed",
+                "test_complex",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115607"
@@ -1056,13 +1253,20 @@ optim_db: List[OptimizerInfo] = [
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
                 "TestOptimRenewed",
                 "test_foreach_large_tensor",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1074,6 +1278,33 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo("cpu fails due to #115607"),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "capturable path no longer called after hitting cache limit, see #121178"
+                ),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "capturable path no longer called after hitting cache limit, see #121178"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "capturable path no longer called after hitting cache limit, see #121178"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1082,6 +1313,26 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1105,7 +1356,14 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1125,6 +1383,20 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "See discrepancy in https://github.com/pytorch/pytorch/issues/115607"
@@ -1147,6 +1419,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_set_default_dtype_works_with_foreach",
             ),
             DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
                 toleranceOverride(
                     {
                         torch.float32: tol(atol=1.5e-5, rtol=1e-5),
@@ -1157,7 +1436,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1201,6 +1480,18 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_groups_weight_decay",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                unittest.skip("LBFGS doesn't support multidevice"),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1209,6 +1500,26 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1225,7 +1536,14 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1269,6 +1587,20 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
@@ -1283,10 +1615,49 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "fails, https://github.com/pytorch/pytorch/issues/117165"
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        # previously atol=1e-7, rtol=1e-7
+                        torch.float64: tol(atol=1.5e-7, rtol=1.1e-7)
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cpu",
             ),
         ),
     ),
@@ -1296,6 +1667,26 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
@@ -1318,6 +1709,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_set_default_dtype_works_with_foreach",
             ),
             DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
                 toleranceOverride(
                     {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
                         torch.float32: tol(atol=5e-04, rtol=0.01),
@@ -1329,7 +1727,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1357,6 +1755,26 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
+                skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
@@ -1379,7 +1797,14 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1409,6 +1834,20 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
@@ -1420,6 +1859,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1441,7 +1887,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
+                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1492,6 +1938,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
         supported_impls=(),
         only_supports_sparse_grads=True,
+        supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
@@ -1524,6 +1971,16 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
                 "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
@@ -1534,3 +1991,43 @@ optim_db: List[OptimizerInfo] = [
         ),
     ),
 ]
+
+
+class TensorTracker:
+    """
+    A utility to track tensor clones in a list, with the expectation of popping them later (in
+    order) to make fair comparisons between two multi-step computation. The intended use case is
+    usually when comparing two supposed equal computations, such as an optimizer step that each
+    individually consists of multiple steps, where numerical deviation could multiply.
+
+    The goal is to be able to compare and align numbers at every milestone so as to minimize
+    numerical discrepancies, and so when the test fails, it is likely a real problem.
+    """
+
+    def __init__(self):
+        self.tensors = []
+
+    def add(self, tensor):
+        """
+        Add a clone().detach()'d version of the tensor
+        """
+        self.tensors.append(tensor.clone().detach())
+
+    # pops from beginning, like a queue and not a stack!
+    def pop_check_set(self, tensor_to_set, testcase):
+        """
+        Pop the first element in the tensor tracker, assert equality between the popped tensor and
+        the input tensor, and then set the input tensor to have the same values as the popped tensor
+        (with copy_).
+        """
+        testcase.assertGreater(len(self.tensors), 0, "no tensors to pop")
+        ref = self.tensors.pop(0)
+
+        testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
+        testcase.assertEqual(tensor_to_set, ref)
+
+        with torch.no_grad():
+            tensor_to_set.copy_(ref)
+
+    def all_popped(self):
+        return len(self.tensors) == 0

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import contextlib
 import functools
@@ -10,10 +12,17 @@ import threading
 import types
 from typing import Dict, List
 
+from ..bytecode_transformation import create_call_function
+
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec
+except ImportError:
+    PyTreeSpec = type(None)
 
 import torch._dynamo.config
 
@@ -61,7 +70,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __repr__(self):
+    def __str__(self):
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -102,10 +111,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
+            if source is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return variables.UserFunctionVariable(func, source=source)
+                return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
@@ -285,9 +294,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             issubclass(type(self.value), type)
-            and hasattr(self.value, "__enter__")
-            and hasattr(self.value, "__exit__")
+            and hasattr(
+                self.value, "__enter__"
+            )  # TODO(voz): These can invoke user code!
+            and hasattr(
+                self.value, "__exit__"
+            )  # TODO(voz): These can invoke user code!
             and check_constant_args(args, kwargs)
+            and self.value.__init__ == object.__init__
             and len(kwargs) == 0  # TODO(ybliang): support kwargs
         ):
             unwrapped_args = [x.as_python_constant() for x in args]
@@ -295,9 +309,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unwrapped_args,
                 cm_obj=self.value(*unwrapped_args),
             )
+
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
-            field_defaults = self.value._field_defaults
+            # check if this a quasi-namedtuple or a real one
+            if self.value.__module__ == "torch.return_types":
+                # create pseudo-defaults from values of the quasi-namedtuple
+                field_defaults = dict(zip(fields, args[0].items))
+            else:
+                field_defaults = self.value._field_defaults
 
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -430,6 +450,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def guard_as_python_constant(self):
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            return self.value
+        return super().guard_as_python_constant()
+
     def torch_function_check(self):
         assert has_torch_function(
             self
@@ -502,7 +528,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
-                install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -514,7 +540,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
-                install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
@@ -552,7 +578,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             if method is list.__len__ and self.source and not (args or kwargs):
-                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return ConstantVariable(len(self.value))
 
         return super().call_method(tx, name, args, kwargs)
@@ -564,7 +590,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and self._maybe_get_baseclass_method("__len__") is list.__len__
             and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
         ):
-            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return [
                 variables.LazyVariableTracker.create(
                     self.value[k],
@@ -594,10 +620,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.random_calls)
+            random_call_index = len(tx.output.random_calls)
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
-            tx.random_calls.append((self.value, args, kwargs))
+            tx.output.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
@@ -606,8 +632,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj = self.value.__self__
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
-                and trace_rules.lookup(obj.__class__)
-                == variables.TorchCtxManagerClassVariable
+                and variables.TorchCtxManagerClassVariable.is_matching_cls(
+                    obj.__class__
+                )
                 and not (args or kwargs)
             ):
                 return variables.TorchCtxManagerClassVariable(
@@ -675,7 +702,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, torch.nn.Module)
+            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
@@ -710,6 +737,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
+            # Rewrite the source being explicit about reading it statically.
+            if self.source:
+                source = AttrSource(self.source, name, get_static=True)
+                source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
@@ -720,12 +751,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
+            if source is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return variables.UserFunctionVariable(func, source=source)
+                return trace_rules.lookup(func)(func)
         elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, source=source)
+            return variables.UserMethodVariable(
+                subobj.__func__, self.var_getattr(tx, "__class__"), source=source
+            )
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
@@ -753,12 +786,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif trace_rules.lookup(func) is not None:
+                elif source is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source
                     )
                 else:
-                    return variables.UserFunctionVariable(func, source=source)
+                    return trace_rules.lookup(func)(func)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -791,6 +824,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and type(value).__module__.startswith("torch.")
             and "torch.optim" not in type(value).__module__
             and not callable(value)
+            and not isinstance(subobj, types.MethodDescriptorType)
         ):
             if not source:
                 assert getattr(
@@ -915,6 +949,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 
 class RemovableHandleVariable(VariableTracker):
+    REMOVED = -1
+
     def __init__(
         self,
         mutable_local=None,
@@ -928,16 +964,17 @@ class RemovableHandleVariable(VariableTracker):
 
     def call_method(self, tx, method_name, args, kwargs):
         if method_name == "remove":
-            tx.output.side_effects.remove_hook(self.idx)
+            if self.idx != self.REMOVED:
+                tx.output.side_effects.remove_hook(self.idx)
+                self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    # This reconstruct is actually pretty unique - it does not construct the object from scratch.
-    # Handles always come from a register_hook call on a tensor, and so, rerunning that for the codegen of a
-    # hook would be incorrect.
-    # Instead, the invariant is that codegen has already produced the handle and stored it at a known name.
     def reconstruct(self, codegen):
-        if self.user_code_variable_name:
-            # It is an invariant that at this point, a STORE_FAST was executed for this name.
-            return [codegen.create_load(self.user_code_variable_name)]
-        return super().reconstruct(codegen)
+        if self.idx == self.REMOVED:
+            # Hook has already been removed, return a dummy handle
+            codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
+            codegen.extend_output(create_call_function(0, True))
+            return
+        # unreachable due to codegen.add_cache() when the hook is installed
+        super().reconstruct(codegen)

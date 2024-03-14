@@ -94,8 +94,8 @@ dtensor_fails = {
     # get full support with varying sharding specs
     xfail("__getitem__"),
     xfail("__rsub__"),
+    xfail("_chunk_cat"),
     xfail("_native_batch_norm_legit"),
-    xfail("_softmax_backward_data"),
     xfail("_upsample_bilinear2d_aa"),
     xfail("addbmm"),
     xfail("addmv"),
@@ -117,7 +117,6 @@ dtensor_fails = {
     xfail("block_diag"),
     xfail("broadcast_shapes"),
     xfail("cauchy"),
-    xfail("cartesian_prod"),
     xfail("cdist"),
     xfail("cholesky"),
     xfail("cholesky_inverse"),
@@ -240,7 +239,6 @@ dtensor_fails = {
     xfail("linalg.tensorsolve"),
     xfail("linalg.vander"),
     xfail("linalg.vecdot"),
-    xfail("linalg.vector_norm"),
     xfail("linspace"),
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
@@ -263,7 +261,6 @@ dtensor_fails = {
     xfail("masked.cumsum"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
-    xfail("masked.norm"),
     xfail("matrix_exp"),
     xfail("max", "binary"),
     xfail("max", "reduction_with_dim"),
@@ -311,7 +308,6 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose2d"),
     xfail("nn.functional.conv_transpose3d"),
     xfail("nn.functional.cosine_similarity"),
-    xfail("nn.functional.cross_entropy"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.dropout"),
     xfail("nn.functional.dropout2d"),
@@ -356,7 +352,6 @@ dtensor_fails = {
     xfail("nn.functional.multi_head_attention_forward"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.nll_loss"),
     xfail("nn.functional.normalize"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.pad", "reflect"),
@@ -371,7 +366,6 @@ dtensor_fails = {
     xfail("nn.functional.relu6"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.selu"),
-    xfail("nn.functional.silu"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.softplus"),
@@ -383,9 +377,6 @@ dtensor_fails = {
     xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     xfail("nonzero"),
-    xfail("norm"),
-    xfail("norm", "fro"),
-    xfail("norm", "inf"),
     xfail("norm", "nuc"),
     xfail("normal"),
     xfail("normal", "number_mean"),
@@ -471,7 +462,6 @@ dtensor_fails = {
     xfail("svd"),
     xfail("svd_lowrank"),
     xfail("t"),
-    xfail("take_along_dim"),
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),
@@ -704,7 +694,4 @@ instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 
 
 if __name__ == "__main__":
-    # NB: CPU dtensor ops test frequently timeout https://github.com/pytorch/pytorch/issues/98816
-    # so running it only on CUDA
-    if torch.cuda.is_available():
-        run_tests()
+    run_tests()

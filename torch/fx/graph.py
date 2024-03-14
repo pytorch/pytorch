@@ -219,6 +219,8 @@ dtype_abbrs = {
     torch.int64: 'i64',
     torch.bool: 'b8',
     torch.uint8: 'u8',
+    torch.uint32: 'u32',
+    torch.uint64: 'u64',
 }
 
 @compatibility(is_backward_compatible=True)
@@ -267,12 +269,20 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        root, direction = self.graph._root, self.direction
-        cur = getattr(root, direction)
-        while cur is not root:
-            if not cur._erased:
-                yield cur
-            cur = getattr(cur, direction)
+        root = self.graph._root
+        if self.direction == "_next":
+            cur = root._next
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._next
+        else:
+            assert self.direction == "_prev"
+            cur = root._prev
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._prev
 
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
@@ -370,10 +380,18 @@ class CodeGen:
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
+        from torch.utils._triton import has_triton
+
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
+
+        if has_triton():
+            import triton
+            globals_[triton.__name__] = triton
+            from torch.utils._triton import patch_triton_dtype_repr
+            patch_triton_dtype_repr()
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -945,6 +963,8 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase.graph != self:
+            raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
