@@ -86,6 +86,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -102,7 +103,6 @@ from .variables.misc import (
     InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
@@ -341,6 +341,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
                 return
 
+            if isinstance(value, SymNodeVariable):
+                # if the assertion is normal shape expression.
+                # just install guard and bail out.
+                sym_expr = value.sym_num
+                if not isinstance(sym_expr, torch.SymBool):
+                    sym_expr = sym_expr != 0
+
+                result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
+                if not result:
+                    raise unimplemented(
+                        "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
+                    )
+                self.jump(inst)
+                return
+
             scalar_to_tensor_proxy = self.output.create_proxy(
                 "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
             )
@@ -431,6 +446,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
+                push and self.push(value)
+                self.jump(inst)
+        elif isinstance(value, variables.BackwardHookVariable):
+            if truth_fn(True):
                 push and self.push(value)
                 self.jump(inst)
         else:
@@ -532,12 +551,10 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                self.output.add_output_instructions(
-                    [
-                        *b.with_context.reconstruct(cg),
-                        *b.resume_fn().try_except(cg.code_options, cleanup),
-                    ]
-                )
+                cg(b.with_context)
+                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+            self.output.add_output_instructions(cg.get_instructions())
+            del cg
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -2065,7 +2082,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
         )
 
-        self._throw_if_in_vmap()
+        self._throw_if_in_functorch()
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
@@ -2091,6 +2108,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             }
+
+            self._throw_if_unsupported_optimizer_step()
+
+            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
@@ -2103,20 +2124,28 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
 
-    def _throw_if_in_vmap(self):
+    def _throw_if_unsupported_optimizer_step(self):
+        from .variables import OptimizerVariable
+
+        OptimizerVariable.throw_if_unsupported_step(
+            self.symbolic_locals, self.code_options["co_name"]
+        )
+
+    def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
         eager = torch._dynamo.lookup_backend("eager")
         compiler_fn = inspect.getattr_static(
             self.output.compiler_fn, "compiler_fn", self.output.compiler_fn
         )
         ci = torch._C._functorch.peek_interpreter_stack()
-        if (
-            ci is not None
-            and ci.key() == torch._C._functorch.TransformType.Vmap
-            and compiler_fn is not eager
-        ):
-            # if it reaches here, it means Dynamo failed to inline vmap
-            msg = "torch.vmap(fn) requires the function to be inlined by dynamo"
+        forbidden_keys = (
+            torch._C._functorch.TransformType.Vmap,
+            torch._C._functorch.TransformType.Grad,
+        )
+        if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
+            # if it reaches here, it means Dynamo failed to inline a functorch function
+            name = ci.key().name.lower()
+            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
             unimplemented(msg)
 
     def get_example_value(self, source: Source):
@@ -2301,7 +2330,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
-        if isinstance(func, SkipFilesVariable):
+        if isinstance(func, SkipFunctionVariable):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,

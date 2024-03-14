@@ -444,9 +444,12 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) 
 }
 
 inline at::vec::Vectorized<float> to_float_mask(int src) {
-  float mask;
-  *(uint32_t*)&mask = src ? 0xFFFFFFFF : 0;
-  return at::vec::Vectorized<float>(mask);
+  union {
+      float fmask;
+      uint32_t imask;
+  } mask;
+  mask.imask = src ? 0xFFFFFFFF : 0;
+  return at::vec::Vectorized<float>(mask.fmask);
 }
 
 inline bool all_zero(at::vec::Vectorized<float> src) {

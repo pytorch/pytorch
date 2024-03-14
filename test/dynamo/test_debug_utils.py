@@ -11,6 +11,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
+f32 = torch.float32
+i64 = torch.int64
+i32 = torch.int32
+
 
 class TestDebugUtils(TestCase):
     def test_cast_model_to_fp64_dtype_args(self):
@@ -58,10 +62,6 @@ def forward(self, x_1):
     @requires_cuda
     def test_aot_graph_parser(self):
         from torch import device
-
-        f32 = torch.float32
-        i64 = torch.int64
-        i32 = torch.int32
 
         def forward(
             self,
@@ -148,6 +148,28 @@ def forward(self, x_1):
         kwargs = aot_graph_input_parser(forward, device="cuda")
         # runs successfully
         forward(**kwargs)
+
+    @requires_cuda
+    def test_sym_aot_graph_parser(self):
+        def forward(
+            self,
+            primals_1: "f32[1001, 6]",  # noqa: F821
+            primals_2: "f32[s0]",  # noqa: F821
+            primals_3: "Sym(s0)",  # noqa: F821,
+            primals_4: "f32[s1]",  # noqa: F821,
+            primals_5: "Sym(s1)",  # noqa: F821,
+        ):
+            _tensor_constant0: "i64[4190]" = self._tensor_constant0
+
+        kwargs = aot_graph_input_parser(
+            forward, device="cuda", sym_shapes={"s0": 10}, default_sym_shape=5
+        )
+
+        self.assertEqual(list(kwargs["primals_2"].shape), [10])
+        self.assertEqual(kwargs["primals_3"], 10)
+
+        self.assertEqual(list(kwargs["primals_4"].shape), [5])
+        self.assertEqual(kwargs["primals_5"], 5)
 
 
 if __name__ == "__main__":

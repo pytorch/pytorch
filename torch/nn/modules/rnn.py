@@ -507,7 +507,11 @@ class RNN(RNNBase):
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+        if len(args) > 3:
+            self.nonlinearity = args[3]
+            args = args[:3] + args[4:]
+        else:
+            self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
