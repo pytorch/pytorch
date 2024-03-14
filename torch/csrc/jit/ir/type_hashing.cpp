@@ -17,7 +17,7 @@ size_t hashType(const Type& type) {
   for (const auto& containedType : type.containedTypes()) {
     hash = at::hash_combine(hash, hashType(*containedType));
   }
-  at::hash_combine(hash, get_hash(type.kind()));
+  hash = at::hash_combine(hash, get_hash(type.kind()));
   return hash;
 }
 } // namespace
