@@ -356,6 +356,50 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_non_strict_source_fn_stack(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                x = x + x
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, weight, bias):
+                x = torch.nn.functional.linear(x, weight, bias)
+                x = torch.nn.functional.relu(x)
+                x = x + x
+                return x
+
+        def compare_graph_nodes(ep_strict, ep_nonstrict, check_func_name: bool = True):
+            for node1, node2 in zip(ep_strict.graph.nodes, ep_nonstrict.graph.nodes):
+                if node1.op != "call_function":
+                    continue
+                # source_fn_stack is an one item list of tuple(func_name, func_descr),
+                # here we test that func_names are the same
+                assert "source_fn_stack" in node1.meta
+                assert "source_fn_stack" in node2.meta
+                if check_func_name:
+                    fn_name1 = node1.meta["source_fn_stack"][0][0]
+                    fn_name2 = node2.meta["source_fn_stack"][0][0]
+                    self.assertTrue(fn_name1 == fn_name2, f"func {fn_name1} != {fn_name2}")
+
+        ep_strict_m1 = torch.export.export(M1(), (torch.randn(3, 3), ), strict=True)
+        ep_nonstrict_m1 = torch.export.export(M1(), (torch.randn(3, 3), ), strict=False)
+        compare_graph_nodes(ep_strict_m1, ep_nonstrict_m1, check_func_name=False)
+
+        ep_strict_m2 = torch.export.export(M2(), (torch.randn(3, 3), torch.rand(3, 3), torch.rand(3, 3)), strict=True)
+        ep_nonstrict_m2 = torch.export.export(M2(), (torch.randn(3, 3), torch.rand(3, 3), torch.rand(3, 3)), strict=False)
+        compare_graph_nodes(ep_strict_m2, ep_nonstrict_m2)
+
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
