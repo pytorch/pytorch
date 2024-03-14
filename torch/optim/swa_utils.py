@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 import warnings
 
 import torch
-from torch import device, Tensor
+from torch import Tensor
 from torch.nn import Module
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
@@ -171,7 +171,7 @@ class AveragedModel(Module):
     def __init__(
         self,
         model: Module,
-        device: Optional[Union[int, device]] = None,
+        device: Optional[Union[int, torch.device]] = None,
         avg_fn: Optional[Callable[[Tensor, Tensor, Tensor], Tensor]] = None,
         multi_avg_fn: Optional[
             Callable[[List[Optional[Tensor]], List[Optional[Tensor]], Tensor],
@@ -233,7 +233,7 @@ class AveragedModel(Module):
 
 
 @torch.no_grad()
-def update_bn(loader: Iterable[Any], model: Module, device: Optional[Union[int, device]] = None):
+def update_bn(loader: Iterable[Any], model: Module, device: Optional[Union[int, torch.device]] = None):
     r"""Updates BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
