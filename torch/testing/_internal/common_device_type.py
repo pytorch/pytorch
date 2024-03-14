@@ -1556,6 +1556,7 @@ def get_all_device_types() -> List[str]:
     device_types = ['cpu']
     if torch.cuda.is_available():
         device_types.append('cuda')
-    if torch.xpu.is_available():
-        device_types.append('xpu')
+    if hasattr(torch, "xpu"):
+        if torch.xpu.is_available():
+            device_types.append('xpu')
     return device_types
