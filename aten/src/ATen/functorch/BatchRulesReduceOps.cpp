@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -123,9 +123,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
-  Tensor self;
-  optional<int64_t> self_bdim;
-  std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
+  auto [self, self_bdim] = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
 
   self = moveBatchDimToFront(self, self_bdim);
 
@@ -509,4 +507,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);
   VMAP_SUPPORT(_is_any_true, _is_any_true_batch_rule);
 }
-}}
+
+} // namespace at::functorch

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List
@@ -222,11 +224,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def __str__(self):
-        return f"{self.__class__.__name__}()"
-
     def __repr__(self):
-        return str(self)
+        return f"{self.__class__.__name__}()"
 
     def python_type(self):
         """
@@ -257,6 +256,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
+
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        try:
+            return self.as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(str(e))
 
     def is_python_constant(self):
         try:
@@ -362,7 +368,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
-        self.user_code_variable_name = tx.output.new_var(name)
         return self
 
     def realize(self) -> "VariableTracker":
@@ -386,13 +391,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-        user_code_variable_name: str = None,
         parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
-        self.user_code_variable_name = user_code_variable_name
         self.parents_tracker = parents_tracker
 
     def __post_init__(self, *args, **kwargs):

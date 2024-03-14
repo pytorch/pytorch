@@ -1,10 +1,14 @@
 import functools
 import itertools
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+
+
+log = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -86,7 +90,11 @@ class ShapeEnvEvent:
 
     # Replay itself, but using shape_env as self.
     def run(self, shape_env=None) -> Any:
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes
+        from torch.fx.experimental.symbolic_shapes import (
+            is_symbolic,
+            ShapeEnv,
+            SymTypes,
+        )
 
         # Special handling for the constructor event.
         if self.f is ShapeEnv:
@@ -105,7 +113,7 @@ class ShapeEnvEvent:
         # Replace any argument of type SymTypes by a new instance,
         # replacing its ShapeEnv reference.
         args, kwargs = pytree.tree_map_only(
-            SymTypes,
+            lambda x: isinstance(x, SymTypes) and is_symbolic(x),
             lambda a: type(a)(a.node.with_shape_env(shape_env)),
             (args, kwargs),
         )
@@ -115,6 +123,7 @@ class ShapeEnvEvent:
             if not isinstance(x, torch.fx.Node):
                 # Don't do anything to x if it's not an FX node.
                 return x
+
             # If, at some point, we created an FX node, it means that translation validation is on.
             # It also means we are building an FX graph for symbolic shapes at shape_env.graph, and
             # we are tracking node names at shape_env.name_to_node.
@@ -155,7 +164,7 @@ class ShapeEnvEvent:
         return f"event: {name} ({self.args}, {self.kwargs})"
 
     def is_create_fx_call_function(self) -> bool:
-        return self.name == "create_fx_call_function"
+        return self.name == "_create_fx_call_function"
 
     def is_evaluate_expr(self) -> bool:
         return self.name == "evaluate_expr"
@@ -171,7 +180,7 @@ class ShapeEnvEvent:
 # If we find more than one object of any of the above types, we
 # also check that the ShapeEnv instance is the same for all of them.
 def _extract_shape_env_and_assert_equal(args, kwargs):
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes
+    from torch.fx.experimental.symbolic_shapes import is_symbolic, ShapeEnv, SymTypes
 
     def assert_equal(old: Optional[ShapeEnv], new: ShapeEnv) -> ShapeEnv:
         if old is not None:
@@ -182,7 +191,7 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
     for val in itertools.chain(args, kwargs.values()):
         if isinstance(val, ShapeEnv):
             shape_env = assert_equal(shape_env, val)
-        if isinstance(val, SymTypes):
+        if isinstance(val, SymTypes) and is_symbolic(val):
             shape_env = assert_equal(shape_env, val.node.shape_env)
 
     return shape_env
@@ -236,18 +245,27 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 return fn(*args, **kwargs)
 
             # Otherwise, start recording and call the function.
-            with self.recording():
+            with self._recording():
                 # Take a snapshot of the current tracked_fakes.
                 tracked_fakes = (
-                    self.snapshot_tracked_fakes() if save_tracked_fakes else None
+                    self._snapshot_tracked_fakes() if save_tracked_fakes else None
                 )
                 # Record the event for 'fn'.
                 event = ShapeEnvEvent(
                     fn, list(args), kwargs, tracked_fakes, name=fn.__name__
                 )
-                self.events.append(event)
                 # Play the event on this ShapeEnv.
-                return event.run(self)
+                # NB: It's important to put the event first, because running
+                # the event can trigger internal events that must be ordered
+                # after this event.  However, if an exception happens, we do
+                # NOT want to have the event in the list, so pop it off from
+                # the record if an error happened
+                self.events.append(event)
+                try:
+                    return event.run(self)
+                except Exception:
+                    self.events.pop()
+                    raise
 
         return wrapper
 
@@ -274,7 +292,8 @@ def replay_shape_env_events(events):
             # change after each event is replayed.
             event.run(shape_env)
         except Exception as e:
-            raise RuntimeError(f"failed when running event: {event}") from e
+            log.error("failed when running event: %s", event)
+            raise
 
     return shape_env
 

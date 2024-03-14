@@ -835,7 +835,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
                     type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq) and
-                    maybe_obs_mod.dtype == arg_as_input_target_dtype
+                    maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node

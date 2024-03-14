@@ -25,10 +25,10 @@ C10_EXPORT void storage_copy(
     const c10::Storage& src,
     bool non_blocking) {
   auto dst_options = c10::TensorOptions().device(dst.device()).dtype(at::kByte);
-  auto dst_t = at::empty({0}, {}, dst_options).set_(dst);
+  auto dst_t = at::empty({0}, dst_options).set_(dst);
 
   auto src_options = c10::TensorOptions().device(src.device()).dtype(at::kByte);
-  auto src_t = at::empty({0}, {}, src_options).set_(src);
+  auto src_t = at::empty({0}, src_options).set_(src);
   dst_t.copy_(src_t, non_blocking);
 }
 

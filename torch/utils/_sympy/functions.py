@@ -8,6 +8,12 @@ __all__ = [
 ]
 
 
+def fuzzy_eq(x, y):
+    if None in (x, y):
+        return None
+    return x == y
+
+
 class FloorDiv(sympy.Function):
     """
     We maintain this so that:
@@ -95,7 +101,7 @@ class FloorDiv(sympy.Function):
 
 class ModularIndexing(sympy.Function):
     """
-    ModularIndexing(a, b, c) => (a // b) % c
+    ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
     nargs = (3,)
@@ -147,6 +153,15 @@ class ModularIndexing(sympy.Function):
 
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
+    def _eval_is_nonnegative(self):
+        p, q = self.args[:2]
+        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
+
+    def _eval_is_positive(self):
+        p, q = self.args[:2]
+        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
+
 
 class Where(sympy.Function):
     """
