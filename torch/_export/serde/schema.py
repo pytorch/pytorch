@@ -129,7 +129,7 @@ class TensorArgument:
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @dataclass(repr=False)
 class OptionalTensorArgument(_Union):
-    as_tensor: str
+    as_tensor: TensorArgument
     as_none: Tuple[()]
 
 

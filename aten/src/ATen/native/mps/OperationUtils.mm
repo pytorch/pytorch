@@ -210,6 +210,9 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "float";
     case ScalarType::Half:
       return "half";
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return "bfloat";
     case ScalarType::Int:
       return "int";
     case ScalarType::Long:

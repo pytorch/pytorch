@@ -776,7 +776,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg0_1 = arg1_1 = None
         return ()""",
                 )
 
