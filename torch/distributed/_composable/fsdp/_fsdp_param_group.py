@@ -262,6 +262,8 @@ class FSDPParamGroup:
                 return
         self._to_sharded()
 
+    # Explicitly disable to ensure clean graph break to avoid tracing errors
+    @torch.compiler.disable()
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
