@@ -122,8 +122,7 @@ manual_torch_name_rule_map = {
     "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
-    # https://github.com/pytorch/pytorch/issues/99569
-    "torch.nn.Parameter": SkipFunctionVariable,
+    "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
     # symbol operators implemented in Python
@@ -222,6 +221,7 @@ manual_torch_name_rule_map = {
     "torch.sparse_csc_tensor": SkipFunctionVariable,
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
+    "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
 }
 
 
@@ -1005,7 +1005,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._scatter_out",
         "torch._C._scatter",
         "torch._C._select_conv_backend",
-        "torch._C._select_batch_norm_backend",
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",

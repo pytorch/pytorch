@@ -192,7 +192,6 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
-    "_batch_norm_with_update": {f16, f32, f64},
 }
 
 if not SM80OrLater:
@@ -218,6 +217,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
+    "nn.functional.avg_pool3d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
