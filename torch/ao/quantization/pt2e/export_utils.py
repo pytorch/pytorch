@@ -137,12 +137,16 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_var
     )
     if train_to_eval:
-        match_pattern = get_aten_graph_module_for_pattern(_WrapperModule(bn_train), example_inputs)
+        match_pattern = get_aten_graph_module_for_pattern(
+            _WrapperModule(bn_train), example_inputs
+        )
         replacement_pattern = get_aten_graph_module_for_pattern(
             _WrapperModule(bn_eval), example_inputs
         )
     else:
-        match_pattern = get_aten_graph_module_for_pattern(_WrapperModule(bn_eval), example_inputs)
+        match_pattern = get_aten_graph_module_for_pattern(
+            _WrapperModule(bn_eval), example_inputs
+        )
         replacement_pattern = get_aten_graph_module_for_pattern(
             _WrapperModule(bn_train), example_inputs
         )
