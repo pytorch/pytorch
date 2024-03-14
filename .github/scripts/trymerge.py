@@ -2354,5 +2354,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    o = find_matching_merge_rule(pr = GitHubPR("pytorch", "executorch", 2326), skip_mandatory_checks=True, skip_internal_checks=True)
-    print(o)
+    main()
