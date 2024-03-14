@@ -328,8 +328,12 @@ class FSDPParamGroup:
                 self._reduce_dtype,
                 self.device,
                 self._grad_divide_factors,
-                self._all_reduce_process_group if self._should_all_reduce_grads() else None,
-                self.comm_ctx.all_reduce_stream if self._should_all_reduce_grads() else None,
+                self._all_reduce_process_group
+                if self._should_all_reduce_grads()
+                else None,
+                self.comm_ctx.all_reduce_stream
+                if self._should_all_reduce_grads()
+                else None,
             )
 
     def finalize_backward(self):
