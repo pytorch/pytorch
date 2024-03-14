@@ -236,8 +236,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     ):
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3, foreach=foreach)
-            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3, foreach=foreach)
+            orig_optim = optimizer_class(
+                orig_model.parameters(), lr=1e-3, foreach=foreach
+            )
+            copy_optim = optimizer_class(
+                orig_model.parameters(), lr=1e-3, foreach=foreach
+            )
 
             dist_model = FSDP2(
                 copy.deepcopy(orig_model),
@@ -246,7 +250,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
             if compile_model:
                 dist_model = torch.compile(dist_model)
-            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3, foreach=foreach)
+            dist_optim = optimizer_class(
+                dist_model.parameters(), lr=1e-3, foreach=foreach
+            )
 
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
