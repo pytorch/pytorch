@@ -188,7 +188,7 @@ class FSDP:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                    fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):

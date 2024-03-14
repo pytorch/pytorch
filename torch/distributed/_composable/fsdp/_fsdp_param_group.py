@@ -1,6 +1,6 @@
 import contextlib
 
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -15,7 +15,7 @@ from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
     foreach_all_gather_copy_out,
-    foreach_reduce_scatter_and_all_reduce,
+    foreach_reduce,
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
@@ -54,7 +54,7 @@ class FSDPCommContext:
         # Reduce-scatter stream gives separate execution "thread" for post-
         # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
-        # run the HSDP all-reduces concurrently with all-gather/reduce-scatter
+        # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
         self.all_reduce_stream = torch.cuda.Stream()
@@ -125,8 +125,7 @@ class FSDPParamGroup:
         # Whether to reduce-scatter or all-reduce gradients, respectively
         # (can be set to false to save communication during gradient
         # accumulation); all-reducing without reduce-scatter is disallowed
-        self.reduce_scatter_grads: bool = True
-        # TODO: whether use all_reduce_grads or if isinstance(self.mesh_info, HSDPMeshInfo):
+        self.reduce_grads: bool = True
         self.all_reduce_grads: bool = True
 
         # - CUDA events for stream synchronization
@@ -169,7 +168,10 @@ class FSDPParamGroup:
         if self._reduce_dtype == torch.float32:
             # Use NCCL's AVG op to divide after reduction since it is more
             # performant and fp32 has sufficient precision
-            self._grad_divide_factors: Optional[Tuple[float, float]] = None
+            self._grad_divide_factors: Union[Tuple[None, None], Tuple[float, float]] = (
+                None,
+                None,
+            )
             return
         # For N data parallel workers, each worker computes g_i, and they
         # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
@@ -303,7 +305,7 @@ class FSDPParamGroup:
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
-            if not self.reduce_scatter_grads:
+            if not self.reduce_grads:
                 self.reshard()
                 return
             # Save the autograd-computed gradients before resharding to only
@@ -319,7 +321,7 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with torch.profiler.record_function("FSDP::post_backward_reduce"):
-            self._post_reduce_view_out_event = foreach_reduce_scatter_and_all_reduce(
+            self._post_reduce_view_out_event = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
                 self._reduce_scatter_process_group,
@@ -331,9 +333,7 @@ class FSDPParamGroup:
                 self._all_reduce_process_group
                 if self._should_all_reduce_grads()
                 else None,
-                self.comm_ctx.all_reduce_stream
-                if self._should_all_reduce_grads()
-                else None,
+                self.comm_ctx.all_reduce_stream,
             )
 
     def finalize_backward(self):
