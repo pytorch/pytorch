@@ -357,6 +357,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache = VariableTrackerCache()
+        self.unique_var_id = itertools.count()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
         # used to track nodes that are added between calls of copy_graphstate
@@ -746,8 +747,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
-        for i in itertools.count():
-            var = f"{name}_{i}"
+        # In common case, this will be O(1)
+        while True:
+            var = f"{name}_{next(self.unique_var_id)}"
             if var not in existing:
                 self.code_options["co_varnames"] += (var,)
                 return var
