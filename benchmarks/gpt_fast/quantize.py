@@ -1,3 +1,4 @@
+# flake8: noqa: E266, C417, B950
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
