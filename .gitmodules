@@ -149,3 +149,7 @@
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
+[submodule "composable_kernel_tiled"]
+	path = third_party/composable_kernel_tiled
+	url = https://github.com/ROCm/composable_kernel.git
+	branch = ck_tile/dev
