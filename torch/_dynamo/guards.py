@@ -43,12 +43,13 @@ from torch._guards import (
     GuardSource,
     Source,
 )
+
+from torch._logging import structured
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
     is_symbolic,
     SYMPY_INTERP,
 )
-
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -104,7 +105,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
-    "__numpy_isnan": np.isnan,
+    "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
@@ -382,9 +383,13 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
-        m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
-        assert m, f"invalid hasattr check {guard.name}"
-        base, attr = m.group(1, 2)
+        assert isinstance(
+            guard.originating_source, AttrSource
+        ), f"invalid source {guard.name}"
+        base_source = guard.originating_source.base
+        base = base_source.name()
+        attr = guard.originating_source.member
+
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
         code = None
@@ -468,8 +473,8 @@ class GuardBuilder(GuardBuilderBase):
         # If matching equality against list/tuple, we must also check that
         # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
-            # NB: LIST_LENGTH takes care of the outer __check_type_id test
-            self.LIST_LENGTH(guard)
+            # NB: SEQUENCE_LENGTH takes care of the outer __check_type_id test
+            self.SEQUENCE_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
@@ -482,6 +487,10 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # Code object can not be compared against their string representation
+        # I.e `eval(f"{compile('2+2','','exec')!r}")` raises SyntaxError
+        assert not istype(val, types.CodeType)
+
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking
         # and NaN tests
@@ -490,7 +499,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None), types.CodeType)):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
@@ -502,10 +511,7 @@ class GuardBuilder(GuardBuilderBase):
 
         def setup_guard():
             assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
+            self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
 
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
@@ -535,7 +541,9 @@ class GuardBuilder(GuardBuilderBase):
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def LIST_LENGTH(self, guard):
+    def SEQUENCE_LENGTH(self, guard):
+        # This guard is used to check lenght of PySequence objects like list,
+        # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -548,6 +556,9 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)
+
+    def DICT_LENGTH(self, guard):
+        self.SEQUENCE_LENGTH(guard)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
@@ -664,31 +675,29 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            from sympy import Symbol
+
             source_pairs: List[Tuple[Source, Source]] = []
+            derived_equalities: List[  # type: ignore[type-arg]
+                Tuple[Source, Union[Source, Symbol], Callable]
+            ] = []
+            phantom_symbols: Dict[str, Symbol] = {}
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
-                    source, *other_sources = get_sources(
-                        constraint.t_id, constraint.dim
+                    torch.export.dynamic_shapes._process_equalities(
+                        constraint,
+                        get_sources,
+                        output_graph.shape_env,
+                        source_pairs,
+                        derived_equalities,
+                        phantom_symbols,
                     )
-                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                    # constraints that make src0 "equal" to src1, ..., srcN.
-                    source_pairs.extend(
-                        (source, other_source) for other_source in other_sources
-                    )
-                    if constraint.shared is not None:
-                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                        # constraints that also make src0 "equal" to src1', ..., srcN'.
-                        other_sources = get_sources(
-                            constraint.shared.t_id, constraint.shared.dim
-                        )
-                        source_pairs.extend(
-                            (source, other_source) for other_source in other_sources
-                        )
                 else:
                     log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
+                derived_equalities=derived_equalities,
+                phantom_symbols=list(phantom_symbols.values()),
                 warn_only=False,
             )
         else:
@@ -763,33 +772,34 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_examples.append(value)
                 self.tensor_check_guards.append(guard)
 
-            # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
-            # strict subset of the old.
+            # A frame is valid for reuse with dynamic dimensions if the new
+            # (user-requested) dynamic dimensions are a subset of the old
+            # (already compiled) dynamic dimensions.
             #
-            # The logic here is as follows:
+            # It's a little non-obvious why you'd want this: in particular,
+            # if an already compiled frame matches all of the guards, why
+            # not just use it, why force a recompile?
             #
-            # Every mark_dynamic directive is a user-knows-best command, which can incur a raise at tracing
-            # time if we find guards that run counter to the user directive.
-            # If compiling a frame with explicit dynamic dims X could cause an exception, we MUST NOT skip compiling.
+            # We force it for two reasons:
             #
-            # If the frame is compiled with any marked dynamic indices, let's call that set of indices X.
-            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices,
-            # let's call that set Y.
+            #   - The user *required* us to compile with a new dynamic dimension,
+            #     we should not ignore that and serve up the old, specialized
+            #     frame.  Listen to the user!
             #
-            # When X is a strict subset of Y, the potential new raises introduced during compilation are a strict subset
-            # of the raises we
-            # could have encountered. The frame compiled under Y is safe to reuse with X.
-            # When X is not a strict subset of Y, the non-overlapping new elements of X may cause new raises, and the
-            # frame is no longer fit for reuse.
+            #   - In fact, we are obligated to *raise an error* if we fail to
+            #     make the requested dimension dynamic.  If we don't
+            #     recompile, we can't tell if that dimension can actually be
+            #     made dynamic.
             #
-            # This is the case because any newly introduced mark_dynamic directives have a chance of
-            # raising, failing compilation. Any existing mark_dynamic indices that we lost are safe to lose
-            # as all it means is that we have gotten rid of a user directive which could incur a raise at compile time.
-            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe
-            # to reuse
-            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
-            # compiled with that same
-            # tensor + more onerous user directives.
+            # If the new dynamic dims are a subset of the old, we already know
+            # we can make them dynamic (since we made them dynamic in old).
+            # This is slightly unsound, because maybe your input size is
+            # [s0, s0, s1] and so you can do it dynamic if you say dynamic
+            # dims {0, 1, 2} but you can't if you only do {0, 2} (because now
+            # the second s0 is specialized).  But we're not entirely sure if
+            # this is a good idea anyway lol... (if you want to try removing
+            # this logic, be my guest!  -- ezyang 2024)
+            #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
                 value, is_tensor=True, guard_source=guard.source
@@ -993,17 +1003,6 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
-
-        # Note: right overrides left
-        def combine_scopes(left, right):
-            if left is None:
-                return right
-
-            if right is None:
-                return left
-
-            return {**left, **right}
-
         w_builder = None
 
         def source_ref(source):
@@ -1048,7 +1047,6 @@ class CheckFunctionManager:
 
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
@@ -1058,6 +1056,17 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+
+        # NB - We have to very careful of cleaning up here. Because of the
+        # invalidate function, we can create a weakref finalizer that keeps
+        # `self` alive for very long. Sometimes by mistake, we can run
+        # invalidate for a type/object (check id_ref method) that Python can
+        # leak by design, preventing us from calling the finalizer. In that
+        # case, the `self` will be alive even though the cache entry will be
+        # deleted (check invalidate method), which can cause a memory leak,
+        # e.g., not setting output_graph = None can keep hold of nn_modules.
+        self._weakrefs.clear()
+        self.output_graph = None
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -1069,10 +1078,23 @@ class CheckFunctionManager:
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___check_global_state()"]
         verbose_code_parts = code_parts[:]
+        structured_guard_fns = []
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
             guards_log.debug("%s", verbose_code_part)
+
+            structured_guard_fns.append(
+                lambda: {
+                    "code": code_part,
+                    "stack": structured.from_traceback(guard.stack.summary())
+                    if guard.stack
+                    else None,
+                    "user_stack": structured.from_traceback(guard.user_stack)
+                    if guard.user_stack
+                    else None,
+                }
+            )
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
@@ -1168,6 +1190,11 @@ class CheckFunctionManager:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
 
+        # OK, all done generating guards
+        torch._logging.trace_structured(
+            "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
+        )
+
         global_state = convert_frame.initial_global_state
         if global_state is None:
             # we should only hit this case in NopTests()
@@ -1195,6 +1222,13 @@ class CheckFunctionManager:
         # guard_fn.__globals__ becomes equal to builder.scope. This causes
         # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
         globals_for_guard_fn = {"G": builder.scope["G"]}
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton
+
+            globals_for_guard_fn[triton.__name__] = triton
+
         try:
             exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
@@ -1469,7 +1503,10 @@ def install_guard(*guards, skip=0):
     """
     from torch._guards import TracingContext
 
+    collect_debug_stack = guards_log.isEnabledFor(
+        logging.DEBUG
+    ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
-        add(guard, skip=skip + 1)
+        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)

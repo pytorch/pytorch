@@ -24,7 +24,6 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 
 namespace at {
@@ -289,7 +288,7 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
   // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
@@ -320,6 +319,8 @@ class TORCH_API Context {
 
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
+  bool allowFP16ReductionCPU() const;
+  void setAllowFP16ReductionCPU(bool);
 
  private:
   void initCUDAIfNeeded(c10::DeviceType p) {
@@ -378,6 +379,7 @@ class TORCH_API Context {
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
+  bool allow_fp16_reduction_cpu = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -511,6 +513,19 @@ static inline void manual_seed(uint64_t seed) {
     }
   }
 
+  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
+  if (hasXPU() && xpu_num_gpus) {
+    for (const auto i : c10::irange(xpu_num_gpus)) {
+      auto xpu_gen = globalContext().defaultGenerator(
+          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
+        xpu_gen.set_current_seed(seed);
+      }
+    }
+  }
+
   if (hasMPS()) {
     auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
     // See Note [Acquire lock when using random generators]
@@ -536,15 +551,10 @@ struct TORCH_API NoTF32Guard {
   bool changed = false;
 };
 
-#ifdef USE_ROCM
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
-
- private:
-  static thread_local bool is_backward_pass_;
 };
-#endif
 
 } // namespace at

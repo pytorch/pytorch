@@ -201,7 +201,7 @@ def scaled_dot_product_attention_strategy(
         assert len(spec_list) == 6
         input_expected_specs = spec_list[3:]
         output_specs: List[Optional[DTensorSpec]] = list(spec_list[:3])
-        # fix up ouput_specs and fill in None for the int and empty tensor return values
+        # fix up output_specs and fill in None for the int and empty tensor return values
         for i in range(2, 8):
             output_specs.insert(i, None)
         if all(is_tensor_shardable(qkv_shape, spec) for spec in input_expected_specs):

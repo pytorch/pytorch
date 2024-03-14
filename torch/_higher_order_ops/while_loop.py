@@ -96,7 +96,7 @@ def while_loop(cond_fn, body_fn, operands):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return while_loop_op(cond_fn, body_fn, operands)
 
     def _validate_input(cond_fn, body_fn, operands):
@@ -209,17 +209,22 @@ def while_loop_func(ctx, cond_fn, body_fn, operands):
     with ctx.redispatch_to_next() as m:
         functional_cond_fn = ctx.functionalize(cond_fn)
         functional_body_fn = ctx.functionalize(body_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
             (functional_cond_fn, "cond_fn"),
             (functional_body_fn, "body_fn"),
         ]:
-            if _has_potential_branch_input_mutation(fn, unwrapped_operands):
+            if _has_potential_branch_input_mutation(
+                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be modifying the input!"
                 )
 
         for fn in [functional_cond_fn, functional_body_fn]:
-            if _has_potential_branch_input_alias(fn, unwrapped_operands):
+            if _has_potential_branch_input_alias(
+                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be aliasing the input!"
                 )
