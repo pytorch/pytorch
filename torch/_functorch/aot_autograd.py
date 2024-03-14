@@ -1103,7 +1103,8 @@ https://github.com/pytorch/pytorch/issues/101192
         for i, tensor_name in enumerate(tensor_dict.keys()):
             node = graph_nodes[node_index]
             name = f"{tensor_type}_{prettify_func(tensor_name)}"
-            node.name = node.target = name
+            # node.name = node.target = name
+            node.name = name
             node_index += 1
 
     # assign input names
@@ -1112,7 +1113,8 @@ https://github.com/pytorch/pytorch/issues/101192
     for i, (tree_path, val) in enumerate(flat_args):
         node = graph_nodes[params_len + i]
         name = "input_" + "_dict_".join(y.key for y in tree_path).replace(".", "__")
-        node.name = node.target = name
+        # node.name = node.target = name
+        node.name = name
 
     # assign input names for submodules
     def prettify_cond_submodule_names(gm):
@@ -1127,7 +1129,8 @@ https://github.com/pytorch/pytorch/issues/101192
             # this assumes that placeholder nodes are always at start of graph
             for i, node in enumerate(subgm.graph.nodes):
                 if node.op == "placeholder":
-                    node.name = node.target = names[i]
+                    # node.name = node.target = names[i]
+                    node.name = names[i]
                 else:
                     break
             # ensure we assigned all names, or ran out of nodes (graph is placeholder-only)
@@ -1176,7 +1179,7 @@ https://github.com/pytorch/pytorch/issues/101192
                     prettify_cond_submodule_names(subgraph)  # recurse on subgraphs
                     subgraph.recompile()
 
-    prettify_cond_submodule_names(fx_g)
+    # prettify_cond_submodule_names(fx_g)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
