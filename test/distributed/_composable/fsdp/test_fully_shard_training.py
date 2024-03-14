@@ -824,7 +824,6 @@ class TestFullyShardHSDPTraining(FSDPTest):
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
         for mlp in model:
             if use_activation_checkpointing:
                 checkpoint(mlp)
@@ -835,7 +834,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
             model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
+        check_sharded_parity(self, ref_model, model)
         torch.manual_seed(42 + self.rank + 1)
         device = torch.device("cuda")
         num_microbatches = 3
@@ -853,6 +852,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            check_sharded_parity(self, ref_model, model)
 
 
 if __name__ == "__main__":
