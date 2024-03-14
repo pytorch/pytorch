@@ -247,6 +247,7 @@ CI_SERIAL_LIST = [
     "inductor/test_torchinductor",  # OOM on test_large_block_sizes
     "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
     "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
+    "test_tensorboard",  # TestTensorBoardSummary.test_hparams_bool is failing flakily otherwise
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
