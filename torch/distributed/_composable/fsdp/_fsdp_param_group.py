@@ -57,8 +57,7 @@ class FSDPCommContext:
         # run the HSDP all-reduces concurrently with all-gather/reduce-scatter
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
-        # TODO: understand if HSDP needs stream(high_priority)
-        self.all_reduce_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_reduce_stream = torch.cuda.Stream()
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -127,7 +126,6 @@ class FSDPParamGroup:
         # (can be set to false to save communication during gradient
         # accumulation); all-reducing without reduce-scatter is disallowed
         self.reduce_scatter_grads: bool = True
-        # TODO: whether use all_reduce_grads or if isinstance(self.mesh_info, HSDPMeshInfo):
         self.all_reduce_grads: bool = True
 
         # - CUDA events for stream synchronization
@@ -477,7 +475,6 @@ class FSDPParamGroup:
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
         mesh_info = self.mesh_info
-        # TODO: confirm no need to support DDPMeshInfo
         assert isinstance(mesh_info, HSDPMeshInfo)
         return mesh_info.replicate_process_group
 

@@ -122,6 +122,10 @@ def foreach_reduce_scatter_and_all_reduce(
         )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
+    if divide_factors:
+        predivide_factor, postdivide_factor = divide_factors
+    else:
+        predivide_factor, postdivide_factor = None, None
     world_size = reduce_scatter_group.size()
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
@@ -144,9 +148,7 @@ def foreach_reduce_scatter_and_all_reduce(
         post_reduce_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
         )
-        if divide_factors:
-            predivide_factor, postdivide_factor = divide_factors
-            _div_if_needed(reduce_scatter_input, predivide_factor)
+        _div_if_needed(reduce_scatter_input, predivide_factor)
         _reduce_scatter(
             post_reduce_output,
             reduce_scatter_input,
@@ -156,15 +158,12 @@ def foreach_reduce_scatter_and_all_reduce(
     if all_reduce_stream is not None:
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with torch.cuda.stream(all_reduce_stream):
-            _all_reduce(
-                post_reduce_output, all_reduce_group, divide_factors  # type: ignore[arg-type]
-            )
+            _all_reduce(post_reduce_output, all_reduce_group, divide_factors)  # type: ignore[arg-type]
     view_out_stream = (
         reduce_scatter_stream if all_reduce_stream is None else all_reduce_stream
     )
     with torch.cuda.stream(view_out_stream):
-        if divide_factors:
-            _div_if_needed(post_reduce_output, postdivide_factor)
+        _div_if_needed(post_reduce_output, postdivide_factor)
         post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
         # - View out and accumulate
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -185,12 +184,12 @@ def foreach_reduce_scatter_and_all_reduce(
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-        _post_reduce_view_out_event = view_out_stream.record_event()
+        post_reduce_view_out_event = view_out_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
-    return _post_reduce_view_out_event
+    return post_reduce_view_out_event
 
 
 def foreach_reduce_scatter_copy_in(
@@ -237,11 +236,10 @@ def _all_reduce(
     if divide_factors:
         dist.all_reduce(tensor, group=group)
     else:
-        # Using NCCL's reduce-scatter to do the division by world size saves
-        # extra memory read/write from a separate division kernel
+        # saves extra memory read/write from a separate division kernel
         dist.all_reduce(tensor, op=ReduceOp.AVG, group=group)
 
 
-def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
-    if div_factor > 1:
+def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:
+    if div_factor is not None and div_factor > 1:
         tensor.div_(div_factor)

@@ -786,12 +786,14 @@ class TestFullyShard2DTraining(FSDPTest):
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
     def world_size(self) -> int:
-        return 4
+        return min(4, torch.cuda.device_count())
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_train_parity_hsdp(self):
+        shard_size = 2 if self.world_size > 2 else 1
+        replicate_size = self.world_size // shard_size
         global_mesh = init_device_mesh(
-            "cuda", (2, 2), mesh_dim_names=("replicate", "shard")
+            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
         )
         self.run_subtests(
             {
