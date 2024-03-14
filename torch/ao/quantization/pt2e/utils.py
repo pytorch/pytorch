@@ -310,6 +310,14 @@ def get_aten_graph_module(
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
+    # ep.module() will insert copy_ nodes in the end to write the mutated
+    # inputs and buffers. Since this function is only used for patterns
+    # it is ok to kill copy_ nodes.
+    for node in aten_pattern.graph.nodes:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default and len(node.users) == 0:
+            aten_pattern.graph.erase_node(node)
+    aten_pattern.graph.eliminate_dead_code()
+    aten_pattern.recompile()
     return aten_pattern
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:

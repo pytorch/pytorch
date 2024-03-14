@@ -40,7 +40,6 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.export._unlift import _create_stateful_graph_module
 from torch.export.dynamic_shapes import (
     _process_constraints,
-    _process_dynamic_shapes,
     Constraint,
     dims,
     dynamic_dim,
@@ -314,10 +313,8 @@ def aot_compile(
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
 
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-
     if config.is_predispatch:
-        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
+        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -325,7 +322,7 @@ def aot_compile(
             f,
             args,
             kwargs,
-            constraints,
+            dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
             # Disabling this flag, because instead we can rely on the mapping
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
