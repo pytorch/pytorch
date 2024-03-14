@@ -177,6 +177,7 @@ if torch.xpu._is_compiled():
 else:
     get_xpu_stream = None
 
+
 class XPUInterface(DeviceInterface):
     device = torch.xpu.device
     Event = torch.xpu.Event
@@ -231,8 +232,8 @@ class XPUInterface(DeviceInterface):
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
-        #TODO update this after intel triton fixed the issue  https://github.com/intel/intel-xpu-backend-for-triton/issues/581 
-        #cc = torch.xpu.get_device_capability(device)
+        # TODO update this after intel triton fixed the issue  https://github.com/intel/intel-xpu-backend-for-triton/issues/581
+        # cc = torch.xpu.get_device_capability(device)
         cc = 86
         return cc
 
