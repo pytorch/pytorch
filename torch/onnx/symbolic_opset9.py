@@ -185,7 +185,6 @@ __all__ = [
     "ones_like",
     "ones",
     "onnx_placeholder",
-    "overload_by_arg_count",
     "pad",
     "pairwise_distance",
     "permute",
@@ -291,15 +290,6 @@ __all__ = [
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=9)
-
-
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
 
 
 def _export(name: str):
@@ -774,132 +764,26 @@ def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
 
-@_beartype.beartype
-def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
-    scalar_type = _type_utils.JitScalarType.from_value(
-        self, _type_utils.JitScalarType.UNDEFINED
-    )
-    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
-        # This check only covers traced modules where dtype is present
-        # pytorch reduce-ops cast all other integral types to int64
-        if (
-            not symbolic_helper._is_fp(self)
-            and scalar_type != _type_utils.JitScalarType.INT64
-        ):
-            self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.INT64)
-    return self
-
-
-@_beartype.beartype
-def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
-    @_beartype.beartype
-    def symbolic(g, self, dim=None, keepdim=None):
-        self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == tuple():
-            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
-            # (not dim)
-            # all-reduce path
-            return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
-        else:
-            # dim-reduce path
-            keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
-            if g.opset < 18:
-                desc = "is" if allow_multi_dim_support else "i"
-                dim = symbolic_helper._get_const(dim, desc, "dim")
-                dim_list = dim if allow_multi_dim_support else [dim]
-                return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
-            else:
-                if symbolic_helper._is_value(dim):
-                    axes = dim
-                else:
-                    if allow_multi_dim_support:
-                        axes = g.op(
-                            "Constant", value_t=torch.tensor(dim, dtype=torch.long)
-                        )
-                    else:
-                        axes = g.op(
-                            "Constant", value_t=torch.tensor([dim], dtype=torch.long)
-                        )
-                return g.op(onnx_op_name, self, axes, keepdims_i=keepdim)
-
-    return symbolic
-
-
-@_beartype.beartype
-def overload_by_arg_count(fn):
-    @functools.wraps(fn)
-    @_beartype.beartype
-    def wrapper(g, *args):
-        overloads = fn(g, *args)
-        for overload in overloads:
-            arg_descriptors = overload._arg_descriptors
-            if len(arg_descriptors) == len(args):
-                return overload(g, *args)
-        return symbolic_helper._unimplemented(
-            f"aten::{fn.__name__}", f"with {len(args)} arguments"
-        )
-
-    return wrapper
-
-
-@_onnx_symbolic("aten::sum", decorate=[_apply_params("ReduceSum", "sum")])
-@_onnx_symbolic("aten::mean", decorate=[_apply_params("ReduceMean", "mean")])
+@_onnx_symbolic(
+    "aten::sum", decorate=[symbolic_helper._apply_params("ReduceSum", "sum")]
+)
+@_onnx_symbolic(
+    "aten::mean", decorate=[symbolic_helper._apply_params("ReduceMean", "mean")]
+)
 # torch.prod does not support multidimensional "dim"
 @_onnx_symbolic(
     "aten::prod",
-    decorate=[_apply_params("ReduceProd", "prod", allow_multi_dim_support=False)],
+    decorate=[
+        symbolic_helper._apply_params(
+            "ReduceProd", "prod", allow_multi_dim_support=False
+        )
+    ],
 )
 @_beartype.beartype
 def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = True):
-    symbolic = _reduce_op_symbolic(
-        onnx_op, allow_multi_dim_support=allow_multi_dim_support
+    return symbolic_helper._reduce_with_dtype_helper(
+        onnx_op, name, allow_multi_dim_support
     )
-
-    @overload_by_arg_count
-    def reduce(g, *args, **kwargs):
-        @symbolic_helper.quantized_args(True)
-        @symbolic_helper.parse_args("v", "none")
-        def reduce_nodim(g, self, dtype):
-            dtype_onnx = None
-            if dtype.node().kind() == "onnx::Constant":
-                dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
-                self = g.op("Cast", self, to_i=dtype_onnx)
-            elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype", dtype)
-            result = symbolic(g, self)
-            if dtype_onnx is not None:
-                result_dtype_onnx = _type_utils.JitScalarType.from_value(
-                    result
-                ).onnx_type()
-                if result_dtype_onnx != dtype_onnx:
-                    result = g.op("Cast", result, to_i=dtype_onnx)
-            return result
-
-        dim_desc = "is" if allow_multi_dim_support else "i"
-
-        @symbolic_helper.quantized_args(True)
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
-        def reduce_dim(g, self, dim, keepdim, dtype):
-            dtype_onnx = None
-            if dtype.node().kind() == "onnx::Constant":
-                dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
-                self = g.op("Cast", self, to_i=dtype_onnx)
-            elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype", dtype)
-            result = symbolic(g, self, dim, keepdim)
-            if dtype_onnx is not None:
-                result_dtype_onnx = _type_utils.JitScalarType.from_value(
-                    result
-                ).onnx_type()
-                if result_dtype_onnx != dtype_onnx:
-                    result = g.op("Cast", result, to_i=dtype_onnx)
-            return result
-
-        return reduce_nodim, reduce_dim
-
-    return reduce
 
 
 @_onnx_symbolic("aten::cumsum")
@@ -1567,7 +1451,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 @_onnx_symbolic(
     "aten::max_pool1d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
         ),
         _export("max_pool1d"),
@@ -1576,7 +1460,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 @_onnx_symbolic(
     "aten::max_pool2d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
         ),
         _export("max_pool2d"),
@@ -1585,7 +1469,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 @_onnx_symbolic(
     "aten::max_pool3d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
         ),
         _export("max_pool3d"),
@@ -1680,21 +1564,21 @@ max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
 @_onnx_symbolic(
     "aten::avg_pool1d",
     decorate=[
-        _apply_params("avg_pool1d", torch.nn.modules.utils._single),
+        symbolic_helper._apply_params("avg_pool1d", torch.nn.modules.utils._single),
         _export("avg_pool1d"),
     ],
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
     decorate=[
-        _apply_params("avg_pool2d", torch.nn.modules.utils._pair),
+        symbolic_helper._apply_params("avg_pool2d", torch.nn.modules.utils._pair),
         _export("avg_pool2d"),
     ],
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
     decorate=[
-        _apply_params("avg_pool3d", torch.nn.modules.utils._triple),
+        symbolic_helper._apply_params("avg_pool3d", torch.nn.modules.utils._triple),
         _export("avg_pool3d"),
     ],
 )
@@ -1758,7 +1642,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_avg_pool1d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_avg_pool1d", "AveragePool", torch.nn.modules.utils._single
         ),
         _export("adaptive_avg_pool1d"),
@@ -1767,7 +1651,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_avg_pool2d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_avg_pool2d", "AveragePool", torch.nn.modules.utils._pair
         ),
         _export("adaptive_avg_pool2d"),
@@ -1776,7 +1660,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_avg_pool3d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_avg_pool3d", "AveragePool", torch.nn.modules.utils._triple
         ),
         _export("adaptive_avg_pool3d"),
@@ -1785,7 +1669,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_max_pool1d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_max_pool1d",
             "MaxPool",
             torch.nn.modules.utils._single,
@@ -1797,7 +1681,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_max_pool2d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_max_pool2d",
             "MaxPool",
             torch.nn.modules.utils._pair,
@@ -1809,7 +1693,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_max_pool3d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_max_pool3d",
             "MaxPool",
             torch.nn.modules.utils._triple,
@@ -2023,42 +1907,42 @@ def pad(
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
     decorate=[
-        _apply_params("upsample_nearest1d", 3, "nearest"),
+        symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest"),
         _export("upsample_nearest1d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
     decorate=[
-        _apply_params("upsample_nearest2d", 4, "nearest"),
+        symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest"),
         _export("upsample_nearest2d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
     decorate=[
-        _apply_params("upsample_nearest3d", 5, "nearest"),
+        symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest"),
         _export("upsample_nearest3d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
     decorate=[
-        _apply_params("upsample_linear1d", 3, "linear"),
+        symbolic_helper._apply_params("upsample_linear1d", 3, "linear"),
         _export("upsample_linear1d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
     decorate=[
-        _apply_params("upsample_bilinear2d", 4, "linear"),
+        symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear"),
         _export("upsample_bilinear2d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
     decorate=[
-        _apply_params("upsample_trilinear3d", 5, "linear"),
+        symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear"),
         _export("upsample_trilinear3d"),
     ],
 )
@@ -3566,22 +3450,28 @@ def dropout(g: jit_utils.GraphContext, input, p, train):
 
 
 @_onnx_symbolic(
-    "aten::alpha_dropout_", decorate=[_apply_params("aten::alpha_dropout_")]
+    "aten::alpha_dropout_",
+    decorate=[symbolic_helper._apply_params("aten::alpha_dropout_")],
 )  # See Note [Export inplace]
 @_onnx_symbolic(
     "aten::feature_alpha_dropout_",
-    decorate=[_apply_params("aten::feature_alpha_dropout_")],
+    decorate=[symbolic_helper._apply_params("aten::feature_alpha_dropout_")],
 )
 @_onnx_symbolic(
-    "aten::feature_dropout_", decorate=[_apply_params("aten::feature_dropout_")]
+    "aten::feature_dropout_",
+    decorate=[symbolic_helper._apply_params("aten::feature_dropout_")],
 )
 @_onnx_symbolic(
     "aten::feature_alpha_dropout",
-    decorate=[_apply_params("aten::feature_alpha_dropout")],
+    decorate=[symbolic_helper._apply_params("aten::feature_alpha_dropout")],
 )
-@_onnx_symbolic("aten::alpha_dropout", decorate=[_apply_params("aten::alpha_dropout")])
 @_onnx_symbolic(
-    "aten::feature_dropout", decorate=[_apply_params("aten::feature_dropout")]
+    "aten::alpha_dropout",
+    decorate=[symbolic_helper._apply_params("aten::alpha_dropout")],
+)
+@_onnx_symbolic(
+    "aten::feature_dropout",
+    decorate=[symbolic_helper._apply_params("aten::feature_dropout")],
 )
 @_beartype.beartype
 def _unsupported_dropout(name: str):
@@ -3601,9 +3491,9 @@ def _unsupported_dropout(name: str):
 @_beartype.beartype
 def norm(g: jit_utils.GraphContext, self, p, dim, keepdim, dtype=None):
     if p == 1:
-        f = _reduce_op_symbolic("ReduceL1")
+        f = symbolic_helper._reduce_op_symbolic_helper("ReduceL1")
     elif p == 2:
-        f = _reduce_op_symbolic("ReduceL2")
+        f = symbolic_helper._reduce_op_symbolic_helper("ReduceL2")
     else:
         raise errors.SymbolicValueError(
             "ONNX export only p-norms with p of 1 or 2", self
@@ -4990,12 +4880,16 @@ def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
     ), symbolic_helper._squeeze_helper(g, c_outs, [0])
 
 
-@_onnx_symbolic("aten::gru", decorate=[_apply_params("GRU"), _export("gru")])
 @_onnx_symbolic(
-    "aten::rnn_tanh", decorate=[_apply_params("RNN_TANH"), _export("rnn_tanh")]
+    "aten::gru", decorate=[symbolic_helper._apply_params("GRU"), _export("gru")]
 )
 @_onnx_symbolic(
-    "aten::rnn_relu", decorate=[_apply_params("RNN_RELU"), _export("rnn_relu")]
+    "aten::rnn_tanh",
+    decorate=[symbolic_helper._apply_params("RNN_TANH"), _export("rnn_tanh")],
+)
+@_onnx_symbolic(
+    "aten::rnn_relu",
+    decorate=[symbolic_helper._apply_params("RNN_RELU"), _export("rnn_relu")],
 )
 def _one_hidden_rnn(kind: str):
     @symbolic_helper.parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
@@ -6089,20 +5983,32 @@ def linalg_vector_norm(
         )
     elif ord == 1:
         if g.opset < 18:
-            result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+            result = symbolic_helper._reduce_op_symbolic_helper("ReduceL1")(
+                g, self, dim=dim, keepdim=keepdim
+            )
         else:
             if axes is None:
-                result = _reduce_op_symbolic("ReduceL1")(g, self, keepdim=keepdim)
+                result = symbolic_helper._reduce_op_symbolic_helper("ReduceL1")(
+                    g, self, keepdim=keepdim
+                )
             else:
-                result = _reduce_op_symbolic("ReduceL1")(g, self, axes, keepdim=keepdim)
+                result = symbolic_helper._reduce_op_symbolic_helper("ReduceL1")(
+                    g, self, axes, keepdim=keepdim
+                )
     elif ord == 2:
         if g.opset < 18:
-            result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
+            result = symbolic_helper._reduce_op_symbolic_helper("ReduceL2")(
+                g, self, dim=dim, keepdim=keepdim
+            )
         else:
             if axes is None:
-                result = _reduce_op_symbolic("ReduceL2")(g, self, keepdim=keepdim)
+                result = symbolic_helper._reduce_op_symbolic_helper("ReduceL2")(
+                    g, self, keepdim=keepdim
+                )
             else:
-                result = _reduce_op_symbolic("ReduceL2")(g, self, axes, keepdim=keepdim)
+                result = symbolic_helper._reduce_op_symbolic_helper("ReduceL2")(
+                    g, self, axes, keepdim=keepdim
+                )
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(

@@ -86,15 +86,6 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=11)
 
 
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
-
-
 @_onnx_symbolic("aten::hardtanh")
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
@@ -352,31 +343,31 @@ def pixel_shuffle(g: jit_utils.GraphContext, self, upscale_factor):
 
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
-    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
-    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
-    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
-    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_linear1d", 3, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
-    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
-    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bicubic2d",
-    decorate=[_apply_params("upsample_bicubic2d", 4, "cubic")],
+    decorate=[symbolic_helper._apply_params("upsample_bicubic2d", 4, "cubic")],
 )
 @_beartype.beartype
 def _interpolate(name: str, dim: int, interpolate_mode: str):

@@ -1767,6 +1767,134 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     return self
 
+
+@_beartype.beartype
+def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+        # This check only covers traced modules where dtype is present
+        # pytorch reduce-ops cast all other integral types to int64
+        if not _is_fp(self) and scalar_type != _type_utils.JitScalarType.INT64:
+            self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.INT64)
+    return self
+
+
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+@_beartype.beartype
+def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
+    @_beartype.beartype
+    def symbolic(g, self, dim=None, keepdim=None):
+        self = _maybe_cast_reduce_op_input(g, self)
+        if dim is None or dim == tuple():
+            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
+            # (not dim)
+            # all-reduce path
+            return _handle_reduce_dim_none(g, self, onnx_op_name)
+        else:
+            # dim-reduce path
+            keepdim = _get_const(keepdim, "i", "keepdim")
+            if g.opset < 18:
+                desc = "is" if allow_multi_dim_support else "i"
+                dim = _get_const(dim, desc, "dim")
+                dim_list = dim if allow_multi_dim_support else [dim]
+                return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
+            else:
+                if _is_value(dim):
+                    axes = dim
+                else:
+                    if allow_multi_dim_support:
+                        axes = g.op(
+                            "Constant", value_t=torch.tensor(dim, dtype=torch.long)
+                        )
+                    else:
+                        axes = g.op(
+                            "Constant", value_t=torch.tensor([dim], dtype=torch.long)
+                        )
+                return g.op(onnx_op_name, self, axes, keepdims_i=keepdim)
+
+    return symbolic
+
+
+@_beartype.beartype
+def overload_by_arg_count(fn):
+    @functools.wraps(fn)
+    @_beartype.beartype
+    def wrapper(g, *args):
+        overloads = fn(g, *args)
+        for overload in overloads:
+            arg_descriptors = overload._arg_descriptors
+            if len(arg_descriptors) == len(args):
+                return overload(g, *args)
+        return _unimplemented(f"aten::{fn.__name__}", f"with {len(args)} arguments")
+
+    return wrapper
+
+
+@_beartype.beartype
+def _reduce_with_dtype_helper(
+    onnx_op: str, name: str, allow_multi_dim_support: bool = True
+):
+    symbolic = _reduce_op_symbolic_helper(
+        onnx_op, allow_multi_dim_support=allow_multi_dim_support
+    )
+
+    @overload_by_arg_count
+    def reduce(g, *args, **kwargs):
+        @quantized_args(True)
+        @parse_args("v", "none")
+        def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
+            if dtype.node().kind() == "onnx::Constant":
+                dtype = _get_const(dtype, "i", "dtype")
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
+            elif dtype.node().kind() != "prim::Constant":
+                return _unimplemented(name, "dtype", dtype)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
+
+        dim_desc = "is" if allow_multi_dim_support else "i"
+
+        @quantized_args(True)
+        @parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
+        def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
+            if dtype.node().kind() == "onnx::Constant":
+                dtype = _get_const(dtype, "i", "dtype")
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
+            elif dtype.node().kind() != "prim::Constant":
+                return _unimplemented(name, "dtype", dtype)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
+
+        return reduce_nodim, reduce_dim
+
+    return reduce
+
+
 # Deprecated. Internally use _type_utils.ScalarType
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator

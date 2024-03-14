@@ -27,7 +27,10 @@ from torch.onnx._internal import _beartype, registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-__all__ = ["col2im"]
+__all__ = [
+    "col2im",
+    "_reduce_with_dtype",
+]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=18)
 
@@ -68,4 +71,22 @@ def col2im(
         dilations_i=dilation,
         pads_i=adjusted_padding,
         strides_i=stride,
+    )
+
+
+@_onnx_symbolic(
+    "aten::mean", decorate=[symbolic_helper._apply_params("ReduceMean", "mean")]
+)
+@_onnx_symbolic(
+    "aten::prod",
+    decorate=[
+        symbolic_helper._apply_params(
+            "ReduceProd", "prod", allow_multi_dim_support=False
+        )
+    ],
+)
+@_beartype.beartype
+def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = True):
+    return symbolic_helper._reduce_with_dtype_helper(
+        onnx_op, name, allow_multi_dim_support
     )

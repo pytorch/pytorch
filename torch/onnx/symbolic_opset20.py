@@ -31,7 +31,7 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-__all__ = ["grid_sampler", "affine_grid_generator"]
+__all__ = ["_grid_sampler", "_affine_grid_generator"]
 
 
 def convert_grid_sample_mode(mode_s):
