@@ -750,6 +750,14 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
+        elif isinstance(value, types.FunctionType) and hasattr(
+            torch.utils._cxx_pytree, value.__name__
+        ):
+            # Convert cxx_pytree.* -> pytree.* calls inside dynamo
+            fn = getattr(torch.utils._pytree, value.__name__)
+            if fn is None:
+                unimplemented(f"missing 'torch.utils._pytree.{value.__name__}'")
+            return trace_rules.lookup(fn).create_with_source(fn, source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,

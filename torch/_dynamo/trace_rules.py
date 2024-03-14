@@ -3102,6 +3102,7 @@ THIRDPARTY_SKIPLIST = (
     "onnx",
     "onnxruntime",
     "onnx_tf",
+    "optree",
     "pandas",
     "sklearn",
     "tabulate",

@@ -12,7 +12,7 @@ import functools
 import threading
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import (
+from torch.utils._cxx_pytree import (
     tree_flatten,
     tree_unflatten,
     tree_map_,

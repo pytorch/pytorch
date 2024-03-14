@@ -10,7 +10,7 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import (
+from torch.utils._cxx_pytree import (
     tree_flatten,
     tree_unflatten,
     tree_map,
