@@ -26,7 +26,6 @@ import tempfile
 import textwrap
 import threading
 import warnings
-import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
@@ -700,6 +699,10 @@ class FxGraphCache:
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
+        symints = FxGraphCache._filter_symints(example_inputs)
+        assert all(has_hint(s) for s in symints)
+        hints = [hint_int(s) for s in symints]
+
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
@@ -708,43 +711,61 @@ class FxGraphCache:
             with open(os.path.join(subdir, path), "rb") as f:
                 candidate: CompiledFxGraph = pickle.load(f)
 
-            guards_expr = candidate.guards_expr
-            if not guards_expr:
+            if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
                 break
 
             # Evaluate the guard expression in the current context.
-            symints = FxGraphCache._filter_symints(example_inputs)
-
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            assert all(has_hint(s) for s in symints)
-            hints = [hint_int(s) for s in symints]
-            hit = bool(shape_env.evaluate_guards_expression(guards_expr, hints))
+            hit = bool(
+                shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
+            )
             log.debug(
-                "fx graph cache key %s evaluating guards for %s with values %s => %s",
+                "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
                 key,
-                guards_expr,
+                candidate.guards_expr,
                 hints,
                 hit,
             )
             if hit:
-                # Now re-evaluate with the symints to add any guards to the current env.
-                check = bool(shape_env.evaluate_guards_expression(guards_expr, symints))
-                assert check is True
-                log.debug(
-                    "fx graph cache key %s post-load guards: %s", key, shape_env.guards
-                )
                 graph = candidate
                 break
+
+        if graph is None:
+            return None
+
+        # See _save_graph(); we don't store the callable in the cache entry so
+        # recreate it here from the PyCodeCache disk cache.
+        try:
+            graph.current_callable = PyCodeCache.load_by_key_path(
+                graph.cache_key,
+                graph.artifact_path,
+                graph.cache_linemap,
+                graph.constants,
+            ).call
+        except OSError:
+            # Not expected, but in case the PyCodeCache entry is removed from
+            # underneath us, treat it as a cache miss and recompile.
+            log.error("Failed to load cached artifact: %s", graph.artifact_path)
+            return None
+
+        # Now re-evaluate with the symints to add any guards to the current env.
+        if graph.guards_expr:
+            check = bool(
+                shape_env.evaluate_guards_expression(graph.guards_expr, symints)
+            )
+            assert check is True
+            log.debug(
+                "fx graph cache key %s post-load guards: %s", key, shape_env.guards
+            )
 
         # Increment the cached metrics by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
-        if graph is not None:
-            metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+        metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
 
         return graph
 
@@ -756,8 +777,11 @@ class FxGraphCache:
         Store a serialized CompiledFxGraph on disk.
         """
         disk_compiled_graph = copy(compiled_graph)
-        # Important as compiled models are not pickleable:
-        disk_compiled_graph.compiled_artifact = None
+        # We can't really serialize callables that may be C++/Triton/etc.,
+        # so we serialize their PyCodeCache disk cache location instead.
+        # TODO: This could be better if we're ever able to serialize compiled
+        # models to disk.
+        disk_compiled_graph.current_callable = None
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -857,10 +881,9 @@ class CompiledFxGraph:
     to support FxGraph caching.
     """
 
-    compiled_artifact: Optional[Callable[..., Any]]
     current_callable: Optional[Callable[..., Any]]
-    cache_key: Optional[str]
-    artifact_path: Optional[str]
+    cache_key: str
+    artifact_path: str
     cache_linemap: Optional[List[Tuple[int, str]]]
     device_types: Set[str]
     device_idxs: Set[int]
@@ -881,14 +904,13 @@ class CompiledFxGraph:
 
     def __init__(
         self,
-        compiled_artifact: Optional[Callable[..., Any]],
+        current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
     ):
-        self.compiled_artifact = compiled_artifact
-        self.current_callable = None
+        self.current_callable = current_callable
         self.cache_key = graph.cache_key
         self.artifact_path = graph.cache_path
         self.cache_linemap = graph.cache_linemap
@@ -903,35 +925,8 @@ class CompiledFxGraph:
         self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
-        return self.get_current_callable()(inputs)
-
-    def get_current_callable(self) -> Callable[..., Any]:
-        if self.current_callable is None:
-            # This prevents a circular reference that makes CompiledFxGraph
-            # get stuck without getting garbage collected
-            return functools.partial(_run_from_cache, weakref.proxy(self))
-        else:
-            return self.current_callable
-
-
-def _run_from_cache(compiled_graph: CompiledFxGraph, inputs: List[Any]) -> Any:
-    # We can't really serialize callables that may be C++/Triton/etc.,
-    # so we serialize their disk cache location instead
-    # TODO: When making an API that can save compiled models e2e to disk
-    # this will need to be better
-    if compiled_graph.compiled_artifact is None:
-        from .codecache import PyCodeCache
-
-        assert compiled_graph.cache_key
-        assert compiled_graph.artifact_path
-        compiled_graph.compiled_artifact = PyCodeCache.load_by_key_path(
-            compiled_graph.cache_key,
-            compiled_graph.artifact_path,
-            compiled_graph.cache_linemap,
-            compiled_graph.constants,
-        ).call
-
-    return compiled_graph.compiled_artifact(inputs)
+        assert self.current_callable is not None
+        return self.current_callable(inputs)
 
 
 def cpp_compiler() -> str:
