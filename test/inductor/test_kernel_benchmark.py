@@ -5,10 +5,10 @@ import sys
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU

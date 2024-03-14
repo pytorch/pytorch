@@ -165,7 +165,7 @@ def _unlift_graph(mod, gm, graph_signature):
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
     for out in outputs:
-        if out in graph_signature.buffers_to_mutate:
+        if out.name in graph_signature.buffers_to_mutate:
             mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
         else:
             mutated_outputs.append(None)

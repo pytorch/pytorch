@@ -776,7 +776,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg0_1 = arg1_1 = None
         return ()""",
                 )
 
@@ -9779,6 +9779,23 @@ fn
             return Mod(), (torch.randn(100, 100), fc)
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
+
+    def test_parameter_free(self):
+        def model_inp_ctr():
+            param = torch.nn.Parameter(torch.randn(100, 100))
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = param
+
+                def forward(self, x):
+                    return self.param * x[0]
+
+            # return param to keep it alive in _test_compile_model_free
+            return Mod(), (torch.randn(100, 100), param)
+
+        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
 
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):

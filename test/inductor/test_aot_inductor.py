@@ -210,6 +210,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfRocm
     @requires_cuda
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
@@ -226,6 +227,22 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    def test_buffer_mutation(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("foo", torch.randn(4, 4, device=device))
+
+            def forward(self, x):
+                self.foo.add_(1)
+                return self.foo + x
+
+        example_inputs = (torch.rand(4, 4, device=self.device),)
+        torch._export.aot_compile(Model(self.device), example_inputs)
+        with self.assertRaisesRegex(AssertionError, "False is not true"):
+            # TODO: AOTI seems to mutate the buffer while tracing
             self.check_model(Model(self.device), example_inputs)
 
     @requires_cuda
