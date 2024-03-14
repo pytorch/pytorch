@@ -746,9 +746,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return obj
 
     def new_var(self, name="tmp"):
-        var = f"{name}_{next(self.unique_var_id)}"
-        self.code_options["co_varnames"] += (var,)
-        return var
+        existing = set(self.code_options["co_varnames"])
+        while True:
+            var = f"{name}_{next(self.unique_var_id)}"
+            if var not in existing:
+                self.code_options["co_varnames"] += (var,)
+                return var
 
     def update_co_names(self, name):
         """Ensure self.code_options.co_names contains name"""
