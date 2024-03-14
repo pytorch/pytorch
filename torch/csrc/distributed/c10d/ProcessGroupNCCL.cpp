@@ -2490,7 +2490,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   auto work = initWork(
-      device, rank_, opType, nullptr, inputs, outputs, /*record=*/true);
+      device, rank_, opType, profilingTitle, inputs, outputs, /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2502,7 +2502,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  // Start event should only be recorded before the ncclGroupStart()
+  // Start event should only be recorded before the ncclGroupStart() (which
+  // happens inside AutoNcclGroup guard below)
   if (work->timingEnabled_) {
     work->ncclStartEvent_->record(ncclStream);
   }
@@ -2559,10 +2560,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     }
   }
 
-  // End event should only be recorded after the ncclGroupEnd()
-  if (!coalescing_state_) {
-    work->ncclEndEvent_->record(ncclStream);
-  }
+  work->ncclEndEvent_->record(ncclStream);
   work->ncclComm_ = ncclComm;
 
   {
@@ -2597,15 +2595,41 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
+  /* Note [cuda graph capture and workEnqueue]
 
-  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+  Normal behavior of the C10D watchdog is to query cuda events on work objects
+  periodically, but when cuda graph recording is active these event queries
+  would crash or mess up the recording.
+
+  To ensure we do not enqueue a work object to the watchdog when cuda graph
+  capture is active, we use a one-way sync. We increment a flag pre-emptively,
+  indicating our intent to enqueue a work object. Then we check capture_status
+  to see if (a) capturing is already in progress (we cannot enqueue in this
+  case), (b) capturing hasn't started yet, so we can trust that no capture will
+  start (since a pre-condition of starting a capture is to check the event query
+  count is 0).
+
+  If we are not able to enqueue the work due to capture-in-progress, we finally
+  decrement the counter.
+
+  For this reason we cannot easily move the increment inside workEnqueue unless
+  we also change the semantic of workEnqueue to 'maybeWorkEnqueue'.
+
+  TODO:
+   - Is our design for flight recorder safe in this context?  are we recording
+  any FR events during cudagraph capture? if so, they won't be safe to poll for
+  completion status.
+  */
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+  if (capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
-
+  // TODO(whc) if the work isn't enqueued, I don't feel great about returning
+  // it, since interactions with it by usercode won't behave normally - they
+  // won't observe work completion, for instance.  Will this lead to silent
+  // problems during capture?
   return work;
 }
 
