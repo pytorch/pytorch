@@ -390,6 +390,48 @@ class TestCutlassBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_mixed_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return torch.mm(a, b.to(torch.half))
+
+        # CUTLASS only supports row-major/column-major combination of
+        # layouts for this operation, thus the transpose of tensor b.
+        # Also, for CUTLASS alignment requirements, number of columns
+        # of the first tensor has to be divisible by 16.
+        a = torch.randn(100, 16).cuda().half()
+        b = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda().T
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "use_mixed_mm": True,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
