@@ -1257,9 +1257,19 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
 
     offset_negative = V.graph.sizevars.evaluate_expr(sympy.Lt(offset, 0))
     if offset_negative:
-        diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+        diag_size = V.graph.sizevars.evaluate_max(
+            V.graph.sizevars.evaluate_min(
+                original_shape[dim1] + offset, original_shape[dim2]
+            ),
+            0,  # type: ignore[arg-type]
+        )
     else:
-        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
+        diag_size = V.graph.sizevars.evaluate_max(
+            V.graph.sizevars.evaluate_min(
+                original_shape[dim1], original_shape[dim2] - offset
+            ),
+            0,  # type: ignore[arg-type]
+        )
 
     base_idx = (0, 0)
     if offset_negative:
