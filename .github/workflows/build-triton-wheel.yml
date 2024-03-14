@@ -107,10 +107,7 @@ jobs:
             BUILD_ROCM="--build-rocm"
           fi
 
-          RELEASE=""
-          if [[ "${IS_RELEASE_TAG}" == true ]]; then
-            RELEASE="--release"
-          fi
+          RELEASE="--release"
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
@@ -235,10 +232,7 @@ jobs:
             "${DOCKER_IMAGE}" \
           )
 
-          RELEASE=""
-          if [[ "${IS_RELEASE_TAG}" == true ]]; then
-            RELEASE="--release"
-          fi
+          RELEASE="--release"
 
           docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
