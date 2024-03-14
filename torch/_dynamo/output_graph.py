@@ -747,6 +747,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
+        # In common case, this will be O(1)
         while True:
             var = f"{name}_{next(self.unique_var_id)}"
             if var not in existing:
