@@ -418,6 +418,13 @@ def _reduce_fake_tensor(t):
 def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
+    If we see tensors, we know they're constants stored as attributes on
+    the GraphModule. Include the values in the key calculation. Small
+    tensors will be inlined, so we can't serve the same cache entry for
+    different constant values. Large constants are treated as parameters,
+    so we could conceivably reuse a cache entry. To do that, however,
+    PyCodeCache would need more complexity to create a new module from its
+    cache, but with the right constants attached as attributes.
     """
     if t.is_mkldnn:
         # TODO: These tensors don't currently pickle, so we can't cache a
@@ -425,13 +432,14 @@ def _reduce_tensor(t):
         # get pickling support, we can remove this.
         raise BypassFxGraphCache()
 
-    # If we see tensors, we know they're constants stored as attributes on
-    # the GraphModule. Include the values in the key calculation. Small
-    # tensors will be inlined, so we can't serve the same cache entry for
-    # different constant values. Large constants are treated as parameters,
-    # so we could conceivably reuse a cache entry. To do that, PyCodeCache
-    # would need more sophistication to create a new module with the right
-    # constants attached as attributes.
+    # Very large tensors could be expensive to copy to cpu and hash; maybe
+    # not worth it. Bypass the cache at something arbitrarily large.
+    if t.numel() > 100000:
+        warnings.warn(
+            f"Found constant with {t.numel()} elements; skipping FX code caching."
+        )
+        raise BypassFxGraphCache()
+
     metadata = extract_tensor_metadata(t)
     return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
 
