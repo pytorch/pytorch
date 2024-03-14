@@ -816,7 +816,6 @@ class TestFullyShardHSDPTraining(FSDPTest):
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.LayerNorm(mlp_dim, bias=False),
-            # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
             MLP(mlp_dim, dim_multiplier=3),
@@ -849,6 +848,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
                     losses.append(_model(inp).sum())
                     losses[-1].backward()
                 self.assertEqual(losses[0], losses[1])
+            check_sharded_parity(self, ref_model, model)
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))

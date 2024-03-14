@@ -155,13 +155,12 @@ def foreach_reduce_scatter_and_all_reduce(
             reduce_scatter_group,
             divide_factors,
         )
+    view_out_stream = reduce_scatter_stream
     if all_reduce_stream is not None:
+        view_out_stream = all_reduce_stream
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with torch.cuda.stream(all_reduce_stream):
             _all_reduce(post_reduce_output, all_reduce_group, divide_factors)  # type: ignore[arg-type]
-    view_out_stream = (
-        reduce_scatter_stream if all_reduce_stream is None else all_reduce_stream
-    )
     with torch.cuda.stream(view_out_stream):
         _div_if_needed(post_reduce_output, postdivide_factor)
         post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
