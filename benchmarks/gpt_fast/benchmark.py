@@ -2,7 +2,6 @@ import csv
 import dataclasses
 import itertools
 import os
-import sys
 import time
 from typing import Optional, Tuple
 
@@ -31,7 +30,9 @@ class Experiment:
 
 
 all_experiments = [
-    Experiment("Llama-2-7b-chat-hf", LLaMA, None, LLaMAWeightOnlyInt8QuantHandler, 104),
+    Experiment(
+        "Llama-2-7b-chat-hf", LLaMA, "bfloat16", LLaMAWeightOnlyInt8QuantHandler, 104
+    ),
     Experiment(
         "Llama-2-7b-chat-hf", LLaMA, "int8", LLaMAWeightOnlyInt8QuantHandler, 155
     ),
@@ -80,8 +81,7 @@ def sample(logits, temperature: float = 1.0, top_k: Optional[int] = None):
     return idx_next, probs
 
 
-# TODO: Figure out why prefill doesn't work well with torch.compile, probably this is a regression.
-# @torch.compile(fullgraph=True, dynamic=True)
+@torch.compile(fullgraph=True)
 def prefill(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> torch.Tensor:
@@ -90,7 +90,7 @@ def prefill(
     return sample(logits, **sampling_kwargs)[0]
 
 
-@torch.compile(fullgraph=True, dynamic=True, mode="reduce-overhead")
+@torch.compile(fullgraph=True, mode="reduce-overhead")
 def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -244,11 +244,11 @@ def output_csv(filename, headers, row):
 def main():
     results = []
     for x in all_experiments:
-        result = run_experiment(x)
-        status = "PASS" if result >= x.target else "FAIL"
-        results.append((x, result, status))
+        actual = run_experiment(x)
+        percentage = f"{actual / x.target * 100:.2f}%"
+        results.append((x, actual, percentage))
 
-    headers = ["name", "mode", "target", "result", "status"]
+    headers = ["name", "mode", "target", "actual", "percentage"]
     rows = [[x[0].name, x[0].mode, x[0].target, x[1], x[2]] for x in results]
     for row in rows:
         output_csv(output_filename, headers, row)

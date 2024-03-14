@@ -3,14 +3,12 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-import time
-from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mixtral_moe_model import ConditionalFeedForward, Transformer
+from mixtral_moe_model import ConditionalFeedForward
 
 ##### Quantization Primitives ######
 

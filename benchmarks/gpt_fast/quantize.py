@@ -1,11 +1,7 @@
-import time
-from pathlib import Path
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model import Transformer
 
 ##### Quantization Primitives ######
 
