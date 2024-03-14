@@ -20,7 +20,7 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module_for_pattern",
+    "_get_aten_graph_module_for_pattern",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -292,7 +292,7 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
 
-def get_aten_graph_module_for_pattern(
+def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
@@ -380,8 +380,8 @@ def _replace_literals_with_new_placeholders(
         return x - 3
 
     example_inputs = (torch.randn(1, 3, 3, 3),)
-    pattern_gm = get_aten_graph_module_for_pattern(pattern, example_inputs)
-    replacement_gm = get_aten_graph_module_for_pattern(pattern, example_inptus)
+    pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x):
@@ -466,8 +466,8 @@ def _replace_literals_with_existing_placeholders(
         -128,
         127,
     )
-    pattern_gm = get_aten_graph_module_for_pattern(pattern, example_inputs)
-    replacement_gm = get_aten_graph_module_for_pattern(pattern, example_inptus)
+    pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
