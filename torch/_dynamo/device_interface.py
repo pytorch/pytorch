@@ -178,7 +178,7 @@ else:
     get_xpu_stream = None
 
 
-class XPUInterface(DeviceInterface):
+class XpuInterface(DeviceInterface):
     device = torch.xpu.device
     Event = torch.xpu.Event
     Stream = torch.xpu.Stream
@@ -203,7 +203,7 @@ class XPUInterface(DeviceInterface):
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
-                device = XPUInterface.Worker.current_device()
+                device = XpuInterface.Worker.current_device()
 
             if "xpu" not in caching_worker_device_properties:
                 device_prop = [
@@ -232,9 +232,7 @@ class XPUInterface(DeviceInterface):
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
-        # TODO update this after intel triton fixed the issue  https://github.com/intel/intel-xpu-backend-for-triton/issues/581
-        # cc = torch.xpu.get_device_capability(device)
-        cc = 86
+        cc = torch.xpu.get_device_capability(device)
         return cc
 
 
@@ -265,7 +263,6 @@ register_interface_for_device("cuda", CudaInterface)
 for i in range(torch.cuda.device_count()):
     register_interface_for_device(f"cuda:{i}", CudaInterface)
 
-
-register_interface_for_device("xpu", XPUInterface)
+register_interface_for_device("xpu", XpuInterface)
 for i in range(torch.xpu.device_count()):
-    register_interface_for_device(f"xpu:{i}", XPUInterface)
+    register_interface_for_device(f"xpu:{i}", XpuInterface)
