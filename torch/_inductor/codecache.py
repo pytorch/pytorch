@@ -426,16 +426,14 @@ def _reduce_tensor(t):
         raise BypassFxGraphCache()
 
     # If we see tensors, we know they're constants stored as attributes on
-    # the GraphModule. See tensor lowering; small constants are inlined. If
-    # we see a small tensor, therefore, no reference will ultimately remain
-    # in the generated code. So we need to include its value in the cache key.
-    # Large constants are effectively treated as inputs and we consider only
-    # their metadata.
+    # the GraphModule. Include the values in the key calculation. Small
+    # tensors will be inlined, so we can't serve the same cache entry for
+    # different constant values. Large constants are treated as parameters,
+    # so we could conceivably reuse a cache entry. To do that, PyCodeCache
+    # would need more sophistication to create a new module with the right
+    # constants attached as attributes.
     metadata = extract_tensor_metadata(t)
-    if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
-        return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
-    else:
-        return (_ident, (metadata,))
+    return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
 
 
 def _reduce_symint(s):
