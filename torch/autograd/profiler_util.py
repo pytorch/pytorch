@@ -423,6 +423,9 @@ class Interval:
         self.end = end
 
     def elapsed_us(self):
+        r"""
+        Returns the length of the interval
+        """
         return self.end - self.start
 
 
@@ -453,6 +456,7 @@ class FunctionEvent(FormattedTimesMixin):
         node_id=-1,
         device_type=DeviceType.CPU,
         device_index=0,
+        device_resource_id=None,
         is_legacy=False,
         flops=None,
         trace_name=None,
@@ -482,6 +486,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.sequence_nr: int = sequence_nr
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
+        self.device_resource_id: int = (
+            thread if device_resource_id is None else device_resource_id
+        )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
 
@@ -781,6 +788,9 @@ class MemRecordsAcc:
             self._start_uses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
     def in_interval(self, start_us, end_us):
+        r"""
+        Return all records in the given interval
+        """
         start_idx = bisect.bisect_left(self._start_uses, start_us)
         end_idx = bisect.bisect_right(self._start_uses, end_us)
         for i in range(start_idx, end_idx):
@@ -1142,7 +1152,7 @@ def _build_table(
             if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append(f"{evt.flops * flops_scale:8.3f}")
+                row_values.append(f"{evt.flops * flops_scale:8.3f}")  # type: ignore[possibly-undefined]
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:

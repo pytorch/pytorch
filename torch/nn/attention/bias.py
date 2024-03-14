@@ -1,4 +1,4 @@
-"""Defines utilities for interacting with scaled_dot_product_attention"""
+"""Defines bias subclasses that work with scaled_dot_product_attention"""
 from enum import auto, IntEnum
 from typing import Optional
 from warnings import warn
@@ -19,6 +19,11 @@ from torch.nn.attention._utils import (
 from torch.nn.functional import scaled_dot_product_attention
 
 __all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
+
+
+torch._dynamo.allow_in_graph(can_use_flash_attention)
+torch._dynamo.allow_in_graph(can_use_efficient_attention)
+torch._dynamo.allow_in_graph(SDPAParams)
 
 
 class CausalVariant(IntEnum):
@@ -207,9 +212,7 @@ class CausalBias(torch.Tensor):
                 scale=scale,
             )
         elif attn_mask.variant == CausalVariant.LOWER_RIGHT:
-            _validate_sdpa_input(
-                query, key, value, attn_mask, dropout_p, is_causal, scale
-            )
+            _validate_sdpa_input(query, key, value, None, dropout_p, is_causal, scale)
             sdpa_params = SDPAParams(query, key, value, None, dropout_p, is_causal)
             if can_use_flash_attention(sdpa_params):
                 needs_padding = query.size(-1) % 8 != 0
