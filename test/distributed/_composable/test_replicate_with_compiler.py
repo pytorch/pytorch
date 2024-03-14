@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import functools
 import os
 import unittest
 from copy import deepcopy
@@ -9,13 +10,17 @@ from typing import Callable, Optional
 import torch
 import torch.distributed as dist
 from torch import _inductor as inductor, nn
+from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
+from torch._dynamo.utils import counters
+from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as ddp_default_hooks,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    run_with_native_funcol,
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
@@ -25,6 +30,8 @@ from torch.utils.checkpoint import checkpoint
 
 
 DIM = 2000
+# TODO: figure out why buffer reuse conflicts with bucketing
+torch._inductor.config.allow_buffer_reuse = False
 
 
 class Net(nn.Module):
@@ -44,7 +51,7 @@ class Net(nn.Module):
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
-def compiler_fn(no_inductor):
+def compiler_fn(no_inductor=False):
     def _compiler_fn(gm):
         def inner_compiler(gm_, example_inputs_):
             if no_inductor:
@@ -154,9 +161,19 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(tuple(model.parameters()), tuple(compiled_model.parameters()))
 
     def test_compile_cpu(self):
+        # Test the coalesced_op with CPU.
+        torch._inductor.config._fuse_ddp_communication_passes = [
+            "fuse_ddp_with_coalesced_op",
+            "schedule_comm_wait",
+        ]
         self._test_compile(use_gpu=False, no_sync=False)
 
     def test_compile_cpu_no_sync(self):
+        # Test the coalesced_op with CPU.
+        torch._inductor.config._fuse_ddp_communication_passes = [
+            "fuse_ddp_with_coalesced_op",
+            "schedule_comm_wait",
+        ]
         self._test_compile(use_gpu=False, no_sync=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -205,6 +222,98 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self):
         self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
+
+    def _test_bucketing(self, init_process_group=True, loop=1):
+        if init_process_group:
+            dist.init_process_group(
+                backend="gloo",
+                rank=self.rank,
+                world_size=self.world_size,
+                store=dist.FileStore(self.file_name, self.world_size),
+            )
+        model = Net()
+        input = torch.randn([1, DIM])
+        torch._dynamo.config.optimize_ddp = "python_reducer"
+        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
+
+        def bwd(loss):
+            with compiled_autograd.enable(compiler_fn()):
+                loss.backward()
+
+        for i in range(loop):
+            loss = compiled_model(input).sum()
+            if i != loop - 1:
+                # Leave the last bwd for the run_and_get_triton_code.
+                bwd(loss)
+
+        code = run_and_get_triton_code(functools.partial(bwd, loss=loss))
+
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        return code
+
+    @run_with_native_funcol
+    def test_bucketing_coalesced_op(self):
+        torch._inductor.config._fuse_ddp_communication_passes = [
+            "fuse_ddp_with_coalesced_op",
+            "schedule_comm_wait",
+        ]
+
+        # Gradient is None
+        code = self._test_bucketing()
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default("
+            )
+        for i in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+
+        fc.run(code)
+
+        # Gradient is None
+        code = self._test_bucketing(init_process_group=False, loop=2)
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default("
+            )
+        for i in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+
+        fc.run(code)
+
+    @run_with_native_funcol
+    def test_bucketing_concat_op(self):
+        torch._inductor.config._fuse_ddp_communication_passes = [
+            "fuse_ddp_with_concat_op",
+            "schedule_comm_wait",
+        ]
+
+        # Gradient is None
+        code = self._test_bucketing()
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_.default("
+            )
+        for i in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+        fc.run(code)
+
+        # Gradient is not None
+        code = self._test_bucketing(init_process_group=False, loop=2)
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_.default("
+            )
+        for i in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+        fc.run(code)
 
 
 if __name__ == "__main__":
