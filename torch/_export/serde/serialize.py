@@ -1014,17 +1014,14 @@ class GraphModuleSerializer:
             # tensor list so that the deserializer knows to insert getitem nodes.
 
             if len(meta_val) == 1:
-                tensors = []
-                for i, v in enumerate(meta_val):
-                    assert isinstance(v, torch.Tensor)
-                    user_node = _output_node_at_index(node, i)
-                    name = (
-                        user_node.name
-                        if user_node is not None
-                        else f"{node.name}_unused_{i}"
-                    )
-                    tensors.append(self.serialize_tensor_output(name, v))
-                return [Argument.create(as_tensors=tensors)]
+                assert isinstance(meta_val[0], torch.Tensor)
+                user_node = _output_node_at_index(node, 0)
+                name = (
+                    user_node.name
+                    if user_node is not None
+                    else f"{node.name}_unused_0"
+                )
+                return [Argument.create(as_tensors=[self.serialize_tensor_output(name, meta_val[0])])]
 
             outputs = []
             for i, element_meta_val in enumerate(meta_val):
