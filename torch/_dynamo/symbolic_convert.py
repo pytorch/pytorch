@@ -65,6 +65,7 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
     LazyString,
+    preserve_rng_state,
     proxy_args_kwargs,
 )
 from .variables.base import (
@@ -801,7 +802,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         return TracingContext.current_frame(None)
 
     def run(self):
-        with self.run_ctx_mgr():
+        with self.run_ctx_mgr(), preserve_rng_state():
             try:
                 self.output.push_tx(self)
                 while (
