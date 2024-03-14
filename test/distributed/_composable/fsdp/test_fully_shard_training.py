@@ -840,10 +840,6 @@ class TestFullyShardHSDPTraining(FSDPTest):
         device = torch.device("cuda")
         num_microbatches = 3
         for iter_idx in range(5):
-            if iter_idx > 0:
-                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                    _optim.step()
-                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             for microbatch_idx in range(num_microbatches):
                 is_last_microbatch = microbatch_idx == num_microbatches - 1
                 if sync_gradients_at_last_batch:
@@ -854,6 +850,9 @@ class TestFullyShardHSDPTraining(FSDPTest):
                     losses.append(_model(inp).sum())
                     losses[-1].backward()
                 self.assertEqual(losses[0], losses[1])
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.step()
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
 
 if __name__ == "__main__":
