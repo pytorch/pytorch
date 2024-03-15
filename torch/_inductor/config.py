@@ -705,6 +705,43 @@ class cuda:
     cutlass_only_evt_capable_ops: bool = False
 
 
+class rocm:
+    # Device arch list, e.g. ["gfx908", "gfx942"]. If empty, the `native` arch is used
+    arch: List[str] = []
+
+    # Hip (and ROCm) version, if None, will use torch.hip.version
+    hip_version: Optional[str] = None
+
+    # Optimization level, use to balance compilation speed and runtime performance
+    compile_opt_level = "-O1"
+
+    # Flag to keep debug information in compiled objects
+    is_debug = False
+
+    # Flag to keep intermediate files (assembly listings, preprocessed sources, etc.)
+    save_temps = False
+
+    # Flag to add `-ffast-math`` to compile flags
+    use_fast_math = False
+
+    # Flag to add `-fgpu-flush-denormals-to-zero` to compile flags
+    flush_denormals = False
+
+    # Flag to print register and LDS usage during compilation
+    print_kernel_resource_usage = False
+
+    # Path to ROCm installation, if None, use env variable ROCM_HOME
+    rocm_home: Optional[str] = None
+
+    # Path to Composable Kernel library (by default it is checked out as a submodule)
+    ck_dir = os.environ.get(
+        "TORCHINDUCTOR_CK_DIR",
+        os.path.abspath(
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/composable_kernel_tiled/")
+        ),
+    )
+
+
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
