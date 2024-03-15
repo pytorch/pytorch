@@ -2750,6 +2750,10 @@ class ShapeEnv:
             symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
         return r
 
+    def add_var_to_val(self, expr: sympy.Symbol, val: int):
+        assert expr not in self.var_to_val, f"{expr} already exists"
+        self.var_to_val[expr] = sympy.Integer(val)
+
     def _debug_name(self, source):
         src_name = source.name()
         return self.source_name_to_debug_name.get(src_name, src_name)
