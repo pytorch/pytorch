@@ -31,6 +31,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/_convert_weight_to_int4pack_native.h>
+#include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
@@ -149,6 +150,7 @@
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
+#include <iostream>
 
 namespace at {
 
@@ -3543,16 +3545,18 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
     const int64_t ldc = result.strides()[0];
-    for (const auto i : c10::irange(m)) {
-      for (const auto j : c10::irange(n)) {
-        c[i * ldc + j] = 0;
+    parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        auto row = i / n;
+        auto col = i % n;
+        c[row * ldc + col] = 0;
         for (const auto k : c10::irange(k)) {
-          c[i * ldc + j] = c[i * ldc + j] +
-              static_cast<int32_t>(a[i * lda_0 + k * lda_1]) *
-                  static_cast<int32_t>(b[k * ldb_0 + j * ldb_1]);
+          c[row * ldc + col] = c[row * ldc + col] +
+              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
+                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
         }
       }
-    }
+    });
   }
   return result;
 }

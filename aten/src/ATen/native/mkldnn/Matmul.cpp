@@ -409,31 +409,10 @@ bool use_mkldnn_matmul(
   return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result) || use_mkldnn_bf32_matmul(mat1, mat2, result));
 }
 
-void mkldnn_matmul_i8i8i32(
+static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  // x:s8 * w:s8 -> y:s32
-  TORCH_CHECK(
-      mat1.scalar_type() == c10::kChar,
-      __func__, ": mat1 dtype should be signed int8 but found ",
-      mat1.scalar_type());
-  TORCH_CHECK(
-      mat2.scalar_type() == c10::kChar,
-      __func__, ": mat2 dtype should be signed int8 but found ",
-      mat2.scalar_type());
-  TORCH_CHECK(
-      mat1.dim() == 2 && mat2.dim() == 2,
-      __func__, ": Expect mat1 and mat2 are 2d but got ",
-      mat1.dim(),
-      " and ",
-      mat2.dim());
-  TORCH_CHECK(
-      mat1.size(1) == mat2.size(0),
-      "matmul_i8i8i32: mat1 shape and mat2 shape do not match, got ",
-      mat1.sizes(),
-      " and ",
-      mat2.sizes());
   // Create ideep tensors for oneDNN computation
   auto src = ideep::tensor(
       {mat1.sizes().vec(),
@@ -471,6 +450,69 @@ void mkldnn_matmul_i8i8i32(
   // Create primitve and execute
   auto primitive = dnnl::matmul(prim_desc);
   primitive.execute(ideep::stream::default_stream(), args);
+}
+
+static void _mkldnn_gemm_i8i8i32_with_blas(
+  const Tensor& self,
+  const Tensor& mat2,
+  const Tensor& result) {
+    const int m = result.size(0);
+    const int n = result.size(1);
+    const int k = self.size(1);
+
+    const char transa = self.strides()[1] == 1 ? 'N' : 'T';
+    const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
+    const char offsetc = 'F';
+
+    const int lda = transa == 'T' ? m : k;
+    const int ldb = transb == 'T' ? k : n;
+    const int ldc = n;
+
+    const float alpha = 1;
+    const float beta = 0;
+
+    int8_t ao = 0;
+    int8_t bo = 0;
+    int32_t co = 0;
+
+    dnnl::gemm_s8s8s32(
+        transa,
+        transb,
+        offsetc,
+        m,
+        n,
+        k,
+        alpha,
+        (int8_t*)self.data_ptr(),
+        lda,
+        ao,
+        (int8_t*)mat2.data_ptr(),
+        ldb,
+        bo,
+        beta,
+        (int32_t*)result.data_ptr(),
+        ldc,
+        &co);
+  }
+
+void mkldnn_matmul_i8i8i32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  // x:s8 * w:s8 -> y:s32
+  // both inputs should be 2d
+  // In most cases, using DNNL blas API is faster but it requires a/b data contiguous
+  // Tested on Intel(R) Xeon(R) Platinum 8358, one instance, on a whole socket and on a single core
+  bool a_is_contigous = (mat1.stride(0) == mat1.size(1) && mat1.stride(1) == 1) ||
+      (mat1.stride(0) == 1 && mat1.stride(1) == mat1.size(0));
+  bool b_is_contigous = (mat2.stride(0) == mat2.size(1) && mat2.stride(1) == 1) ||
+      (mat2.stride(0) == 1 && mat2.stride(1) == mat2.size(0));
+
+  if (a_is_contigous && b_is_contigous) {
+    _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
+  } else {
+    _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
+  }
 }
 
 } // namespace native
