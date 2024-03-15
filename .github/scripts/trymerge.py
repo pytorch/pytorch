@@ -1404,16 +1404,16 @@ def find_matching_merge_rule(
                 mandatory_checks,
             )
         )
-        pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-        failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-        if len(required_checks) > 0:
-            pending_checks, failed_checks, _ = categorize_checks(
-                checks,
-                required_checks,
-                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
-                if rule.ignore_flaky_failures
-                else 0,
-            )
+        pending_checks, failed_checks, _ = categorize_checks(
+            checks,
+            required_checks,
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+            if rule.ignore_flaky_failures
+            else 0,
+        )
+        if len(required_checks) == 0:
+            pending_checks = []
+            failed_checks = []
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
