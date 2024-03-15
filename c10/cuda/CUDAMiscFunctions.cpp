@@ -1,5 +1,5 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
-#include <stdlib.h>
+#include <cstdlib>
 
 namespace c10::cuda {
 
