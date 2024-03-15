@@ -980,11 +980,17 @@ class GraphLowering(torch.fx.Interpreter):
                 # Realize so that outputs are correctly aliased
                 result.realize()
 
-            if is_input_for_as_strided and isinstance(
+            if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
+                # Check strides before we call is_non_overlapping_and_dense
+                # which will try to evaluate a symbolic expression.
                 strides = n.meta["val"].stride()
-                dense = torch.ops.aten.is_non_overlapping_and_dense(n.meta["val"])
+                is_definitely_overlapping = len(strides) > 0 and 0 in strides
+                dense = (
+                    not is_definitely_overlapping and not n.meta["val"].is_sparse
+                    and torch.ops.aten.is_non_overlapping_and_dense(n.meta["val"])
+                )
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
 
