@@ -3995,7 +3995,7 @@ class ExternKernel(InputsKernel):
                     type_ = self.arg_properties[i].get("type")
                     args.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, x, self.is_legacy_abi_kernel()
+                            type_, x
                         )
                     )
                 else:
@@ -4010,9 +4010,6 @@ class ExternKernel(InputsKernel):
             return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
-
-    def is_legacy_abi_kernel(self):
-        return False
 
     def codegen_kwargs(self):
         if V.graph.cpp_wrapper:
@@ -4029,7 +4026,7 @@ class ExternKernel(InputsKernel):
                     )
                     kwargs.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, v, self.is_legacy_abi_kernel()
+                            type_, v
                         )
                     )
         else:
@@ -4788,7 +4785,6 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
-        self.abi_compatible_kernel = None
 
         assert isinstance(
             kernel,
@@ -4900,12 +4896,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
 
-    def is_legacy_abi_kernel(self):
-        return (
-            config.c_shim_version == "1"
-            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
-        )
-
     def init_args_default_value(self, schema):
         self.args_default_value = [
             {
@@ -4950,22 +4940,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        # Now we setup abi_compatible_kernel after self.python_kernel_name
-        # and kwargs are adjusted appropriately.
-        # For sdpa, we need the v2 version since v1 didn't consider optional arg
-        # FIXME: no need to do this after we switch to the torchgen-ed C shim
-        self.abi_compatible_kernel = (
-            f"{self.cpp_kernel_name}_v2"
-            if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
-            and config.c_shim_version == "1"
-            else self.cpp_kernel_name
-        )
-
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(
-                    param.real_type, x, self.is_legacy_abi_kernel()
-                )
+                V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
