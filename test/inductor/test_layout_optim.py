@@ -286,6 +286,53 @@ class TestLayoutOptim(TestCase):
             # Trigger the compiling of the backward graph
             actual.sum().backward()
 
+    def test_nll_loss_backward(self):
+        """
+        Repro for issue https://github.com/pytorch/pytorch/issues/120759
+
+        The CUDA implementation of aten.nll_loss2d_backward.default requires
+        the self tensor (whose layout will be used to create grad_input)
+        to be contiguous. Layout optimization may change the self tensor's layout
+        and cause failure. We fix that by adding layout constaints to the
+        fallback of aten.nll_loss2d_backward.default .
+        """
+
+        class MyModel(torch.nn.Module):
+            def __init__(self, input_dim, num_classes):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, num_classes, 3, 1, padding="same")
+                self.out = torch.nn.Linear(input_dim * num_classes, num_classes)
+
+            def forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+                x = self.conv(x)
+                b, c, t, f = x.size()
+                x = self.out(x.reshape(b, t, c * f))
+                logits = x.reshape(x.size(0), x.size(2), x.size(1))
+                loss = torch.nn.functional.cross_entropy(logits, targets)
+                return loss
+
+        device = "cuda"
+        batch_size = 48
+        seq_len = 144
+        input_dim = 39
+        num_classes = 111
+
+        model = MyModel(input_dim, num_classes)
+        model.to(device)
+
+        opt_model = torch.compile(model)
+
+        x = torch.ones((batch_size, 1, seq_len, input_dim), device=device)
+        targets = torch.randint(
+            0, num_classes - 1, (batch_size, seq_len), device=device, dtype=torch.int64
+        )
+
+        loss = model(x, targets)
+        loss.backward()
+
+        ref = model(x, targets)
+        self.assertTrue(torch.allclose(ref, loss))
+
 
 if __name__ == "__main__":
     if HAS_CUDA:

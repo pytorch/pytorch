@@ -232,12 +232,15 @@ class FSDP:
                             "Please set torch.__future__.set_swap_module_params_on_conversion(True) "
                             "to use _apply methods with FSDP"
                         )
-                new_local_tensor = new_param._local_tensor
+                local_tensor = new_param._local_tensor
                 padded_sharded_size = fsdp_param.padded_sharded_param_size
-                if new_param._local_tensor.size() != padded_sharded_size:
-                    new_local_tensor.resize_(padded_sharded_size)
-                fsdp_param._sharded_param_data = new_local_tensor.view(-1)
-                cast(
-                    DTensor, fsdp_param.sharded_param
-                )._local_tensor = new_local_tensor[: fsdp_param.sharded_size[0]]
+                if local_tensor.size() != padded_sharded_size:
+                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
+                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
+                    local_tensor = padded_local_tensor
+                fsdp_param._sharded_param_data = local_tensor.view(-1)
+                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
+                fsdp_param.sharded_param._local_tensor = local_tensor[
+                    : fsdp_param.sharded_size[0]
+                ]
         return ret

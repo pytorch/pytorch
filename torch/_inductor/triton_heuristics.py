@@ -31,6 +31,7 @@ from .utils import (
     conditional_product,
     create_bandwidth_info_str,
     do_bench,
+    get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
@@ -157,6 +158,7 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
+        self.cuda_kernel_saved = False
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -357,7 +359,16 @@ class CachingAutotuner(KernelInterface):
             # need to initialize context
             self.gpu_device.synchronize(self.gpu_device.current_device())
 
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            try:
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            except Exception:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
             binary._init_handles()
 
         call_args = [
@@ -563,6 +574,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.bin.asm["hsaco_path"]
             ).read_bytes()
             CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+
+        self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
@@ -1479,11 +1492,28 @@ def grid(*numels):
             return numel
         return ceildiv(numel, block)
 
+    max_grid_dims = config.triton.max_tiles
+
     def grid_fn(meta):
+        x_grid = get_grid_dim(xnumel, meta.get("XBLOCK", 1))
+        y_grid = get_grid_dim(ynumel, meta.get("YBLOCK", None))
+
+        MAX_Y_GRID = get_max_y_grid()
+        if znumel is None and max_grid_dims <= 2:
+            div = ceildiv(y_grid, MAX_Y_GRID)
+            y_grid = y_grid // div
+            z_grid = div
+        else:
+            z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
+            torch._check(
+                y_grid <= MAX_Y_GRID,
+                lambda: f"Generated y grid beyond 2^16 ({y_grid}) not supported with z dimension present. File issue",
+            )
+
         return (
-            get_grid_dim(xnumel, meta.get("XBLOCK", 1)),
-            get_grid_dim(ynumel, meta.get("YBLOCK", None)),
-            get_grid_dim(znumel, meta.get("ZBLOCK", None)),
+            x_grid,
+            y_grid,
+            z_grid,
         )
 
     return grid_fn
