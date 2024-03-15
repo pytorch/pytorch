@@ -35,6 +35,7 @@ DriverAPI create_driver_api() {
       TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
         C10_NVML_DRIVER_API(LOOKUP_NVML_ENTRY)
     #undef LOOKUP_NVML_ENTRY
+      }
   #endif
 
   DriverAPI r{};
