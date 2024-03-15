@@ -1063,11 +1063,11 @@ if has_triton():
     import triton
     import triton.language as tl
 
-    # values: (T, D) contiguous (TODO: allow non-contiguous)
+    # values: (P, D) contiguous (TODO: allow non-contiguous)
     # offsets: B + 1 contiguous
     # output: (B, M, D) contiguous
     # where:
-    #   T is sum_B(*)
+    #   P is sum_B(*)
     #   M is max sequence length
     @triton.jit
     def _jagged_to_padded_kernel(
@@ -1082,28 +1082,25 @@ if has_triton():
         output_seq_stride,
         output_dim_stride,
         padding_value,
-        T: tl.constexpr,
         B: tl.constexpr,
         M: tl.constexpr,
         D: tl.constexpr,
         BLOCKSIZE_BATCH: tl.constexpr,
-        # BLOCKSIZE_SEQ: tl.constexpr,
     ):
         batch_pid = tl.program_id(axis=0)
-        # seq_pid = tl.program_id(axis=0)
 
-        # Get (begin, end) offsets within packed batch (i.e. within T).
+        # Get (begin, end) offsets within packed batch dimension.
         batch_block_arange = batch_pid * BLOCKSIZE_BATCH + tl.arange(0, BLOCKSIZE_BATCH)
-        offsets_block_ptrs = offsets_ptr + batch_block_arange
-        batch_block_offsets = tl.load(offsets_block_ptrs, mask=batch_block_arange < B)
-        batch_block_end_offsets = (
-            tl.load(offsets_block_ptrs + 1, mask=batch_block_arange < B)
+        block_offsets_ptrs = offsets_ptr + batch_block_arange
+        block_begin_offsets = tl.load(block_offsets_ptrs, mask=batch_block_arange < B)
+        block_end_offsets = (
+            tl.load(block_offsets_ptrs + 1, mask=batch_block_arange < B)
         )
 
         # Compute mask for sequence length by batch item.
-        seq_block_arange = tl.arange(0, M) #seq_pid * BLOCKSIZE_SEQ + tl.arange(0, BLOCKSIZE_SEQ)
+        seq_block_arange = tl.arange(0, M)
         dim_block_arange = tl.arange(0, D)
-        lengths = batch_block_end_offsets - batch_block_offsets
+        lengths = block_end_offsets - block_begin_offsets
         values_mask = (
             seq_block_arange[None, :, None] < lengths[:, None, None]
         )
@@ -1111,26 +1108,34 @@ if has_triton():
         # Load values from input values tensor.
         values_ptrs = (
             values_ptr +
-            (batch_block_offsets[:, None, None] * values_packed_batch_stride) +
+            (block_begin_offsets[:, None, None] * values_packed_batch_stride) +
             (seq_block_arange[None, :, None] * values_packed_batch_stride) +
             (dim_block_arange[None, None, :] * values_dim_stride)
         )
-        batch_block_values = tl.load(values_ptrs, mask=values_mask)
+        block_values = tl.load(values_ptrs, mask=values_mask)
+        if batch_pid == 6:
+            print("block values", block_values)
 
         # Store values to output tensor.
+        # output_mask = values_mask # & (batch_block_arange[:, None, None] < B)
         output_ptrs = (
             output_ptr +
             (batch_block_arange[:, None, None] * output_batch_stride) +
             (seq_block_arange[None, :, None] * output_seq_stride) +
             (dim_block_arange[None, None, :] * output_dim_stride)
         )
-        tl.store(output_ptrs, batch_block_values, mask=values_mask)
+        # print("bba:", batch_block_arange[:, None, None] * output_batch_stride)
+        # tl.store(output_ptrs, block_values, mask=values_mask)
+        output_values = tl.where(values_mask, block_values, padding_value)
+        if batch_pid == 6:
+            print("output values", output_values)
+        tl.store(output_ptrs, output_values)
 
 
     def _run_jagged_to_padded_kernel(
         values, offsets, output, max_seq_len, padding_value = 0.0
     ):
-        T, B, M, D = values.size(0), offsets.size(0) - 1, max_seq_len, values.size(-1)
+        B, M, D = offsets.size(0) - 1, max_seq_len, values.size(-1)
         full_grid = (B,)
 
         grid_blocks = None
@@ -1144,16 +1149,20 @@ if has_triton():
 
         def kernel(grid, *sliced_tensors):
             _jagged_to_padded_kernel[grid](
-                # values, offsets, output,
-                *ptr_stride_extractor(*sliced_tensors),
+                values,
+                values.stride(0),
+                values.stride(1),
+                offsets,
+                offsets.stride(0),
+                output,
+                output.stride(0),
+                output.stride(1),
+                output.stride(2),
                 padding_value,
-                T, B, M, D,
-                # TODO: fix blocksizes
-                BLOCKSIZE_BATCH=8,
-                # BLOCKSIZE_SEQ=8,
-                # TODO: fix these
-                num_warps=4,
-                num_stages=1,
+                B, M, D,
+                BLOCKSIZE_BATCH=4,
+                # num_warps=1,
+                # num_stages=1,
             )
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
@@ -1162,7 +1171,7 @@ if has_triton():
         # allocate output
         T, B, M, D = values.size(0), offsets.size(0) - 1, max_seq_len, values.size(-1)
         full_grid = (B, M, D)
-        output = values.new_full(full_grid, padding_value)
+        output = values.new_empty(full_grid)
         _run_jagged_to_padded_kernel(values, offsets, output, max_seq_len, padding_value)
         return output
 
