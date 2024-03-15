@@ -258,7 +258,7 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
 Note [Expandable Segments]
