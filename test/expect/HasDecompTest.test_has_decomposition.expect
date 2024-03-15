@@ -30,8 +30,6 @@ aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
 aten::_assert_async.msg
-aten::_batch_norm_no_update.out
-aten::_batch_norm_with_update.out
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -608,6 +606,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out

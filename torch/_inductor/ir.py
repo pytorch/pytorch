@@ -3196,16 +3196,7 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
-    def simplify_and_reorder(self):
-        """
-        This is a main place where we do loop transformations in a
-        backend-agnostic way.
-
-        Here we:
-            1) Remove any 1 dimensions
-            2) Fuse contiguous dimensions together
-            3) Reorder dimensions based on stride orders
-        """
+    def get_default_sizes_body(self):
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
         )
@@ -3215,17 +3206,6 @@ class ComputedBuffer(Buffer):
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
             )
-        index_formulas = [*body.indexing_exprs.values()]
-        reads_bufs = [
-            V.graph.name_to_buffer[reads_name]
-            if reads_name in V.graph.name_to_buffer.keys()
-            else None
-            for reads_name in body.reads_name2expr.keys()
-        ]
-        memory_addrs = [
-            *body.reads_name2expr.values(),
-            *body.writes_name2expr.values(),
-        ]
         index_vars = []
         reduce_vars: List[Any] = []
         index_size = []
@@ -3239,6 +3219,65 @@ class ComputedBuffer(Buffer):
                 assert v in args[1]
                 reduce_vars.append(v)
                 reduce_size.append(s)
+        return (index_size, reduce_size), body, (index_vars, reduce_vars)
+
+    def simplify_and_reorder(
+        self,
+        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+    ):
+        """
+        This is a main place where we do loop transformations in a
+        backend-agnostic way.
+
+        Here we:
+            1) Remove any 1 dimensions
+            2) Fuse contiguous dimensions together
+            3) Reorder dimensions based on stride orders
+
+        Optional argument extra_indexing_constraints can be used to append additional
+        indexing expressions to existing ones derived from buffer's body. This can be useful
+        to fuse scheduler nodes with compatible ranges, e.g. (s0*s1*...,) and (s0, s1, s2, ...)
+        on CPU by preventing indexing simplifications and obtaining index/reduce ranges for
+        the scheduler node compatible with other nodes.
+        """
+        (
+            (index_size, reduce_size),
+            body,
+            (index_vars, reduce_vars),
+        ) = self.get_default_sizes_body()
+
+        index_formulas = [*body.indexing_exprs.values()]
+        if extra_indexing_constraints is not None:
+            assert (
+                isinstance(extra_indexing_constraints, tuple)
+                and len(extra_indexing_constraints) == 2
+            )
+            extra_indexing_ranges, extra_indexing_expr = extra_indexing_constraints
+            assert isinstance(extra_indexing_ranges, dict)
+            assert isinstance(extra_indexing_expr, list)
+            assert all(isinstance(f, Expr) for f in extra_indexing_expr)
+
+            expected_var_ranges = body.var_ranges
+            assert expected_var_ranges == extra_indexing_ranges, (
+                expected_var_ranges,
+                extra_indexing_ranges,
+            )
+            # remove already existing expressions
+            extra_indexing_expr = [
+                e for e in extra_indexing_expr if e not in index_formulas
+            ]
+            index_formulas += extra_indexing_expr
+
+        reads_bufs = [
+            V.graph.name_to_buffer[reads_name]
+            if reads_name in V.graph.name_to_buffer.keys()
+            else None
+            for reads_name in body.reads_name2expr.keys()
+        ]
+        memory_addrs = [
+            *body.reads_name2expr.values(),
+            *body.writes_name2expr.values(),
+        ]
 
         # the reordering_reindex in reads' simplify_reorder_and_tile
         reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
@@ -3389,7 +3428,10 @@ class TemplateBuffer(Buffer):
     def should_allocate(self):
         return True
 
-    def simplify_and_reorder(self):
+    def simplify_and_reorder(
+        self,
+        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+    ):
         return (
             (
                 self.get_size(),
@@ -3953,7 +3995,7 @@ class ExternKernel(InputsKernel):
                     type_ = self.arg_properties[i].get("type")
                     args.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, x, self.is_legacy_abi_kernel()
+                            type_, x
                         )
                     )
                 else:
@@ -3968,9 +4010,6 @@ class ExternKernel(InputsKernel):
             return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
-
-    def is_legacy_abi_kernel(self):
-        return False
 
     def codegen_kwargs(self):
         if V.graph.cpp_wrapper:
@@ -3987,7 +4026,7 @@ class ExternKernel(InputsKernel):
                     )
                     kwargs.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, v, self.is_legacy_abi_kernel()
+                            type_, v
                         )
                     )
         else:
@@ -4322,7 +4361,11 @@ class InplaceBernoulliFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.bernoulli_"
-        self.cpp_kernel_name = "at::native::bernoulli_"
+        self.cpp_kernel_name = (
+            "aoti_torch_bernoulli_"
+            if config.abi_compatible
+            else "at::native::bernoulli_"
+        )
         mark_node_as_mutating(self, x)
 
 
@@ -4742,7 +4785,6 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
-        self.abi_compatible_kernel = None
 
         assert isinstance(
             kernel,
@@ -4854,12 +4896,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
 
-    def is_legacy_abi_kernel(self):
-        return (
-            config.c_shim_version == "1"
-            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
-        )
-
     def init_args_default_value(self, schema):
         self.args_default_value = [
             {
@@ -4904,22 +4940,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        # Now we setup abi_compatible_kernel after self.python_kernel_name
-        # and kwargs are adjusted appropriately.
-        # For sdpa, we need the v2 version since v1 didn't consider optional arg
-        # FIXME: no need to do this after we switch to the torchgen-ed C shim
-        self.abi_compatible_kernel = (
-            f"{self.cpp_kernel_name}_v2"
-            if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
-            and config.c_shim_version == "1"
-            else self.cpp_kernel_name
-        )
-
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(
-                    param.real_type, x, self.is_legacy_abi_kernel()
-                )
+                V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
@@ -5239,18 +5262,18 @@ class MultiOutput(ExternKernel):
     def codegen_list_tuple_access(self, basename, indices):
         if len(indices) > 0:
             itype, i = indices[0]
-            if itype == list:
+            if issubclass(itype, list):
                 return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
-            elif itype == tuple:
+            elif issubclass(itype, tuple):
                 # cpp wrapper code needs to use std::get<> to access a tuple
                 tuple_access = V.graph.wrapper_code.codegen_tuple_access(
                     basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
-            elif itype == dict:
+            elif issubclass(itype, dict):
                 return self.codegen_list_tuple_access(f"{basename}['{i}']", indices[1:])
             else:
-                raise AssertionError("non supported index type")
+                raise AssertionError("non supported index type: ", itype)
         else:
             return basename
 
@@ -7889,11 +7912,16 @@ class _WaitKernel(_CollectiveKernel):
             # Out-of-place single-output
             return [inp.inputs[0]]
         elif isinstance(inp, MultiOutput):
-            # Out-of-place multi-output
+            # This can be two things:
+            # 1. Out-of-place multi-output coll
+            # 2. In-place coll with inputs coming from another MultiOutput
             coll = inp.inputs[0]
-            assert isinstance(coll, _CollectiveKernel)
-            _, idx = inp.indices[0]
-            return [coll.inputs[idx]]
+            # Case 1
+            if isinstance(coll, _CollectiveKernel):
+                _, idx = inp.indices[0]
+                return [coll.inputs[idx]]
+            # Case 2
+            return []
         else:
             # In-place requires no additional deps handling for volatile
             # reads since the inputs are mutated.
