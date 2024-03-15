@@ -1104,11 +1104,17 @@ def main():
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if use_prioritized_text == "1" or use_prioritized_text == "True":
-        gen_linker_script(filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld")
+        gen_linker_script(
+            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
+        )
         linker_script_path = os.path.abspath("cmake/linker_script.ld")
         os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
-        os.environ["CFLAGS"] = os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
-        os.environ["CXXFLAGS"] = os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
+        os.environ["CFLAGS"] = (
+            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
+        os.environ["CXXFLAGS"] = (
+            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
