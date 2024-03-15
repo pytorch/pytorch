@@ -212,6 +212,10 @@ class BlockStackEntry:
         return self.with_context.exit(tx)
 
 
+class ReturnValueOp(Exception):
+    pass
+
+
 class InstructionTranslatorGraphState(NamedTuple):
     output: OutputGraphState
     symbolic_locals: Dict[str, VariableTracker]
@@ -483,9 +487,6 @@ def break_graph_if_unsupported(*, push):
                 assert speculation.reason is not None
                 return handle_graph_break(self, inst, speculation.reason)
             try:
-                TracingContext.set_current_loc(
-                    self.f_code.co_filename, self.lineno, self.f_code.co_name
-                )
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.generic_context_manager_depth > 0:
@@ -502,8 +503,15 @@ def break_graph_if_unsupported(*, push):
 
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                try:
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                except IndexError:
+                    # first instruction
+                    code_options = self.code_options
+                    frame_loc = (
+                        code_options["co_filename"],
+                        code_options["co_firstlineno"],
+                    )
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
@@ -511,6 +519,7 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
                     # This log line is exercised from
                     #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
@@ -598,7 +607,26 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
-class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
+class BytecodeDistpatchTableMeta(type):
+    """Installs a `cls.dispatch_table` on every subclass to speed up calls to self.OPCODE()"""
+
+    def __init__(cls, name, bases, dct):
+        super().__init__(name, bases, dct)
+
+        def _missing(opname, *args):
+            unimplemented(f"missing: {opname}")
+
+        dispatch_table = {
+            op: getattr(cls, opname, functools.partial(_missing, opname))
+            for opname, op in dis.opmap.items()
+        }
+        cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
+
+
+class InstructionTranslatorBase(
+    Checkpointable[InstructionTranslatorGraphState],
+    metaclass=BytecodeDistpatchTableMeta,
+):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
@@ -614,6 +642,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
+    dispatch_table: List[Any]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -695,8 +724,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         log_str += f"    {line}"
         return log_str
 
-    def log_starts_line(self):
-        trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
+    def starts_line(self, lineno):
+        if self.lineno == lineno:
+            return
+        self.lineno = lineno
+        TracingContext.set_current_loc(
+            self.f_code.co_filename, lineno, self.f_code.co_name
+        )
+        if trace_source_log.isEnabledFor(logging.DEBUG):
+            trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
@@ -704,17 +740,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inst = self.instructions[self.instruction_pointer]
         self.current_instruction = inst
         self.instruction_pointer += 1
-        if self.instruction_pointer < len(self.instructions):
+        try:
             self.next_instruction = self.instructions[self.instruction_pointer]
-        else:
+        except IndexError:
             self.instruction_pointer = None
             self.next_instruction = None
-        if inst.starts_line and self.lineno != inst.starts_line:
-            self.lineno = inst.starts_line
-            self.log_starts_line()
+
+        if inst.starts_line:
+            self.starts_line(inst.starts_line)
 
         if (
-            len(self.stack) == 0
+            not self.stack
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
         ):
@@ -722,18 +758,36 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if self.current_speculation.failed:
                 return self.step_graph_break(inst)
 
-        log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
 
-        # 3.11 no longer uses a block stack, but we still keep track of one
-        # so that we know which contexts are currently active.
-        # For our purposes, all exception table entries with the same target
-        # are considered to be part of the same "block".
-        if sys.version_info >= (3, 11):
+        self.update_block_stack(inst)
+
+        try:
+            self.dispatch_table[inst.opcode](self, inst)
+            return True
+        except ReturnValueOp:
+            return False
+        except Unsupported:
+            if self.current_speculation is None:
+                log.debug("empty checkpoint")
+                raise
+            log.debug("step triggered compile", exc_info=True)
+
+        self.current_speculation.fail_and_restart_analysis()
+
+    if sys.version_info >= (3, 11):
+
+        def update_block_stack(self, inst):
+            # 3.11 no longer uses a block stack, but we still keep track of one
+            # so that we know which contexts are currently active.
+            # For our purposes, all exception table entries with the same target
+            # are considered to be part of the same "block".
             entry = inst.exn_tab_entry
             if not (
                 # still in the same block
-                self.block_stack
-                and entry
+                entry
+                and self.block_stack
                 and self.block_stack[-1].target is entry.target
             ):
                 if not entry:
@@ -764,22 +818,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                         BlockStackEntry(entry.target, len(self.stack))
                     )
 
-        try:
-            if not hasattr(self, inst.opname):
-                unimplemented(f"missing: {inst.opname}")
-            TracingContext.set_current_loc(
-                self.f_code.co_filename, self.lineno, self.f_code.co_name
-            )
-            getattr(self, inst.opname)(inst)
+    else:
 
-            return inst.opname != "RETURN_VALUE"
-        except Unsupported:
-            if self.current_speculation is None:
-                log.debug("empty checkpoint")
-                raise
-            log.debug("step triggered compile", exc_info=True)
-
-        self.current_speculation.fail_and_restart_analysis()
+        def update_block_stack(self, inst):
+            pass
 
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
@@ -1972,7 +2014,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.generic_context_manager_depth = 0
-        self.lineno = code_options["co_firstlineno"]
+        self.lineno = -1
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []
@@ -2017,7 +2059,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
         linecache.lazycache(f_code.co_filename, f_globals)
-        self.log_starts_line()
 
 
 class InstructionTranslator(InstructionTranslatorBase):
@@ -2282,6 +2323,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             ),
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
+        raise ReturnValueOp()
 
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
@@ -2551,6 +2593,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()  # type: ignore[assignment]
         self.instruction_pointer = None
+        raise ReturnValueOp()
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
