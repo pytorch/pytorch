@@ -76,6 +76,9 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
         del tx.nn_module_stack[module_key]
 
 
+tracer_to_used_names = {}
+
+
 class NNModuleVariable(VariableTracker):
     _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
 
@@ -450,8 +453,36 @@ class NNModuleVariable(VariableTracker):
                         "source_fn_stack" in node.meta
                         and len(node.meta["source_fn_stack"]) > 0
                     ):
+                        # below logic to get a unique name for source_fn_stack is mimic from
+                        # the _Namespace.create_name() which is used to get a unique name for
+                        # the fx node.
+                        if tx.output.current_tracer not in tracer_to_used_names.keys():
+                            # TODO(JackCaoG): use weakref here?
+                            tracer_to_used_names[tx.output.current_tracer] = {}
+
+                        if (
+                            self.module_key
+                            not in tracer_to_used_names[tx.output.current_tracer].keys()
+                        ):
+                            tracer_to_used_names[tx.output.current_tracer][
+                                self.module_key
+                            ] = 0
+
+                        count = tracer_to_used_names[tx.output.current_tracer][
+                            self.module_key
+                        ]
+                        tracer_to_used_names[tx.output.current_tracer][
+                            self.module_key
+                        ] += 1
+                        unique_module_key = (
+                            self.module_key
+                            if count == 0
+                            else f"{self.module_key}_{count}"
+                        )
+
+                        print(unique_module_key)
                         node.meta["source_fn_stack"][-1] = (
-                            self.module_key,
+                            unique_module_key,
                             type(self.module),
                         )
                     # remove the additional stack trace caused by fwd inlining
