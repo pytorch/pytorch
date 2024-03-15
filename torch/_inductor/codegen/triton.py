@@ -53,6 +53,7 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
     get_max_y_grid,
+    get_read_only_benchmark_value,
     green_text,
     is_welford_reduction,
     next_power_of_2,
@@ -3814,6 +3815,8 @@ class TritonScheduling(BaseScheduling):
         for n in nodes:
             n.last_usage = set()
 
+        non_out_arg_indices: List[int] = []
+
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -3829,13 +3832,32 @@ class TritonScheduling(BaseScheduling):
                 mutations=mutations,
                 index_dtype=index_dtype,
             )
-
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
+
+            argument_names, test, test2 = kernel.args.python_argdefs()
+            for i, arg in enumerate(argument_names):
+                # in_out arguments get cloned before kernel invocation,
+                # safe to take from params
+                if "in_out" in arg or "in_" in arg:
+                    non_out_arg_indices.append(i)
+                else:
+                    assert "out" in arg
+
         else:
             template_node = nodes[0]
             epilogue_nodes = nodes[1:]
+            # TODO - better way to figure out inputs here
+
+            input_names = []
+            unique_inputs = []
+            for inp in template_node.node.inputs:
+                if inp.get_name() not in input_names:
+                    unique_inputs.append(inp)
+                    input_names.append(inp.get_name())
+
+            non_out_arg_indices.extend(range(len(unique_inputs)))
 
             with config.patch("benchmark_kernel", True):
                 src_code = self.codegen_template(
@@ -3870,7 +3892,29 @@ class TritonScheduling(BaseScheduling):
         if ms is not None:
             return ms, mod.__file__
 
-        args = mod.get_args()
+        with torch._subclasses.FakeTensorMode():
+            fake_args = mod.get_args()
+
+        args = []
+        for i, fake_arg in enumerate(fake_args):
+            if not isinstance(fake_arg, torch.Tensor):
+                args.append(fake_arg)
+
+            gen_fn = (
+                get_read_only_benchmark_value
+                if i in non_out_arg_indices
+                else torch._dynamo.testing.rand_strided
+            )
+            args.append(
+                gen_fn(
+                    fake_arg.shape,
+                    fake_arg.stride(),
+                    dtype=fake_arg.dtype,
+                    device=fake_arg.device,
+                    extra_size=fake_arg.storage_offset(),
+                )
+            )
+
         call = mod.call
         wrapped_jit_function = mod.triton_
 
