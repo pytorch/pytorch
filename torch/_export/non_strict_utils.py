@@ -202,13 +202,15 @@ def make_constraints(
     if dynamic_shapes == []:
         return {}
 
+    def _is_dynamic_shape_leaf(x):
+        if x is None:
+            return True
+        if isinstance(x, dict):
+            x = list(x.values())
+        return all(isinstance(y, _Dim) or y is None for y in x)
+
     flat_dynamic_shapes, _ = tree_flatten(
-        dynamic_shapes,
-        is_leaf=lambda x: x is None
-        or all(
-            isinstance(y, _Dim) or y is None
-            for y in (x.values() if isinstance(x, dict) else x)
-        ),
+        dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
     )
 
     shape_env = fake_mode.shape_env
