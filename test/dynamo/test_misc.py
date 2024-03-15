@@ -776,7 +776,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg0_1 = arg1_1 = None
         return ()""",
                 )
 
@@ -9560,27 +9560,28 @@ ShapeEnv not equal: field values don't match:
         f = torch.compile(fn, backend="eager")
         f(x)
         metrics = torch._dynamo.utils.get_compilation_metrics()
-        subgraph_break_reason = metrics[0].graph_break_reason
+        # Should only be one restart per event
+        (restart_reason,) = metrics[0].restart_reasons
         self.assertTrue(
-            "skip function graph_break" in subgraph_break_reason,
+            "skip function graph_break" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(
             metrics[0].wasted_compile_time_s <= metrics[0].entire_frame_compile_time_s
         )
 
-        subgraph_break_reason = metrics[1].graph_break_reason
+        (restart_reason,) = metrics[1].restart_reasons
         self.assertTrue(
-            "skip function graph_break" in subgraph_break_reason,
+            "skip function graph_break" in restart_reason,
             "Should have logged graph break reason",
         )
         self.assertTrue(
             metrics[1].wasted_compile_time_s <= metrics[1].entire_frame_compile_time_s
         )
 
-        subgraph_break_reason = metrics[2].graph_break_reason
+        # No restarts
         self.assertTrue(
-            subgraph_break_reason is None, "Last compile has no graph break"
+            len(metrics[2].restart_reasons) == 0, "Last compile has no graph break"
         )
         self.assertTrue(metrics[2].wasted_compile_time_s == 0)
 
@@ -9600,8 +9601,8 @@ ShapeEnv not equal: field values don't match:
             for metric in metrics:
                 self.assertTrue(metric.wasted_compile_time_s > 0)
                 self.assertTrue(
-                    "RuntimeError: broken backend" in metric.graph_break_reason,
-                    "Should have logged graph break reason",
+                    "RuntimeError: broken backend" in metric.fail_reason,
+                    "Should have logged fail reason",
                 )
 
     def test_compilation_metrics_size_limit(self):

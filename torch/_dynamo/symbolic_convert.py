@@ -139,7 +139,11 @@ class SpeculationEntry:
         Start tracing of the current frame over again, and don't take this branch.
         """
         self.failed = True
-        raise exc.SpeculationRestartAnalysis()
+        if self.reason is not None:
+            restart_reason = self.reason.reason
+        else:
+            restart_reason = "Unknown fail_and_restart_analysis"
+        raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
 
 
 @dataclasses.dataclass
