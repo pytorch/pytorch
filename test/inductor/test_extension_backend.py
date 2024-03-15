@@ -140,7 +140,7 @@ class ExtensionBackendTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
     # cpp_extension doesn't work in fbcode right now
