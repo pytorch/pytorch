@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
@@ -525,12 +526,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (bias.defined()) {
     check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
   }
+  
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+  bool support_bf16 = is_sm8x || is_sm90;
 
   const bool use_cudnn = (
       input.is_cuda()
       && weight.scalar_type() != at::kBFloat16
       && ((input.scalar_type() != at::kHalf && input.scalar_type() != at::kBFloat16)
         || weight.scalar_type() == at::kFloat)
+      && (input.scalar_type() != at::kBFloat16 || support_bf16)
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
