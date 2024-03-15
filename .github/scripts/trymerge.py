@@ -1411,6 +1411,10 @@ def find_matching_merge_rule(
             if rule.ignore_flaky_failures
             else 0,
         )
+
+        # categorize_checks assumes all tests are required if required_checks is empty.
+        # this is a workaround as we want to keep that behavior for categorize_checks
+        # generally.
         if not required_checks:
             pending_checks = []
             failed_checks = []
