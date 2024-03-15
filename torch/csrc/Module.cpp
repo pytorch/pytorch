@@ -9,6 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
@@ -606,6 +607,22 @@ PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+// Set Accelerator Python Errors.
+// Only used when privateuse1 is registered.
+static void setAcceleratorPyError() {
+  auto device_type = at::getAccelerator(true);
+  std::string device_name = c10::DeviceTypeName(device_type.value());
+  THPException_AcceleratorOutOfMemoryError = PyErr_NewExceptionWithDoc(
+      ("torch." + device_name + ".OutOfMemoryError").c_str(),
+      ("Exception raised when " + device_name + " is out of memory").c_str(),
+      PyExc_RuntimeError,
+      nullptr);
+  PyObject* module = PyImport_ImportModule("torch._C");
+  PyModule_AddObject(module, "_AcceleratorOutOfMemoryError",
+      THPException_AcceleratorOutOfMemoryError);
+}
+
+
 static PyObject* THModule_rename_privateuse1_backend(
     PyObject* _unused,
     PyObject* arg) {
@@ -616,6 +633,7 @@ static PyObject* THModule_rename_privateuse1_backend(
       THPUtils_typename(arg));
   const std::string backend_name = THPUtils_unpackString(arg);
   c10::register_privateuse1_backend(backend_name);
+  setAcceleratorPyError();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
