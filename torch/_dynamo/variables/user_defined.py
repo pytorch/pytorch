@@ -44,6 +44,7 @@ from ..utils import (
     istype,
     namedtuple_fields,
     object_has_getattribute,
+    object_new,
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
@@ -414,6 +415,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
+        elif (
+            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            and inspect.getattr_static(self.value, "__init__", None)
+            is not torch.nn.Module.__init__
+            and not self.source
+        ):
+            # Instantiate a UserDefinedObject class and call its __init__ method.
+            obj = object_new(self.value)
+            variable = UserDefinedObjectVariable(
+                obj,
+            )
+            return variable.call_method(tx, "__init__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
