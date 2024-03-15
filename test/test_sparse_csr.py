@@ -2510,6 +2510,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(b.grad, b1.grad)
 
     @onlyCUDA
+    # It works on ROCm and CUDA issue is currently active
     @skipCUDAIf(not TEST_WITH_ROCM, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
