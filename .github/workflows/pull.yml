@@ -82,7 +82,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11-no-ops
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
@@ -93,7 +93,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-pch:
     name: linux-jammy-py3.8-gcc11-pch
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11-pch
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
@@ -104,7 +104,7 @@ jobs:
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
@@ -133,7 +133,7 @@ jobs:
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
@@ -156,7 +156,7 @@ jobs:
 
   linux-focal-py3_8-clang10-build:
     name: linux-focal-py3.8-clang10
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.8-clang10
       docker-image-name: pytorch-linux-focal-py3.8-clang10
@@ -185,7 +185,7 @@ jobs:
 
   linux-focal-py3_11-clang10-build:
     name: linux-focal-py3.11-clang10
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.11-clang10
       docker-image-name: pytorch-linux-focal-py3.11-clang10
@@ -214,7 +214,7 @@ jobs:
 
   linux-focal-py3_12-clang10-build:
     name: linux-focal-py3.12-clang10
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.12-clang10
       docker-image-name: pytorch-linux-focal-py3.12-clang10
@@ -237,7 +237,7 @@ jobs:
 
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
@@ -262,7 +262,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
@@ -290,7 +290,7 @@ jobs:
 
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3-clang12-mobile-build
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
@@ -302,7 +302,7 @@ jobs:
 
   linux-jammy-cuda-11_8-cudnn8-py3_8-clang12-build:
     name: linux-jammy-cuda11.8-cudnn8-py3.8-clang12
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-cuda11.8-cudnn8-py3.8-clang12
       docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12
@@ -313,7 +313,7 @@ jobs:
 
   linux-focal-py3-clang9-mobile-custom-build-static:
     name: linux-focal-py3-clang9-mobile-custom-build-static
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3-clang9-mobile-custom-build-static
       docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
@@ -325,7 +325,7 @@ jobs:
 
   linux-focal-py3_8-clang9-xla-build:
     name: linux-focal-py3_8-clang9-xla
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3_8-clang9-xla
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
@@ -407,7 +407,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.8-gcc11-mobile-lightweight-dispatch-build
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc111-mobile-lightweight-dispatch-build
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
@@ -421,7 +421,7 @@ jobs:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
     name: linux-focal-rocm6.0-py3.8
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-rocm6.0-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
@@ -435,7 +435,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
@@ -462,7 +462,7 @@ jobs:
 
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
