@@ -695,9 +695,9 @@ class Node:
                     m._replace_hook(old=self, new=value, user=user)
         update = False
         if (
-                name == "target" and
+                name in ("target", "op") and
                 hasattr(self, name) and
-                self.target != value and
+                getattr(self, name) != value and
                 hasattr(self.graph, "_side_table") and
                 self in self.graph._side_table
         ):
