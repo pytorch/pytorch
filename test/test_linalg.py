@@ -5872,7 +5872,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("n", [16, 32])
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
-    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b):
+    @parametrize("non_contig", [True, False])
+    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig):
 
         def genf_int_float(x, y, use_transpose):
             if use_transpose:
@@ -5883,8 +5884,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 return x_int8.t(), x_float.t()
             return x_int8, x_float
 
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b)
+        def genf_int_float_non_contig(x, y):
+            x_int8 = torch.randint(-10, 10, (x, y + 1), dtype=torch.int8, device=device)
+            x_float = x_int8.to(torch.float32)
+            return x_int8[:, :-1], x_float[:, :-1]
+
+        if non_contig and (m == 0 or k == 0 or use_transpose_a or use_transpose_b):
+            # skip unnecessary and duplicate cases
+            return
+        if non_contig:
+            a_int8, a_float = genf_int_float_non_contig(m, k)
+            b_int8, b_float = genf_int_float_non_contig(k, n)
+        else:
+            a_int8, a_float = genf_int_float(m, k, use_transpose_a)
+            b_int8, b_float = genf_int_float(k, n, use_transpose_b)
         c_int32 = torch._int_mm(a_int8, b_int8)
         self.assertTrue(c_int32.dtype is torch.int32)
         self.assertEqual(c_int32.device, torch.device(device))
