@@ -2582,7 +2582,8 @@ def rms_norm(
 
     See :class:`~torch.nn.RMSNorm` for details.
     """
-    if eps is None:
+    # isintance(input, Tensor) needed for classes that implement __torch_function__ but are not Tensors
+    if eps is None and isinstance(input, Tensor):
         eps = torch.finfo(input.dtype).eps
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(

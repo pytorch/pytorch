@@ -1932,6 +1932,9 @@ def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, tr
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def rms_norm_reference_fn(m, p, i):
+        eps = m.eps
+        if eps is None:
+            eps = torch.finfo(i.dtype).eps
         ndim = i.ndim
         normalized_shape = m.normalized_shape
         weight = m.weight

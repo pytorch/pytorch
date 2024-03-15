@@ -293,15 +293,15 @@ class GroupNorm(Module):
 
 
 class RMSNorm(Module):
-    """Applies Root Mean Square Layer Normalization over a mini-batch of inputs.
+    r"""Applies Root Mean Square Layer Normalization over a mini-batch of inputs.
 
     This layer implements the operation as described in
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y = \frac{x}{\\sqrt{\\mathrm{RMS}[x] + \\epsilon}} * \\gamma
+        y = \frac{x}{\sqrt{\mathrm{RMS}[x] + \epsilon}} * \gamma
 
-    The root mean squared norm is taken over the last `D` dimensions, where `D`
+    The root mean squared norm is taken over the last ``D`` dimensions, where ``D``
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
     is ``(3, 5)`` (a 2-dimensional shape), the rms norm is computed over
     the last 2 dimensions of the input.
@@ -311,8 +311,8 @@ class RMSNorm(Module):
             of size
 
             .. math::
-                [* \times \text{normalized\\_shape}[0] \times \text{normalized\\_shape}[1]
-                    \times \\ldots \times \text{normalized\\_shape}[-1]]
+                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
+                    \times \ldots \times \text{normalized\_shape}[-1]]
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
@@ -324,6 +324,12 @@ class RMSNorm(Module):
     Shape:
         - Input: :math:`(N, *)`
         - Output: :math:`(N, *)` (same shape as input)
+
+    Examples::
+
+        >>> rms_norm = nn.RMSNorm([2, 3])
+        >>> input = torch.randn(2, 2, 3)
+        >>> rms_norm(input)
 
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
