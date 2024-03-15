@@ -3317,24 +3317,6 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 @_beartype.beartype
 def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
     return symbolic_helper._max_helper(g, self, dim_or_y, keepdim)
-    if dim_or_y is None and keepdim is None:
-        return g.op("ReduceMax", self, keepdims_i=0)
-    # torch.max(input, other)
-    if keepdim is None:
-        return symbolic_helper._op_with_optional_float_cast(
-            g, "Max", self, dim_or_y, opset_before=12
-        )
-    # torch.max(input, dim, keepdim)
-    else:
-        keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
-        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
-        if g.opset < 18:
-            max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
-        else:
-            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-            max = g.op("ReduceMax", self, axes, keepdims_i=keepdim)
-        indices = g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdim)
-        return max, indices
 
 
 @_onnx_symbolic("aten::maximum")

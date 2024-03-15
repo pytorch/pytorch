@@ -3565,8 +3565,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = Variance()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMinOpsetVersion(18)
-    @skipIfUnsupportedMaxOpsetVersion(18)
     def test_var_mean(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
