@@ -1,5 +1,3 @@
-from contextlib import contextmanager
-
 import torch
 import torch._subclasses.functional_tensor
 
@@ -8,7 +6,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
 
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import _set_compilation_env, autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -20,21 +18,9 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
-@contextmanager
-def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
-    try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
-        # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
-        yield
-    finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
-
-
 @exposed_in("torch")
 def strict_mode(callable, operands):
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return strict_mode_op(callable, operands)
 
     with _set_compilation_env():

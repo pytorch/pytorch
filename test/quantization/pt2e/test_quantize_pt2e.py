@@ -1092,6 +1092,48 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_input_edge_sanity_check(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 6
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.add.Tensor
+                    ):
+                        input_act1 = node.args[0]
+                        # this is a constant, so not valid for annotation
+                        input_act2 = node.args[1]
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act1: act_qspec,
+                                # this is supposed to error out
+                                input_act2: act_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        m = M().eval()
+        example_inputs = torch.randn(1, 2, 3, 3)
+        m = capture_pre_autograd_graph(m, example_inputs)
+        with self.assertRaises(Exception):
+            m = prepare_pt2e(m, BackendAQuantizer())
+
     def test_fold_quantize(self):
         """Test to make sure the quantized model gets quantized weight (quantize_per_tensor op is folded)
         """
@@ -1280,6 +1322,53 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             ns.call_function(torch.ops.aten.add.Tensor): 0,
             ns.call_function(torch.ops.aten.mul.Tensor): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_composable_quantizer_transform_for_annotation(self):
+        class TestQuantizer1(Quantizer):
+            def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in model.graph.nodes:
+                    if n.target == torch.ops.aten.add.Tensor:
+                        n.target = torch.ops.aten.mul.Tensor
+                return model
+
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class TestQuantizer2(Quantizer):
+            def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in model.graph.nodes:
+                    if n.target == torch.ops.aten.sub.Tensor:
+                        n.target = torch.ops.aten.div.Tensor
+                return model
+
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y - z
+
+        m = M().eval()
+        quantizer = ComposableQuantizer(
+            [TestQuantizer1(), TestQuantizer2()]
+        )
+        example_inputs = (torch.randn(1, 2, 3, 3), torch.randn(1, 2, 3, 3), torch.randn(1, 2, 3, 3))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        node_occurrence = {
+            ns.call_function(torch.ops.aten.add.Tensor): 0,
+            ns.call_function(torch.ops.aten.sub.Tensor): 0,
+            ns.call_function(torch.ops.aten.mul.Tensor): 1,
+            ns.call_function(torch.ops.aten.div.Tensor): 1,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
@@ -1707,6 +1796,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         fx_traced_gm = torch.fx.symbolic_trace(m, example_inputs)
         self.assertTrue(torch.ao.quantization.pt2e.export_utils.model_is_exported(exported_gm))
         self.assertFalse(torch.ao.quantization.pt2e.export_utils.model_is_exported(fx_traced_gm))
+        self.assertFalse(torch.ao.quantization.pt2e.export_utils.model_is_exported(m))
 
     def test_reentrant(self):
         """Test we can safely call quantization apis multiple times"""

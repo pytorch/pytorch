@@ -8,10 +8,10 @@ import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
@@ -89,7 +89,9 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    def _generate_qdq_quantized_model(self, mod, inputs, is_qat=False):
+    def _generate_qdq_quantized_model(
+        self, mod, inputs, is_qat=False, is_dynamic=False
+    ):
         maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
         with maybe_no_grad:
             export_model = capture_pre_autograd_graph(
@@ -98,7 +100,9 @@ class TestPatternMatcherBase(TestCase):
             )
             quantizer = X86InductorQuantizer()
             quantizer.set_global(
-                xiq.get_default_x86_inductor_quantization_config(is_qat=is_qat)
+                xiq.get_default_x86_inductor_quantization_config(
+                    is_qat=is_qat, is_dynamic=is_dynamic
+                )
             )
             prepare_model = (
                 prepare_qat_pt2e(export_model, quantizer)
@@ -123,6 +127,7 @@ class TestPatternMatcherBase(TestCase):
         is_qat=False,
         matcher_check_fn=None,
         dtype=None,
+        is_dynamic=False,
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -146,7 +151,9 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
 
         if check_quantization:
-            convert_model = self._generate_qdq_quantized_model(mod, inputs, is_qat)
+            convert_model = self._generate_qdq_quantized_model(
+                mod, inputs, is_qat, is_dynamic
+            )
             with torch.no_grad(), maybe_autocast:
                 _ = torch.compile(convert_model)(*inputs)
                 if matcher_count is not None:
@@ -1195,6 +1202,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         do_permute=False,
         matcher_check_fn=None,
         bias=True,
+        is_dynamic=False,
+        is_qat=False,
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias, do_permute=False):
@@ -1223,6 +1232,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn
             if matcher_check_fn is not None
             else _default_matcher_check_fn,
+            is_qat=is_qat,
+            is_dynamic=is_dynamic,
         )
 
     @skipIfNoDynamoSupport
@@ -1234,6 +1245,30 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         for bias in [True, False]:
             self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_dynamic_qlinear_cpu(self):
+        r"""
+        This testcase will quantize a single Linear Moduel.
+        """
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 4)),), bias=bias, is_dynamic=True
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_dynamic_qlinear_qat_cpu(self):
+        r"""
+        This testcase will quantize a single Linear Moduel.
+        """
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 4)),), bias=bias, is_dynamic=True, is_qat=True
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1327,14 +1362,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 bias=bias,
             )
 
-    def _qlinear_unary_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_unary_cpu_test_helper(
+        self, inputs, unary_op=torch.nn.ReLU(), int8_mixed_bf16=False
+    ):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
-                self.unary_fn = torch.nn.ReLU()
+                self.unary_fn = copy.deepcopy(unary_op)
                 self.linear2 = torch.nn.Linear(4, 4, use_bias)
-                self.unary_fn2 = torch.nn.ReLU()
+                self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
                 tmp = self.unary_fn(self.linear(x))
@@ -1401,6 +1438,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._qlinear_unary_cpu_test_helper(
             (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
         )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_gelu_cpu(self):
+        r"""
+        This testcase will quantize a Linear->GELU pattern.
+        """
+        for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
+            self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),), gelu)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_gelu_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a Linear->GELU pattern with int8_mixed_bf16 quantization.
+        """
+        for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
+            self._qlinear_unary_cpu_test_helper(
+                (torch.randn((2, 4)),), gelu, int8_mixed_bf16=True
+            )
 
     def _qlinear_dequant_promotion_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
         class M(torch.nn.Module):
