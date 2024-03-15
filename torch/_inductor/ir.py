@@ -4451,7 +4451,11 @@ class InplaceBernoulliFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.bernoulli_"
-        self.cpp_kernel_name = "at::native::bernoulli_"
+        self.cpp_kernel_name = (
+            "aoti_torch_bernoulli_"
+            if config.abi_compatible
+            else "at::native::bernoulli_"
+        )
         mark_node_as_mutating(self, x)
 
 
@@ -5368,18 +5372,18 @@ class MultiOutput(ExternKernel):
     def codegen_list_tuple_access(self, basename, indices):
         if len(indices) > 0:
             itype, i = indices[0]
-            if itype == list:
+            if issubclass(itype, list):
                 return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
-            elif itype == tuple:
+            elif issubclass(itype, tuple):
                 # cpp wrapper code needs to use std::get<> to access a tuple
                 tuple_access = V.graph.wrapper_code.codegen_tuple_access(
                     basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
-            elif itype == dict:
+            elif issubclass(itype, dict):
                 return self.codegen_list_tuple_access(f"{basename}['{i}']", indices[1:])
             else:
-                raise AssertionError("non supported index type")
+                raise AssertionError("non supported index type: ", itype)
         else:
             return basename
 
@@ -8018,11 +8022,16 @@ class _WaitKernel(_CollectiveKernel):
             # Out-of-place single-output
             return [inp.inputs[0]]
         elif isinstance(inp, MultiOutput):
-            # Out-of-place multi-output
+            # This can be two things:
+            # 1. Out-of-place multi-output coll
+            # 2. In-place coll with inputs coming from another MultiOutput
             coll = inp.inputs[0]
-            assert isinstance(coll, _CollectiveKernel)
-            _, idx = inp.indices[0]
-            return [coll.inputs[idx]]
+            # Case 1
+            if isinstance(coll, _CollectiveKernel):
+                _, idx = inp.indices[0]
+                return [coll.inputs[idx]]
+            # Case 2
+            return []
         else:
             # In-place requires no additional deps handling for volatile
             # reads since the inputs are mutated.
