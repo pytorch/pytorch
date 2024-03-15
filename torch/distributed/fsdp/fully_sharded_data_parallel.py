@@ -1158,7 +1158,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if norm_type == math.inf:
             total_norm = (
                 torch.maximum(local_sharded_norm, local_nonsharded_norm)
-                if local_nonsharded_norm
+                if local_nonsharded_norm is not None
                 else local_sharded_norm
             )
             dist.all_reduce(
@@ -1169,7 +1169,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             dist.all_reduce(total_norm, group=self.process_group)
             # All-reducing the local non-sharded norm would count it an extra
             # world-size-many times
-            if local_nonsharded_norm:
+            if local_nonsharded_norm is not None:
                 total_norm += local_nonsharded_norm**norm_type
             total_norm = total_norm ** (1.0 / norm_type)
         if self.cpu_offload.offload_params:
