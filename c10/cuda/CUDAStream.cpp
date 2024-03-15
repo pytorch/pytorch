@@ -49,7 +49,7 @@ static std::array<
 static std::array<
     std::array<
         std::array<cudaStream_t, kStreamsPerPool>,
-c10::Device::MAX_NUM_DEVICES>,
+        c10::Device::MAX_NUM_DEVICES>,
     c10::cuda::max_compile_time_stream_priorities>
     streams;
 #ifdef USE_ROCM
