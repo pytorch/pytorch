@@ -3425,11 +3425,12 @@ class TemplateBuffer(Buffer):
     that we can fuse an epilogue onto.
     """
 
-    def __init__(self, layout, inputs, make_kernel_render):
+    def __init__(self, layout, inputs, make_kernel_render, can_fuse=True):
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
         self.name = V.graph.register_buffer(self)
+        self.can_fuse = can_fuse
 
     def get_read_writes(self):
         return self.normalized_read_writes()

@@ -2087,6 +2087,9 @@ class Scheduler:
         if node2.is_template():
             why("templates can only fuse epilogues")
             return False
+        if node1.is_template() and not node1.node.can_fuse:
+            why("node1 not fusable")
+            return False
         if node1.is_template() and (
             node2.has_aliasing_or_mutation()
             or node2.is_reduction()

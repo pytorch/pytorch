@@ -67,18 +67,20 @@ mm_template = TritonTemplate(
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(K, 0, -BLOCK_K):
+    for k in range(0, tl.cdiv(K, BLOCK_K * SPLIT_K)):
         if EVEN_K:
             a = tl.load(A)
             b = tl.load(B)
         else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
+            k_remaining = K - k * (BLOCK_K * SPLIT_K)
+            _0 = tl.zeros((1, 1), dtype=ACC_TYPE)
+            a = tl.load(A, mask=rk[None, :] < k_remaining, other=_0)
+            b = tl.load(B, mask=rk[:, None] < k_remaining, other=_0)
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
+        A += BLOCK_K * SPLIT_K * stride_ak
+        B += BLOCK_K * SPLIT_K * stride_bk
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -88,7 +90,11 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
+{% if SPLIT_K == 1 %}
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+{% else %}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", "atomic_add")}}
+{% endif %}
 """,
 )
 
@@ -128,7 +134,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
 
     if m * n != 0 and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, out_dtype=layout.dtype):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -178,7 +184,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if m * n != 0 and use_triton_template(layout, enable_int32=True):
-        for config in int8_mm_configs(m, n, k):
+        for config in int8_mm_configs(m, n, k, out_dtype=layout.dtype):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -234,7 +240,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     if use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, out_dtype=layout.dtype):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -290,7 +296,9 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mm_configs(
+            m, n, k, has_int8_tensor=has_int8_tensor, out_dtype=layout.dtype
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -323,7 +331,7 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
         mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
     choices: List[Dict[Any, Any]] = []
-    for config in int8_mm_configs(m, n, k):
+    for config in int8_mm_configs(m, n, k, out_dtype=layout.dtype):
         mm_template.maybe_append_choice(
             choices,
             input_nodes=(mat1, mat2, mat3),

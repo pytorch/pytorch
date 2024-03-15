@@ -24,8 +24,9 @@ def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: List[Tuple[int, int, int, int, int]],
+    configs: List[Tuple[int, int, int, int, int, int]],
     has_int8_tensor=False,
+    out_dtype=None,
 ):
     """Heuristic to shrink configs when they are bigger than the input size"""
 
@@ -58,13 +59,15 @@ def filtered_configs(
         min_block_size,
     )
     used = set()
-    for block_m, block_n, block_k, num_stages, num_warps in configs:
+    for block_m, block_n, block_k, split_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(block_m, m), min_block_size)
         block_n = max(min(block_n, n), min_block_size)
         block_k = max(min(block_k, k), min_block_size)
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
+        if out_dtype == torch.bfloat16:
+            split_k = 1
         if torch.version.hip:
             for matrix_instr_nonkdim in [0, 16]:
                 if matrix_instr_nonkdim != 0 and (
@@ -77,6 +80,7 @@ def filtered_configs(
                     block_m,
                     block_n,
                     block_k,
+                    split_k,
                     num_stages,
                     num_warps,
                     matrix_instr_nonkdim,
@@ -86,6 +90,7 @@ def filtered_configs(
                             block_m,
                             block_n,
                             block_k,
+                            split_k,
                             num_stages,
                             num_warps,
                             matrix_instr_nonkdim,
@@ -95,67 +100,102 @@ def filtered_configs(
                         BLOCK_M=block_m,
                         BLOCK_N=block_n,
                         BLOCK_K=block_k,
+                        SPLIT_K=split_k,
                         num_stages=num_stages,
                         num_warps=num_warps,
                         matrix_instr_nonkdim=matrix_instr_nonkdim,
                     )
+
+                    if out_dtype != torch.bfloat16:
+                        more_split_ks = [k for k in [2, 4, 8, 16] if k != split_k]
+                        for more_split_k in more_split_ks:
+                            yield triton_config(
+                                BLOCK_M=block_m,
+                                BLOCK_N=block_n,
+                                BLOCK_K=block_k,
+                                SPLIT_K=more_split_k,
+                                num_stages=num_stages,
+                                num_warps=num_warps,
+                                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                            )
         else:
-            if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
-                used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
+            if (
+                block_m,
+                block_n,
+                block_k,
+                split_k,
+                num_stages,
+                num_warps,
+                0,
+            ) not in used:
+                used.add((block_m, block_n, block_k, split_k, num_stages, num_warps, 0))
                 yield triton_config(
                     BLOCK_M=block_m,
                     BLOCK_N=block_n,
                     BLOCK_K=block_k,
+                    SPLIT_K=split_k,
                     num_stages=num_stages,
                     num_warps=num_warps,
                 )
+                if out_dtype != torch.bfloat16:
+                    more_split_ks = [k for k in [2, 4, 8, 16] if k != split_k]
+                    for more_split_k in more_split_ks:
+                        yield triton_config(
+                            BLOCK_M=block_m,
+                            BLOCK_N=block_n,
+                            BLOCK_K=block_k,
+                            SPLIT_K=more_split_k,
+                            num_stages=num_stages,
+                            num_warps=num_warps,
+                            matrix_instr_nonkdim=matrix_instr_nonkdim,
+                        )
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
 # will be utilised on the target platform
 mm_kernel_configs = [
-    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 128, 32, 3, 4), "cond": True},
-    {"config": (128, 64, 32, 3, 4), "cond": True},
-    {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (128, 64, 32, 4, 8), "cond": True},
-    {"config": (64, 32, 32, 5, 8), "cond": True},
-    {"config": (32, 64, 32, 5, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (64, 64, 64, 3, 8), "cond": True},
-    {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
-    {"config": (64, 64, 16, 2, 4), "cond": True},
-    {"config": (32, 32, 16, 1, 2), "cond": True},
+    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "SPLIT_K", "num_stages", "num_warps"
+    {"config": (64, 64, 32, 1, 2, 4), "cond": True},
+    {"config": (64, 128, 32, 1, 3, 4), "cond": True},
+    {"config": (128, 64, 32, 1, 3, 4), "cond": True},
+    {"config": (64, 128, 32, 1, 4, 8), "cond": True},
+    {"config": (128, 64, 32, 1, 4, 8), "cond": True},
+    {"config": (64, 32, 32, 1, 5, 8), "cond": True},
+    {"config": (32, 64, 32, 1, 5, 8), "cond": True},
+    {"config": (128, 128, 32, 1, 2, 8), "cond": True},
+    {"config": (64, 64, 64, 1, 3, 8), "cond": True},
+    {"config": (32, 32, 128, 1, 2, 4), "cond": torch.version.hip is None},
+    {"config": (64, 64, 16, 1, 2, 4), "cond": True},
+    {"config": (32, 32, 16, 1, 1, 2), "cond": True},
 ]
 
 int8_mm_kernel_configs = [
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 128, 32, 3, 4), "cond": True},
-    {"config": (128, 64, 32, 3, 4), "cond": True},
-    {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (128, 64, 32, 4, 8), "cond": True},
-    {"config": (64, 32, 32, 5, 8), "cond": True},
-    {"config": (32, 64, 32, 5, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (64, 64, 64, 3, 8), "cond": True},
-    # {"config": (32, 32, 128, 2, 4), "cond": True},
-    # {"config": (64, 64, 16, 2, 4), "cond": True},
-    # {"config": (32, 32, 16, 1, 2), "cond": True},
-    {"config": (128, 256, 128, 3, 8), "cond": torch.version.hip is None},
-    {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
+    {"config": (64, 64, 32, 1, 2, 4), "cond": True},
+    {"config": (64, 128, 32, 1, 3, 4), "cond": True},
+    {"config": (128, 64, 32, 1, 3, 4), "cond": True},
+    {"config": (64, 128, 32, 1, 4, 8), "cond": True},
+    {"config": (128, 64, 32, 1, 4, 8), "cond": True},
+    {"config": (64, 32, 32, 1, 5, 8), "cond": True},
+    {"config": (32, 64, 32, 1, 5, 8), "cond": True},
+    {"config": (128, 128, 32, 1, 2, 8), "cond": True},
+    {"config": (64, 64, 64, 1, 3, 8), "cond": True},
+    # {"config": (32, 32, 128, 1, 2, 4), "cond": True},
+    # {"config": (64, 64, 16, 1, 2, 4), "cond": True},
+    # {"config": (32, 32, 16, 1, 1, 2), "cond": True},
+    {"config": (128, 256, 128, 1, 3, 8), "cond": torch.version.hip is None},
+    {"config": (256, 128, 128, 1, 3, 8), "cond": torch.version.hip is None},
 ]
 
 # Create filtered list of configs based on cond evaluation
 
 
 mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(Tuple[int, int, int, int, int, int], config["config"])
     for config in mm_kernel_configs
     if config["cond"]
 )
 int8_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(Tuple[int, int, int, int, int, int], config["config"])
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
@@ -163,11 +203,11 @@ int8_platform_configs = tuple(
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
 if torch.version.hip:
     mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
+        (config[0], config[1], config[2], config[3], 1, config[5])
         for config in mm_platform_configs
     )
     int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
+        (config[0], config[1], config[2], config[3], 1, config[5])
         for config in mm_platform_configs
     )
 
