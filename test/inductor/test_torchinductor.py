@@ -9175,6 +9175,8 @@ class CommonTemplate:
 
         self.common(fn, args, check_lowp=check_lowp)
 
+    # codegen test fails with no dynamic for loop in dynamic shape tests
+    @expectedFailureCodegenDynamic
     def test_view_uint8_through_differing_bitwidths(self):
         # https://github.com/pytorch/pytorch/issues/120998
         def fn(x, view_dtype):
