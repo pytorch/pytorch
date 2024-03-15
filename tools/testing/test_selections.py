@@ -20,7 +20,6 @@ IS_ROCM = os.path.exists("/opt/rocm")
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
-DEFAULT_TIME = 60  # if no test times available for the test, assume it takes 60s
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
@@ -49,13 +48,13 @@ class ShardJob:
         self.serial: List[ShardedTest] = []
         self.parallel: List[ShardedTest] = []
 
-    def get_total_time(self, default: float = 0.0) -> float:
+    def get_total_time(self) -> float:
         """Default is the value for which to substitute if a test has no time"""
         procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
         for test in self.parallel:
             min_index = procs.index(min(procs))
-            procs[min_index] += test.get_time(default)
-        time = max(procs) + sum(test.get_time(default) for test in self.serial)
+            procs[min_index] += test.get_time()
+        time = max(procs) + sum(test.get_time() for test in self.serial)
         return time
 
     def convert_to_tuple(self) -> Tuple[float, List[ShardedTest]]:
@@ -138,8 +137,17 @@ def shard(
         ), "No shards provided but there are tests to shard"
         return
 
-    def _get_min_sharded_job(sharded_jobs: List[ShardJob]) -> ShardJob:
-        return min(sharded_jobs, key=lambda j: j.get_total_time(default=DEFAULT_TIME))
+    round_robin_index = 0
+
+    def _get_min_sharded_job(
+        sharded_jobs: List[ShardJob], test: ShardedTest
+    ) -> ShardJob:
+        if test.time is None:
+            nonlocal round_robin_index
+            job = sharded_jobs[round_robin_index % len(sharded_jobs)]
+            round_robin_index += 1
+            return job
+        return min(sharded_jobs, key=lambda j: j.get_total_time())
 
     def _shard_serial(
         tests: Sequence[ShardedTest], sharded_jobs: List[ShardJob]
@@ -149,18 +157,17 @@ def shard(
         for test in tests:
             if (
                 len(sharded_jobs) > 1
-                and sharded_jobs[-1].get_total_time(default=DEFAULT_TIME)
-                > estimated_time_limit
+                and sharded_jobs[-1].get_total_time() > estimated_time_limit
             ):
                 new_sharded_jobs = sharded_jobs[:-1]
-            min_sharded_job = _get_min_sharded_job(new_sharded_jobs)
+            min_sharded_job = _get_min_sharded_job(new_sharded_jobs, test)
             min_sharded_job.serial.append(test)
 
     def _shard_parallel(
         tests: Sequence[ShardedTest], sharded_jobs: List[ShardJob]
     ) -> None:
         for test in tests:
-            min_sharded_job = _get_min_sharded_job(sharded_jobs)
+            min_sharded_job = _get_min_sharded_job(sharded_jobs, test)
             min_sharded_job.parallel.append(test)
 
     if serial:
@@ -202,15 +209,11 @@ def calculate_shards(
         )
     del tests
 
-    serial_tests = [
-        test
-        for test in pytest_sharded_tests
-        if must_serial(test.name) or test.time is None
-    ]
+    serial_tests = [test for test in pytest_sharded_tests if must_serial(test.name)]
     parallel_tests = [test for test in pytest_sharded_tests if test not in serial_tests]
 
-    serial_time = sum(test.get_time(DEFAULT_TIME) for test in serial_tests)
-    parallel_time = sum(test.get_time(DEFAULT_TIME) for test in parallel_tests)
+    serial_time = sum(test.get_time() for test in serial_tests)
+    parallel_time = sum(test.get_time() for test in parallel_tests)
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
     estimated_time_per_shard = total_time / num_shards
     # Separate serial tests from parallel tests as much as possible to maximize

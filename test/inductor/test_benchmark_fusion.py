@@ -4,10 +4,13 @@ import os
 import sys
 
 import torch
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     skipIfRocm,
+    slowTest,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
@@ -62,6 +65,7 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (torch.rand(2, 8192),))
 
+    @slowTest
     @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
@@ -128,6 +132,55 @@ class BenchmarkFusionTestTemplate:
             return a + 1, b + 2
 
         self.common(f, (a, b))
+
+    @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+    def test_avoid_register_spilling(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only")
+
+        from torch.nn.functional import gelu
+
+        def foo(m, inp):
+            curr = m(inp)
+            tmps = []
+            for _ in range(4):
+                curr = gelu(curr)
+                for t in tmps:
+                    curr = curr + t
+                tmps.append(curr)
+
+            return curr
+
+        m = torch.nn.Linear(2048, 2048, bias=True).half().cuda()
+        inp = torch.rand([2048, 2048]).half().cuda()
+
+        with torch.no_grad():
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+
+            _, out_code = run_and_get_code(foo_c, m, inp)
+
+            # occasionally, CI will make this one kernel. just skip in this case
+            if not out_code[0].count("def triton_") == 2:
+                return
+
+            # should be multiple triton invocations
+            FileCheck().check("async_compile.wait").check_count(
+                ".run", 2, exactly=True
+            ).run(out_code[0])
+
+        with config.patch(
+            {"benchmark_fusion": False, "epilogue_fusion": False}
+        ), torch.no_grad():
+            torch._dynamo.reset()
+
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+
+            _, out_code2 = run_and_get_code(foo_c, m, inp)
+
+        for c in out_code[0], out_code2[0]:
+            FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
+                "empty_strided_cuda", 2, exactly=True
+            ).check("return").run(c)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
