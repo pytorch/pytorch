@@ -30,8 +30,6 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 
 __all__ = [
     "col2im",
-    "_reduce_with_dtype",
-    "_var_mean",
 ]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=18)
@@ -106,7 +104,7 @@ def _native_layer_norm(
     bias: _C.Value,
     eps: float,
 ) -> Tuple[_C.Value, _C.Value, _C.Value]:
-    opset9.native_layer_norm(g, input, normalized_shape, weight, bias, eps)
+    return opset9.native_layer_norm(g, input, normalized_shape, weight, bias, eps)
 
 
 @_onnx_symbolic("aten::glu")
