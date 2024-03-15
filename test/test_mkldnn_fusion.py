@@ -338,6 +338,28 @@ class TestMkldnnFusion(JitTestCase):
                     )
                     self.assertEqual(ref, fused)
 
+    # fix issue https://github.com/pytorch/pytorch/issues/121253
+    def test_addmm_fusion_beta_alpha(self):
+        class M(nn.Module):
+            def __init__(self, weight, bias, beta, alpha):
+                super().__init__()
+                self.weight = weight
+                self.bias = bias
+                self.beta = beta
+                self.alpha = alpha
+
+            def forward(self, x):
+                return torch.addmm(self.bias, x, self.weight, beta=self.beta, alpha=self.alpha)
+
+        for beta, alpha in zip([1.0, 0.1], [1.0, 0.1]):
+            func = M(torch.randn(64, 64), torch.randn(64), beta, alpha)
+            with torch.no_grad():
+                func_compiled = torch.compile(func)
+                x = torch.randn(1, 64)
+                res_ref = func(x.clone())
+                res_actual = func_compiled(x.clone())
+                self.assertEqual(res_ref, res_actual)
+
     def test_conv_transpose_unary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, kernel_size, **kwargs):

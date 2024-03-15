@@ -911,6 +911,11 @@ if torch._C._has_mkldnn:
         Check if the node is supported for MKLDNN linear.
         """
         linear_node = match.output_node()
+        # mkldnn linear only supports beta=1 and alpha=1
+        # beta_idx=3, alpha_idx=4
+        if linear_node.target == aten.addmm.default:
+            if match.args[3] != 1.0 or match.args[4] != 1.0:
+                return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
         if linear_node.args[weight_idx].op != "get_attr":
@@ -1093,7 +1098,9 @@ if torch._C._has_mkldnn:
                 graph.erase_node(lstm_node)
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
+            CallFunction(
+                aten.addmm.default, Arg(), Arg(), Arg(), beta=Arg(), alpha=Arg()
+            ),
             extra_check=_is_packable_linear,
         )
         @register_freezing_graph_pattern(
