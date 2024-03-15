@@ -1678,6 +1678,9 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
+        # Stash the compiler_fn to be used for backend match guard.
+        from torch._inductor.compile_fx import compile_fx
+        self._torchdynamo_orig_callable = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -1757,6 +1760,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        # Stash the compiler_fn to be used for backend match guard.
+        self._torchdynamo_orig_callable = self.compiler_fn
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileWrapper) and
