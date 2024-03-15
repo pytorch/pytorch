@@ -8645,7 +8645,7 @@ class CommonTemplate:
 
     def test_inplace_resize_as(self):
         def fn(x, y, memory_format):
-            x.resize_as_(y, memory_format=memory_format)
+            torch.ops.aten.resize_as_(x, y, memory_format=memory_format)
             return x
 
         for x, y, memory_format in CommonTemplate._cases_resize_as_common():
