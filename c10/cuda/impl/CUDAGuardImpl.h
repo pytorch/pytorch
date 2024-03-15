@@ -83,11 +83,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto cuda_flag = cudaEventDefault;
     switch (flag) {
       case EventFlag::PYTORCH_DEFAULT:
-      case EventFlag::CUDA_EVENT_DISABLE_TIMING:
         cuda_flag = cudaEventDisableTiming;
         break;
       case EventFlag::BACKEND_DEFAULT:
-      case EventFlag::CUDA_EVENT_DEFAULT:
         cuda_flag = cudaEventDefault;
         break;
       default:
