@@ -1411,7 +1411,7 @@ def find_matching_merge_rule(
             if rule.ignore_flaky_failures
             else 0,
         )
-        if len(required_checks) == 0:
+        if not required_checks:
             pending_checks = []
             failed_checks = []
 
