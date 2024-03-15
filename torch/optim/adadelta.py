@@ -1,9 +1,18 @@
+from typing import List, Optional
+
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
-from typing import List, Optional
+from .optimizer import (
+    _default_to_fused_or_foreach,
+    _differentiable_doc,
+    _foreach_doc,
+    _get_scalar_dtype,
+    _maximize_doc,
+    _use_grad_for_differentiable,
+    _view_as_real,
+    Optimizer,
+)
 
 __all__ = ["Adadelta", "adadelta"]
 
@@ -47,8 +56,17 @@ class Adadelta(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
+                    step_val = float(p_state["step"])
+                    p_state["step"] = torch.tensor(
+                        step_val, dtype=_get_scalar_dtype(), device=p.device
+                    )
 
-    def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas):
+    def _init_group(
+        self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+    ):
         has_complex = False
         for p in group["params"]:
             if p.grad is None:
@@ -63,7 +81,9 @@ class Adadelta(Optimizer):
 
             # Lazy state initialization
             if len(state) == 0:
-                state["step"] = 0
+                state["step"] = torch.zeros(
+                    (), device=p.device, dtype=_get_scalar_dtype()
+                )
                 state["square_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -73,8 +93,8 @@ class Adadelta(Optimizer):
 
             square_avgs.append(state["square_avg"])
             acc_deltas.append(state["acc_delta"])
+            state_steps.append(state["step"])
 
-            state["step"] += 1
         return has_complex
 
     @_use_grad_for_differentiable
@@ -95,6 +115,7 @@ class Adadelta(Optimizer):
             grads = []
             square_avgs = []
             acc_deltas = []
+            state_steps = []
             lr, rho, eps, weight_decay, foreach, maximize, differentiable = (
                 group["lr"],
                 group["rho"],
@@ -105,13 +126,16 @@ class Adadelta(Optimizer):
                 group["differentiable"],
             )
 
-            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
+            has_complex = self._init_group(
+                group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+            )
 
             adadelta(
                 params_with_grad,
                 grads,
                 square_avgs,
                 acc_deltas,
+                state_steps,
                 lr=lr,
                 rho=rho,
                 eps=eps,
@@ -125,7 +149,8 @@ class Adadelta(Optimizer):
         return loss
 
 
-Adadelta.__doc__ = r"""Implements Adadelta algorithm.
+Adadelta.__doc__ = (
+    r"""Implements Adadelta algorithm.
 
     .. math::
        \begin{aligned}
@@ -152,7 +177,8 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
-    """ + fr"""
+    """
+    + rf"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -173,6 +199,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         https://arxiv.org/abs/1212.5701
 
     """
+)
 
 
 def adadelta(
@@ -180,6 +207,7 @@ def adadelta(
     grads: List[Tensor],
     square_avgs: List[Tensor],
     acc_deltas: List[Tensor],
+    state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
@@ -198,7 +226,9 @@ def adadelta(
     """
     # We still respect when the user inputs False for foreach.
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -213,6 +243,7 @@ def adadelta(
         grads,
         square_avgs,
         acc_deltas,
+        state_steps,
         lr=lr,
         rho=rho,
         eps=eps,
@@ -228,6 +259,7 @@ def _single_tensor_adadelta(
     grads: List[Tensor],
     square_avgs: List[Tensor],
     acc_deltas: List[Tensor],
+    state_steps: List[Tensor],
     *,
     lr: float,
     rho: float,
@@ -238,10 +270,12 @@ def _single_tensor_adadelta(
     has_complex: bool,
 ):
 
-    for (param, grad, square_avg, acc_delta) in zip(
-        params, grads, square_avgs, acc_deltas
+    for param, grad, square_avg, acc_delta, step in zip(
+        params, grads, square_avgs, acc_deltas, state_steps
     ):
         grad = grad if not maximize else -grad
+
+        step += 1
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
@@ -269,6 +303,7 @@ def _multi_tensor_adadelta(
     grads: List[Tensor],
     square_avgs: List[Tensor],
     acc_deltas: List[Tensor],
+    state_steps: List[Tensor],
     *,
     lr: float,
     weight_decay: float,
@@ -284,10 +319,20 @@ def _multi_tensor_adadelta(
     if len(params) == 0:
         return
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
-    for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, square_avgs, acc_deltas, state_steps]
+    )
+    for (
+        device_params,
+        device_grads,
+        device_square_avgs,
+        device_acc_deltas,
+        steps,
+    ), _ in grouped_tensors.values():
         if has_complex:
-            _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
+            _view_as_real(
+                device_params, device_grads, device_square_avgs, device_acc_deltas
+            )
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
@@ -297,10 +342,15 @@ def _multi_tensor_adadelta(
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+                device_grads = torch._foreach_add(
+                    device_grads, device_params, alpha=weight_decay
+                )
 
+        torch._foreach_add_(steps, 1)
         torch._foreach_mul_(device_square_avgs, rho)
-        torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)
+        torch._foreach_addcmul_(
+            device_square_avgs, device_grads, device_grads, value=1 - rho
+        )
 
         std = torch._foreach_add(device_square_avgs, eps)
         torch._foreach_sqrt_(std)
