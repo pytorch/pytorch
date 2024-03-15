@@ -58,7 +58,7 @@ def quantize_per_tensor(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
@@ -75,7 +75,7 @@ def quantize_per_tensor_meta(
         quant_max: int,
         dtype: torch.dtype
 ) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     return torch.empty_like(input, dtype=dtype)
@@ -111,7 +111,7 @@ def quantize_per_tensor_tensor_meta(
         quant_max: int,
         dtype: torch.dtype
 ) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
@@ -332,7 +332,11 @@ def choose_qparams_tensor(
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert dtype in _DTYPE_TO_QVALUE_BOUNDS, \
         f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
@@ -367,7 +371,11 @@ def choose_qparams_symmetric_tensor(
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert dtype in _DTYPE_TO_QVALUE_BOUNDS, \
         f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
@@ -392,7 +400,11 @@ def choose_qparams_tensor_meta(
         eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: \
         {quant_min} max: {quant_max}"
     return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(1, dtype=torch.int64, device=input.device)
@@ -446,7 +458,7 @@ def quantize_per_channel(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
@@ -474,7 +486,7 @@ def quantize_per_channel_meta(
         quant_max: int,
         dtype: torch.dtype
 ) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
@@ -574,7 +586,7 @@ class FakeQuantPerChannel(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, scales, zero_points, axis, quant_min, quant_max):
         with torch._C._AutoDispatchBelowAutograd():
-            if input.dtype == torch.bfloat16:
+            if input.dtype in [torch.float16, torch.bfloat16]:
                 input = input.to(torch.float32)
             if scales.dtype != torch.float32:
                 scales = scales.to(torch.float32)
