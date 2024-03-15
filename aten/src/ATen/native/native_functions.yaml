@@ -3686,13 +3686,13 @@
 
 - func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: logsumexp(Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
+- func: logsumexp(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logsumexp
 
-- func: logsumexp.out(Tensor self, int[1]? dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: logsumexp.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     # calls squeeze
