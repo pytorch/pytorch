@@ -65,6 +65,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
+    ${TORCH_ROOT}/third_party/nlohmann/include
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include

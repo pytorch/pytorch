@@ -142,7 +142,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.header.splice(
                 """
                 import torch
-                from torch._inductor.codecache import CppWrapperCodeCache
+                from torch._inductor.codecache import CppWrapperCodeCache, CppWrapperCodeCacheForEager
 
                 cpp_wrapper_src = (
                 '''
@@ -362,6 +362,14 @@ class CppWrapperCpu(WrapperCodeGen):
                     )
                 else:
                     self.prefix.splice(run_impl_proto)
+        elif config.aot_inductor.eager_mode:
+            self.prefix.splice(
+                """
+                std::vector<at::Tensor> inductor_entry_cpp(
+                    const std::vector<at::Tensor>& inputs
+                ) {
+                """
+            )
         else:
             self.prefix.splice(
                 """
@@ -382,6 +390,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 if not V.graph.is_const_graph:
                     if V.graph.aot_mode:
                         num_args = len(V.graph.graph_inputs)
+                    elif config.aot_inductor.eager_mode:
+                        num_args = len(V.graph.graph_inputs)
+                        pass
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
@@ -397,6 +408,8 @@ class CppWrapperCpu(WrapperCodeGen):
                                 auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {num_args});
                             """
                         )
+                    elif config.aot_inductor.eager_mode:
+                        pass
                     else:
                         # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                         self.prefix.splice(
@@ -789,6 +802,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.wrapper_call.writeline(
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
+        return_tensors = []
         for idx, output in enumerate(output_refs):
             if config.abi_compatible:
                 output_buffer = V.graph.graph_outputs[idx]
@@ -869,10 +883,21 @@ class CppWrapperCpu(WrapperCodeGen):
                     # See NOTE(return_constant) above.
                 else:
                     output_expr = output
-                self.wrapper_call.writeline(
-                    f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
-                    + f"new at::Tensor({output_expr}));"
-                )
+
+                if config.aot_inductor.eager_mode:
+                    return_tensors.append(output_expr)
+                else:
+                    self.wrapper_call.writeline(
+                        f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+                        + f"new at::Tensor({output_expr}));"
+                    )
+        if config.aot_inductor.eager_mode:
+            assert not arr_iface, "ArrayRef interface is not supported in eager mode"
+            if return_tensors:
+                self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n")
+            else:
+                self.wrapper_call.writeline("return {};")
+
         if arr_iface:
             self.wrapper_call.writeline("return output_arrayref_tensors;")
 
@@ -893,10 +918,38 @@ class CppWrapperCpu(WrapperCodeGen):
             return
 
         result.writeline("'''\n)")
+
+        cache_cls_name = (
+            "CppWrapperCodeCacheForEager"
+            if config.aot_inductor.eager_mode
+            else "CppWrapperCodeCache"
+        )
+
+        kernel_meta_info = {}
+        if config.aot_inductor.eager_mode and config.aot_inductor.eager_op_name:
+            kernel_meta_info_items = []
+            for value in V.graph.graph_inputs.values():
+                if isinstance(value, ir.TensorBox) and isinstance(
+                    value.layout, ir.FixedLayout
+                ):
+                    meta_info_item = {}
+                    # TODO(Eikan):We only support symbloic shape now and will support it later.
+                    meta_info_item["is_symbloic"] = "false"
+                    meta_info_item["device_type"] = f"{value.get_device().type}"
+                    meta_info_item["dtype"] = f"{value.get_dtype()}"
+                    meta_info_item["sizes"] = f"{value.get_size()}"
+                    meta_info_item["strides"] = f"{value.get_stride()}"
+                    kernel_meta_info_items.append(meta_info_item)
+            kernel_meta_info[config.aot_inductor.eager_op_name] = kernel_meta_info_items
+
         result.splice(
             f"""
-            inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
+            inductor_entry = {cache_cls_name}.load_pybinding(
+                ["std::vector<at::Tensor>"],
+                cpp_wrapper_src,
+                {self.cuda},
+                {len(V.graph.graph_outputs)},
+                {kernel_meta_info})
             """
         )
 
@@ -1173,6 +1226,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 and V.graph.aot_mode
                 and buffer.get_name() in V.graph.graph_inputs
             )
+            or config.aot_inductor.eager_mode
             else f"{buffer.get_name()}.reset();"
         )
 
