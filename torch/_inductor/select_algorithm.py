@@ -863,16 +863,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
-            import time
-            s = time.time()
             executor = ThreadPoolExecutor(max_workers=num_workers)
-            # Submit tasks to the executor
             futures = executor.map(
                 lambda c: c.precompile(),
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
-            print("Gen futures", time.time() - s)
 
             def wait_on_futures():
                 try:
@@ -891,6 +887,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 except StopIteration:
                     pass
                 executor.shutdown(wait=True)
+
             return wait_on_futures
 
         def autotune(choices, precompile_fn):
@@ -972,8 +969,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-
-        # TODO - dont want to precopmile if cache hit
+        # TODO - dont want to precompile if we have a cache hit
         timings = do_autotuning(precompile_fn)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
