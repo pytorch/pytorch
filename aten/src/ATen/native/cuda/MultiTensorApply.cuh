@@ -167,37 +167,49 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
   const bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
       at::cuda::CaptureStatus::None;
 
-  // Use dynamically allocated buffer to pack the vectors
-  // First, prepare a host buffer to stage the data to be copied to device
-  at::Tensor buf_tensor;
+  at::Tensor buf_tensor = at::empty(
+      {static_cast<int64_t>(total_bytes)},
+      // Only use pinned memory when not capturing
+      at::TensorOptions().dtype(at::kByte).pinned_memory(!is_capturing));
+
+  // Populate the buf tensor
+  for (const auto i : c10::irange(ptrs.size())) {
+    pack.offsets[i] = offsets[i];
+    memcpy(buf_tensor.data_ptr<uint8_t>() + offsets[i], ptrs[i], sizes[i]);
+  }
+
   if (!is_capturing) {
-    // No special treatment is needed when not capturing, as the as the buffer
-    // is allocated and populated on every invocation.
-    buf_tensor = at::empty(
-        {static_cast<int64_t>(total_bytes)},
-        // Only use pinned memory when not capturing
-        at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    buf_tensor = buf_tensor.to(device, /*non_blocking=*/true);
+    pack.buffer_ptr = static_cast<char*>(buf_tensor.data_ptr());
+    return std::make_tuple(pack, buf_tensor);
   } else {
     // With CUDA Graph, we need the data to have the same lifetime as the
     // capturing graph because the data is an extension of the launch argument.
     // This is achieved by dynamically allocating a buffer, managing the
     // lifetime of the buffer with a CUDA User Object, and transferring the
     // ownership of the CUDA User Object to the capturing graph.
-    //
-    // NOTE: based on PR feedback (see details in
-    // https://github.com/pytorch/pytorch/pull/119764#issuecomment-1951485700),
-    // we want to be conservative and replicate the behavior w/o CUDA Graph
-    // first. This means that a HtoD copy will be issued on every replay. This
-    // copy can be eliminated by having the CUDA User Object manage a device
-    // buffer.
-    uint8_t* buf = new uint8_t[total_bytes];
+    auto graph_owned_buf =
+        c10::cuda::CUDACachingAllocator::raw_alloc(total_bytes);
+
+    {
+      // Copy the data from the host staging buffer to the graph-owned device
+      // buffer. The copy won't be captured in the graph.
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+#endif
+      C10_CUDA_CHECK(cudaMemcpy(
+          graph_owned_buf,
+          buf_tensor.data_ptr(),
+          total_bytes,
+          cudaMemcpyHostToDevice));
+    }
 
     // Manage the ownership of buf with a cuda user object
     cudaUserObject_t user_object;
     C10_CUDA_CHECK(cudaUserObjectCreate(
         &user_object,
-        buf,
-        [](void* buf) { delete[] reinterpret_cast<uint8_t*>(buf); },
+        graph_owned_buf,
+        [](void* buf) { c10::cuda::CUDACachingAllocator::raw_delete(buf); },
         1, // refcount
         cudaUserObjectNoDestructorSync));
 
@@ -217,20 +229,9 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     C10_CUDA_CHECK(cudaGraphRetainUserObject(
         graph, user_object, 1, cudaGraphUserObjectMove));
 
-    buf_tensor =
-        at::from_blob(buf, {static_cast<int64_t>(total_bytes)}, at::kByte);
+    pack.buffer_ptr = static_cast<char*>(graph_owned_buf);
+    return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
   }
-  // Populate the host buffer
-  for (const auto i : c10::irange(ptrs.size())) {
-    pack.offsets[i] = offsets[i];
-    memcpy(buf_tensor.data_ptr<uint8_t>() + offsets[i], ptrs[i], sizes[i]);
-  }
-
-  // Copy the host buffer to device
-  // NOTE: with CUDA graph, the HtoD copy is also replayed
-  buf_tensor = buf_tensor.to(device, /*non_blocking=*/true);
-  pack.buffer_ptr = static_cast<char*>(buf_tensor.data_ptr());
-  return std::make_tuple(pack, buf_tensor);
 }
 
 template <int n>
