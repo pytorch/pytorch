@@ -699,9 +699,20 @@ class CustomizedDictVariable(ConstDictVariable):
                         "expect VariableTracker or ConstantVariable.is_literal"
                     )
 
+            bound_args = {}
+            if _is_matching_transformers_cls(user_cls) or _is_matching_diffusers_cls(
+                user_cls
+            ):
+                # Skip none
+                for k, v in bound.arguments.items():
+                    if isinstance(v, ConstantVariable) and v.value is None or v is None:
+                        continue
+                    bound_args[k] = v
+            else:
+                bound_args = bound.arguments
+
             items = {
-                ConstantVariable.create(k): make_var(v)
-                for k, v in bound.arguments.items()
+                ConstantVariable.create(k): make_var(v) for k, v in bound_args.items()
             }
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
