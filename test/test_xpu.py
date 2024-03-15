@@ -455,6 +455,8 @@ if __name__ == "__main__":
                     f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
                 )
 
+instantiate_device_type_tests(TestXpu, globals())
+
 
 if __name__ == "__main__":
     run_tests()
