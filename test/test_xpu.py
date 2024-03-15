@@ -6,6 +6,7 @@ from typing import Dict, Sequence
 
 import torch
 from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
     onlyNativeDeviceTypes,
     onlyXPU,
     OpDTypes,
@@ -62,11 +63,20 @@ _xpu_tensor_factory_op_list = [
     "empty",
     "empty_strided",
 ]
+_xpu_not_test_dtype_op_list = [
+    "resize_",  # Skipped by CPU
+    "resize_as_",  # Skipped by CPU
+    "abs",  # Not aligned dtype
+]
 _xpu_all_op_list = _xpu_computation_op_list + _xpu_tensor_factory_op_list
 _xpu_all_ops = [op for op in ops_and_refs if op.name in _xpu_all_op_list]
 _xpu_computation_ops = [
     op for op in ops_and_refs if op.name in _xpu_computation_op_list
 ]
+_xpu_dtype_op_list = _xpu_all_op_list
+for op in _xpu_not_test_dtype_op_list:
+    _xpu_dtype_op_list.remove(op)
+_xpu_dtype_ops = [op for op in ops_and_refs if op.name in _xpu_dtype_op_list]
 
 
 class TestXpu(TestCase):
