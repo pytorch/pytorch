@@ -7,13 +7,13 @@ import sys
 import torch
 import inspect
 import operator
-import traceback
 import collections
 
 from dataclasses import is_dataclass, fields
 
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
+from torch.utils._traceback import CapturedTraceback
 from typing import Tuple, Dict, OrderedDict, Optional, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
@@ -197,12 +197,8 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         if self.record_stack_traces and not proxy.node.stack_trace:
-            user_frame = self._find_user_frame()
-            if user_frame:
-                summary = traceback.extract_stack(user_frame)
-                tb_lines = summary.format()
-                # stack_trace would have innermost frame at the bottom
-                proxy.node.stack_trace = ''.join(tb_lines)
+            proxy.node.stack_trace = ''.join(CapturedTraceback.extract().format())
+
 
         return proxy
 
@@ -245,6 +241,11 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        from torch.utils._triton import has_triton
+
+        if has_triton():
+            import triton
+
         if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
             return a.__fx_create_arg__(self)
         # aggregates
@@ -279,6 +280,8 @@ class TracerBase:
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
         elif isinstance(a, torch._ops.OpOverload):
+            return a
+        elif has_triton() and isinstance(a, triton.language.dtype):
             return a
 
         if isinstance(a, Proxy):
