@@ -464,8 +464,8 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
     const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
     const char offsetc = 'F';
 
-    const int lda = transa == 'T' ? m : k;
-    const int ldb = transb == 'T' ? k : n;
+    const int lda = transa == 'T' ? self.stride(1) : self.stride(0);
+    const int ldb = transb == 'T' ? mat2.stride(1) : mat2.stride(0);
     const int ldc = n;
 
     const float alpha = 1;
@@ -501,12 +501,9 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &result) {
   // x:s8 * w:s8 -> y:s32
   // both inputs should be 2d
-  // In most cases, using DNNL blas API is faster but it requires a/b data contiguous
-  // Tested on Intel(R) Xeon(R) Platinum 8358, one instance, on a whole socket and on a single core
-  bool a_is_contigous = (mat1.stride(0) == mat1.size(1) && mat1.stride(1) == 1) ||
-      (mat1.stride(0) == 1 && mat1.stride(1) == mat1.size(0));
-  bool b_is_contigous = (mat2.stride(0) == mat2.size(1) && mat2.stride(1) == 1) ||
-      (mat2.stride(0) == 1 && mat2.stride(1) == mat2.size(0));
+  // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
+  bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
+  bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
 
   if (a_is_contigous && b_is_contigous) {
     _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
