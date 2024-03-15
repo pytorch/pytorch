@@ -1113,22 +1113,15 @@ if has_triton():
             (dim_block_arange[None, None, :] * values_dim_stride)
         )
         block_values = tl.load(values_ptrs, mask=values_mask)
-        if batch_pid == 6:
-            print("block values", block_values)
 
         # Store values to output tensor.
-        # output_mask = values_mask # & (batch_block_arange[:, None, None] < B)
         output_ptrs = (
             output_ptr +
             (batch_block_arange[:, None, None] * output_batch_stride) +
             (seq_block_arange[None, :, None] * output_seq_stride) +
             (dim_block_arange[None, None, :] * output_dim_stride)
         )
-        # print("bba:", batch_block_arange[:, None, None] * output_batch_stride)
-        # tl.store(output_ptrs, block_values, mask=values_mask)
         output_values = tl.where(values_mask, block_values, padding_value)
-        if batch_pid == 6:
-            print("output values", output_values)
         tl.store(output_ptrs, output_values)
 
 
@@ -1161,8 +1154,6 @@ if has_triton():
                 padding_value,
                 B, M, D,
                 BLOCKSIZE_BATCH=4,
-                # num_warps=1,
-                # num_stages=1,
             )
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
