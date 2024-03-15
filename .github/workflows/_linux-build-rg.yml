@@ -37,7 +37,7 @@ on:
       runner-group:
         required: false
         type: string
-        default: "linux.2xlarge"
+        default: "arc-lf-linux.2xlarge"
         description: Runner group to select group type
       test-matrix:
         required: false
