@@ -2337,18 +2337,20 @@ def cuda_compile_command(
     dst_file: str,
     dst_file_ext: str,
 ) -> str:
-    if os.getenv("ROCM_PATH", None) is None:
+    if torch.version.cuda:
         include_paths = _cutlass_include_paths()
         lib_options = _cuda_lib_options()
         host_compiler_options = _nvcc_host_compiler_options()
         device_compiler_options = _nvcc_compiler_options()
         compiler = _cuda_compiler()
-    else:
+    elif torch.version.hip:
         include_paths = _ck_include_paths()
         lib_options = _hip_lib_options()
         host_compiler_options = _hipcc_host_compiler_options()
         device_compiler_options = _hipcc_device_compiler_options()
         compiler = _hip_compiler()
+    else:
+        return ""
     options = (
         device_compiler_options
         + [
