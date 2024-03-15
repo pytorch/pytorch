@@ -158,6 +158,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch and type error",
     ),
     xfail(
+        "_softmax_backward_data",
+        reason=onnx_test_common.reason_dynamo_does_not_support("assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)")
+    ),
+    xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
     ),
