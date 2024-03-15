@@ -1196,6 +1196,12 @@ class GraphModuleDeserializer:
     def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
         val = s.value
         if s.type == "as_expr":
+            if val.hint is None:
+                hint = None
+            else:
+                assert val.hint.type == "as_int"
+                hint = val.hint.value
+
             if val.expr_str in self.symbol_name_to_symbol:
                 sym = self.symbol_name_to_symbol[val.expr_str]
             else:
@@ -1210,6 +1216,8 @@ class GraphModuleDeserializer:
                 sym = sym.subs({s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols})
                 if isinstance(sym, sympy.Symbol):
                     self.symbol_name_to_symbol[val.expr_str] = sym
+                    if hint is not None:
+                        self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
                         symbolic_shapes._constrain_symbol_range(
@@ -1234,13 +1242,6 @@ class GraphModuleDeserializer:
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
                             )
-
-
-            if val.hint is None:
-                hint = None
-            else:
-                assert val.hint.type == "as_int"
-                hint = val.hint.value
 
             return self.shape_env.create_symintnode(sym, hint=hint)
         elif s.type == "as_int":
