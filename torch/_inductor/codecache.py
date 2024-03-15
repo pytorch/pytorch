@@ -2301,13 +2301,17 @@ def _nvcc_compiler_options() -> List[str]:
 
 
 def _ck_include_paths() -> List[str]:
-    return ["-I/opt/rocm/include"]
+    from torch.utils import cpp_extension
+
+    return [f"-I{cpp_extension._join_rocm_home('include')}"]
 
 
 def _hip_lib_options() -> List[str]:
+    from torch.utils import cpp_extension
+
     return [
-        "-L/opt/rocm/lib",
-        "-L/opt/rocm/hip/lib",
+        f"-L{cpp_extension._join_rocm_home('lib')}",
+        f"-L{cpp_extension._join_rocm_home('hip', 'lib')}",
         "-lamdhip64",
     ]
 
