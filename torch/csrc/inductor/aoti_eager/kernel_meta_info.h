@@ -9,7 +9,7 @@
 
 namespace torch::inductor {
 
-struct TensorChecker;
+class TensorChecker;
 
 struct TensorMetaInfo {
   bool is_symbolic;
