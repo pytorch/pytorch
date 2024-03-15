@@ -2,6 +2,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
+
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -658,10 +659,14 @@ class TestSchemaVersioning(TestCase):
         f = Module()
         ep = export(f, (torch.randn(1, 3),))
 
-        serialized_artifact = ExportedProgramSerializer().serialize(ep)
-        serialized_artifact.exported_program.schema_version.major = -1
+        serialized_program = ExportedProgramSerializer().serialize(ep)
+        serialized_program.exported_program.schema_version.major = -1
         with self.assertRaisesRegex(SerializeError, r"Serialized schema version .* does not match our current"):
-            ExportedProgramDeserializer().deserialize(serialized_artifact)
+            ExportedProgramDeserializer().deserialize(
+                serialized_program.exported_program,
+                serialized_program.state_dict,
+                serialized_program.constants
+            )
 
 
 class TestOpVersioning(TestCase):
