@@ -89,7 +89,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<int> tensorlist_args_indices;
 
-  auto device = c10::Device(kCPU);
+  c10::optional<c10::Device> tgt_device = c10::nullopt;
   // save converted cpu tensor for TensorList
   std::vector<c10::IValue> tensorlist_cpu_args;
 
@@ -126,7 +126,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       }
       (*stack)[arguments_begin + idx] = c10::IValue(opt_tensors);
     } else if (ivalue.isDevice()) {
-      device = ivalue.toDevice();
+      tgt_device = ivalue.toDevice();
       (*stack)[arguments_begin + idx] = c10::IValue(c10::Device(kCPU));
     }
   }
@@ -188,12 +188,8 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  c10::optional<c10::Device> tgt_device = c10::nullopt;
-  auto computed_tgt_device = compute_target_device(tensor_args, tensorlist_args);
-  if (computed_tgt_device != c10::nullopt) {
-    tgt_device = computed_tgt_device;
-  } else {
-    tgt_device = device;
+  if (computed_tgt_device == c10::nullopt) {
+    tgt_device = compute_target_device(tensor_args, tensorlist_args);
   }
 
   for (const auto idx : c10::irange(returns.size())) {
