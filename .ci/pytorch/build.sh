@@ -359,4 +359,4 @@ fi
 
 print_sccache_stats
 
-sudo chown -R $WORKSPACE_ORIGINAL_OWNER_ID /var/lib/jenkins/workspace
+sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
