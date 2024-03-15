@@ -570,7 +570,7 @@ class FxGraphHashDetails:
         self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
-        except TypeError as e:
+        except (TypeError, AttributeError) as e:
             # Some configs options are callables, e.g., post_grad_custom_pre_pass,
             # and may not pickle.
             log.debug("Can't pickle inductor config: %s", e)
@@ -1745,7 +1745,7 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
-            cmd = cpp_compile_command(
+            compile_cmd = cpp_compile_command(
                 input=input_path,
                 output=output_o,
                 vec_isa=picked_vec_isa,
@@ -1754,12 +1754,12 @@ class AotCodeCompiler:
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
             )
-            log.debug("aot compilation command: %s", cmd)
+            log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
-                compile_file(input_path, output_o, cmd.split())
+                compile_file(input_path, output_o, compile_cmd.split())
                 os.chmod(output_o, 0o644)
             else:
-                run_command_and_check(cmd)
+                run_command_and_check(compile_cmd)
 
             def _to_bytes(t: torch.Tensor) -> bytes:
                 # This serializes the tensor's untyped_storage to bytes by accessing
@@ -1787,7 +1787,7 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
-            cmd = cpp_compile_command(
+            link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
                 vec_isa=picked_vec_isa,
@@ -1795,12 +1795,18 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
-            log.debug("aot linkage command: %s", cmd)
+            log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
-                compile_file([output_o, consts_o], output_so, cmd.split())
+                compile_file([output_o, consts_o], output_so, link_cmd.split())
                 os.chmod(output_so, 0o755)
             else:
-                run_command_and_check(cmd)
+                run_command_and_check(link_cmd)
+
+            # Append cmds to the end of codegen-ed wrapper file
+            with open(input_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
 
         return output_so
 
@@ -2080,28 +2086,49 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
-        "include_pytorch": True,
+        "include_pytorch": not config.abi_compatible,
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
-    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s));"
+    call_entry_function = "return inductor_entry_cpp(%s);"
     extra_parse_arg = textwrap.dedent(
         """
-        #include <torch/csrc/autograd/python_variable.h>
-        #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+        #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-        template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
-            return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+        static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {
+            std::vector<AtenTensorHandle> result;
+            size_t result_len = PyList_GET_SIZE(pyvec);
+            result.reserve(result_len);
+            for (size_t i = 0; i < result_len; i++) {
+                // AtenTensorHandle is essentially a pointer
+                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
+            }
+            return result;
         }
 
-        std::vector<at::Tensor> inductor_entry_cpp(std::vector<at::Tensor>&& inputs) {
-            auto input_handles = unsafe_alloc_new_handles_from_tensors(inputs);
+        static inline PyObject* pack_tensor_handle_list(const std::vector<AtenTensorHandle>& cppvec) {
+            size_t result_len = cppvec.size();
+            PyObject* result = PyList_New(static_cast<Py_ssize_t>(result_len));
+            for (size_t i = 0; i < result_len; i++) {
+                // Store AtenTensorHandle as PyCapsulate
+                PyObject* elem = PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
+                PyList_SET_ITEM(result, i, elem);
+            }
+            return result;
+        }
+
+        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {
+            return unpack_tensor_handle_list(PyTuple_GET_ITEM(args, n));
+        }
+
+        PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {
             // For outputs, we only allocate a vector to hold returned tensor handles,
             // not allocating the actual output tensor storage here
             std::vector<AtenTensorHandle> output_handles(%s);
-
             try {
                 inductor_entry_impl(input_handles.data(), output_handles.data());
+                return pack_tensor_handle_list(output_handles);
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return {};
@@ -2109,8 +2136,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return {};
             }
-
-            return alloc_tensors_by_stealing_from_handles(output_handles.data(), output_handles.size());
         }
         """
     )
