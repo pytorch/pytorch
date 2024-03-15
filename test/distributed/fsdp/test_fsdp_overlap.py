@@ -131,6 +131,10 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
                 all_gather_called = False
 
                 def _delayed_all_gather(*args, **kwargs):
+                    # No need to delay the all-gather if world size is 1 since
+                    # the all-gather would be a no-op anyway
+                    if self.world_size == 1:
+                        return orig_all_gather(*args, **kwargs)
                     nonlocal all_gather_called
                     all_gather_called = True
                     torch.cuda._sleep(all_gather_cycles)
