@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (5, 2)
+SCHEMA_VERSION = (5, 1)
 TREESPEC_VERSION = 1
 
 
@@ -120,11 +120,6 @@ class SymBoolArgument(_Union):
 
 @dataclass
 class TensorArgument:
-    name: str
-
-
-@dataclass
-class TokenArgument:
     name: str
 
 
@@ -241,11 +236,6 @@ class InputToCustomObjSpec:
     custom_obj_name: str
 
 
-@dataclass
-class InputTokenSpec:
-    arg: TokenArgument
-
-
 @dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
@@ -253,7 +243,6 @@ class InputSpec(_Union):
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
-    token: InputTokenSpec
 
 
 @dataclass
@@ -290,11 +279,6 @@ class UserInputMutationSpec:
     user_input_name: str
 
 
-@dataclass
-class OutputTokenSpec:
-    arg: TokenArgument
-
-
 @dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
@@ -303,7 +287,6 @@ class OutputSpec(_Union):
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec
     user_input_mutation: UserInputMutationSpec
-    token: OutputTokenSpec
 
 
 @dataclass

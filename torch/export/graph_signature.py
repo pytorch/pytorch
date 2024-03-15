@@ -23,11 +23,6 @@ class TensorArgument:
 
 
 @dataclasses.dataclass
-class TokenArgument:
-    name: str
-
-
-@dataclasses.dataclass
 class SymIntArgument:
     name: str
 
@@ -44,11 +39,7 @@ class ConstantArgument:
 
 
 ArgumentSpec = Union[
-    TensorArgument,
-    SymIntArgument,
-    ConstantArgument,
-    CustomObjArgument,
-    TokenArgument,
+    TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument
 ]
 
 
@@ -75,13 +66,7 @@ class InputSpec:
             ), "Failed to specify persistent flag on BUFFER."
         assert isinstance(
             self.arg,
-            (
-                TensorArgument,
-                SymIntArgument,
-                ConstantArgument,
-                CustomObjArgument,
-                TokenArgument,
-            ),
+            (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
         ), f"got {type(self.arg)}"
 
 
@@ -102,9 +87,7 @@ class OutputSpec:
     target: Optional[str]
 
     def __post_init__(self):
-        assert isinstance(
-            self.arg, (TensorArgument, SymIntArgument, ConstantArgument, TokenArgument)
-        )
+        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
 
 
 def _sig_to_specs(
@@ -124,9 +107,6 @@ def _sig_to_specs(
     output_tokens: List[str],
 ) -> Tuple[List[InputSpec], List[OutputSpec]]:
     def to_input_spec(inp: ArgumentSpec) -> InputSpec:
-        if isinstance(inp, TokenArgument):
-            return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
-
         if not isinstance(inp, TensorArgument):
             return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
         name = inp.name
@@ -149,13 +129,12 @@ def _sig_to_specs(
                 # TODO(suo): this is horrible.
                 persistent=True,
             )
+        elif name in input_tokens:
+            return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
 
     def to_output_spec(idx: int, o: ArgumentSpec) -> OutputSpec:
-        if isinstance(o, TokenArgument):
-            return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)
-
         if not isinstance(o, TensorArgument):
             return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
         name = o.name
@@ -172,6 +151,8 @@ def _sig_to_specs(
                     arg=o,
                     target=user_input_mutations[name],
                 )
+            elif name in output_tokens:
+                return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)
             else:
                 raise AssertionError(f"Unknown tensor mutation kind: {name}")
         else:
@@ -475,7 +456,7 @@ class ExportGraphSignature:
         input_tokens = []
         for s in self.input_specs:
             if s.kind == InputKind.TOKEN:
-                assert isinstance(s.arg, TokenArgument)
+                assert isinstance(s.arg, TensorArgument)
                 input_tokens.append(s.arg.name)
         return input_tokens
 
@@ -484,7 +465,7 @@ class ExportGraphSignature:
         output_tokens = []
         for s in self.output_specs:
             if s.kind == OutputKind.TOKEN:
-                assert isinstance(s.arg, TokenArgument)
+                assert isinstance(s.arg, TensorArgument)
                 output_tokens.append(s.arg.name)
         return output_tokens
 
