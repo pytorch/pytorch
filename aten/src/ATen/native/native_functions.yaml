@@ -4100,6 +4100,10 @@
     CPU: _weight_int4pack_mm_cpu
     CUDA: _weight_int4pack_mm_cuda
 
+- func: _weight_int8pack_mm(Tensor self, Tensor mat2, Tensor scales) -> Tensor
+  dispatch:
+    CPU: _weight_int8pack_mm_cpu
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
@@ -5613,6 +5617,16 @@
     SparseCPU: _sspaddmm_out_cpu
     SparseCUDA: _sspaddmm_out_cuda
 
+- func: _chunk_cat(Tensor[] tensors, int dim, int num_chunks) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _chunk_cat
+    CUDA: _chunk_cat_cuda
+
+- func: _chunk_cat.out(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: _chunk_cat_out
+    CUDA: _chunk_cat_out_cuda
+
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
@@ -6347,15 +6361,13 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: where
-    MPS: where_mps
+    CPU, CUDA, MPS: where
   tags: [core, pointwise]
 
 - func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: where_self_out
-    MPS: where_self_out_mps
+    CPU, CUDA, MPS: where_self_out
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
