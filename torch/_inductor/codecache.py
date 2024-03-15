@@ -2300,31 +2300,71 @@ def _nvcc_compiler_options() -> List[str]:
     return options
 
 
+def _ck_include_paths() -> List[str]:
+    return ["-I/opt/rocm/include"]
+
+
+def _hip_lib_options() -> List[str]:
+    return [
+        "-L/opt/rocm/lib",
+        "-L/opt/rocm/hip/lib",
+        "-lamdhip64",
+    ]
+
+
+def _hipcc_host_compiler_options() -> List[str]:
+    return []
+
+
+def _hipcc_device_compiler_options() -> List[str]:
+    return [
+        config.rocm.compile_opt_level,
+        "-std=c++17",
+        "--offload-arch=native",
+        "-fno-gpu-rdc",
+        "-fPIC",
+    ]
+
+
+def _hip_compiler() -> Optional[str]:
+    if is_linux():
+        return "hipcc"
+    return None
+
+
 def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
 ) -> str:
-    include_paths = _cutlass_include_paths()
-    cuda_lib_options = _cuda_lib_options()
-    nvcc_host_compiler_options = _nvcc_host_compiler_options()
-    nvcc_compiler_options = _nvcc_compiler_options()
+    if os.getenv("ROCM_PATH", None) is None:
+        include_paths = _cutlass_include_paths()
+        lib_options = _cuda_lib_options()
+        host_compiler_options = _nvcc_host_compiler_options()
+        device_compiler_options = _nvcc_compiler_options()
+        compiler = _cuda_compiler()
+    else:
+        include_paths = _ck_include_paths()
+        lib_options = _hip_lib_options()
+        host_compiler_options = _hipcc_host_compiler_options()
+        device_compiler_options = _hipcc_device_compiler_options()
+        compiler = _hip_compiler()
     options = (
-        nvcc_compiler_options
+        device_compiler_options
         + [
             f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
-            for opt in nvcc_host_compiler_options
+            for opt in host_compiler_options
         ]
         + ["-I" + path for path in include_paths]
-        + cuda_lib_options
+        + lib_options
     )
     src_file = " ".join(src_files)
     res = ""
     if dst_file_ext == "o":
-        res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
+        res = f"{compiler} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
-        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
     log.debug("CUDA command: %s", res)
