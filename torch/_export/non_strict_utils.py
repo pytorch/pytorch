@@ -177,7 +177,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
 def make_constraints(
     fake_mode: FakeTensorMode,
     equalities_inputs: EqualityConstraint,
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
     input_specs: List[InputSpec],
     original_signature: inspect.Signature,
     gm: torch.fx.GraphModule,
