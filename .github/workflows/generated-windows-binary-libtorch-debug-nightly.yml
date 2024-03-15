@@ -109,7 +109,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -230,7 +230,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -364,7 +364,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -486,7 +486,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -621,7 +621,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -743,7 +743,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder

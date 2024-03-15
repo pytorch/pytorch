@@ -89,7 +89,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -141,7 +141,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.3
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
       use_s3: False
@@ -207,7 +207,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -259,7 +259,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.3
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       use_s3: False
@@ -325,7 +325,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -377,7 +377,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.3
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       use_s3: False
@@ -443,7 +443,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -495,7 +495,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.3
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       use_s3: False
@@ -561,7 +561,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_onednn_22
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -613,7 +613,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.3
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       use_s3: False
