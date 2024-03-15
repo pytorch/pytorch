@@ -476,7 +476,6 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * 2
 
     def scan(self, dtypes, combine_fn, values, inits):
-        self.inner_fn(dtypes, combine_fn, values, inits)
         return (None,) * len(values)
 
     def reduction(
