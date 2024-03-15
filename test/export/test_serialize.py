@@ -781,12 +781,6 @@ unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_scalar_output
 )
 
-# Error with SymInt nn_module_stack metadata verification.
-# Haven't figured out way to assign nn_module_stack for Sym-related nodes with export_non_strict()
-unittest.expectedFailure(
-    TestDeserialize.test_sym_ite
-)
-
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
