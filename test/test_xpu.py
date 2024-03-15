@@ -237,8 +237,7 @@ if __name__ == "__main__":
 
     @onlyXPU
     @skipMeta
-    @onlyNativeDeviceTypes
-    @ops(_xpu_all_ops, dtypes=OpDTypes.none)
+    @ops(_xpu_dtype_ops, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
@@ -454,6 +453,7 @@ if __name__ == "__main__":
                 self.fail(
                     f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
                 )
+
 
 instantiate_device_type_tests(TestXpu, globals())
 
