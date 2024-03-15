@@ -107,7 +107,7 @@ def filtered_configs(
                     )
 
                     if out_dtype != torch.bfloat16:
-                        more_split_ks = [k for k in [2, 4, 8, 16] if k != split_k]
+                        more_split_ks = [k for k in [1] if k != split_k]
                         for more_split_k in more_split_ks:
                             yield triton_config(
                                 BLOCK_M=block_m,
@@ -138,7 +138,7 @@ def filtered_configs(
                     num_warps=num_warps,
                 )
                 if out_dtype != torch.bfloat16:
-                    more_split_ks = [k for k in [2, 4, 8, 16] if k != split_k]
+                    more_split_ks = [k for k in [1] if k != split_k]
                     for more_split_k in more_split_ks:
                         yield triton_config(
                             BLOCK_M=block_m,
