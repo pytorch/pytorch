@@ -155,10 +155,10 @@ and capturable vs default optimizers. For more details, see https://pytorch.org/
 Specifically, while you can think of our optimizer's handling of complex tensors as the same as optimizing over their
 `p.real` and `p.imag` pieces separately, the implementation details are not precisely that. Note that the
 :func:`torch.view_as_real` equivalent will convert a complex tensor to a real tensor with shape :math:`(..., 2)`,
-whereas splitting a complex tensor into two tensors is more like :math:`(2, ...)`. This distinction has no impact on
-pointwise optimizers (like AdamW) but will cause slight discrepancy in optimizers that do per-Tensor reductions. We
-currently do not have such optimizers and do not yet define this behavior. Open an issue if you have a use case that
-requires precisely defining this behavior.
+whereas splitting a complex tensor into two tensors is 2 tensors of size :math:`(...)`. This distinction has no impact on
+pointwise optimizers (like AdamW) but will cause slight discrepancy in optimizers that do global reductions (like LBFGS).
+We currently do not have optimizers that do per-Tensor reductions and thus do not yet define this behavior. Open an issue
+if you have a use case that requires precisely defining this behavior.
 
 
 We do not fully support the following subsystems:
