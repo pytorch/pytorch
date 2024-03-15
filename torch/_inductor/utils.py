@@ -984,7 +984,7 @@ def use_cutlass_template(layout):
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
     )
@@ -1276,6 +1276,10 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def get_max_y_grid():
+    return 65535
 
 
 def is_linux() -> bool:
