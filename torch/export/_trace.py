@@ -105,6 +105,29 @@ def _ignore_backend_decomps():
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
+@contextmanager
+def _patch_dropout_decomps():
+    """
+    In export, we always want to decompose dropout_
+    to functional dropout. The very correct way to do is
+    we extend functionalization to automatically functionalize
+    CompositeImplicitAutograd ops using their functional variant.
+    But this is significantly lot more work to do. Since, it seems
+    users only care about certain set of ops, so for now we just
+    patch our own CompositeImplicitAutograd decomp
+    """
+    def dropout_(input, p, train):
+        res = torch.ops.aten.dropout.default(input, p, train)
+        input.copy_(res)
+        return res
+
+    torch.ops.aten.dropout_.default.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(dropout_)
+    try:
+        yield
+    finally:
+        del torch.ops.aten.dropout_.default.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
+
+
 def _convert_input_to_fake(gm, args, kwargs):
     params_buffers = _get_params_buffers(gm)
     fake_inps: List[torch.Tensor] = []
@@ -436,7 +459,7 @@ def _export_non_strict(
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(),_patch_dropout_decomps(),  _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
