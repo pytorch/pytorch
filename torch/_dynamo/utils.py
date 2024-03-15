@@ -102,7 +102,9 @@ from torch.utils._pytree import tree_map_only
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
-troubleshooting_url = "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
+troubleshooting_url = (
+    "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
+)
 nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
