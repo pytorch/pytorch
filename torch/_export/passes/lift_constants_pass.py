@@ -103,9 +103,6 @@ def lift_constants_pass(
     """
     all_constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
 
-    if len([node for node in gm.graph.nodes if node.op == "placeholder"]) == 0:
-        return {}
-
     inputs = graph_signature.input_specs
     num_custom_obj = sum(
         input_specs.kind == InputKind.CUSTOM_OBJ for input_specs in inputs
@@ -177,6 +174,9 @@ def lift_constants_pass(
             with gm.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
                 const_placeholder_node = gm.graph.placeholder(constant_name)
+                # match target name with its node name in case there is name collision
+                # and suffix is added to node name in fx
+                const_placeholder_node.target = const_placeholder_node.name
 
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v

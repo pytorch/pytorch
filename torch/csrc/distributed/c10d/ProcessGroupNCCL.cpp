@@ -78,6 +78,22 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
   return it->second;
 }
 
+bool complexViewAsRealAllowed(const ReduceOp reduceOp) {
+  switch (reduceOp) {
+    case ReduceOp::SUM:
+      return true;
+    case ReduceOp::AVG:
+      return true;
+    case ReduceOp::PREMUL_SUM:
+      return true;
+    case ReduceOp::UNUSED:
+      return true;
+    default:
+      return false;
+  }
+  return false;
+}
+
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
 template <typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(
@@ -2902,7 +2918,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(
       Error,
-      "allreduce_sparse is only available in the NCCL experimental branch.");
+      "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
 #endif
 }
 
@@ -2937,6 +2953,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        complexViewAsRealAllowed(opts.reduceOp),
+        "all_reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
 
   if (intraNodeComm_ != nullptr && opts.reduceOp == ReduceOp::SUM) {
@@ -3023,6 +3047,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
 
   // @lint-ignore CLANGTIDY
@@ -3111,6 +3138,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        complexViewAsRealAllowed(opts.reduceOp),
+        "reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(

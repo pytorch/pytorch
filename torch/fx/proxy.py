@@ -245,6 +245,11 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        from torch.utils._triton import has_triton
+
+        if has_triton():
+            import triton
+
         if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
             return a.__fx_create_arg__(self)
         # aggregates
@@ -279,6 +284,8 @@ class TracerBase:
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
         elif isinstance(a, torch._ops.OpOverload):
+            return a
+        elif has_triton() and isinstance(a, triton.language.dtype):
             return a
 
         if isinstance(a, Proxy):

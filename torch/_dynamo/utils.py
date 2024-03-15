@@ -98,7 +98,7 @@ from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
-
+from torch.utils._triton import has_triton, has_triton_package
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -977,6 +977,10 @@ common_constant_types = {
     torch.memory_format,
     torch.layout,
 }
+if has_triton_package():
+    import triton
+
+    common_constant_types.add(triton.language.dtype)
 
 
 def is_safe_constant(v):
@@ -1350,10 +1354,13 @@ def same(
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
                         res_error,
                         ref_error,
                         res.size(),
+                        res.dtype,
+                        multiplier,
+                        tol,
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test
@@ -1688,7 +1695,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 )
                 if maybe_pystub is not None:
                     module, ctx = maybe_pystub
-                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
+                    import_suggestion = (
+                        f"It's possible that the support was implemented in "
+                        f"module `{module}` and you may need to `import {module}`"
+                        f"({ctx}), otherwise "
+                    )
             unimplemented(
                 f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
@@ -2186,8 +2197,6 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch.utils._triton import has_triton
-
         compile_supported = has_triton()
     else:
         compile_supported = False
