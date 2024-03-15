@@ -788,6 +788,32 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
+@register_meta([aten._linalg_eigvals.default, aten.linalg_eigvals.out])
+@out_wrapper()
+def meta__linalg_eigvals(input: Tensor) -> Tensor:
+    squareCheckInputs(input, "linalg.eigvals")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    return input.new_empty(input.shape[:-1], dtype=complex_dtype)
+
+
+@register_meta([aten.linalg_eig])
+@out_wrapper("eigenvalues", "eigenvectors")
+def meta_linalg_eig(input: Tensor):
+    squareCheckInputs(input, "linalg.eig")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    values = input.new_empty(input.shape[:-1], dtype=complex_dtype)
+    vectors = input.new_empty(input.shape, dtype=complex_dtype)
+    return values, vectors
+
+
 def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
     return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
 
@@ -2150,6 +2176,11 @@ def meta_conv(
         output_padding if is_transposed else None,
     )
 
+    input_channels_dim = 1
+    output_channels_dim = 1
+    if input_tensor.size(input_channels_dim) == 0:
+        shape_out[output_channels_dim] = 0
+
     out = input_tensor.new_empty(shape_out)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
@@ -2244,6 +2275,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.qlinear_pointwise.default)
+    @register_meta(torch.ops.onednn.qlinear_pointwise.tensor)
     def meta_qlinear_pointwise(
         x,
         x_scale,
@@ -3423,6 +3455,21 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
 
 
+@register_meta([aten._weight_int8pack_mm])
+def meta__weight_int8pack_mm(x, w, q_scales):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(
+        x.dtype is torch.bfloat16,
+        lambda: f"expected x to be bf16, got {x.dtype}",
+    )
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        w.dtype is torch.int8,
+        lambda: f"expected w to be int8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
+
+
 @register_meta(aten._cdist_forward.default)
 def meta_cdist_forward(x1, x2, p, compute_mode):
     torch._check(
@@ -4316,6 +4363,91 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.fractional_max_pool2d.default)
+def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
+    torch._check(
+        self_.ndim in (3, 4),
+        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_.ndim}",
+    )
+    ndim = self_.ndim
+
+    for d in range(ndim - 3, ndim):
+        torch._check(
+            self_.size(d) > 0,
+            f"fractional_max_pool2d: Expected input to have non-zero "
+            f" size for non-batch dimenions, but got {self_.size()} with dimension {d} empty",
+        )
+
+    # the check and message are out of sync, but this matches the structured meta
+    torch._check(
+        len(kernel_size) == 2,
+        lambda: "fractional_max_pool2d: kernel_size must"
+        "either be a single int or tuple of Ints",
+    )
+    torch._check(
+        len(output_size) == 2,
+        lambda: "fractional_max_pool2d: output_size must "
+        "either be a single int or tuple of Ints",
+    )
+
+    input_channels = self_.size(-3)
+    input_height = self_.size(-2)
+    input_width = self_.size(-1)
+    if ndim == 4:
+        input_batch = self_.size(0)
+    else:
+        input_batch = 1
+
+    torch._check(
+        self_.dtype == random_samples.dtype,
+        lambda: "Expect _random_samples to have the same dtype as input",
+    )
+    torch._check(
+        random_samples.ndim == 3,
+        lambda: f"Expect _random samples to have 3 dimensions got, {random_samples.ndim}",
+    )
+
+    n = random_samples.size(0)
+    c = random_samples.size(1)
+    d = random_samples.size(2)
+    torch._check(
+        n >= input_batch,
+        "Expect _random_samples.size(0) no less then input batch size.",
+    )
+    torch._check(
+        c == input_channels,
+        lambda: "Expect _random_samples.size(1) equals to input channel size.",
+    )
+    torch._check(d == 2, lambda: f"Expect _random_samples.size(2) equals to 2 got {d}.")
+
+    torch._check(
+        output_size[0] + kernel_size[0] - 1 <= input_height,
+        lambda: f"fractional_max_pool2d: kernel height {kernel_size[0]} is too large relative to input height {input_height}",
+    )
+    torch._check(
+        output_size[1] + kernel_size[1] - 1 <= input_width,
+        lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {input_width}",
+    )
+
+    if self_.dim() == 4:
+        size = [input_batch, input_channels, output_size[0], output_size[1]]
+    else:
+        size = [input_channels, output_size[0], output_size[1]]
+
+    return (
+        torch.empty(
+            size,
+            dtype=self_.dtype,
+            device=self_.device,
+        ),
+        torch.empty(
+            size,
+            dtype=torch.int64,
+            device=self_.device,
+        ),
+    )
+
+
 @register_meta(aten.max_unpool2d)
 @out_wrapper()
 def meta_max_unpool2d(self_, indices, output_size):
@@ -5065,67 +5197,6 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
 
 @register_meta(
     [
-        aten._scaled_dot_product_flash_attention,
-    ]
-)
-def meta__scaled_dot_product_flash(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = False,
-    scale: Optional[float] = None,
-):
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    max_seqlen_batch_q = query.size(2)
-    head_dim = query.size(3)
-    max_seqlen_batch_k = key.size(2)
-
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
-            dtype=query.dtype,
-            device=query.device,
-        )
-    else:
-        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
-
-    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
-    # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return meta tensors here
-    # it's possible we'll need to have some special handling in inductor for sdpa
-
-    return (
-        attention,
-        logsumexp,
-        None,
-        None,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
-        debug_mask,
-    )
-
-
-@register_meta(
-    [
         aten._scaled_dot_product_flash_attention_backward,
     ]
 )
@@ -5240,50 +5311,6 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
 
 @register_meta(
     [
-        aten._scaled_dot_product_efficient_attention,
-    ]
-)
-def meta__scaled_dot_product_efficient(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    attn_bias: Optional[Tensor],
-    compute_log_sumexp: bool,
-    dropout_p=0.0,
-    is_causal: bool = False,
-    scale: Optional[float] = None,
-):
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
-    B = query.size(0)
-    M = query.size(1)
-    N = key.size(1)
-    num_heads = query.size(-2)
-    K = query.size(-1)
-    Kv = value.size(-1)
-
-    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
-
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
-    logsum_exp = torch.empty(
-        (B, num_heads, logsumexp_dim),
-        dtype=torch.float,
-        device=query.device,
-    )
-
-    res = res.transpose(1, 2)
-
-    # See Note [Seed and Offset]:
-    seed = torch.empty((), dtype=torch.long, device="meta")
-    offset = torch.empty((), dtype=torch.long, device="meta")
-
-    return res, logsum_exp, seed, offset
-
-
-@register_meta(
-    [
         aten._scaled_dot_product_efficient_attention_backward,
     ]
 )
@@ -5344,67 +5371,6 @@ def meta__scaled_dot_product_efficient_backward(
 
 @register_meta(
     [
-        aten._flash_attention_forward,
-    ]
-)
-def meta__flash_attention_forward(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    cum_seq_q: Optional[Tensor],
-    cum_seq_k: Optional[Tensor],
-    max_q: int,
-    max_k: int,
-    dropout_p: float,
-    is_causal: bool,
-    return_debug_mask: bool,
-    scale: Optional[float] = None,
-):
-    # NB: there are two underlying paths:
-    # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
-    # 2. varseqlen path; expect 3D inputs of shape (total, num_heads, head_dim) where total
-    #    includes all batch item sequences. cum_seq_q / cum_seq_k contain offsets into total
-    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
-    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
-    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
-    num_heads = query.size(-2)
-    head_dim = query.size(-1)
-
-    # Cuda Path
-    attention = torch.empty_like(query)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
-            dtype=query.dtype,
-            device=query.device,
-        )
-    else:
-        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
-
-    # See Note [Seed and Offset]:
-    return (
-        attention,
-        logsumexp,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
-        debug_mask,
-    )
-
-
-@register_meta(
-    [
         aten._flash_attention_backward,
     ]
 )
@@ -5430,51 +5396,6 @@ def meta__flash_attention_backward(
     grad_value = torch.empty_like(value)
 
     return grad_query, grad_key, grad_value
-
-
-@register_meta(
-    [
-        aten._efficient_attention_forward,
-    ]
-)
-def meta__efficient_attention_forward(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    bias: Optional[Tensor],
-    cu_seqlens_q: Optional[Tensor],
-    cu_seqlens_k: Optional[Tensor],
-    max_seqlen_q: Optional[int],
-    max_seqlen_k: Optional[int],
-    dropout_p: float,
-    custom_mask_type: int,
-    compute_log_sumexp: bool = False,
-    scale: Optional[float] = None,
-    causal_diagonal: Optional[Tensor] = None,
-    seqlen_k: Optional[Tensor] = None,
-):
-    B = query.size(0)
-    M = query.size(1)
-    N = key.size(1)
-    num_heads = query.size(-2)
-    K = query.size(-1)
-    Kv = value.size(-1)
-
-    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
-
-    logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
-    logsum_exp = torch.empty(
-        (logsumexp_batch_dim, num_heads, logsumexp_dim),
-        dtype=torch.float,
-        device=query.device,
-    )
-
-    # See Note [Seed and Offset]:
-    seed = torch.empty((), dtype=torch.long, device="meta")
-    offset = torch.empty((), dtype=torch.long, device="meta")
-
-    return res, logsum_exp, seed, offset, M, N
 
 
 @register_meta(
@@ -6170,6 +6091,31 @@ def meta_searchsorted(
         return torch.empty_like(self, dtype=dtype).contiguous()
     else:  # Scalar
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
+
+
+def _check_for_unsupported_isin_dtype(dtype):
+    torch._check(
+        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
+        lambda: f"Unsupported input type encountered for isin(): {dtype}",
+    )
+
+
+@register_meta(aten.isin)
+@out_wrapper()
+def meta_isin(elements, test_elements, *, assume_unique=False, invert=False):
+    torch._check(
+        isinstance(elements, Tensor) or isinstance(test_elements, Tensor),
+        lambda: "At least one of elements and test_elements must be a Tensor.",
+    )
+    if not isinstance(elements, Tensor):
+        elements = torch.tensor(elements, device=test_elements.device)
+
+    if not isinstance(test_elements, Tensor):
+        test_elements = torch.tensor(test_elements, device=elements.device)
+
+    _check_for_unsupported_isin_dtype(elements.dtype)
+    _check_for_unsupported_isin_dtype(test_elements.dtype)
+    return torch.empty_like(elements, dtype=torch.bool)
 
 
 @register_meta(aten.polygamma)

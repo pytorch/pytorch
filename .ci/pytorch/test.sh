@@ -163,6 +163,8 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+install_tlparse
+
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
@@ -297,6 +299,7 @@ test_inductor_distributed() {
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume
   pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
@@ -319,6 +322,14 @@ test_inductor() {
       BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
       CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
   fi
+}
+
+test_inductor_cpp_wrapper_abi_compatible() {
+  export TORCHINDUCTOR_ABI_COMPATIBLE=1
+  echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
+  # cpu stack allocation causes segfault and needs more investigation
+  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -1171,6 +1182,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
+  install_torchvision
+  test_inductor_cpp_wrapper_abi_compatible
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor
