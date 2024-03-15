@@ -826,7 +826,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
-        # choices = choices[0:3]
 
         if len(choices) == 0:
             raise RuntimeError(

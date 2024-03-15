@@ -639,7 +639,7 @@ class CachingAutotuner(KernelInterface):
             and config.coordinate_descent_tuning
         ):
             self.launchers = [
-            self.coordinate_descent_tuning(
+                self.coordinate_descent_tuning(
                     self.launchers[0], *args, grid=grid, **kwargs
                 )
             ]
