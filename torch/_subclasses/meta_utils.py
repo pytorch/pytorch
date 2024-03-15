@@ -796,7 +796,6 @@ class MetaConverter:
                                 device="meta",
                             )
                         )
-                        r.source = source
 
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:

@@ -1094,7 +1094,7 @@ https://github.com/pytorch/pytorch/issues/101192
         prettify_func = lambda x:"_".join(x.split(".")[1:])
     else:
         forward_call = mod.forward
-        prettify_func = lambda x:x.split("L__self___")[1].replace(".", "__")
+        prettify_func = lambda x:x[len("L__self___" if x.startswith("L__self____") else "fn.") : ].replace(".", "__")
 
     # assign parameter & buffer names
     graph_nodes = list(fx_g.graph.nodes)
@@ -1104,7 +1104,6 @@ https://github.com/pytorch/pytorch/issues/101192
             node = graph_nodes[node_index]
             name = f"{tensor_type}_{prettify_func(tensor_name)}"
             node.name = node.target = name
-            # node.name = name
             node_index += 1
 
     # assign input names
@@ -1112,9 +1111,8 @@ https://github.com/pytorch/pytorch/issues/101192
     flat_args, _ = pytree.tree_flatten_with_path(forward_sig)
     for i, (tree_path, val) in enumerate(flat_args):
         node = graph_nodes[params_len + i]
-        name = "_".join((y.key if isinstance(y, pytree.MappingKey) else str(y.idx)) for y in tree_path).replace(".", "__")
+        name = "_".join(str(y.key if isinstance(y, pytree.MappingKey) else y.idx) for y in tree_path).replace(".", "__")
         node.name = node.target = name
-        # node.name = name
 
     # assign input names for submodules
     def prettify_cond_submodule_names(gm):
@@ -1130,7 +1128,6 @@ https://github.com/pytorch/pytorch/issues/101192
             for i, node in enumerate(subgm.graph.nodes):
                 if node.op == "placeholder":
                     node.name = node.target = names[i]
-                    # node.name = names[i]
                 else:
                     break
             # ensure we assigned all names, or ran out of nodes (graph is placeholder-only)
@@ -1143,19 +1140,6 @@ https://github.com/pytorch/pytorch/issues/101192
                 isinstance(node.target, torch._ops.HigherOrderOperator)
             ):
                 predicate, true_graph_node, false_graph_node, node_args = node._args
-
-                # assign true_graph/false_graph arg names
-
-                # # version with just input_0, input_1, ...
-                # arg_names = [
-                #     arg.name if any(arg.name.startswith(x) for x in ["param_"]) else None
-                #     for arg in node_args
-                # ]
-                # num_inputs = 0
-                # for i, name in enumerate(arg_names):
-                #     if name is None:
-                #         arg_names[i] = f"input_{num_inputs}"
-                #         num_inputs += 1
 
                 # version with original op + nn_module_stack
                 arg_names = []
@@ -1171,15 +1155,13 @@ https://github.com/pytorch/pytorch/issues/101192
                         arg_names.append(arg.name)
 
                 # both subgraphs have the same args, regardless of whether they're used or not
-                print("set names", arg_names)
-                print()
                 for subgraph_node in [true_graph_node, false_graph_node]:
                     subgraph = getattr(gm, subgraph_node.target)
                     _set_subgraph_placeholder_names(arg_names, subgraph)
                     prettify_cond_submodule_names(subgraph)  # recurse on subgraphs
                     subgraph.recompile()
 
-    # prettify_cond_submodule_names(fx_g)
+    prettify_cond_submodule_names(fx_g)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(

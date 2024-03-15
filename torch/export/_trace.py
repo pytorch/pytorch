@@ -30,6 +30,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
+from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
@@ -405,11 +406,32 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
     return constants
 
 
+def _verify_placeholder_node_names(gm: torch.fx.GraphModule, sig: ExportGraphSignature):
+    name_to_kind = {spec.arg.name: spec.kind for spec in sig.input_specs if isinstance(spec.arg, TensorArgument)}
+    kind_to_prefix = {
+        InputKind.PARAMETER: "p",
+        InputKind.BUFFER: "b",
+        InputKind.CONSTANT_TENSOR: "c",
+        InputKind.CUSTOM_OBJ: "o",
+        InputKind.TOKEN: "t",
+    }
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if not isinstance(node.meta['val'], FakeTensor):  # skip constant inputs
+                continue
+            node_kind = name_to_kind[node.name]
+            if node_kind in [InputKind.USER_INPUT]:
+                continue
+            prefix = kind_to_prefix[node_kind] + "_"
+            if not node.name.startswith(prefix):
+                raise SpecViolationError(
+                    f"Placeholder node name {node.name} does not follow spec for {node_kind}, name should start with {prefix}"
+                )
+
+
 def _export_non_strict(
     mod: torch.nn.Module,
     fake_combined_args,
-    # fake_args,
-    # fake_kwargs,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
     *,
@@ -442,10 +464,8 @@ def _export_non_strict(
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_combined_args,
-            # fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
-            # kwargs=fake_kwargs,
         )
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -529,6 +549,9 @@ def _export_non_strict(
 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    # run this here instead of verifier, to allow users to create nodes that don't follow spec
+    _verify_placeholder_node_names(gm, export_graph_signature)
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -786,8 +809,6 @@ def _export(
         (
             fake_mode,
             fake_combined_args,
-            # fake_args,
-            # fake_kwargs,
             equalities_inputs,
             original_signature,
         ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
@@ -799,8 +820,6 @@ def _export(
             ep_non_strict = _export_non_strict(
                 mod,
                 fake_combined_args,
-                # fake_args,
-                # fake_kwargs,
                 fake_params_buffers,
                 constant_attrs,
                 pre_dispatch=pre_dispatch,
@@ -815,7 +834,6 @@ def _export(
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
-
 
         assert out_spec is not None
 
@@ -849,7 +867,6 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
-
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
