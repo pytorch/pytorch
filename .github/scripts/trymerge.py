@@ -1404,13 +1404,16 @@ def find_matching_merge_rule(
                 mandatory_checks,
             )
         )
-        pending_checks, failed_checks, _ = categorize_checks(
-            checks,
-            required_checks,
-            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
-            if rule.ignore_flaky_failures
-            else 0,
-        )
+        pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+        failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+        if len(required_checks) > 0:
+            pending_checks, failed_checks, _ = categorize_checks(
+                checks,
+                required_checks,
+                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+                if rule.ignore_flaky_failures
+                else 0,
+            )
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
@@ -1993,11 +1996,18 @@ def categorize_checks(
     ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     ignorable_failed_checks: Dict[str, List[Any]] = defaultdict(list)
 
+    # If required_checks is not set or empty, consider all names are relevant
+    relevant_checknames = [
+        name
+        for name in check_runs.keys()
+        if not required_checks or any(x in name for x in required_checks)
+    ]
+
     for checkname in required_checks:
         if all(checkname not in x for x in check_runs.keys()):
             pending_checks.append((checkname, None, None))
 
-    for checkname in required_checks:
+    for checkname in relevant_checknames:
         status = check_runs[checkname].status
         url = check_runs[checkname].url
         classification = check_runs[checkname].classification
