@@ -3507,11 +3507,11 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     ):
         super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
         self._choice_timings_fn = choice_timings
-        self._choice_timings = None
+        self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
 
     @property
-    def choice_timings(self):
+    def choice_timings(self) -> Dict[ChoiceCaller, float]:
         if self._choice_timings is None:
             self._choice_timings = self._choice_timings_fn()
         return self._choice_timings
