@@ -266,6 +266,9 @@ jobs:
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
