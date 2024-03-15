@@ -241,6 +241,27 @@ Tensor nested_from_padded_generic(
       std::move(new_buffer), sizes);
 }
 
+/* Tensor _nested_jagged_to_padded( */
+/*     const Tensor& values, */
+/*     const Tensor& offsets, */
+/*     float padding, */
+/*     at::OptionalIntArrayRef output_size, */
+/*     int64_t ragged_idx) { */
+/*   TORCH_INTERNAL_ASSERT( */
+/*       false, "_nested_jagged_to_padded(): expected to be implemented from Python"); */
+/*   return at::Tensor(); */
+/* } */
+
+/* Tensor _nested_jagged_from_padded( */
+/*     const Tensor& padded, */
+/*     const Tensor& offsets, */
+/*     const Tensor& dummy, */
+/*     const int64_t ragged_idx) { */
+/*   TORCH_INTERNAL_ASSERT( */
+/*       false, "_nested_jagged_from_padded(): expected to be implemented from Python"); */
+/*   return Tensor(); */
+/* } */
+
 Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
     double padding,
