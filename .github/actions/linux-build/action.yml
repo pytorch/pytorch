@@ -141,7 +141,7 @@ runs:
         TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
         DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
-        DEBUG: ${{ inputs.build-with-debug == "true" && '1' || '0' }}
+        DEBUG: ${{ inputs.build-with-debug == 'true' && '1' || '0' }}
         OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         HUGGING_FACE_HUB_TOKEN: ${{ inputs.HUGGING_FACE_HUB_TOKEN }}
       shell: bash
@@ -176,14 +176,14 @@ runs:
         docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
     - name: Archive artifacts into zip
-      if: inputs.build-generates-artifacts == "true" && steps.build.outcome != 'skipped'
+      if: inputs.build-generates-artifacts == 'true' && steps.build.outcome != 'skipped'
       shell: bash
       run: |
         zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
     - name: Store PyTorch Build Artifacts on S3
       uses: seemethere/upload-artifact-s3@v5
-      if: inputs.build-generates-artifacts == "true" && steps.build.outcome != 'skipped'
+      if: inputs.build-generates-artifacts == 'true' && steps.build.outcome != 'skipped'
       with:
         name: ${{ inputs.build-environment }}
         retention-days: 14
