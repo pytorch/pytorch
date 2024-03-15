@@ -233,7 +233,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
   return i;
 }
 
-void CUDAAllocatorConfig::parseArgs(const char* env) {
+void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -241,7 +241,7 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (env == nullptr) {
+  if (!env.has_value()) {
     return;
   }
   {
@@ -250,7 +250,7 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   }
 
   std::vector<std::string> config;
-  lexArgs(env, config);
+  lexArgs(env.value().c_str(), config);
 
   for (size_t i = 0; i < config.size(); i++) {
     if (config[i].compare("max_split_size_mb") == 0) {
