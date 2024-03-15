@@ -2500,8 +2500,7 @@ class Layout(IRNode):
         return True
 
     def is_stride_ordered(self, order):
-        if len(self.stride) != len(order):
-            return False
+        assert len(self.stride) == len(order)
 
         # ignore dimensions of size 1, they dont affect layout
         non_1_indices = [
@@ -3966,26 +3965,6 @@ class ExternKernel(InputsKernel):
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
         return x
-
-    @classmethod
-    def require_stride_order_for_format(cls, x, format):
-        if x.get_numel() == 0:
-            # Layout doesn't matter
-            return x
-
-        assert format in (
-            torch.contiguous_format,
-            torch.channels_last,
-            torch.channels_last_3d,
-        ), f"Invalid memory format: {format}"
-        # TODO: chanels_last_1d does not seem to be covered?
-        if format == torch.contiguous_format:
-            return cls.require_contiguous(x)
-        elif format == torch.channels_last:
-            return cls.require_channels_last(x)
-        else:
-            assert format == torch.channels_last_3d
-            return cls.require_stride_order(x, [4, 0, 3, 2, 1])
 
     @classmethod
     def require_channels_last(cls, x):

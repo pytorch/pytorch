@@ -5835,7 +5835,7 @@ def resize(x, size, *, memory_format=None):
 def resize_(x, size, *, memory_format=None):
     val = resize(x, size, memory_format=memory_format)
     if isinstance(x, TensorBox):
-        x_data = x.data
+        x_data = x.data # type: ignore[attr-defined]
     else:
         x_data = x
     assert isinstance(val, ir.StorageBox)
