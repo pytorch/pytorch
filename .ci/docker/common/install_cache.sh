@@ -56,7 +56,7 @@ function write_sccache_stub() {
     cat > "/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
-if [ "\$1" = "-E" ] -o [ "\$2" = "-E" ]; then
+if [ "\$1" = "-E" ] || [ "\$2" = "-E" ]; then
   exec $(which $1) "\$@"
 elif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
   exec sccache $(which $1) "\$@"
