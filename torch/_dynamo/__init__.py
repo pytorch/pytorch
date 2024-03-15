@@ -18,7 +18,6 @@ from .decorators import (
     run,
 )
 from .eval_frame import (
-    _reset_guarded_backend_cache,
     explain,
     export,
     is_dynamo_supported,
@@ -76,7 +75,6 @@ def reset() -> None:
         guard_failures.clear()
         graph_break_reasons.clear()
         resume_execution.ContinueExecutionCache.cache.clear()
-        _reset_guarded_backend_cache()
         reset_frame_count()
         torch._C._dynamo.compiled_autograd.clear_cache()
         convert_frame.FRAME_COUNTER = 0
