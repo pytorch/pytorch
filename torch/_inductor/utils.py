@@ -167,9 +167,7 @@ def do_bench(*args, **kwargs):
 
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    out = triton_do_bench(*args, **kwargs)[0]
-    return out
-
+    return triton_do_bench(*args, **kwargs)[0]
 
 
 @functools.lru_cache(None)
