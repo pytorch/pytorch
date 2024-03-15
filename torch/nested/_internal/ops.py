@@ -1087,15 +1087,12 @@ if has_triton():
         M: tl.constexpr,
         D: tl.constexpr,
         BLOCKSIZE_BATCH: tl.constexpr,
-        BLOCKSIZE_SEQ: tl.constexpr,
+        # BLOCKSIZE_SEQ: tl.constexpr,
     ):
-        batch_pid = tl.program_id(axis=1)
-        seq_pid = tl.program_id(axis=0)
+        batch_pid = tl.program_id(axis=0)
+        # seq_pid = tl.program_id(axis=0)
 
-        # Step 1: Calculate 3D -> 2D indices
-        # 3D: (i, j, k)
-        # 2D: (m, n)
-        # m = offsets[i] + j
+        # Get (begin, end) offsets within packed batch (i.e. within T).
         batch_block_arange = batch_pid * BLOCKSIZE_BATCH + tl.arange(0, BLOCKSIZE_BATCH)
         offsets_block_ptrs = offsets_ptr + batch_block_arange
         batch_block_offsets = tl.load(offsets_block_ptrs, mask=batch_block_arange < B)
@@ -1103,52 +1100,44 @@ if has_triton():
             tl.load(offsets_block_ptrs + 1, mask=batch_block_arange < B)
         )
 
-        # Step 2: Index values using m and n
-        seq_block_arange = seq_pid * BLOCKSIZE_SEQ + tl.arange(0, BLOCKSIZE_SEQ)
+        # Compute mask for sequence length by batch item.
+        seq_block_arange = tl.arange(0, M) #seq_pid * BLOCKSIZE_SEQ + tl.arange(0, BLOCKSIZE_SEQ)
         dim_block_arange = tl.arange(0, D)
+        lengths = batch_block_end_offsets - batch_block_offsets
+        values_mask = (
+            seq_block_arange[None, :, None] < lengths[:, None, None]
+        )
+
+        # Load values from input values tensor.
         values_ptrs = (
             values_ptr +
             (batch_block_offsets[:, None, None] * values_packed_batch_stride) +
             (seq_block_arange[None, :, None] * values_packed_batch_stride) +
             (dim_block_arange[None, None, :] * values_dim_stride)
         )
-        # need to index values from [batch_start, batch_start + seq_len]
-        values_mask = (batch_block_offsets < batch_block_end_offsets)[:, None, None]
         batch_block_values = tl.load(values_ptrs, mask=values_mask)
 
-        # Step 3: Store values in output at locations given by (i, j, k)
-        # output_mask = (
-        #     (batch_block_arange[:, None, None] < B) &
-        #     (seq_block_arange[None, :, None] < M)
-        #     # (seq_block_arange[None, :, None] < batch_block_end_offsets)
-        # )
-
-        lengths = batch_block_end_offsets - batch_block_offsets
-        output_mask = (
-            (batch_block_arange < B)[:, None, None] &
-            seq_block_arange < lengths[None, :, None]
-        )
-
+        # Store values to output tensor.
         output_ptrs = (
             output_ptr +
             (batch_block_arange[:, None, None] * output_batch_stride) +
             (seq_block_arange[None, :, None] * output_seq_stride) +
             (dim_block_arange[None, None, :] * output_dim_stride)
         )
-        tl.store(output_ptrs, batch_block_values, mask=output_mask)
+        tl.store(output_ptrs, batch_block_values, mask=values_mask)
 
 
     def _run_jagged_to_padded_kernel(
         values, offsets, output, max_seq_len, padding_value = 0.0
     ):
         T, B, M, D = values.size(0), offsets.size(0) - 1, max_seq_len, values.size(-1)
-        full_grid = (B, M, D)
+        full_grid = (B,)
 
         grid_blocks = None
         tensor_dims_map = {
-            values: (None, None),
-            offsets: (None, None),
-            output: (0, 1),
+            values: (None,),
+            offsets: (None,),
+            output: (0,),
         }
 
         from torch.sparse._triton_ops import launch_kernel, ptr_stride_extractor
@@ -1160,8 +1149,8 @@ if has_triton():
                 padding_value,
                 T, B, M, D,
                 # TODO: fix blocksizes
-                BLOCKSIZE_BATCH=64,
-                BLOCKSIZE_SEQ=64,
+                BLOCKSIZE_BATCH=8,
+                # BLOCKSIZE_SEQ=8,
                 # TODO: fix these
                 num_warps=4,
                 num_stages=1,
