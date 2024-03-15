@@ -1275,26 +1275,7 @@ def linalg_vector_norm(
     keepdim: bool,
     dtype,
 ):
-    if ord == 0:
-        if dim is None:
-            self = symbolic_helper._reshape_helper(
-                g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
-            )
-            keepdim = False
-
-        cond_op = g.op(
-            "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
-        )
-        cond_op = g.op(
-            "Cast",
-            cond_op,
-            to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
-        )
-        return symbolic_helper._reducesum_helper(
-            g, cond_op, axes_i=dim, keepdims_i=keepdim
-        )
-    else:
-        return opset9.linalg_vector_norm(g, self, ord, dim, keepdim, dtype)
+    return symbolic_helper._linalg_vector_norm_helper(g, self, ord, dim, keepdim, dtype)
 
 
 @_onnx_symbolic("aten::embedding_bag")
