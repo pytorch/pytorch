@@ -680,13 +680,6 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-def output_node(gm: torch.fx.GraphModule):
-    """Get the output node from an FX graph"""
-    last_node = next(iter(reversed(gm.graph.nodes)))
-    assert last_node.op == "output"
-    return last_node
-
-
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
@@ -984,7 +977,7 @@ def use_cutlass_template(layout):
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
     )
