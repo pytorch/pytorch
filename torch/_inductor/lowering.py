@@ -566,9 +566,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
-        raise NotImplementedError(
-            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
-        )
+        # fallback to aten eager implementation for differing bitwidths
+        return fallback_handler(aten.view.dtype)(x, dtype)
 
     def _to_dtype_bitcast(x):
         # Because we may promote tensor type from float16 or bfloat16
