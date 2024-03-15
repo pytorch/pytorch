@@ -433,7 +433,10 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(NOT USE_SYSTEM_SLEEF)
-    set(SLEEF_BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
+    # Failure to define option at parent level (before add_subdirectory())
+    # as well as component/child level could lead to unexpected results.
+    option (BUILD_SHARED_LIBS "Build shared libraries" ON)
+    set(BUILD_SHARED_LIBS OFF)
     set(SLEEF_BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
     set(SLEEF_BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(SLEEF_BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
