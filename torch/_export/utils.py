@@ -171,6 +171,10 @@ def register_dataclass_as_pytree_node(
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
     unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
 
+    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+        flattened, (flat_names, none_names) = flatten_fn(obj)
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
             f"Both to_dumpable_context and from_dumpable_context for {cls} must "
@@ -182,6 +186,7 @@ def register_dataclass_as_pytree_node(
         flatten_fn,
         unflatten_fn,
         serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=default_flatten_fn_with_keys,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
     )

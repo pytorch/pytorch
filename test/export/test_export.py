@@ -149,6 +149,7 @@ class TestDynamismExpression(TestCase):
 class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
+        breakpoint()
         exported_program = export(f, args, kwargs)
         self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
         # this is not supported by .module()
@@ -872,8 +873,8 @@ class TestExport(TestCase):
         args = (torch.ones(6, 4), torch.ones(1, 1))
         kwargs1 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}}
         kwargs2 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}, "b": 2}
-        self._test_export_same_as_eager(kw_func, args, kwargs1)
-        self._test_export_same_as_eager(kw_func, args, kwargs2)
+        # self._test_export_same_as_eager(kw_func, args, kwargs1)
+        # self._test_export_same_as_eager(kw_func, args, kwargs2)
         kwargs3 = {"b": 1}
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 

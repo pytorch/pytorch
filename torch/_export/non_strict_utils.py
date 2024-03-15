@@ -141,11 +141,10 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
     with fake_mode:
         original_signature = inspect.signature(nn_module.forward)
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
-        fake_combined_args = tree_map_with_path(
+        fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
-            original_signature.bind(*args, **kwargs).arguments,
+            (args, kwargs),
         )
-        fake_combined_args = list(fake_combined_args.values())
 
         from sympy import Symbol
 
@@ -168,7 +167,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
             phantom_symbols=list(phantom_symbols.values()),
             warn_only=False,
         )
-        return fake_mode, fake_combined_args, equalities_inputs, original_signature
+        return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
 
 
 def make_constraints(

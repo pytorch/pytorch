@@ -431,7 +431,8 @@ def _verify_placeholder_node_names(gm: torch.fx.GraphModule, sig: ExportGraphSig
 
 def _export_non_strict(
     mod: torch.nn.Module,
-    fake_combined_args,
+    fake_args,
+    fake_kwargs,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
     *,
@@ -463,9 +464,10 @@ def _export_non_strict(
     ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
-            fake_combined_args,
+            fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
+            kwargs=fake_kwargs,
         )
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -482,7 +484,7 @@ def _export_non_strict(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves(fake_combined_args)
+    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -808,7 +810,8 @@ def _export(
 
         (
             fake_mode,
-            fake_combined_args,
+            fake_args,
+            fake_kwargs,
             equalities_inputs,
             original_signature,
         ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
@@ -819,7 +822,8 @@ def _export(
         with fake_mode:
             ep_non_strict = _export_non_strict(
                 mod,
-                fake_combined_args,
+                fake_args,
+                fake_kwargs,
                 fake_params_buffers,
                 constant_attrs,
                 pre_dispatch=pre_dispatch,
@@ -983,10 +987,12 @@ def _export(
     ep_non_strict = _export_non_strict(
         gm_torch_level,
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+        {},
         fake_params_buffers,
         constant_attrs,
         pre_dispatch=pre_dispatch,
     )
+    breakpoint()
 
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig

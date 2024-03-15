@@ -1107,7 +1107,7 @@ https://github.com/pytorch/pytorch/issues/101192
             node_index += 1
 
     # assign input names
-    forward_sig = inspect.signature(forward_call).bind(*args).arguments
+    forward_sig = inspect.signature(forward_call).bind(*args, **kwargs).arguments
     flat_args, _ = pytree.tree_flatten_with_path(forward_sig)
     for i, (tree_path, val) in enumerate(flat_args):
         node = graph_nodes[params_len + i]

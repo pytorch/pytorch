@@ -1328,6 +1328,8 @@ class GraphModuleDeserializer:
             if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                if node_name:
+                    placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
             elif input_.type in ("as_int", "as_float", "as_bool", "as_none", "as_string"):
                 node_name = f"arg{i}"
@@ -1840,6 +1842,9 @@ class ExportedProgramDeserializer:
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
             for k, v in exported_program.range_constraints.items()
         }
+        '''
+        graph nodes contains 'input'
+        '''
         res = (
             GraphModuleDeserializer()
             .deserialize(
@@ -1857,6 +1862,10 @@ class ExportedProgramDeserializer:
 
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
+        '''
+        signature contains 'input'
+        nodes contains 'input_1'
+        '''
         exported_program = ep.ExportedProgram(
             root=res.graph_module,
             graph=res.graph_module.graph,
