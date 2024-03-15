@@ -122,10 +122,11 @@ class FSDPParamGroup:
         # of the output's grad fns and later query the autograd engine whether
         # any grad fn will execute in the current backward to know to prefetch.
         self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
-        # Whether to reduce-scatter or all-reduce gradients, respectively
-        # (can be set to false to save communication during gradient
-        # accumulation); all-reducing without reduce-scatter is disallowed
+        # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
+        # Whether to all-reduce gradients for HSDP; only used if
+        # `self.reduce_grads` is true, in which case setting this to false
+        # means reduce-scatter but no all-reduce
         self.all_reduce_grads: bool = True
 
         # - CUDA events for stream synchronization
