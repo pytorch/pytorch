@@ -2285,6 +2285,115 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
         for dim in range(-1, len(shape) - 1):
             yield SampleInput(tensors, args=(dim,))
 
+
+def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
+    # 1. If input tensors have different ndims, dim should be non-negative and be less than the ndims of every input tensors.
+    #    If all input tensors have the same ndims, we support both negative and non-negative dim.
+    # 2. For wrapped_dim, all tensors should have the same size for 0,...,wrapped_dim-1 dimensions.
+    #        No requirements for (wrapped_dim, ...)-th dimension.
+    # 3. Expect positive num_chunks
+    # 4. Expect non-empty input tensor list and each input tensor should have at least 1 element
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    same_ndim_cases = (
+        (
+            [
+                torch.Size([1, 2, 3]),
+                torch.Size([1, 2, 3]),
+            ], -1, 5
+        ),
+        (
+            [
+                torch.Size([1, 2, 3]),
+                torch.Size([1, 2, 3]),
+            ], 1, 5
+        ),
+        (
+            [
+                torch.Size([3, 3, 2, 1]),
+                torch.Size([1, 4, 2, 2]),
+                torch.Size([2, 1, 3, 3]),
+            ], 0, 2
+        ),
+    )
+    for sizes, dim, num_chunks in same_ndim_cases:
+        tensors = []
+        for size in sizes:
+            tensors.append(make_arg(size))
+        yield SampleInput(tensors, args=(dim, num_chunks))
+
+    different_ndim_case = [
+        torch.Size([2, 3, 3]),
+        torch.Size([2, 3, 1, 2]),
+        torch.Size([2, 3]),
+        torch.Size([2, 3, 2]),
+    ]
+    max_dim, num_chunks = 2, 3
+    for dim in range(max_dim):
+        tensors = []
+        for size in different_ndim_case:
+            tensors.append(make_arg(size))
+        yield SampleInput(tensors, args=(dim, num_chunks))
+
+
+def error_inputs_chunk_cat(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # input tensors have different ndims but dim is negative
+    sizes, dim, num_chunks = [torch.Size([2, 3]), torch.Size([4,])], -1, 3
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects non-negative dim when input tensors have different ndims',
+    )
+
+    # input tensors have different ndims but dim >= ndim of some input tensors
+    sizes, dim, num_chunks = [torch.Size([2, 3]), torch.Size([4,])], 1, 3
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects dim < ndim for all input tensors',
+    )
+
+    # some tensors have different sizes for 0, ..., dim-1 dimensions.
+    sizes, dim, num_chunks = [torch.Size([2, 3, 4]), torch.Size([4, 3])], 1, 3
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects same sizes of 0,...,dim-1 dimensions for all tensors',
+    )
+
+    # negative num_chunks
+    sizes, dim, num_chunks = [torch.Size([2,]), torch.Size([3,])], 0, -1
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects positive num_chunks',
+    )
+
+    # zero as num_chunks
+    sizes, dim, num_chunks = [torch.Size([2,]), torch.Size([3,])], 0, 0
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects positive num_chunks',
+    )
+
+    # empty input tensor list
+    dim, num_chunks = 0, 1
+    yield ErrorInput(
+        SampleInput([], args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects a non-empty input tensor list',
+    )
+
+    # empty input tensor with 0 elements
+    sizes, dim, num_chunks = [torch.Size([0,]), torch.Size([3,])], 0, 1
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects non-empty tensor',
+    )
+
+
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -10351,7 +10460,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           # TODO: Avoid COW materialize
            supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_log_normal,
            error_inputs_func=error_inputs_log_normal,
@@ -10697,8 +10805,6 @@ op_db: List[OpInfo] = [
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -11023,8 +11129,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
@@ -11751,8 +11855,6 @@ op_db: List[OpInfo] = [
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
            supports_autograd=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
@@ -11793,6 +11895,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+               # NotImplementedError: Could not run 'aten::sparse_sampled_addmm' with arguments from the 'SparseCsrMeta' backend.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
            )),
     OpInfo('sparse.mm',
            dtypes=floating_types_and(torch.bfloat16),
@@ -11801,8 +11909,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            supports_forward_ad=False,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_sparse_mm_reduce,
            decorators=[onlyCPU],
            skips=(
@@ -11836,6 +11942,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
                # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_fail_gradgrad'),
+               # NotImplementedError: Could not run 'aten::_sparse_mm_reduce_impl' with arguments from the 'SparseCsrMeta' backend
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace'),
            )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
@@ -12334,8 +12444,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            skips=(
                # mexp does not support bf16 and fp16
                DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive',
@@ -12743,8 +12851,6 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            supports_out=True),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
@@ -12766,8 +12872,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
@@ -12802,8 +12906,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -14012,6 +14114,7 @@ op_db: List[OpInfo] = [
            operator_variant=None,
            inplace_operator_variant=None,
            check_batched_gradgrad=False,
+           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
@@ -15575,7 +15678,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_split_with_sizes,
            supports_out=True,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           skips=(
+               # No error raised
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_requires_grad_error"),
+           )),
     BinaryUfuncInfo('__radd__',
                     op=torch.Tensor.__radd__,
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -16200,10 +16307,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -17439,6 +17542,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            ),
            ),
+    OpInfo('_chunk_cat',
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_chunk_cat,
+           error_inputs_func=error_inputs_chunk_cat,
+           supports_autograd=False,
+           supports_out=True,
+           ),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
@@ -18231,12 +18341,11 @@ op_db: List[OpInfo] = [
            # Currently only the `input` is tested in gradcheck.
            # If we pass `condition` first, none of the input which supports
            # autograd will be tested. Hence the following lambda.
-           op=lambda self, condition, other: torch.where(condition, self, other),
+           op=lambda self, condition, other, **kwargs: torch.where(condition, self, other, **kwargs),
            ref=lambda self, condition, other: np.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            reference_inputs_func=reference_inputs_where,
            error_inputs_func=error_inputs_where,
-           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=(
@@ -18484,11 +18593,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatches in Python to matrix_norm. Not sure how to make this test happy
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),)
+                            dtypes=(torch.complex64, torch.float32,)),)
            ),
     OpInfo('norm',
            variant_test_name='fro',
@@ -22477,6 +22582,7 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
+        supports_out=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
         ),
