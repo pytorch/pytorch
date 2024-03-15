@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import cast, List, Optional, Sequence, Tuple, Union
@@ -87,7 +88,12 @@ class _NormPartial(_Partial):
         if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
             return tensor
         elif self.reduce_op == c10d.ReduceOp.SUM:
-            return tensor / mesh.size(mesh_dim=mesh_dim)
+            if self.norm_type == 0:
+                raise NotImplementedError(f"Unsupported norm type:: {self.norm_type}")
+            elif self.norm_type == 1:
+                return tensor / mesh.size(mesh_dim)
+            assert isinstance(self.norm_type, (int, float))
+            return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
         raise NotImplementedError(self.reduce_op)
 
     def _reduce_shard_value(
