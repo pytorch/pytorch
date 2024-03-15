@@ -4680,6 +4680,8 @@ def triplet_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    if margin <= 0:
+        raise ValueError("margin must be greater than 0")
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap, reduction_enum)
 
 
@@ -4719,6 +4721,10 @@ def triplet_margin_with_distance_loss(
     # Check validity of reduction mode
     if reduction not in ("mean", "sum", "none"):
         raise ValueError(f"{reduction} is not a valid value for reduction")
+
+    # Check validity of margin
+    if margin <= 0:
+        raise ValueError("margin must be greater than 0")
 
     # Check dimensions
     a_dim = anchor.ndim
