@@ -419,7 +419,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and inspect.getattr_static(self.value, "__init__", None)
             is not torch.nn.Module.__init__
-            and not self.source
         ):
             # Instantiate a UserDefinedObject class and call its __init__ method.
             obj = object_new(self.value)
