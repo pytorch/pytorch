@@ -422,7 +422,7 @@ def _reduce_op_symbolic(onnx_op_name):
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
 
-    @symbolic_helper.overload_by_arg_count
+    @symbolic_helper._overload_by_arg_count
     @_beartype.beartype
     def reduce(g, *args, **kwargs):
         @symbolic_helper.parse_args("v", "none")

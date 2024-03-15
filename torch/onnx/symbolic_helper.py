@@ -43,6 +43,10 @@ __all__ = [
     "scalar_name_to_pytorch",
     "scalar_type_to_onnx",
     "scalar_type_to_pytorch_type",
+    "_reduce_with_dtype_helper",
+    "_max_helper",
+    "_min_helper",
+    "_var_mean_helper",
 ]
 
 # ---------------------------------------------------------------------------------
@@ -1826,7 +1830,7 @@ def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
 
 
 @_beartype.beartype
-def overload_by_arg_count(fn):
+def _overload_by_arg_count(fn):
     @functools.wraps(fn)
     @_beartype.beartype
     def wrapper(g, *args):
@@ -1848,7 +1852,7 @@ def _reduce_with_dtype_helper(
         onnx_op, allow_multi_dim_support=allow_multi_dim_support
     )
 
-    @overload_by_arg_count
+    @_overload_by_arg_count
     def reduce(g, *args, **kwargs):
         @quantized_args(True)
         @parse_args("v", "none")
@@ -1893,6 +1897,128 @@ def _reduce_with_dtype_helper(
         return reduce_nodim, reduce_dim
 
     return reduce
+
+
+@_beartype.beartype
+def _max_helper(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+    # torch.max(input)
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
+    # torch.max(input, other)
+    if keepdim is None:
+        return _op_with_optional_float_cast(g, "Max", self, dim_or_y, opset_before=12)
+    # torch.max(input, dim, keepdim)
+    else:
+        keepdim = _get_const(keepdim, "i", "keepdim")
+        dim = _get_const(dim_or_y, "i", "dim")
+        if g.opset < 18:
+            max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            max = g.op("ReduceMax", self, axes, keepdims_i=keepdim)
+        indices = g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdim)
+        return max, indices
+
+
+@_beartype.beartype
+def _min_helper(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+    # torch.min(input)
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
+    # torch.min(input, other)
+    if keepdim is None:
+        return _op_with_optional_float_cast(g, "Min", self, dim_or_y, opset_before=12)
+    # torch.min(input, dim, keepdim)
+    else:
+        keepdim = _get_const(keepdim, "i", "keepdim")
+        dim = _get_const(dim_or_y, "i", "dim")
+        if g.opset < 18:
+            min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            min = g.op("ReduceMin", self, axes, keepdims_i=keepdim)
+        indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
+        return min, indices
+
+
+@_beartype.beartype
+def _numel_helper(g: jit_utils.GraphContext, self):
+    shape = g.op("Shape", self)
+    return g.op("ReduceProd", shape, keepdims_i=0)
+
+
+@parse_args("v", "is", "i", "i")
+@_beartype.beartype
+def _var_mean_helper(g: jit_utils.GraphContext, input, dim, correction, keepdim):
+    if g.opset < 18:
+        if dim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            t_mean = mean
+            num_elements = _numel_helper(g, input)
+        else:
+            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+            t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
+            redudced_dims = g.op("Shape", input)
+            # dim could contain one or multiple dimensions
+            redudced_dims = g.op(
+                "Gather",
+                redudced_dims,
+                g.op("Constant", value_t=torch.tensor(dim)),
+                axis_i=0,
+            )
+            num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+        sub_v = g.op("Sub", input, t_mean)
+        sqr_sub = g.op("Mul", sub_v, sub_v)
+        keepdim_mean = 0 if dim is None else keepdim
+        var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
+        # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+        if correction is None:
+            correction = 1
+        if correction != 0:
+            num_elements = g.op(
+                "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
+            )
+            one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
+            mul = g.op("Mul", var, num_elements)
+            var = g.op("Div", mul, g.op("Sub", num_elements, one))
+        return var, mean
+    else:
+        axes = None
+        if dim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            t_mean = mean
+            num_elements = _numel_helper(g, input)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+            mean = g.op("ReduceMean", input, axes, keepdims_i=keepdim)
+            t_mean = g.op("ReduceMean", input, axes, keepdims_i=1)
+            redudced_dims = g.op("Shape", input)
+            # dim could contain one or multiple dimensions
+            redudced_dims = g.op(
+                "Gather",
+                redudced_dims,
+                g.op("Constant", value_t=torch.tensor(dim)),
+                axis_i=0,
+            )
+            num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+        sub_v = g.op("Sub", input, t_mean)
+        sqr_sub = g.op("Mul", sub_v, sub_v)
+        keepdim_mean = 0 if dim is None else keepdim
+        if axes is None:
+            var = g.op("ReduceMean", sqr_sub, keepdims_i=keepdim_mean)
+        else:
+            var = g.op("ReduceMean", sqr_sub, axes, keepdims_i=keepdim_mean)
+        # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+        if correction is None:
+            correction = 1
+        if correction != 0:
+            num_elements = g.op(
+                "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
+            )
+            one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
+            mul = g.op("Mul", var, num_elements)
+            var = g.op("Div", mul, g.op("Sub", num_elements, one))
+        return var, mean
 
 
 # Deprecated. Internally use _type_utils.ScalarType
