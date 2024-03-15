@@ -9560,7 +9560,6 @@ ShapeEnv not equal: field values don't match:
         f = torch.compile(fn, backend="eager")
         f(x)
         metrics = torch._dynamo.utils.get_compilation_metrics()
-        print(metrics)
         # Should only be one restart per event
         (restart_reason,) = metrics[0].restart_reasons
         self.assertTrue(
