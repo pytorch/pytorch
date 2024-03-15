@@ -15309,11 +15309,6 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     ref=np.power,
-                    # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
-                    # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
-                    # unsupported on CPU.
-                    backward_dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_inplace_autograd=False,

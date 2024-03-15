@@ -92,18 +92,6 @@ static void pow_tensor_scalar_kernel(
   // prevent multiple calls to iter.common_dtype()
   const auto dtype = iter.common_dtype();
 
-  if (dtype == ScalarType::Float || dtype == ScalarType::Double ||
-      dtype == kBFloat16 || isComplexType(dtype)) {
-    // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
-    if (exp_scalar.equal(.5)) {
-      return sqrt_kernel(iter);
-    } else if (exp_scalar.equal(-0.5)) {
-      return rsqrt_kernel(iter);
-    } else if (exp_scalar.equal(-1.0)) {
-      return reciprocal_kernel(iter);
-    }
-  }
-
   if (dtype == ScalarType::Float || dtype == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(dtype, "pow", [&]() {
       pow_tensor_scalar_optimized_kernel<scalar_t, double>(

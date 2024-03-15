@@ -168,16 +168,6 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
 }
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
-  // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
-  if (!exp_scalar.isComplex()) {
-    if (exp_scalar.equal(.5)) {
-      return sqrt_kernel_cuda(iter);
-    } else if (exp_scalar.equal(-0.5)) {
-      return rsqrt_kernel_cuda(iter);
-    } else if (exp_scalar.equal(-1.0)) {
-      return reciprocal_kernel_cuda(iter);
-    }
-  }
   if (isComplexType(iter.common_dtype()) || exp_scalar.isComplex()) {
     if (iter.common_dtype() == kComplexHalf) {
       using scalar_t = c10::complex<at::Half>;
