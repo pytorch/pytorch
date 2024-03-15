@@ -530,12 +530,14 @@ static PyObject* _custom_eval_frame(
     return NULL;
   }
 
+  PyObject* backend = get_backend(callback);
+
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = lookup(extra, frame->f_locals, callback);
+    PyObject* maybe_cached_code = lookup(extra, frame->f_locals, backend);
     _pytorch_record_function_exit(rf);
 
     if (maybe_cached_code == NULL) {
@@ -559,7 +561,6 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyObject* backend = get_backend(callback);
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = lookup(extra, frame->f_locals, backend);
   _pytorch_record_function_exit(rf);

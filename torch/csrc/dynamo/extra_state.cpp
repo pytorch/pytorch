@@ -90,7 +90,7 @@ PyObject* lookup(
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
-    // Check backend.
+    // Check backend. Py_False means run only mode.
     bool valid = backend == Py_False || cache_entry.backend == backend;
     if (valid) {
       try {
