@@ -54,6 +54,15 @@ inputs:
     required: false
     type: string
     default: ""
+  GITHUB_TOKEN:
+    description: GitHub token
+    required: true
+    type: string
+  HUGGING_FACE_HUB_TOKEN:
+    description: Hugging Face Hub token
+    required: false
+    type: string
+    default: ""
 outputs:
   docker-image:
     value: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -99,6 +108,7 @@ runs:
 
     - name: Parse ref
       id: parse-ref
+      shell: bash
       run: .github/scripts/parse_ref.py
 
     - name: Get workflow job id
@@ -106,14 +116,14 @@ runs:
       uses: ./.github/actions/get-workflow-job-id
       if: always()
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ inputs.GITHUB_TOKEN }}
 
     # Apply the filter logic to the build step too if the test-config label is already there
     - name: Select all requested test configurations (if the test matrix is available)
       id: filter
       uses: ./.github/actions/filter-test-configs
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ inputs.GITHUB_TOKEN }}
         test-matrix: ${{ inputs.test-matrix }}
         job-name: ${{ steps.get-job-id.outputs.job-name }}
 
@@ -144,7 +154,8 @@ runs:
         XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
         DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
         OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+        HUGGING_FACE_HUB_TOKEN: ${{ inputs.HUGGING_FACE_HUB_TOKEN }}
+      shell: bash
       run: |
         # detached container should get cleaned up by teardown_ec2_linux
         container_name=$(docker run \
@@ -177,6 +188,7 @@ runs:
 
     - name: Archive artifacts into zip
       if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+      shell: bash
       run: |
         zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
