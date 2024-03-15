@@ -106,6 +106,10 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
         fx_g = function_key_to_fx[function_key]
 
     # print("\nfx code")
+    # this is a hack, we want to access `.code` here to trigger the `real_recompile`
+    # in case this is `_lazy_graph_module`. This will aovid us trying to inline the
+    # `_LazyGraphModule._lazy_forward`(in the skip list) below.
+    temp = fx_g.code
     # print(fx_g.code)
 
     # now inline this fx graph and return the output
