@@ -421,7 +421,7 @@ def _reduce_tensor(t):
     If we see tensors, we know they're constants stored as attributes on
     the GraphModule. Include the values in the key calculation. Small
     tensors will be inlined, so we can't serve the same cache entry for
-    different constant values. Large constants are treated as parameters,
+    different values anyway. Large constants are treated as parameters,
     so we could conceivably reuse a cache entry. To do that, however,
     PyCodeCache would need more complexity to create a new module from its
     cache, but with the right constants attached as attributes.
@@ -432,16 +432,18 @@ def _reduce_tensor(t):
         # get pickling support, we can remove this.
         raise BypassFxGraphCache()
 
-    # Very large tensors could be expensive to copy to cpu and hash; maybe
-    # not worth it. Bypass the cache at something arbitrarily large.
-    if t.numel() > 100000:
+    # Very large tensors could be expensive to copy to cpu and hash. Let's
+    # at least report if we find slowness.
+    start = time()
+    values = t.tolist()
+    elapsed = time() - start
+    if elapsed > 1.0:
         warnings.warn(
-            f"Found constant with {t.numel()} elements; skipping FX code caching."
+            f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
-        raise BypassFxGraphCache()
 
     metadata = extract_tensor_metadata(t)
-    return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
+    return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
 def _reduce_symint(s):
