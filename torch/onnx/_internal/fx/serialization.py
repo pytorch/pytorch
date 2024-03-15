@@ -3,11 +3,12 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Tuple, TYPE_CHECKING, Union
+from typing import Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx.type_utils import _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE
 
 if TYPE_CHECKING:
     import onnx
@@ -17,7 +18,11 @@ log = logging.getLogger(__name__)
 
 @_beartype.beartype
 def _create_tensor_proto_with_external_data(
-    tensor: torch.Tensor, name: str, location: str, basepath: str
+    tensor: torch.Tensor,
+    name: str,
+    location: str,
+    basepath: str,
+    dtype_override: Optional["onnx.onnx_ml_pb2.TypeProto"] = None,
 ) -> onnx.TensorProto:  # type: ignore[name-defined]
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
@@ -41,11 +46,21 @@ def _create_tensor_proto_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
+    scalar_type = jit_type_utils.JitScalarType.from_dtype(
+        _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE[dtype_override.tensor_type.elem_type]  # type: ignore[index]
+        if dtype_override is not None
+        else tensor.dtype
+    )
+    # Checkpoints can be stored with a different dtype as the model expects because
+    # the user script can explicitly cast the original type to something or maybe
+    # PyTorch's type promotion might do it
+    if dtype_override is not None and dtype_override != tensor.dtype:
+        tensor = tensor.to(scalar_type.dtype())
+
     tensor_proto = onnx.TensorProto()  # type: ignore[attr-defined]
     tensor_proto.name = name
-    tensor_proto.data_type = jit_type_utils.JitScalarType.from_dtype(
-        tensor.dtype
-    ).onnx_type()
+    tensor_proto.data_type = scalar_type.onnx_type()
+
     tensor_proto.dims.extend(tensor.shape)
     tensor_proto.data_location = onnx.TensorProto.EXTERNAL  # type: ignore[attr-defined]
 
@@ -200,8 +215,16 @@ def save_model_with_external_data(
             # Create one file per tensor.
             # tensor_proto.raw_data is stored to external file at
             # os.path.join(basepath, relative_tensor_file_path).
+            model_input_types = {
+                k.name: k.type for k in onnx_model_with_initializers.graph.input
+            }
+
             tensor_proto = _create_tensor_proto_with_external_data(
-                tensor, name, relative_tensor_file_path, basepath
+                tensor,
+                name,
+                relative_tensor_file_path,
+                basepath,
+                model_input_types.pop(name, None),
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
             onnx_model_with_initializers.graph.initializer.append(tensor_proto)
