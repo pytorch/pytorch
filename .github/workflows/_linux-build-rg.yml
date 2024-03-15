@@ -101,3 +101,5 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           s3-bucket: ${{ inputs.s3-bucket }}
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
