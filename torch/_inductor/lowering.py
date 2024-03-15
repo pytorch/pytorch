@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 import os
 import warnings
@@ -5356,7 +5357,10 @@ def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
     ):
         out = loader(*inner_fn_args)
 
-    return None if not isinstance(out, ir.Constant) else out
+    assert isinstance(out, torch._inductor.virtualized.OpsValue)
+    if isinstance(out.value, ir.Constant):
+        return out.value
+    return None
 
 
 # NOTE: prims.div maps to a / b in C, so performs truncation division on
@@ -5370,7 +5374,10 @@ def div_prim(a, b):
 
     if (divisor := get_constant_value(b)) is not None:
         # Replace divide by constant with multiply by reciprocal
-        reciprocal = 1.0 / divisor.value
+        if divisor.value == 0:
+            reciprocal = math.copysign(float("inf"), divisor.value)
+        else:
+            reciprocal = 1.0 / divisor.value
         return mul(a, reciprocal)
 
     def fn(*args):

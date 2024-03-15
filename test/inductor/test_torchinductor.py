@@ -2056,6 +2056,28 @@ class CommonTemplate:
         y = torch.matmul(query, key.transpose(-2, -1))
         self.common(forward, (y,))
 
+    def test_div_by_zero(self):
+
+        def fn(x, runtime_zero, runtime_neg_zero):
+            zero = torch.zeros_like(x)
+            return (
+                x / 0.0,
+                x / -0.0,
+                zero / 0.0,
+                x / zero,
+                x / -zero,
+                zero / zero,
+                x / runtime_zero,
+                # NOTE: -runtime_zero doesn't work as -(0.0) is broken in triton
+                x / runtime_neg_zero,
+                runtime_zero / runtime_neg_zero,
+            )
+
+        a = torch.randn(10)
+        zero = torch.zeros(10)
+        neg_zero = -zero
+        self.common(fn, (a, zero, neg_zero))
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
