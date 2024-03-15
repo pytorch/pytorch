@@ -3040,9 +3040,6 @@ def forward(self, arg0_1, arg1_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
@@ -3096,9 +3093,6 @@ def forward(self, arg0_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
