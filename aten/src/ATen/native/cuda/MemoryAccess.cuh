@@ -346,7 +346,7 @@ struct multi_outputs_unroll {
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
 template<typename scalar_t>
-inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of<aligned_vector<scalar_t, 2>>::value;
   constexpr int vec4_alignment = std::alignment_of<aligned_vector<scalar_t, 4>>::value;
@@ -356,6 +356,11 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
     return 2;
   }
   return 1;
+}
+
+template<typename scalar_t>
+inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+  return can_vectorize_up_to<scalar_t>(static_cast<const char*>(pointer));
 }
 
 template<int i>

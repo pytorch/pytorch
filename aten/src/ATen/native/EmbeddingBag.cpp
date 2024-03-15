@@ -125,9 +125,9 @@ index_select_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   TORCH_CHECK(select_indices.numel() == add_indices.numel());
-  auto* add_indices_data = add_indices.data_ptr<index_t>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
-  auto* src_data = src.data_ptr<data_t>();
+  auto* add_indices_data = add_indices.const_data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
+  auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
@@ -208,14 +208,14 @@ index_select_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<data_t>();
+    auto* src_data = src_contig.const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -316,8 +316,8 @@ index_select_add(
 #endif
   } else {
     TORCH_CHECK(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<data_t>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<data_t>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -388,14 +388,14 @@ index_select_add(const Tensor &select_indices,
                              index_t padding_idx,
                              _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<float>();
+    auto* src_data = src_contig.const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -463,8 +463,8 @@ index_select_add(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<float>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<float>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -519,9 +519,9 @@ index_select_scale_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
-  auto* add_indices_data = add_indices.data_ptr<index_t>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
-  auto* src_data = src.data_ptr<data_t>();
+  auto* add_indices_data = add_indices.const_data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
+  auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
@@ -536,7 +536,7 @@ index_select_scale_add(
   auto output_stride0 = output.strides()[0];
   auto output_stride1 = output.strides()[1];
 
-  auto* scale_data = scale.data_ptr<data_t>();
+  auto* scale_data = scale.const_data_ptr<data_t>();
   auto scale_stride = scale.strides()[0];
 
   for (const auto i : c10::irange(numel)) {
@@ -579,15 +579,15 @@ index_select_scale_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* scale_data = scale.data_ptr<data_t>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* scale_data = scale.const_data_ptr<data_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<data_t>();
+    auto* src_data = src_contig.const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -705,8 +705,8 @@ index_select_scale_add(
 #endif
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<data_t>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<data_t>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -770,15 +770,15 @@ index_select_scale_add(const Tensor &select_indices,
                                           index_t padding_idx,
                                           _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* scale_data = scale.data_ptr<float>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* scale_data = scale.const_data_ptr<float>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<float>();
+    auto* src_data = src_contig.const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -844,8 +844,8 @@ index_select_scale_add(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<float>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<float>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -1089,7 +1089,7 @@ void embedding_bag_cpu_max_out(
   int64_t featureSize = weight.size(1);
   int64_t vocab_size = weight.size(0);
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cpu_max_out", [&] {
-    auto* indices_data = indices.data_ptr<index_t>();
+    auto* indices_data = indices.const_data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.data_ptr<index_t>();
 
     index_t* max_indices_data = nullptr;
@@ -1099,7 +1099,7 @@ void embedding_bag_cpu_max_out(
       max_indices_stride = max_indices->strides()[0];
     }
 
-    auto* weight_data = weight.data_ptr<scalar_t>();
+    auto* weight_data = weight.const_data_ptr<scalar_t>();
     auto* output_data = output.data_ptr<scalar_t>();
     auto* bag_size_data = bag_size.data_ptr<index_t>();
     auto weight_stride0 = weight.strides()[0];

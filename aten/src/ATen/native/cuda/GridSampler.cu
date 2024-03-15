@@ -25,8 +25,8 @@ namespace {
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
@@ -155,8 +155,8 @@ namespace {
   C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
@@ -768,8 +768,8 @@ void launch_grid_sampler_2d_forward_kernel(
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -779,8 +779,8 @@ void launch_grid_sampler_2d_forward_kernel(
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -813,8 +813,8 @@ void launch_grid_sampler_3d_forward_kernel(
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -824,8 +824,8 @@ void launch_grid_sampler_3d_forward_kernel(
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
