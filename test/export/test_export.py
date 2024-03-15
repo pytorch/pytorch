@@ -3399,6 +3399,52 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_predispatch_cond(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("pred", torch.tensor(False))
+                self.register_buffer("t", torch.tensor(10))
+
+            def forward(self, x, y):
+                def true_fn(x, y):
+                    with torch.enable_grad():
+                        return x - 1 + self.t + y
+
+                return torch.cond(
+                    self.pred,
+                    true_fn,
+                    lambda x, y: x + 1 - self.t + y,
+                    [x, y],
+                )
+
+        model = Model()
+        exported_program = torch.export._trace._export(
+            model,
+            (torch.tensor(10), torch.tensor(12)),
+            {},
+            dynamic_shapes=None,
+            pre_dispatch=True,
+            strict=False
+        )
+
+        self.assertExpectedInline(str(exported_program.graph_module.code.strip()), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, [arg1_1, arg2_1, arg3_1]);  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = conditional[0];  conditional = None
+    return (getitem,)""")  # noqa: B950
+
+        self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.code.strip()), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(sub, arg0_1);  sub = arg0_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg2_1);  add = arg2_1 = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    return (add_1,)""")
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
