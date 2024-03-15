@@ -1041,7 +1041,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return "\n".join(lines)
 
         def benchmark_choice_in_current_process(choice):
-            # breakpoint()
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
@@ -1084,7 +1083,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return timings
 
         def benchmark_in_sub_process(choices):
-            breakpoint()
             from . import autotune_process
 
             # only benchmark triton kernel in sub process for now.
