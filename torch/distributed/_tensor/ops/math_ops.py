@@ -88,7 +88,7 @@ class _NormPartial(_Partial):
         """
         For example, consider 4 ranks, a (3,) replicated tensor, and 2-norm:
             Ranks 0 and 1: sqrt(t1^2 + t2^2 + t3^3)
-        We want f(x) such that
+        To convert from replicated to partial, we want f(x) such that
             sqrt(t1^2 + t2^2 + t3^3) = sqrt(4f(t1)^2 + 4f(t2)^2 + 4f(t3)^2)
                                      = sqrt(4) sqrt(f(t1)^2 + f(t2)^2 + f(t3)^2).
         One such f(x) is f(x) = x / sqrt(4). This generalizes to d ranks and
