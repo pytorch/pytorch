@@ -36,9 +36,9 @@ void LayerNormKernelImplInternal(
     Tensor* mean,
     Tensor* rstd) {
   using Vec = vec::Vectorized<T>;
-  const T* X_data = X.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   T* mean_data = mean ? mean->data_ptr<T>() : nullptr;
   T* rstd_data = rstd ? rstd->data_ptr<T>() : nullptr;
@@ -96,9 +96,9 @@ void layer_norm_kernel_mixed_type(
     Tensor* rstd) {
   using bVec = Vectorized<T>;
   using fVec = Vectorized<float>;
-  const T* X_data = X.data_ptr<T>();
-  const param_t* gamma_data = gamma.defined() ? gamma.data_ptr<param_t>() : nullptr;
-  const param_t* beta_data = beta.defined() ? beta.data_ptr<param_t>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const param_t* gamma_data = gamma.defined() ? gamma.const_data_ptr<param_t>() : nullptr;
+  const param_t* beta_data = beta.defined() ? beta.const_data_ptr<param_t>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   param_t* mean_data = mean ? mean->data_ptr<param_t>() : nullptr;
   param_t* rstd_data = rstd ? rstd->data_ptr<param_t>() : nullptr;
