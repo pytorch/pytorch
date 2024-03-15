@@ -371,8 +371,8 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
         args.handle,
-        args.idesc.desc(), args.input.data_ptr(),
-        args.wdesc.desc(), args.weight.data_ptr(),
+        args.idesc.desc(), args.input.const_data_ptr(),
+        args.wdesc.desc(), args.weight.const_data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), args.output.data_ptr(),
         1,        // just return the fastest
@@ -730,8 +730,8 @@ void raw_miopen_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForward(
         args.handle,
-        &one, args.idesc.desc(), input.data_ptr(),
-        args.wdesc.desc(), weight.data_ptr(),
+        &one, args.idesc.desc(), input.const_data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
         args.cdesc.desc(), fwdAlg, &zero,
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
   }
@@ -741,8 +741,8 @@ void raw_miopen_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForwardImmediate(
         args.handle,
-        args.wdesc.desc(), weight.data_ptr(),
-        args.idesc.desc(), input.data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
+        args.idesc.desc(), input.const_data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -838,8 +838,8 @@ void raw_miopen_depthwise_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForward(
         args.handle,
-        &one, args.idesc.desc(), input.data_ptr(),
-        args.wdesc.desc(), weight.data_ptr(),
+        &one, args.idesc.desc(), input.const_data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
         args.cdesc.desc(), fwdAlg, &zero,
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
   }
@@ -849,8 +849,8 @@ void raw_miopen_depthwise_convolution_forward_out(
 
       MIOPEN_CHECK(miopenConvolutionForwardImmediate(
         args.handle,
-        args.wdesc.desc(), weight.data_ptr(),
-        args.idesc.desc(), input.data_ptr(),
+        args.wdesc.desc(), weight.const_data_ptr(),
+        args.idesc.desc(), input.const_data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size, solution_id));
   }
@@ -1528,11 +1528,11 @@ void raw_miopen_convolution_relu_out(
   float activ_gamma = static_cast<float>(0);
   miopenOperatorArgs_t fusionArgs;
   MIOPEN_CHECK(miopenCreateOperatorArgs(&fusionArgs));
-  MIOPEN_CHECK(miopenSetOpArgsConvForward(fusionArgs, convoOp, &alpha, &beta, weight.data_ptr()));
-  MIOPEN_CHECK(miopenSetOpArgsBiasForward(fusionArgs, biasOp, &alpha, &beta, bias.data_ptr()));
+  MIOPEN_CHECK(miopenSetOpArgsConvForward(fusionArgs, convoOp, &alpha, &beta, weight.const_data_ptr()));
+  MIOPEN_CHECK(miopenSetOpArgsBiasForward(fusionArgs, biasOp, &alpha, &beta, bias.const_data_ptr()));
   MIOPEN_CHECK(miopenSetOpArgsActivForward(fusionArgs, activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma));
 
-  miopenExecuteFusionPlan(args.handle, fusePlanDesc, args.idesc.desc(), input.data_ptr(), args.odesc.desc(), output.data_ptr(), fusionArgs);
+  miopenExecuteFusionPlan(args.handle, fusePlanDesc, args.idesc.desc(), input.const_data_ptr(), args.odesc.desc(), output.data_ptr(), fusionArgs);
 
   // Cleanup
   miopenDestroyFusionPlan(fusePlanDesc);

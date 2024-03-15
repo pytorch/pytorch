@@ -188,7 +188,7 @@ class FSDP:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                    fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
@@ -197,6 +197,9 @@ class FSDP:
         implement gradient accumulation with only reduce-scatter but not
         all-reduce for HSDP.
         """
+        # TODO: post_reduce_output += fsdp_param.sharded_param.grad
+        # after reduce-scatter and before all-reduce
+        raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
         for module in cast(nn.Module, self).modules():
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
