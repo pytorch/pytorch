@@ -6,11 +6,12 @@ try:
 except ImportError:
     from test_torchinductor import check_model_gpu, TestCase
 
-# TODO:
-# This is a temp test case for first Intel GPU Inductor PR. It test basic functionality of Intel GPU backend.
-# We are reusing test case in test/inductor/*  step by step.
-# Will be removed this file after Intel GPU backend can pass tests in test/inductor/*
-# 
+# TODO: Remove this file.
+# This is a temporary test case to test the base functionality of first Intel GPU Inductor integration.
+# We are working on reuse and pass the test cases in test/inductor/*  step by step.
+# Will remove this file when pass full test in test/inductor/*.
+
+
 class XpuBasicTests(TestCase):
     common = check_model_gpu
     device = "xpu"
