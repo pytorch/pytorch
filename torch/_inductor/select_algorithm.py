@@ -855,12 +855,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 len(choices),
                 num_workers,
             )
+
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
                 futures = executor.map(
                     lambda c: c.precompile(),
                     [c for c in choices if hasattr(c, "precompile")],
                     timeout=precompilation_timeout_seconds,
                 )
+            def wait_on_futures():
                 try:
                     iterator = iter(futures)
                     while True:
@@ -877,10 +879,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 except StopIteration:
                     pass
                 executor.shutdown(wait=True)
+            return wait_on_futures
 
-        def autotune(choices):
+        def autotune(choices, precompile_fn):
             try:
-                precompile(choices)
+                precompile_fn()
             except TimeoutError:
                 log.warning(
                     "Precompilation phase took longer than timeout allowed. Continuing"
@@ -894,58 +897,71 @@ class AlgorithmSelectorCache(PersistentCache):
             # do the optional warmup
             tuning_pool.initialize()
 
-        autotune_start_ts = time.time()
-        timings = self.lookup(
-            choices,
-            name,
-            repr([self.key_of(x) for x in input_nodes]),
-            autotune,
-        )
-        autotune_elapse = time.time() - autotune_start_ts
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
+        def do_autotuning(precompile_fn):
+            autotune_local = functools.partial(autotune, precompile_fn=precompile_fn)
+            autotune_start_ts = time.time()
+            timings = self.lookup(
+                choices,
+                name,
+                repr([self.key_of(x) for x in input_nodes]),
+                autotune_local,
+            )
+            autotune_elapse = time.time() - autotune_start_ts
 
-        if make_benchmark_fn.cache_info().currsize:
-            counters["inductor"]["select_algorithm_autotune"] += 1
-        if (
-            make_benchmark_fn.cache_info().currsize
-            or log.getEffectiveLevel() == logging.DEBUG
-            or config.trace.log_autotuning_results
-        ):
-            self.log_results(name, input_nodes, timings, autotune_elapse)
+            if make_benchmark_fn.cache_info().currsize:
+                counters["inductor"]["select_algorithm_autotune"] += 1
+
+            if (
+                make_benchmark_fn.cache_info().currsize
+                or log.getEffectiveLevel() == logging.DEBUG
+                or config.trace.log_autotuning_results
+            ):
+                self.log_results(name, input_nodes, timings, autotune_elapse)
+
+            return timings
+
+        precompile_fn = precompile(choices)
 
         if return_multi_template:
-            min_extern_choice = float("inf")
-            for choice, timing in timings.items():
-                if isinstance(choice, ExternKernelCaller):
-                    min_extern_choice = min(min_extern_choice, timing)
 
-            timings = {
-                choice: time
-                for choice, time in timings.items()
-                if (
-                    time <= min_extern_choice
-                    or not isinstance(choice, ExternKernelCaller)
-                )
-            }
+            def get_timings():
+                timings = do_autotuning(precompile_fn)
+                min_extern_choice = float("inf")
+                for choice, timing in timings.items():
+                    if isinstance(choice, ExternKernelCaller):
+                        min_extern_choice = min(min_extern_choice, timing)
 
-            if len(timings) == 1:
-                return next(iter(timings)).output_node()
-
-            if config.debug_filter_choice:
                 timings = {
                     choice: time
                     for choice, time in timings.items()
-                    if config.debug_filter_choice(choice)
+                    if (
+                        time <= min_extern_choice
+                        or not isinstance(choice, ExternKernelCaller)
+                    )
                 }
+
+                if config.debug_filter_choice:
+                    timings = {
+                        choice: time
+                        for choice, time in timings.items()
+                        if config.debug_filter_choice(choice)
+                    }
+
+                return timings
 
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
                     input_nodes,
-                    timings,
+                    get_timings,
                 )
             )
+
+
+        # TODO - dont want to precopmile if cache hit
+        timings = do_autotuning(precompile_fn)
+        if timings == {} or choices[0] not in timings:
+            return choices[0].output_node()
 
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug("selected choice: %s", str(selected_choice))
