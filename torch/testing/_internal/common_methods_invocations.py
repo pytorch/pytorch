@@ -13671,6 +13671,12 @@ op_db: List[OpInfo] = [
            ref=reference_rms_norm,
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           decorators=[
+               # Unknown builtin op: aten::finfo.
+               DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+           ],
            sample_inputs_func=sample_inputs_rms_norm,
            error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
