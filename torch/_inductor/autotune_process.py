@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
+from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 from typing import (
     Any,
     Callable,
@@ -436,6 +437,8 @@ class BenchmarkRequest:
         if debug:
             start_ts = time.time()
 
+        # breakpoint()
+
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
@@ -485,10 +488,10 @@ class TestBenchmarkRequest(BenchmarkRequest):
         return self.value
 
 
+
 class TritonBenchmarkRequest(BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
-
     def __init__(
         self,
         kernel_name: str,
@@ -544,16 +547,23 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 matrix_instr_nonkdim=self.matrix_instr_nonkdim,
             )
         else:
-            return functools.partial(
+            out = functools.partial(
                 run_method,
                 *input_tensors,
                 output_tensor,
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
                 num_stages=self.num_stages,
                 num_warps=self.num_warps,
             )
+            return out
+
+    def precompile(self):
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        getattr(mod, self.kernel_name).precompile()
+
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"

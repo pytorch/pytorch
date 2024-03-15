@@ -628,6 +628,7 @@ class CachingAutotuner(KernelInterface):
         return config2launcher.get(best_config)
 
     def run(self, *args, grid, stream, **kwargs):
+        # HERE ??
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
@@ -639,7 +640,7 @@ class CachingAutotuner(KernelInterface):
             and config.coordinate_descent_tuning
         ):
             self.launchers = [
-                self.coordinate_descent_tuning(
+            self.coordinate_descent_tuning(
                     self.launchers[0], *args, grid=grid, **kwargs
                 )
             ]
@@ -667,6 +668,9 @@ class CachingAutotuner(KernelInterface):
                     stream=stream,
                 )
         else:
+            # HACK, TODO
+            kwargs.pop("num_stages", None)
+            kwargs.pop("num_warps", None)
             return launcher(
                 *args,
                 **kwargs,

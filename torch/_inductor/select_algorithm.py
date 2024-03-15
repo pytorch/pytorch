@@ -94,7 +94,7 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        use_jit=True,
+        use_jit=False,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -150,8 +150,8 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": self.output_node.get_device().index,
+            "device_type": self.output_node.get_device().type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -498,7 +498,7 @@ class TritonTemplate(KernelTemplate):
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            use_jit=True,
+            use_jit=False,
             **kernel_options,
         ) as kernel:
             try:
@@ -684,6 +684,11 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
+    def precompile(self):
+        assert self.bmreq is not None
+        self.bmreq.precompile()
+
+
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -821,6 +826,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+        # choices = choices[0:3]
+
         if len(choices) == 0:
             raise RuntimeError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
@@ -856,12 +863,17 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                futures = executor.map(
-                    lambda c: c.precompile(),
-                    [c for c in choices if hasattr(c, "precompile")],
-                    timeout=precompilation_timeout_seconds,
-                )
+            import time
+            s = time.time()
+            executor = ThreadPoolExecutor(max_workers=num_workers)
+            # Submit tasks to the executor
+            futures = executor.map(
+                lambda c: c.precompile(),
+                [c for c in choices if hasattr(c, "precompile")],
+                timeout=precompilation_timeout_seconds,
+            )
+            print("Gen futures", time.time() - s)
+
             def wait_on_futures():
                 try:
                     iterator = iter(futures)
@@ -883,7 +895,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def autotune(choices, precompile_fn):
             try:
+                import time
+                start = time.time()
                 precompile_fn()
+                print("Precompile took", time.time() - start)
             except TimeoutError:
                 log.warning(
                     "Precompilation phase took longer than timeout allowed. Continuing"
@@ -1030,6 +1045,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return "\n".join(lines)
 
         def benchmark_choice_in_current_process(choice):
+            # breakpoint()
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
@@ -1072,6 +1088,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return timings
 
         def benchmark_in_sub_process(choices):
+            breakpoint()
             from . import autotune_process
 
             # only benchmark triton kernel in sub process for now.
