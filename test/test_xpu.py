@@ -2,9 +2,34 @@
 
 import sys
 import unittest
+from typing import Dict, Sequence
 
 import torch
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_device_type import (
+    onlyNativeDeviceTypes,
+    onlyXPU,
+    OpDTypes,
+    ops,
+    skipMeta,
+)
+from torch.testing._internal.common_dtype import (
+    all_types_and_complex_and,
+    floating_and_complex_types_and,
+    integral_types_and,
+)
+from torch.testing._internal.common_methods_invocations import (
+    ops_and_refs,
+    python_ref_db,
+)
+from torch.testing._internal.common_utils import (
+    NoTest,
+    run_tests,
+    slowTest,
+    suppress_warnings,
+    TEST_WITH_UBSAN,
+    TEST_XPU,
+    TestCase,
+)
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -14,6 +39,34 @@ TEST_MULTIXPU = torch.xpu.device_count() > 1
 
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
+
+any_common_cpu_xpu_one = OpDTypes.any_common_cpu_cuda_one
+_xpu_computation_op_list = [
+    "fill",
+    "zeros",
+    "zeros_like",
+    "clone",
+    "view_as_real",
+    "view_as_complex",
+    "view",
+    "resize_",
+    "resize_as_",
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "abs",
+]
+_xpu_tensor_factory_op_list = [
+    "as_strided",
+    "empty",
+    "empty_strided",
+]
+_xpu_all_op_list = _xpu_computation_op_list + _xpu_tensor_factory_op_list
+_xpu_all_ops = [op for op in ops_and_refs if op.name in _xpu_all_op_list]
+_xpu_computation_ops = [
+    op for op in ops_and_refs if op.name in _xpu_computation_op_list
+]
 
 
 class TestXpu(TestCase):
@@ -129,169 +182,279 @@ if __name__ == "__main__":
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
 
-    # Simple cases for operators
-    # TODO: Reusing PyTorch test_ops.py to improve coverage
+    @onlyXPU
+    @suppress_warnings
+    @slowTest
+    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
+    def test_compare_cpu(self, device, dtype, op):
+        def to_cpu(arg):
+            if isinstance(arg, torch.Tensor):
+                return arg.to(device="cpu")
+            return arg
 
-    # Binary
-    def test_add(self, dtype=torch.float):
-        a_cpu = torch.randn(2, 3)
-        b_cpu = torch.randn(2, 3)
-        a_xpu = a_cpu.to(xpu_device)
-        b_xpu = b_cpu.to(xpu_device)
-        c_xpu = a_xpu + b_xpu
-        c_cpu = a_cpu + b_cpu
-        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+        samples = op.reference_inputs(device, dtype)
+        print(device)
 
-    def test_sub(self, dtype=torch.float):
-        a_cpu = torch.randn(2, 3)
-        b_cpu = torch.randn(2, 3)
-        a_xpu = a_cpu.to(xpu_device)
-        b_xpu = b_cpu.to(xpu_device)
-        c_xpu = a_xpu - b_xpu
-        c_cpu = a_cpu - b_cpu
-        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            xpu_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
-    def test_mul(self, dtype=torch.float):
-        a_cpu = torch.randn(2, 3)
-        b_cpu = torch.randn(2, 3)
-        a_xpu = a_cpu.to(xpu_device)
-        b_xpu = b_cpu.to(xpu_device)
-        c_xpu = a_xpu * b_xpu
-        c_cpu = a_cpu * b_cpu
-        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+            xpu_results = sample.output_process_fn_grad(xpu_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-    def test_div(self, dtype=torch.float):
-        a_cpu = torch.randn(2, 3)
-        b_cpu = torch.randn(2, 3)
-        a_xpu = a_cpu.to(xpu_device)
-        b_xpu = b_cpu.to(xpu_device)
-        c_xpu = a_xpu / b_xpu
-        c_cpu = a_cpu / b_cpu
-        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
 
-    # Resize/View
-    def test_resize(self, dtype=torch.float):
-        x = torch.ones([2, 2, 4, 3], device=xpu_device, dtype=dtype)
-        x.resize_(1, 2, 3, 4)
-        y = torch.ones([2, 2, 4, 3], device=cpu_device, dtype=dtype)
-        y.resize_(1, 2, 3, 4)
-        self.assertEqual(y, x.cpu())
+    @onlyXPU
+    @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
+    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
 
-    def test_view_as_real(self, dtype=torch.cfloat):
-        a_cpu = torch.randn(2, 3, 4, dtype=dtype)
-        a_xpu = a_cpu.to(xpu_device)
-        b_cpu = torch.view_as_real(a_cpu)
-        b_xpu = torch.view_as_real(a_xpu)
-        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(
+                2, 255, x.shape, dtype=torch.uint8, device=x.device
+            )
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
 
-    def test_view_as_complex(self, dtype=torch.float):
-        a_cpu = torch.randn(109, 2, dtype=dtype)
-        a_xpu = a_cpu.to(xpu_device)
-        b_cpu = torch.view_as_complex(a_cpu)
-        b_xpu = torch.view_as_complex(a_xpu)
-        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+            ret = x_int.view(torch.bool)
+            self.assertEqual(ret, x)
+            return ret
 
-    def test_view(self, dtype=torch.float):
-        a_cpu = torch.randn(2, 3, 4, dtype=dtype)
-        a_xpu = a_cpu.to(xpu_device)
-        a_xpu = a_xpu.view(4, 3, 2)
-        b_xpu = torch.full_like(a_xpu, 1)
-        c_cpu = torch.ones([4, 3, 2])
-        assert b_xpu.shape[0] == 4
-        assert b_xpu.shape[1] == 3
-        self.assertEqual(c_cpu, b_xpu.to(cpu_device))
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
 
-    # Unary
-    def test_abs(self, dtype=torch.float):
-        data = [
-            [
-                -0.2911,
-                -1.3204,
-                -2.6425,
-                -2.4644,
-                -0.6018,
-                -0.0839,
-                -0.1322,
-                -0.4713,
-                -0.3586,
-                -0.8882,
-                0.0000,
-                0.0000,
-                1.1111,
-                2.2222,
-                3.3333,
-            ]
-        ]
-        excepted = [
-            [
-                0.2911,
-                1.3204,
-                2.6425,
-                2.4644,
-                0.6018,
-                0.0839,
-                0.1322,
-                0.4713,
-                0.3586,
-                0.8882,
-                0.0000,
-                0.0000,
-                1.1111,
-                2.2222,
-                3.3333,
-            ]
-        ]
-        x_dpcpp = torch.tensor(data, device=xpu_device)
-        y = torch.tensor(excepted, device=xpu_device)
-        y_dpcpp = torch.abs(x_dpcpp)
-        self.assertEqual(y.to(cpu_device), y_dpcpp.to(cpu_device))
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
 
-    # Copy/Clone
-    def test_copy_and_clone(self, dtype=torch.float):
-        a_cpu = torch.randn(16, 64, 28, 28)
-        b_cpu = torch.randn(16, 64, 28, 28)
-        a_xpu = a_cpu.to(xpu_device)
-        b_xpu = b_cpu.to(xpu_device)
-        # naive
-        b_cpu.copy_(a_cpu)
-        b_xpu.copy_(a_xpu)
-        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
-        # clone + permutation
-        b_cpu = a_cpu.clone(memory_format=torch.channels_last)
-        b_xpu = a_xpu.clone(memory_format=torch.channels_last)
-        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+            self.assertEqual(expect, actual)
 
-    # Loops kernel
-    def test_loops(self, dtype=torch.float):
-        test_shapes = [
-            [[23, 72, 72], [5184, 72, 1], [23, 72, 72], [5184, 72, 1]],
-            [[23, 16, 16], [23, 1, 16]],
-            [[23, 16, 17], [23, 1, 17]],
-            [[1, 72, 72], [23, 72, 72]],
-            [[23, 72, 1], [23, 72, 72]],
-            [[23000, 72, 72], [5184, 72, 1], [23000, 72, 72], [5184, 72, 1]],
-            [[16, 16, 256, 256], [16, 16, 256, 256]],
-            [[16, 16, 512, 512], [16, 1, 1, 512]],
-            [[4, 15000, 3], [105000, 1, 15000], [4, 1, 3], [3, 3, 1]],
-            [[16, 16, 512, 513], [16, 1, 1, 513]],
-            [[28, 4096, 9], [36864, 9, 1], [28, 4096, 1], [4096, 1, 1]],
-        ]
-        for shape in test_shapes:
-            if len(shape) == 2:
-                a = torch.randn(shape[0], dtype=dtype)
-                b = torch.randn(shape[1], dtype=dtype)
-            elif len(shape) == 4:
-                a = torch.as_strided(
-                    torch.randn(shape[0][0] * shape[1][0]), shape[0], shape[1]
+    @onlyXPU
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops(_xpu_all_ops, dtypes=OpDTypes.none)
+    def test_dtypes(self, device, op):
+        # Check complex32 support only if the op claims.
+        # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
+        device_type = torch.device(device).type
+        include_complex32 = (
+            (torch.complex32,)
+            if op.supports_dtype(torch.complex32, device_type)
+            else ()
+        )
+
+        # dtypes to try to backward in
+        allowed_backward_dtypes = floating_and_complex_types_and(
+            *((torch.half, torch.bfloat16) + include_complex32)
+        )
+
+        # lists for (un)supported dtypes
+        supported_dtypes = set()
+        unsupported_dtypes = set()
+        supported_backward_dtypes = set()
+        unsupported_backward_dtypes = set()
+        dtype_error: Dict[torch.dtype, Exception] = dict()
+
+        def unsupported(dtype, e):
+            dtype_error[dtype] = e
+            unsupported_dtypes.add(dtype)
+            if dtype in allowed_backward_dtypes:
+                unsupported_backward_dtypes.add(dtype)
+
+        for dtype in all_types_and_complex_and(
+            *((torch.half, torch.bfloat16, torch.bool) + include_complex32)
+        ):
+            # tries to acquire samples - failure indicates lack of support
+            requires_grad = dtype in allowed_backward_dtypes
+            try:
+                samples = tuple(
+                    op.sample_inputs(device, dtype, requires_grad=requires_grad)
                 )
-                b = torch.as_strided(
-                    torch.randn(shape[2][0] * shape[3][0]), shape[2], shape[3]
+            except Exception as e:
+                unsupported(dtype, e)
+                continue
+
+            for sample in samples:
+                # tries to call operator with the sample - failure indicates
+                #   lack of support
+                try:
+                    result = op(sample.input, *sample.args, **sample.kwargs)
+                    supported_dtypes.add(dtype)
+                except Exception as e:
+                    # NOTE: some ops will fail in forward if their inputs
+                    #   require grad but they don't support computing the gradient
+                    #   in that type! This is a bug in the op!
+                    unsupported(dtype, e)
+                    continue
+
+                # Checks for backward support in the same dtype, if the input has
+                # one or more tensors requiring grad
+                def _tensor_requires_grad(x):
+                    if isinstance(x, dict):
+                        for v in x.values():
+                            if _tensor_requires_grad(v):
+                                return True
+                    if isinstance(x, (list, tuple)):
+                        for a in x:
+                            if _tensor_requires_grad(a):
+                                return True
+                    if isinstance(x, torch.Tensor) and x.requires_grad:
+                        return True
+
+                    return False
+
+                requires_grad = (
+                    _tensor_requires_grad(sample.input)
+                    or _tensor_requires_grad(sample.args)
+                    or _tensor_requires_grad(sample.kwargs)
                 )
-            a_xpu = a.xpu()
-            b_xpu = b.xpu()
-            c = a + b
-            c_xpu = a_xpu + b_xpu
-            self.assertEqual(c, c_xpu.cpu())
+                if not requires_grad:
+                    continue
+
+                try:
+                    result = sample.output_process_fn_grad(result)
+                    if isinstance(result, torch.Tensor):
+                        backward_tensor = result
+                    elif isinstance(result, Sequence) and isinstance(
+                        result[0], torch.Tensor
+                    ):
+                        backward_tensor = result[0]
+                    else:
+                        continue
+
+                    # Note: this grad may not have the same dtype as dtype
+                    # For functions like complex (float -> complex) or abs
+                    #   (complex -> float) the grad tensor will have a
+                    #   different dtype than the input.
+                    #   For simplicity, this is still modeled as these ops
+                    #   supporting grad in the input dtype.
+                    grad = torch.randn_like(backward_tensor)
+                    backward_tensor.backward(grad)
+                    supported_backward_dtypes.add(dtype)
+                except Exception as e:
+                    dtype_error[dtype] = e
+                    unsupported_backward_dtypes.add(dtype)
+
+        # Checks that dtypes are listed correctly and generates an informative
+        #   error message
+
+        supported_forward = supported_dtypes - unsupported_dtypes
+        partially_supported_forward = supported_dtypes & unsupported_dtypes
+        unsupported_forward = unsupported_dtypes - supported_dtypes
+        supported_backward = supported_backward_dtypes - unsupported_backward_dtypes
+        partially_supported_backward = (
+            supported_backward_dtypes & unsupported_backward_dtypes
+        )
+        unsupported_backward = unsupported_backward_dtypes - supported_backward_dtypes
+
+        device_type = torch.device(device).type
+
+        claimed_forward = set(op.supported_dtypes(device_type))
+        supported_but_unclaimed_forward = supported_forward - claimed_forward
+        claimed_but_unsupported_forward = claimed_forward & unsupported_forward
+
+        claimed_backward = set(op.supported_backward_dtypes(device_type))
+        supported_but_unclaimed_backward = supported_backward - claimed_backward
+        claimed_but_unsupported_backward = claimed_backward & unsupported_backward
+
+        # Partially supporting a dtype is not an error, but we print a warning
+        if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
+            msg = f"Some dtypes for {op.name} on device type {device_type} are only partially supported!\n"
+            if len(partially_supported_forward) > 0:
+                msg = (
+                    msg
+                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
+                        partially_supported_forward
+                    )
+                )
+            if len(partially_supported_backward) > 0:
+                msg = (
+                    msg
+                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
+                        partially_supported_backward
+                    )
+                )
+            print(msg)
+
+        if (
+            len(supported_but_unclaimed_forward)
+            + len(claimed_but_unsupported_forward)
+            + len(supported_but_unclaimed_backward)
+            + len(claimed_but_unsupported_backward)
+        ) == 0:
+            return
+
+        # Reference operators often support additional dtypes, and that's OK
+        if op in python_ref_db:
+            if (
+                len(claimed_but_unsupported_forward)
+                + len(claimed_but_unsupported_backward)
+            ) == 0:
+                return
+
+        # Generates error msg
+        msg = f"The supported dtypes for {op.name} on device type {device_type} are incorrect!\n"
+        if len(supported_but_unclaimed_forward) > 0:
+            msg = (
+                msg
+                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
+                    supported_but_unclaimed_forward
+                )
+            )
+        if len(supported_but_unclaimed_backward) > 0:
+            msg = (
+                msg
+                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
+                    supported_but_unclaimed_backward
+                )
+            )
+        if len(claimed_but_unsupported_forward) > 0:
+            msg = (
+                msg
+                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
+                    claimed_but_unsupported_forward
+                )
+            )
+        if len(claimed_but_unsupported_backward) > 0:
+            msg = (
+                msg
+                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
+                    claimed_but_unsupported_backward
+                )
+            )
+
+        all_claimed_but_unsupported = set.union(
+            claimed_but_unsupported_backward, claimed_but_unsupported_forward
+        )
+        if all_claimed_but_unsupported:
+            msg += "Unexpected failures raised the following errors:\n"
+            for dtype in all_claimed_but_unsupported:
+                msg += f"{dtype} - {dtype_error[dtype]}\n"
+
+        self.fail(msg)
+
+    # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
+    @onlyXPU
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops(
+        (op for op in _xpu_all_ops if op.promotes_int_to_float),
+        allowed_dtypes=integral_types_and(torch.bool),
+    )
+    def test_promotes_int_to_float(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype):
+            output = op(sample.input, *sample.args, **sample.kwargs)
+            if not output.dtype.is_floating_point:
+                self.fail(
+                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
+                )
+
 
 if __name__ == "__main__":
     run_tests()

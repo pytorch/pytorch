@@ -569,6 +569,27 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class XPUTestBase(DeviceTypeTestBase):
+    device_type = 'xpu'
+    primary_device: ClassVar[str]
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        # currently only one device is supported on MPS backend
+        prim_device = cls.get_primary_device()
+        return [prim_device]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.primary_device = 'xpu:0'
+
+    def _should_stop_test_suite(self):
+        return False
+
 class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
@@ -620,6 +641,8 @@ def get_device_type_test_bases():
         # ramping up support.
         # elif torch.backends.mps.is_available():
         #   test_bases.append(MPSTestBase)
+        if torch.xpu.is_available():
+            test_bases.append(XPUTestBase)
 
     return test_bases
 
@@ -1300,6 +1323,10 @@ def onlyCUDA(fn):
 
 def onlyMPS(fn):
     return onlyOn('mps')(fn)
+
+
+def onlyXPU(fn):
+    return onlyOn('xpu')(fn)
 
 def onlyPRIVATEUSE1(fn):
     device_type = torch._C._get_privateuse1_backend_name()
