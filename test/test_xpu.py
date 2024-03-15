@@ -231,6 +231,7 @@ if __name__ == "__main__":
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
+
 instantiate_device_type_tests(TestXpu, globals())
 
 
