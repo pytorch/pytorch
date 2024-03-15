@@ -655,7 +655,7 @@ class CompilationMetrics:
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
     restart_reasons: Set[str]
-    wasted_compile_time_s: float
+    dynamo_time_before_restart_s: float
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1731,6 +1731,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             )
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
+        elif isinstance(cause, TypeError) and "argument" in str(cause):
+            unimplemented(f"TypeError {node.target}: {cause}")
+
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:

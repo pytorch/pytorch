@@ -9560,6 +9560,7 @@ ShapeEnv not equal: field values don't match:
         f = torch.compile(fn, backend="eager")
         f(x)
         metrics = torch._dynamo.utils.get_compilation_metrics()
+        print(metrics)
         # Should only be one restart per event
         (restart_reason,) = metrics[0].restart_reasons
         self.assertTrue(
@@ -9567,7 +9568,8 @@ ShapeEnv not equal: field values don't match:
             "Should have logged graph break reason",
         )
         self.assertTrue(
-            metrics[0].wasted_compile_time_s <= metrics[0].entire_frame_compile_time_s
+            metrics[0].dynamo_time_before_restart_s
+            <= metrics[0].entire_frame_compile_time_s
         )
 
         (restart_reason,) = metrics[1].restart_reasons
@@ -9576,14 +9578,15 @@ ShapeEnv not equal: field values don't match:
             "Should have logged graph break reason",
         )
         self.assertTrue(
-            metrics[1].wasted_compile_time_s <= metrics[1].entire_frame_compile_time_s
+            metrics[1].dynamo_time_before_restart_s
+            <= metrics[1].entire_frame_compile_time_s
         )
 
         # No restarts
         self.assertTrue(
             len(metrics[2].restart_reasons) == 0, "Last compile has no graph break"
         )
-        self.assertTrue(metrics[2].wasted_compile_time_s == 0)
+        self.assertTrue(metrics[2].dynamo_time_before_restart_s == 0)
 
     def test_graph_break_compilation_metrics_on_failure(self):
         def fn(x):
@@ -9599,7 +9602,7 @@ ShapeEnv not equal: field values don't match:
             f(x)
             metrics = torch._dynamo.utils.get_compilation_metrics()
             for metric in metrics:
-                self.assertTrue(metric.wasted_compile_time_s > 0)
+                self.assertTrue(metric.dynamo_time_before_restart_s > 0)
                 self.assertTrue(
                     "RuntimeError: broken backend" in metric.fail_reason,
                     "Should have logged fail reason",

@@ -532,6 +532,39 @@ class PythonKeyTracer(Tracer):
             return e
 
 
+@contextmanager
+def _temp_remove_pre_dispatch_torch_function_mode():
+    from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
+    temp_elements = []
+    pre_dispatch_mode = None
+
+    while _len_torch_function_stack() > 0:
+        mode = _pop_mode()
+        if isinstance(mode, PreDispatchTorchFunctionMode):
+            pre_dispatch_mode = mode
+            break
+        else:
+            temp_elements.append(mode)
+
+    for mode in reversed(temp_elements):
+        _push_mode(mode)
+
+    try:
+        yield
+
+    finally:
+        if pre_dispatch_mode is not None:
+            count = len(temp_elements)
+            while count > 0:
+                mode = _pop_mode()
+                count -= 1
+
+            temp_elements.append(pre_dispatch_mode)
+
+            for mode in reversed(temp_elements):
+                _push_mode(mode)
+
+
 @torch._disable_dynamo
 def dispatch_trace(
         root: Union[torch.nn.Module, Callable],

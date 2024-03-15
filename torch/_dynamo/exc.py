@@ -34,7 +34,8 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 
 class RestartAnalysis(TorchDynamoException):
-    restart_reason : str
+    restart_reason: str
+
     def __init__(self, *args, restart_reason=None):
         self.restart_reason = restart_reason
         super().__init__(*args)
@@ -42,6 +43,7 @@ class RestartAnalysis(TorchDynamoException):
 
 class SpeculationRestartAnalysis(RestartAnalysis):
     pass
+
 
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass

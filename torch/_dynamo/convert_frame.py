@@ -468,8 +468,8 @@ def _compile(
     )
 
     # Time spent compiling this frame before restarting or failing analysis
-    wasted_compile_time: float = 0.0
-    restart_reasons : set[str] = set()
+    dynamo_time_before_restart: float = 0.0
+    restart_reasons: set[str] = set()
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
@@ -524,7 +524,6 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-
     @dynamo_timed(phase_name="entire_frame_compile")
     def compile_inner(
         code: types.CodeType,
@@ -533,11 +532,11 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal output
-        nonlocal wasted_compile_time
+        nonlocal dynamo_time_before_restart
         nonlocal restart_reasons
+        last_attempt_start_time = start_time = time.time()
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
-            attempt_start_time = time.time()
             try:
                 out_code = transform_code_object(code, transform)
                 break
@@ -548,7 +547,8 @@ def _compile(
                 )
                 # If restart reason is None just log the type of the exception
                 restart_reasons.add(e.restart_reason or str(type(e)))
-                wasted_compile_time += time.time() - attempt_start_time
+                # We now have a new "last attempt", reset the clock
+                last_attempt_start_time = time.time()
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
@@ -592,7 +592,7 @@ def _compile(
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
-
+        dynamo_time_before_restart = last_attempt_start_time - start_time
         assert output is not None
 
         # Tests for new code objects.
@@ -758,7 +758,7 @@ def _compile(
                 compliant_custom_ops = set({})
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
-                wasted_compile_time = time.time() - start_time
+                dynamo_time_before_restart = time.time() - start_time
 
             metrics = CompilationMetrics(
                 frame_key,
@@ -784,7 +784,7 @@ def _compile(
                 non_compliant_ops,
                 compliant_custom_ops,
                 restart_reasons,
-                wasted_compile_time,
+                dynamo_time_before_restart,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
