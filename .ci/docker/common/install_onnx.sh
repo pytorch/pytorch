@@ -31,7 +31,7 @@ pip_install \
 pip_install coloredlogs packaging
 
 pip_install onnxruntime==1.17.0
-pip_install -i https://test.pypi.org/simple/ onnx==1.16.0rc1
+pip_install -i https://test.pypi.org/simple/ onnx==1.16.0rc2
 # pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@3e869ef8ccf19b5ebd21c10d3e9c267c9a9fa729" --no-deps
 pip_install onnxscript==0.1.0.dev20240301 --no-deps
 
