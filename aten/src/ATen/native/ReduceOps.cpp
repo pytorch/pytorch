@@ -1440,40 +1440,42 @@ Tensor nanmean(
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
-static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, at::OptionalIntArrayRef dims, bool keepdim) {
+  DimVector dims_ = at::native::make_dim_vector(dims, self.dim());
   // can't take max of empty tensor
   if (self.numel() != 0) {
-    auto maxes = at::amax(self, dims, true);
-    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
+    auto maxes = at::amax(self, dims_, true);
+    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims_));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
+    at::sum_out(result, (self - maxes).exp_(), dims_, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
-    at::sum_out(result, at::exp(self), dims, keepdim);
+    at::sum_out(result, at::exp(self), dims_, keepdim);
     result.log_();
   }
   return result;
 }
 
-Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+Tensor& logsumexp_out(const Tensor& self, at::OptionalIntArrayRef dims, bool keepdim, Tensor& result) {
   TORCH_CHECK(at::isFloatingType(result.scalar_type()),
               "logsumexp(): Expected floating point type for result tensor, but got: ",
               result.scalar_type());
+  DimVector dims_ = at::native::make_dim_vector(dims, self.dim());
   {
     NoNamesGuard guard;
     if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
       // for integral inputs, promote input to default floating type.
       auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-      logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim);
+      logsumexp_out_impl(result, self.to(default_dtype), dims_, keepdim);
     } else {
-      logsumexp_out_impl(result, self, dims, keepdim);
+      logsumexp_out_impl(result, self, dims_, keepdim);
     }
   }
-  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
+  namedinference::propagate_names_for_reduction(result, self, dims_, keepdim);
   return result;
 }
 
-Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+Tensor logsumexp(const Tensor& self, at::OptionalIntArrayRef dims, bool keepdim) {
   TensorOptions result_options;
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     // even for integral inputs, result is floating dtype
