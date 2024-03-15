@@ -168,9 +168,7 @@ def do_bench(*args, **kwargs):
 
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    out = triton_do_bench(*args, **kwargs)[0]
-    return out
-
+    return triton_do_bench(*args, **kwargs)[0]
 
 def get_primitive_bitwidth(dtype: torch.dtype):
     if dtype.is_floating_point:

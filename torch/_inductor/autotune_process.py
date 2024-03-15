@@ -437,8 +437,6 @@ class BenchmarkRequest:
         if debug:
             start_ts = time.time()
 
-        # breakpoint()
-
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
@@ -541,12 +539,10 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
                 matrix_instr_nonkdim=self.matrix_instr_nonkdim,
             )
         else:
-            out = functools.partial(
+            return functools.partial(
                 run_method,
                 *input_tensors,
                 output_tensor,
@@ -554,10 +550,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 grid=self.grid,
                 **warmup_arg,
                 stream=get_raw_stream(self.output_tensor_meta.device.index),
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
             )
-            return out
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
