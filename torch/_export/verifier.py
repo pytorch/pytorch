@@ -32,34 +32,6 @@ def _check_has_fake_tensor(node: torch.fx.Node) -> None:
     return _check_val(node)
 
 
-def check_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
-    '''
-    Perform nn_module_stack checks on the graph.
-    Current constraints:
-        For the top level graph:
-        - populated for 'call_function', 'get_attr'
-        - None for 'placeholder', 'output'
-        For submodule graphs:
-        - None for 'placeholder', output'
-
-    TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
-    '''
-    # Check top-level graph for all nodes, all graphs for placeholder & output nodes
-    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
-        for node in mod.graph.nodes:
-            if node.op in ['call_function', 'get_attr']:
-                if i == 0:
-                    if node.meta.get('nn_module_stack', None) is None:
-                        raise SpecViolationError(
-                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
-                        )
-            elif node.op in ['placeholder', 'output']:
-                if node.meta.get('nn_module_stack', None):
-                    raise SpecViolationError(
-                        f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
-                    )
-
-
 def _check_val(node: torch.fx.Node) -> None:
     def _check_correct_val(val):
         if val is None:
@@ -277,8 +249,6 @@ class Verifier(metaclass=_VerifierMeta):
                 # elif node.op == "output":
                 #     _check_flattened_outputs()
 
-        if from_export:
-            check_nn_module_stack(gm)
         self.check_additional(gm)
 
 

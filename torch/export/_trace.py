@@ -28,6 +28,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
+from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
@@ -602,6 +603,34 @@ def _rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
+    """
+    Perform nn_module_stack checks on the graph.
+    Current constraints:
+        For the top level graph:
+        - populated for 'call_function', 'get_attr'
+        - None for 'placeholder', 'output'
+        For submodule graphs:
+        - None for 'placeholder', output'
+
+    TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
+    """
+    # Check top-level graph for all nodes, all graphs for placeholder & output nodes
+    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
+        for node in mod.graph.nodes:
+            if node.op in ["call_function", "get_attr"]:
+                if i == 0:
+                    if node.meta.get("nn_module_stack", None) is None:
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+            elif node.op in ["placeholder", "output"]:
+                if node.meta.get("nn_module_stack", None):
+                    raise SpecViolationError(
+                        f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                    )
+
+
 def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
     op_count = 0
     op_set = set()
@@ -853,6 +882,7 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+        _verify_nn_module_stack(gm)
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -1054,6 +1084,7 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
+    _verify_nn_module_stack(gm)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
