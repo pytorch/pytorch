@@ -1,4 +1,4 @@
-name: linux-build-rg
+name: linux-build
 
 on:
   workflow_call:
@@ -32,13 +32,13 @@ on:
         required: false
         type: string
         default: "5.2"
-        description: |
-          List of CUDA architectures CI build should target.
-      runner-group:
+        description: Runner label to select worker type
+      runner:
         required: false
         type: string
-        default: "arc-lf-linux.2xlarge"
-        description: Runner group to select group type
+        default: "linux.2xlarge"
+        description: |
+          List of CUDA architectures CI build should target.
       test-matrix:
         required: false
         type: string
@@ -74,8 +74,7 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on:
-      group: ${{ inputs.runner-group }}
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.linux-build.outputs.docker-image }}
