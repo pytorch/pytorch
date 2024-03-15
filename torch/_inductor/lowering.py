@@ -6150,6 +6150,21 @@ try:
         )
         return inp
 
+    @register_lowering(_c10d_functional.scatter)
+    def _scatter(tensor, scatter_list, src, group_name):
+        tensor = empty_like(tensor)
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.scatter_.default, tensor, scatter_list, src, group_name
+        )
+        return tensor
+
+    @register_lowering(_c10d_functional.scatter_)
+    def _scatter_(tensor, scatter_list, src, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.scatter_.default, tensor, scatter_list, src, group_name
+        )
+        return tensor
+
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)

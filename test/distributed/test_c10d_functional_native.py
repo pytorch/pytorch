@@ -807,6 +807,49 @@ class CompileTest(TestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     @run_with_native_funcol
+    def test_inductor_scatter(self):
+        def func(arg: torch.Tensor, scatter_list: List[torch.Tensor]) -> torch.Tensor:
+            buf0 = arg + 42
+            # Expect in-place with inductor allocated buf
+            br0 = funcol.scatter(buf0, scatter_list, 1, "0")
+            br0 = funcol.wait_tensor(br0)
+            # Expect no in-place with graph input
+            br1 = funcol.scatter(arg, scatter_list, 0, "0")
+            br1 = funcol.wait_tensor(br1)
+            return br0, br1
+
+        arg = torch.rand(4, device="cuda")
+        scatter_list = (
+            [torch.rand(4, device="cuda") for i in range(2)] if self.rank == 0 else []
+        )
+
+        func(arg, scatter_list)
+
+        compiled = torch.compile(func, fullgraph=True)
+
+        code = run_and_get_triton_code(compiled, arg, scatter_list)
+        (
+            FileCheck()
+            # Expect in-place with inductor allocated buf
+            .check("buf0 = empty")
+            .check("torch.ops._c10d_functional.scatter_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            # Expect no in-place with graph input (buf5 is a clone)
+            .check("buf7 = empty")
+            .check("torch.ops._c10d_functional.scatter_.default(buf7")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            # Expect no extra copy on return
+            .check("return (buf0, buf7, )")
+            .run(code)
+        )
+
+        # Test aoti
+        out = AOTIRunnerUtil.run("cuda", func, (arg, scatter_list))
+        torch.cuda.synchronize()
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_ranks_and_tag(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42

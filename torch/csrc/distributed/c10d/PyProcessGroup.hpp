@@ -122,6 +122,19 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override {
+    PYBIND11_OVERRIDE(
+        c10::intrusive_ptr<Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        scatter, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
+  }
+
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
