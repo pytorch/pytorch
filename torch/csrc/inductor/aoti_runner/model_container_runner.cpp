@@ -160,5 +160,21 @@ std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
   return {in_spec, out_spec};
 }
 
+AOTIEagerKernelRunner::AOTIEagerKernelRunner(const std::string& model_so_path) {
+  model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
+  TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
+  std::string run_func_name = "aoti_eager_inductor_entry_cpp";
+  run_func_ = reinterpret_cast<AOTIEagerKernelFunc>(
+      model_so_->sym(run_func_name.c_str()));
+  TORCH_CHECK(run_func_, "Failed to load function: ", run_func_name);
+}
+
+AOTIEagerKernelRunner::~AOTIEagerKernelRunner() {}
+
+std::vector<at::Tensor> AOTIEagerKernelRunner::operator()(
+    std::vector<at::Tensor>& inputs) {
+  return run_func_(inputs);
+}
+
 } // namespace torch::inductor
 #endif

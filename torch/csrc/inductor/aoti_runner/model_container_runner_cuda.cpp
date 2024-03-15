@@ -30,5 +30,15 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
       inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream.stream()));
 }
 
+AOTIEagerKernelRunnerCuda::AOTIEagerKernelRunnerCuda(
+    const std::string& kernel_so_path)
+    : AOTIEagerKernelRunner(kernel_so_path) {}
+
+std::vector<at::Tensor> AOTIEagerKernelRunnerCuda::operator()(
+    std::vector<at::Tensor>& inputs) {
+  at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
+  return AOTIEagerKernelRunner::operator()(inputs);
+}
+
 } // namespace torch::inductor
 #endif
