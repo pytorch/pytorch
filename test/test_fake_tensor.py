@@ -950,11 +950,11 @@ class FakeTensorConverterTest(TestCase):
         mode = FakeTensorMode()
         converter = FakeTensorConverter()
         x_conv = converter(mode, x)
-        x_conv_storage = torch._C._storage_id(x_conv)
+        x_conv_storage = x_conv.untyped_storage()
         del x_conv
         self.assertFalse(x in converter.tensor_memo)
         y_conv = converter(mode, y)
-        self.assertEqual(x_conv_storage, torch._C._storage_id(y_conv))
+        self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_dead_key(self):
