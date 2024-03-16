@@ -2710,7 +2710,7 @@ class BenchmarkRunner:
                 )
 
             if self.args.print_compilation_time:
-                print(compilation_time)
+                print(f"Compilation time: {compilation_time:.2f}")
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -3122,7 +3122,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--print-compilation-time",
         action="store_true",
-        help="print compilation latency"
+        help="print compilation latency",
     )
     parser.add_argument(
         "--print-dataframe-summary",
