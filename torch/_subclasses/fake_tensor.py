@@ -340,10 +340,20 @@ class FakeTensorConverter:
         t,
         *,
         make_constant=False,
-        source=None,
         symbolic_context=None,
+        source=None,
         memoized_only=False,
     ):
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+
+        # Direct calls here ALWAYS end up with static shapes
+        if symbolic_context is None:
+            symbolic_context = StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.STATIC] * t.ndim
+            )
         return self.from_real_tensor(
             fake_mode,
             t,
