@@ -984,14 +984,7 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
-
-                # Try to short-circuit before calling is_non_overlapping_and_dense
-                # which may evaluate a symbolic expr with an unbacked symint.
-                is_definitely_overlapping = len(strides) > 0 and 0 in strides
-                dense = (
-                    not is_definitely_overlapping and not n.meta["val"].is_sparse
-                    and torch.ops.aten.is_non_overlapping_and_dense(n.meta["val"])
-                )
+                dense = torch.ops.aten.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
 
