@@ -996,14 +996,11 @@ class CppWrapperCpu(WrapperCodeGen):
         if not config.aot_inductor.eager_mode:
             # Convert vector of at::Tensor to vector of AtenTensorHandle.
             # If we pass at::Tensor, the compilation will be too slow.
-            wrapper_body += """
-                        input_handles = torch._C._aoti.unsafe_alloc_void_ptr_from_tensors(input_tensors)
-            """
-
             wrapper_body += f"""
-                        output_handles = f(input_handles)
-                        output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptr(output_handles)
-                        return {outputs_str}
+                    input_handles = torch._C._aoti.unsafe_alloc_void_ptr_from_tensors(input_tensors)
+                    output_handles = f(input_handles)
+                    output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptr(output_handles)
+                    return {outputs_str}
             """
         else:
             wrapper_body += f"""
