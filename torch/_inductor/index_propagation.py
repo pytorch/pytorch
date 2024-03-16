@@ -85,10 +85,7 @@ class SymPyOps:
     def to_dtype(
         value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
     ) -> TypedExpr:
-        result = TypedExpr(value.expr, dtype)
-        if is_floating_dtype(dtype) and not result.is_constant():
-            return NotImplemented
-        return result
+        return TypedExpr(value.expr, dtype)
 
     @staticmethod
     def square(x: TypedExpr) -> TypedExpr:
@@ -135,11 +132,14 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
+
+        x_expr = sympy.sympify(x.expr)
+        y_expr = sympy.sympify(y.expr)
         # In these cases, remainder in Python == remainder in C++, so this transformation
         # is sound
         if (
-            x.expr.is_nonnegative is not None
-            and x.expr.is_nonnegative == y.expr.is_positive
+            x_expr.is_nonnegative is not None
+            and x_expr.is_nonnegative == y_expr.is_positive
         ):
             result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
             return TypedExpr(result_expr, result_type)
@@ -248,7 +248,7 @@ class IndexPropagation:
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
-            isinstance(new_expr.expr, sympy.Number)
+            new_expr.is_constant()
             or new_expr.expr.is_integer
         )
         if not is_valid_expr:
