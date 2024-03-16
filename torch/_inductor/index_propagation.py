@@ -28,12 +28,7 @@ import sympy
 from typing_extensions import TypeAlias
 
 import torch
-from torch._prims_common import (
-    dtype_to_type,
-    is_boolean_dtype,
-    is_float_dtype,
-    is_integer_dtype,
-)
+from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 
 
