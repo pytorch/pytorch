@@ -2751,6 +2751,7 @@ class ShapeEnv:
         return r
 
     def add_var_to_val(self, expr: sympy.Symbol, val: int):
+        """ Adds a new symbol to the symbolic environment. """
         assert expr not in self.var_to_val, f"{expr} already exists"
         self.var_to_val[expr] = sympy.Integer(val)
 
