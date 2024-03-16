@@ -1255,8 +1255,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     @pytorch_test_common.xfail_dynamic_fx_test(
-        error_message=" Failed running call_function <built-in function scaled_dot_product_attention>",
-        reason="dynamo does not support it.",
+        error_message="NOT_IMPLEMENTED : Could not find an implementation for Trilu(14) node",
+        reason="Need to check Trilu node in the ONNX graph",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
