@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 from typing import (
     Any,
     Callable,
@@ -27,6 +26,7 @@ from typing import (
 
 import torch
 from torch import multiprocessing
+from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
@@ -539,6 +539,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
                 matrix_instr_nonkdim=self.matrix_instr_nonkdim,
             )
         else:
@@ -555,7 +556,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         getattr(mod, self.kernel_name).precompile()
-
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
