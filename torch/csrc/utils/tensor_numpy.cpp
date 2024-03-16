@@ -414,7 +414,11 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     TORCH_CHECK_VALUE(
         PyArray_DescrConverter(py_typestr, &descr), "cannot parse `typestr`");
     dtype = numpy_dtype_to_aten(descr->type_num);
+#if NPY_ABI_VERSION >= 0x02000000
+    dtype_size_in_bytes = PyDataType_ELSIZE(descr);
+#else
     dtype_size_in_bytes = descr->elsize;
+#endif
     TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
   }
 
