@@ -13,6 +13,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.create_parameter_op import _bind_nn_parameter
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -566,9 +567,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
-        raise NotImplementedError(
-            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
-        )
+        # fallback to aten eager implementation for differing bitwidths
+        return fallback_handler(aten.view.dtype)(x, dtype)
 
     def _to_dtype_bitcast(x):
         # Because we may promote tensor type from float16 or bfloat16
@@ -2260,8 +2260,6 @@ make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
 make_fallback(aten.max_pool3d_with_indices)  # @isuruf (can this one be implemented?)
-make_fallback(aten.cummax)  # @isuruf
-make_fallback(aten.cummin)  # @isuruf
 
 
 # 1) Easy
@@ -5042,8 +5040,8 @@ def _make_scan_inner(x, *, axis, dtype):
 
     return dict(
         device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=x.make_loader(),
+        dtypes=(x.get_dtype(),),
+        inner_fns=(x.make_loader(),),
         size=x.get_size(),
         axis=axis,
     )
@@ -5411,6 +5409,8 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
 fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
+fallback_cummax = fallback_handler(aten.cummax.default)
+fallback_cummin = fallback_handler(aten.cummin.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5425,8 +5425,13 @@ def cumsum(x, axis=None, dtype=None):
         dtype = dtype or x.get_dtype()
         return to_dtype(x, dtype, copy=True)
 
+    def combine_fn(a_tuple, b_tuple):
+        (a,) = a_tuple
+        (b,) = b_tuple
+        return (ops.add(a, b),)
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(0,))
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -5444,8 +5449,13 @@ def cumprod(x, axis=None, dtype=None):
         dtype = dtype or x.get_dtype()
         return to_dtype(x, dtype, copy=True)
 
+    def combine_fn(a_tuple, b_tuple):
+        (a,) = a_tuple
+        (b,) = b_tuple
+        return (ops.mul(a, b),)
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(1,))
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
@@ -5453,11 +5463,13 @@ def cumprod(x, axis=None, dtype=None):
 
 @register_lowering(aten.logcumsumexp)
 def logcumsumexp(x, dim):
-    def log_add_exp_helper(a, b):
+    def log_add_exp_helper(a_tuple, b_tuple):
+        (a,) = a_tuple
+        (b,) = b_tuple
         min_v = ops.minimum(a, b)
         max_v = ops.maximum(a, b)
         mask = (min_v != max_v) | (~ops.isinf(min_v))
-        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
+        return (ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a),)
 
     dtype = x.get_dtype()
     if len(x.get_size()) == 0:
@@ -5465,10 +5477,76 @@ def logcumsumexp(x, dim):
         return clone(x)
 
     kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
+    (result,) = ir.Scan.create(
+        **kwargs, combine_fn=log_add_exp_helper, inits=(float("-inf"),)
+    )
     if result is None:
         return fallback_logcumsumexp(x, dim=dim)
     return result
+
+
+@register_lowering(aten.cummax, type_promotion_kind=None)
+def cummax(x, axis=None):
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        return clone(x), torch.empty_like(x, dtype=torch.int64)
+
+    dtype = x.get_dtype()
+    combine_fn = ir.get_reduction_combine_fn(
+        "argmax", dtype=dtype, arg_break_ties_left=False
+    )
+
+    min_value = (
+        False
+        if dtype is torch.bool
+        else (
+            torch.finfo(dtype).min
+            if dtype.is_floating_point
+            else torch.iinfo(dtype).min
+        )
+    )
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    kwargs["dtypes"] = (dtype, torch.int64)
+    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    values, indices = ir.Scan.create(
+        **kwargs, combine_fn=combine_fn, inits=(min_value, 0)
+    )
+    if values is None:
+        return fallback_cummax(x, dim=axis)
+    return values, indices
+
+
+@register_lowering(aten.cummin, type_promotion_kind=None)
+def cummin(x, axis=None):
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        return clone(x), torch.empty_like(x, dtype=torch.int64)
+
+    dtype = x.get_dtype()
+    combine_fn = ir.get_reduction_combine_fn(
+        "argmin", dtype=dtype, arg_break_ties_left=False
+    )
+
+    max_value = (
+        True
+        if dtype is torch.bool
+        else (
+            torch.finfo(dtype).max
+            if dtype.is_floating_point
+            else torch.iinfo(dtype).max
+        )
+    )
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    kwargs["dtypes"] = (dtype, torch.int64)
+    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    values, indices = ir.Scan.create(
+        **kwargs, combine_fn=combine_fn, inits=(max_value, 0)
+    )
+    if values is None:
+        return fallback_cummin(x, dim=axis)
+    return values, indices
 
 
 @register_lowering(aten.prod)
@@ -5845,6 +5923,12 @@ def resize_storage_bytes_(variable, new_size):
     variable.realize()
     ir.ResizeStorageBytes(variable, new_size)
     return variable
+
+
+@register_lowering(_bind_nn_parameter)
+def create_nn_parameter(self, placeholder):
+    self.realize()
+    return TensorBox.create(ir.BindNNParameter(self, placeholder))
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
