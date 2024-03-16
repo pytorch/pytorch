@@ -614,8 +614,6 @@ void add_projection_weights(
       /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
       /*linLayerMat=*/&matrix_pointer));
 #else
-  void* unused_pointer;
-  TensorDescriptor unused_desc;
   TensorDescriptor lin_layer_mat_desc;
   AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
       /*handle=*/handle,
@@ -626,8 +624,8 @@ void add_projection_weights(
       /*linLayerID=*/linear_id,
       /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
       /*linLayerMat=*/&matrix_pointer,
-      unused_desc.mut_desc(),
-      &unused_pointer));
+      nullptr,
+      nullptr));
 #endif
 
   cudnnDataType_t data_type;
@@ -735,8 +733,6 @@ get_parameters(
             lin_layer_mat_desc.mut_desc(),
             &matrix_pointer));
 #else
-        void* unused_pointer = nullptr;
-        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
         for (int stateless = 0; stateless < 100; stateless++) {
           if (cudnn_method) { // matrix
@@ -749,8 +745,8 @@ get_parameters(
                 linear_id,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer,
-                unused_desc.mut_desc(),
-                &unused_pointer));
+                NULL,
+                nullptr));
           } else { // bias
             AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
                 handle,
@@ -759,8 +755,8 @@ get_parameters(
                 weight_buf.numel() * weight_buf.element_size(),
                 weight_buf.data_ptr(),
                 linear_id,
-                unused_desc.mut_desc(),
-                &unused_pointer,
+                nullptr,
+                nullptr,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer));
           }
@@ -922,8 +918,6 @@ std::vector<void*> get_expected_data_ptrs(
             lin_layer_mat_desc.mut_desc(),
             &matrix_pointer));
 #else
-        void* unused_pointer = nullptr;
-        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
         if (cudnn_method) { // matrix
           AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -935,8 +929,8 @@ std::vector<void*> get_expected_data_ptrs(
               linear_id,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer,
-              unused_desc.mut_desc(),
-              &unused_pointer));
+              nullptr,
+              nullptr));
         } else { // bias
           AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
               handle,
@@ -945,8 +939,8 @@ std::vector<void*> get_expected_data_ptrs(
               weight_buf.numel() * weight_buf.element_size(),
               weight_buf.data_ptr(),
               linear_id,
-              unused_desc.mut_desc(),
-              &unused_pointer,
+              nullptr,
+              nullptr,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer));
         }
@@ -972,8 +966,6 @@ std::vector<void*> get_expected_data_ptrs(
           lin_layer_mat_desc.mut_desc(),
           &matrix_pointer));
 #else
-      void* unused_pointer;
-      TensorDescriptor unused_desc;
       TensorDescriptor lin_layer_mat_desc;
 
       AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -985,8 +977,8 @@ std::vector<void*> get_expected_data_ptrs(
           linear_id,
           lin_layer_mat_desc.mut_desc(),
           &matrix_pointer,
-          unused_desc.mut_desc(),
-          &unused_pointer));
+          nullptr,
+          nullptr));
 #endif
       data_ptrs.push_back(matrix_pointer);
     }
