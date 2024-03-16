@@ -82,7 +82,6 @@ if config.abi_compatible:
         "test_dtype_sympy_expr_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
-        "test_index_put_deterministic_fallback_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
         "test_profiler_mark_wrapper_call_cpu",
         "test_qconv2d_add_cpu",
