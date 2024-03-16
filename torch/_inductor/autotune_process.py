@@ -26,7 +26,6 @@ from typing import (
 
 import torch
 from torch import multiprocessing
-from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
@@ -530,6 +529,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
+
+        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 
         if torch.version.hip and self.matrix_instr_nonkdim != 0:
             return functools.partial(
