@@ -67,7 +67,7 @@ from torch.testing._internal.two_tensor import TwoTensor
 if TEST_WITH_TORCHINDUCTOR:
     from torch._inductor.test_case import TestCase
 else:
-    from torch.testing._internal.common_utils import TestCase
+    from torch.testing._internal.common_utils import TestCase  # type: ignore[assignment]
 
 
 # Protects against includes accidentally setting the default dtype
