@@ -480,7 +480,6 @@ class NNModuleVariable(VariableTracker):
                             else f"{self.module_key}_{count}"
                         )
 
-                        print(unique_module_key)
                         node.meta["source_fn_stack"][-1] = (
                             unique_module_key,
                             type(self.module),
