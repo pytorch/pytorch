@@ -102,8 +102,10 @@ from torch.utils._triton import has_triton, has_triton_package
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
-troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
-nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
+troubleshooting_url = (
+    "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
+)
+nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
@@ -1729,6 +1731,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             )
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
+        elif isinstance(cause, TypeError) and "argument" in str(cause):
+            unimplemented(f"TypeError {node.target}: {cause}")
+
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
