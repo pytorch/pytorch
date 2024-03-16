@@ -1,6 +1,7 @@
 import contextlib
 import functools
-from typing import List, Optional
+import itertools
+from typing import Dict, List, Optional
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -195,6 +196,7 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+        self.reorder_accumulate_grad_nodes()
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
@@ -206,6 +208,24 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
         return self.compiler_fn(graph)
+
+    def reorder_accumulate_grad_nodes(self):
+        """
+        Usage of AOTAutograd causes all the accumulate_grad_ nodes to get pushed to the end of
+        the graph.  This differs from eager mode, which schedules them as soon as possible. This
+        pass attempts to reorder the graph to mimic eager behavior.
+        """
+        order: Dict[torch.fx.Node, int] = {}
+        counter = itertools.count()
+        target = torch.ops.inductor.accumulate_grad_.default
+        last = None
+        for node in [*self.fx_tracer.graph.nodes]:
+            if node.op == "call_function" and node.target == target:
+                arg = max(node.args, key=order.get)  # type: ignore[arg-type]
+                if arg is not last:
+                    arg.append(node)
+            order[node] = next(counter)
+            last = node
 
     def to_proxy(self, t):
         if t is None:
