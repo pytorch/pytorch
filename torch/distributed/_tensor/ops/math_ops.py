@@ -123,6 +123,14 @@ class _NormPartial(_Partial):
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _NormPartial):
+            return False
+        return self.norm_type == other.norm_type
+
+    def __hash__(self) -> int:
+        return 1 + hash(self.norm_type)
+
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
     if dims_arg is None:
