@@ -689,7 +689,7 @@ def min_cut_rematerialization_partition(
     fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(joint_module)
     fsdp_fx_passes.replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this_op(joint_module)
 
-    print(lazy_format_graph_code("Joint graph after FSDP-specific passes", joint_module))
+    # print(lazy_format_graph_code("Joint graph after FSDP-specific passes", joint_module))
 
     full_bw_graph = joint_module.graph
 
