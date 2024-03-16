@@ -2483,7 +2483,7 @@ class ShapeEnv:
         """
         source_name = source.name() if source else None
 
-        if self._translation_validation_enabled and source is not None:
+        if self._translation_validation_enabled and source is not None and not isinstance(sym, sympy.Integer):
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None

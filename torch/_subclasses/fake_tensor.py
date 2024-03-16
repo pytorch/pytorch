@@ -350,7 +350,7 @@ class FakeTensorConverter:
         )
 
         # Direct calls here ALWAYS end up with static shapes
-        if symbolic_context is None and self.shape_env is not None:
+        if self.shape_env is not None:
             symbolic_context = StatelessSymbolicContext(
                 dynamic_sizes=[DimDynamic.STATIC] * t.ndim
             )
