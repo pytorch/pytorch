@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -43,6 +44,31 @@ def patch_init_py(
     with open(path, "w") as f:
         f.write(orig)
 
+def get_rocm_version() -> str:
+    rocm_path = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH') or "/opt/rocm"
+    rocm_version = "0.0.0"
+    rocm_version_h = f"{rocm_path}/include/rocm-core/rocm_version.h"
+    if not os.path.isfile(rocm_version_h):
+        rocm_version_h = f"{rocm_path}/include/rocm_version.h"
+
+    # The file could be missing due to 1) ROCm version < 5.2, or 2) no ROCm install.
+    if os.path.isfile(rocm_version_h):
+        RE_MAJOR = re.compile(r"#define\s+ROCM_VERSION_MAJOR\s+(\d+)")
+        RE_MINOR = re.compile(r"#define\s+ROCM_VERSION_MINOR\s+(\d+)")
+        RE_PATCH = re.compile(r"#define\s+ROCM_VERSION_PATCH\s+(\d+)")
+        major, minor, patch = 0, 0, 0
+        for line in open(rocm_version_h):
+            match = RE_MAJOR.search(line)
+            if match:
+                major = int(match.group(1))
+            match = RE_MINOR.search(line)
+            if match:
+                minor = int(match.group(1))
+            match = RE_PATCH.search(line)
+            if match:
+                patch = int(match.group(1))
+        rocm_version = str(major)+"."+str(minor)+"."+str(patch)
+    return rocm_version
 
 def build_triton(
     *,
@@ -146,6 +172,8 @@ def build_triton(
                 cwd=triton_basedir,
                 shell=True,
             )
+            cur_rocm_ver = get_rocm_version()
+            check_call(["scripts/amd/setup_rocm_libs.sh", cur_rocm_ver], cwd=triton_basedir)
             print("ROCm libraries setup for triton installation...")
 
         check_call(
