@@ -403,7 +403,7 @@ inline bool CUDA_tensor_apply2(at::TensorBase a,
   const dim3 block = getApplyBlock(max_threads_per_block);
 
   dim3 grid;
-  int64_t curDevice = current_device();
+  auto curDevice = current_device();
   if (curDevice == -1) return false;
   if (!getApplyGrid<step>(totalElements, grid, curDevice, max_threads_per_block)) {
     return false;

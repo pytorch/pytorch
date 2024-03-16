@@ -10,7 +10,6 @@
 #include <c10/core/SymBool.h>
 #include <c10/core/SymFloat.h>
 #include <c10/macros/Export.h>
-#include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <type_traits>

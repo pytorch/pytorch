@@ -76,17 +76,6 @@ void convert_handles_to_inputs(
 }
 
 template <typename T>
-const T& convert_arrayref_tensor_to_tensor(const T& t) {
-  return t;
-}
-
-template <typename T>
-RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
-    const ArrayRefTensor<T>& art) {
-  return art.expensiveCopyToTensor();
-}
-
-template <typename T>
 void assert_numel(const ArrayRefTensor<T>& tensor, int64_t numel) {
   if (tensor.numel() != numel) {
     std::stringstream err;

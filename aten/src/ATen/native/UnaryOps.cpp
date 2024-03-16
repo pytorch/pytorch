@@ -973,7 +973,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
 }
 
-// alias for lgamma, implements special.gammanln equivalent to
+// alias for lgamma, implements special.gammaln equivalent to
 // scipy.special.gammaln
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
 Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }

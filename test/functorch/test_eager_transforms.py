@@ -1670,7 +1670,7 @@ class TestJac(TestCase):
 
         self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
 
@@ -1687,14 +1687,14 @@ class TestJac(TestCase):
         expected[2, 0, 0, 3] = 1
         self.assertEqual(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_vmap_on_jac_simple(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
         y = vmap(jacapi(torch.sin))(x)
         expected = torch.stack([torch.diagflat(x[i].cos()) for i in range(2)])
         assert torch.allclose(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_nested_jac_simple(self, device, jacapi):
         def foo(x):
             return x.sin().sum()
@@ -1755,7 +1755,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z[0], tuple))
         self.assertEqual(z, ((expected_out0_x,), (expected_out1_x,)))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_outputs_pytree(self, device, jacapi):
         def f(x, y):
             return {'left': 2 * x + 3 * y, 'right': 4 * x + 5 * y}
@@ -1816,7 +1816,7 @@ class TestJac(TestCase):
         self.assertEqual(result.dim(), 2)
         self.assertEqual(result, x.new_ones(1, 1))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_aux_tensor(self, device, jacapi):
         def f(x):
             y = x.clone()
@@ -1912,7 +1912,7 @@ class TestJac(TestCase):
         )
         self.assertEqual(result, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree_multidim(self, device, jacapi):
         def f(dct):
             a = dct['a']
@@ -4760,7 +4760,10 @@ class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or
+                       IS_WINDOWS or
+                       (TEST_CUDA and not SM70OrLater) or
+                       (sys.version_info >= (3, 12)))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
@@ -4789,8 +4792,8 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    # torch.compile is not supported on Windows
-    @expectedFailureIf(IS_WINDOWS)
+    # torch.compile is not supported on Windows or on Python 3.12+
+    @expectedFailureIf(IS_WINDOWS or (sys.version_info >= (3, 12)))
     @torch._dynamo.config.patch(suppress_errors=False)
     @torch._dynamo.config.patch(capture_func_transforms=True)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
@@ -4803,6 +4806,7 @@ class TestCompileTransforms(TestCase):
 
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        fn = torch.compile(wrapper_fn, backend='eager', fullgraph=True)
         self.assertEqual(actual, expected)
 
         def wrapper_fn(x, y):

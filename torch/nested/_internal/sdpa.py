@@ -341,7 +341,7 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
     # Returns a boolean indicating if contiguous needs to be called for input
     assert isinstance(tensor, NestedTensor)
     offsets = tensor.offsets()
-    strides = tensor._stride
+    strides = tensor._strides
 
     n_tensors = offsets.size(0) - 1
     if n_tensors <= 1:
@@ -603,6 +603,7 @@ def _pad_last_dim(
 
 # TODO: coalesce with torch/nn/utils/attention.py
 def _calculate_scale(query, scale):
+    # TODO: Investigate why math.sqrt() isn't properly handled by Dynamo?
     softmax_scale = scale if scale is not None else torch.sym_sqrt(1.0 / query.size(-1))
     return softmax_scale
 

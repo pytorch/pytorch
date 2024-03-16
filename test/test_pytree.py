@@ -636,6 +636,18 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
+    def test_tree_map_only_predicate_fn(self, pytree_impl):
+        self.assertEqual(
+            pytree_impl.tree_map_only(lambda x: x == 0, lambda x: x + 2, [0, 1]), [2, 1]
+        )
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_tree_all_any(self, pytree_impl):
         self.assertTrue(pytree_impl.tree_all(lambda x: x % 2, [1, 3]))
         self.assertFalse(pytree_impl.tree_all(lambda x: x % 2, [0, 1]))
@@ -913,7 +925,6 @@ TreeSpec(tuple, None, [*,
         # the namedtuple type.
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
 
-    @unittest.expectedFailure
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):

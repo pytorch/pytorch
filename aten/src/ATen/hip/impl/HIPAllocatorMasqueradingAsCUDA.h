@@ -15,7 +15,7 @@ class HIPAllocatorMasqueradingAsCUDA final : public Allocator {
 public:
   explicit HIPAllocatorMasqueradingAsCUDA(Allocator* allocator)
     : allocator_(allocator) {}
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     DataPtr r = allocator_->allocate(size);
     r.unsafe_set_device(Device(c10::DeviceType::CUDA, r.device().index()));
     return r;

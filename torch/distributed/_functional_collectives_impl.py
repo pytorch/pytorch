@@ -24,26 +24,34 @@ _wait_all
 
 """
 
-_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+_use_native_funcol: Optional[bool] = None
 
 
-# These are for testing purposes only and will be removed after we fully
-# migrate to native funcol.
-def native_funcol_enabled():
-    return _use_native_funcol
+if torch._running_with_deploy():
 
+    def native_funcol_enabled():
+        return False
 
-def enable_native_funcol():
-    global _use_native_funcol
-    os.environ["_USE_NATIVE_C10D_FUNCTIONAL"] = "1"
-    _use_native_funcol = True
+else:
+    from torch._dynamo import assume_constant_result
 
+    @assume_constant_result
+    def native_funcol_enabled():
+        global _use_native_funcol
+        if _use_native_funcol is None:
+            try:
+                # Disable native funcol when torch_xla is installed. This check
+                # will be removed once torch_xla adopts the native_funcol IR.
+                import torch_xla  # noqa: F401
 
-def disable_native_funcol():
-    global _use_native_funcol
-    if "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ:
-        del os.environ["_USE_NATIVE_C10D_FUNCTIONAL"]
-    _use_native_funcol = False
+                _use_native_funcol = False
+            except Exception:
+                # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
+                _use_native_funcol = (
+                    os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
+                )
+
+        return _use_native_funcol
 
 
 logger = logging.getLogger(__name__)
@@ -117,11 +125,6 @@ def _wait_reg_dec(ptr, wait_reg):
 def _register_tensor_wrapper(tensor) -> None:
     if native_funcol_enabled():
         # Tensor storage -> work mapping is maintained in C++
-        weakref.finalize(
-            tensor,
-            torch.ops._c10d_functional.wait_tensor,
-            tensor,
-        )
         return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()

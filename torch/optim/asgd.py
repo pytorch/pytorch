@@ -4,7 +4,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
                         _get_scalar_dtype, _view_as_real, _differentiable_doc, _foreach_doc, _maximize_doc,
                         _capturable_doc)
-from torch._utils import is_compiling
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
@@ -34,9 +33,6 @@ class ASGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable and not is_compiling():
-            raise ValueError("Capturable not supported with single tensor ASGD")
-
         defaults = dict(
             lr=lr,
             lambd=lambd,
@@ -62,14 +58,11 @@ class ASGD(Optimizer):
                 if len(p_state) != 0:
                     if not torch.is_tensor(p_state['step']):
                         step_val = float(p_state["step"])
-                        p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
-                                           if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype()))
+                        p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
                     if not torch.is_tensor(p_state["eta"]):
-                        p_state["eta"] = (torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device)
-                                          if group["capturable"] else torch.tensor(p_state["eta"], dtype=_get_scalar_dtype()))
+                        p_state["eta"] = torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device)
                     if not torch.is_tensor(p_state["mu"]):
-                        p_state["mu"] = (torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device)
-                                         if group["capturable"] else torch.tensor(p_state["mu"], dtype=_get_scalar_dtype()))
+                        p_state["mu"] = torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device)
 
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
@@ -106,6 +99,8 @@ class ASGD(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -159,7 +154,7 @@ ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
-        {_capturable_doc} For ASGD, capturable is only supported when foreach is True.
+        {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
@@ -240,9 +235,6 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
-    if capturable and not is_compiling():
-        raise RuntimeError("capturable is not supported for single tensor ASGD (when foreach=False)")
-
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -251,6 +243,12 @@ def _single_tensor_asgd(
         eta = etas[i]
         step_t = state_steps[i]
 
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            assert (param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda) or (
+                param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla
+            ), "If capturable=True, params, mus, etas, and state_steps must be CUDA or XLA tensors."
+
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
             param = torch.view_as_real(param)
@@ -258,28 +256,33 @@ def _single_tensor_asgd(
 
         # update step
         step_t += 1
-        step = _get_value(step_t)
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        eta_value = _get_value(eta)
-        # decay term
-        param.mul_(1 - lambd * eta_value)
-
-        # update parameter
-        param.add_(grad, alpha=-eta_value)
+        if capturable:
+            param.mul_(1 - lambd * eta)
+            param.addcmul_(grad, eta, value=-1)  # update parameter
+        else:
+            eta_value = _get_value(eta)
+            param.mul_(1 - lambd * eta_value)  # decay term
+            param.add_(grad, alpha=-eta_value)  # update parameter
 
         # averaging
-        if is_compiling() or mu.item() != 1:
-            ax.add_(param.sub(ax).mul(mu))
+        if capturable or mu.item() != 1:
+            ax.add_(param.sub(ax).mul_(mu))
         else:
             ax.copy_(param)
 
-        new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
-        eta.copy_(new_eta)
-        new_mu = _to_tensor(1 / max(1, step - t0))
-        mu.copy_(new_mu)
+        if capturable:
+            eta.copy_(lr / ((1 + lambd * lr * step_t) ** alpha))
+            mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
+        else:
+            step = _get_value(step_t)
+            new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
+            eta.copy_(new_eta)
+            new_mu = _to_tensor(1 / max(1, step - t0))
+            mu.copy_(new_mu)
 
 
 def _multi_tensor_asgd(
@@ -309,7 +312,7 @@ def _multi_tensor_asgd(
     if not torch._utils.is_compiling() and capturable:
         assert all(p.is_cuda and mu.is_cuda and eta.is_cuda and step.is_cuda
                    for p, mu, eta, step in zip(params, mus, etas, state_steps)), \
-            "If capturable=True, params, mu_products, and state_steps must be CUDA tensors."
+            "If capturable=True, params, mus, etas, and state_steps must be CUDA tensors."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
     for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,

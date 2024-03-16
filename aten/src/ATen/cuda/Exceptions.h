@@ -21,6 +21,15 @@ class CuDNNError : public c10::Error {
 
 }  // namespace c10
 
+#define AT_CUDNN_FRONTEND_CHECK(EXPR, ...)                                                      \
+  do {                                                                                          \
+    auto error_object = EXPR;                                                                   \
+    if (!error_object.is_good()) {                                                              \
+      TORCH_CHECK_WITH(CuDNNError, false,                                                       \
+            "cuDNN Frontend error: ", error_object.get_message());                              \
+    }                                                                                           \
+  } while (0)                                                                                   \
+
 #define AT_CUDNN_CHECK_WITH_SHAPES(EXPR, ...) AT_CUDNN_CHECK(EXPR, "\n", ##__VA_ARGS__)
 
 // See Note [CHECK macro]

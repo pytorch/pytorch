@@ -843,6 +843,30 @@ class TestConvolutionNN(NNTestCase):
         for s, k, g, d in product(strides, kernel_sizes, groups, dilates):
             _test_conv2d(s, k, g, d)
 
+    def test_permute_conv2d_issue_120211(self):
+        def reproducer(radius: int):
+            image = torch.rand(1, 1024, 1024, 3)
+            image = image.permute(0, 3, 1, 2)
+            kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
+            image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
+
+        for i in range(0, 128):
+            # This should not fail
+            reproducer(radius=i)
+
+    def test_conv3d_issue_120406(self):
+        # This should not fail
+        F.conv3d(torch.ones(2, 3, 8, 9, 26), torch.ones(3, 1, 1, 1, 17), groups=3)
+
+    def test_conv1d_issue_120547(self):
+        weight = torch.ones([16, 1, 32])
+        bias = torch.ones([16])
+        stride, padding, dilation, groups = (1, 16, 1, 16)
+        input = torch.rand((1, 1, 16))
+        input = input.transpose(1, 2)
+        # This should not fail
+        F.conv1d(input, weight, bias, stride, padding, dilation, groups)
+
 
 class TestConvolutionNNDeviceType(NNTestCase):
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,

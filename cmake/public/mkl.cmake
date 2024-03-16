@@ -1,9 +1,10 @@
 find_package(MKL QUIET)
 
-if(NOT TARGET caffe2::mkl)
-  add_library(caffe2::mkl INTERFACE IMPORTED)
+if(TARGET caffe2::mkl)
+  return()
 endif()
 
+add_library(caffe2::mkl INTERFACE IMPORTED)
 target_include_directories(caffe2::mkl INTERFACE ${MKL_INCLUDE_DIR})
 target_link_libraries(caffe2::mkl INTERFACE ${MKL_LIBRARIES})
 foreach(MKL_LIB IN LISTS MKL_LIBRARIES)

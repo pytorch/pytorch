@@ -361,11 +361,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             node: onnx.NodeProto,
             value_infos: Mapping[str, onnx.ValueInfoProto],
             local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
-            prefix: str = "",
+            function_id: str = "",
         ):
             for output in node.output:
-                output_prefix = f"{prefix}/{output}" if prefix else output
-                self.assertIn(output_prefix, value_infos)
+                name = f"{function_id}/{output}" if function_id else output
+                self.assertIn(name, value_infos)
             if node.domain.startswith("pkg.onnxscript.torch_lib"):
                 # No shape info available for values inside torchlib functions.
                 return
@@ -373,11 +373,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 function := local_functions.get((node.domain, node.op_type))
             ) is not None:
                 for node in function.node:
-                    node_prefix = (
-                        f"{prefix}/{function.name}" if prefix else function.name
-                    )
+                    function_id = f"{function.domain}::{function.name}"
                     _assert_node_outputs_has_value_info(
-                        node, value_infos, local_functions, node_prefix
+                        node, value_infos, local_functions, function_id
                     )
 
         type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
@@ -460,7 +458,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         # Variant 1: Save ONNX proto using Model's state_dict()
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             model_state_dict = Model().state_dict()  # Create a state_dict for testing
-            onnx_program.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
+            onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
             assert (
                 len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
             ), "Initializers must be present after loading it from model_state_dict"
@@ -474,9 +472,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             torch.save(
                 Model().state_dict(), tmp_checkpoint_file.name
             )  # Create checkpoint file for testing
-            onnx_program.save(
-                tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
-            )
+            onnx_program.save(tmp_onnx_file.name, model_state=tmp_checkpoint_file.name)
             assert (
                 len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
             ), "Initializers must be present after loading it from model_state_dict"
@@ -651,6 +647,35 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
         self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
+
+    @common_utils.parametrize(
+        "float8_type",
+        [
+            common_utils.subtest(
+                torch.float8_e5m2,
+                name="torch_float8_e5m2",
+            ),
+            common_utils.subtest(
+                torch.float8_e5m2fnuz,
+                name="torch_float8_e5m2fnuz",
+            ),
+            common_utils.subtest(
+                torch.float8_e4m3fn,
+                name="torch_float8_e4m3fn",
+            ),
+            common_utils.subtest(
+                torch.float8_e4m3fnuz,
+                name="torch_float8_e4m3fnuz",
+            ),
+        ],
+    )
+    def test_float8_support(self, float8_type):
+        class Float8Module(torch.nn.Module):
+            def forward(self, input: torch.Tensor):
+                input = input.to(float8_type)
+                return input + torch.tensor(1.0, dtype=float8_type)
+
+        _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
 
 
 if __name__ == "__main__":

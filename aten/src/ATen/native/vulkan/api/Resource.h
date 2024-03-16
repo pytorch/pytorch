@@ -151,6 +151,10 @@ class VulkanBuffer final {
     return (memory_.allocation != VK_NULL_HANDLE);
   }
 
+  inline bool owns_memory() const {
+    return owns_memory_;
+  }
+
   operator bool() const {
     return (handle_ != VK_NULL_HANDLE);
   }
@@ -311,6 +315,8 @@ class VulkanImage final {
   VkImageLayout layout_;
 
  public:
+  void create_image_view();
+
   inline VkDevice device() const {
     VmaAllocatorInfo allocator_info{};
     vmaGetAllocatorInfo(allocator_, &allocator_info);
@@ -370,6 +376,10 @@ class VulkanImage final {
     return (memory_.allocation != VK_NULL_HANDLE);
   }
 
+  inline bool owns_memory() const {
+    return owns_memory_;
+  }
+
   inline operator bool() const {
     return (handles_.image != VK_NULL_HANDLE);
   }
@@ -378,6 +388,9 @@ class VulkanImage final {
     VK_CHECK_COND(!memory_, "Cannot bind an already bound allocation!");
     VK_CHECK(vmaBindImageMemory(allocator_, memory.allocation, handles_.image));
     memory_.allocation = memory.allocation;
+
+    // Only create the image view if the image has been bound to memory
+    create_image_view();
   }
 
   VkMemoryRequirements get_memory_requirements() const;

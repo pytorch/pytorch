@@ -753,6 +753,23 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
 
+        # The dynamically-created test class derives from the test template class
+        # and the empty class. Arrange for both setUpClass and tearDownClass methods
+        # to be called. This allows the parameterized test classes to support setup
+        # and teardown.
+        @classmethod
+        def _setUpClass(cls):
+            base.setUpClass()
+            empty_class.setUpClass()
+
+        @classmethod
+        def _tearDownClass(cls):
+            empty_class.tearDownClass()
+            base.tearDownClass()
+
+        device_type_test_class.setUpClass = _setUpClass
+        device_type_test_class.tearDownClass = _tearDownClass
+
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
         # the module to the given scope.

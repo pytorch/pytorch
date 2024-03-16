@@ -167,7 +167,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   // the temporary CPU output tensor that we created.
   //
   // Note [CPU Fallback Does Not Handle View Operators]
-  // Also note that we are incapable of handling immutable alises properly.
+  // Also note that we are incapable of handling immutable aliases properly.
   // Why?
   // Schemas with an immutable alias'd tensor outputs correspond to view operators.
   // For example, the `view_as` schema from native_functions.yaml:

@@ -17,9 +17,9 @@ import unittest
 import torch
 from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
 from torch.export import Dim
 from torch.utils._triton import has_triton
 

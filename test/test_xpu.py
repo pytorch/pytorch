@@ -92,6 +92,40 @@ if __name__ == "__main__":
         self.assertEqual(high, s1.priority)
         self.assertEqual(torch.device("xpu:0"), s1.device)
 
+    def test_stream_event_repr(self):
+        s = torch.xpu.current_stream()
+        self.assertTrue("torch.xpu.Stream" in str(s))
+        e = torch.xpu.Event()
+        self.assertTrue("torch.xpu.Event(uninitialized)" in str(e))
+        s.record_event(e)
+        self.assertTrue("torch.xpu.Event" in str(e))
+
+    def test_events(self):
+        stream = torch.xpu.current_stream()
+        event = torch.xpu.Event()
+        self.assertTrue(event.query())
+        stream.record_event(event)
+        event.synchronize()
+        self.assertTrue(event.query())
+
+    def test_generator(self):
+        torch.manual_seed(2024)
+        g_state0 = torch.xpu.get_rng_state()
+        torch.manual_seed(1234)
+        g_state1 = torch.xpu.get_rng_state()
+        self.assertNotEqual(g_state0, g_state1)
+
+        torch.xpu.manual_seed(2024)
+        g_state2 = torch.xpu.get_rng_state()
+        self.assertEqual(g_state0, g_state2)
+
+        torch.xpu.set_rng_state(g_state1)
+        self.assertEqual(g_state1, torch.xpu.get_rng_state())
+
+        torch.manual_seed(1234)
+        torch.xpu.set_rng_state(g_state0)
+        self.assertEqual(2024, torch.xpu.initial_seed())
+
 
 if __name__ == "__main__":
     run_tests()

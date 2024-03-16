@@ -141,8 +141,8 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorImplState;
   using detail::CPUGeneratorImplStateLegacy;
 
-  static_assert(std::is_standard_layout<CPUGeneratorImplStateLegacy>::value, "CPUGeneratorImplStateLegacy is not a PODType");
-  static_assert(std::is_standard_layout<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
+  static_assert(std::is_standard_layout_v<CPUGeneratorImplStateLegacy>, "CPUGeneratorImplStateLegacy is not a PODType");
+  static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
   static const size_t size_legacy = sizeof(CPUGeneratorImplStateLegacy);
   static const size_t size_current = sizeof(CPUGeneratorImplState);
@@ -155,8 +155,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   auto double_normal_sample = c10::optional<double>();
 
   // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  CPUGeneratorImplStateLegacy* legacy_pod;
+  CPUGeneratorImplStateLegacy* legacy_pod{nullptr};
   auto new_state_size = new_state.numel();
   if (new_state_size == size_legacy) {
     legacy_pod = (CPUGeneratorImplStateLegacy*)new_state.data();
@@ -221,7 +220,7 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   using detail::CPUGeneratorImplState;
 
   static const size_t size = sizeof(CPUGeneratorImplState);
-  static_assert(std::is_standard_layout<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
+  static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr();

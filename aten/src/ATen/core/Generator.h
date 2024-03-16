@@ -9,7 +9,6 @@
 #include <cstdint>
 
 #include <c10/util/Exception.h>
-#include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>

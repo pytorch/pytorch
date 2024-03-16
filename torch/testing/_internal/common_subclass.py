@@ -64,9 +64,6 @@ class DiagTensorBelow(WrapperTensor):
 
     handled_ops = {}
 
-    # We disable torch function here to avoid any unwanted wrapping of the output
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         if not all(issubclass(cls, t) for t in types):

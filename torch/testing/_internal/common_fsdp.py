@@ -5,10 +5,12 @@ import itertools
 import os
 import re
 import sys
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -30,7 +32,7 @@ from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -49,6 +51,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
+from torch.utils._triton import has_triton
 
 
 class FSDPInitMode(Enum):
@@ -835,7 +838,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: torch.device = torch.device("cpu"),
+        device: Optional[torch.device] = None,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
@@ -852,9 +855,13 @@ class MLP(nn.Module):
         z = F.relu(z)
         z = self.out_proj(z)
         z = F.relu(z)
-        if self.buffer:
-            z += self.buffer
+        if self.buffer is not None:
+            z = z + self.buffer
         return z
+
+    def reset_parameters(self):
+        if self.buffer is not None:
+            torch.nn.init.normal_(self.buffer)
 
 
 class DoubleLinear(nn.Module):
@@ -950,16 +957,12 @@ def reduce_scatter_with_assert(
     return orig_reduce_scatter(*args, **kwargs)
 
 
-def check_1d_sharded_parity(
+def check_sharded_parity(
     cls,  # unit test class
     replicated_module: nn.Module,
     sharded_module: nn.Module,
-    group: Optional[dist.ProcessGroup] = None,
-    check_grads: bool = True,
     prefixes_to_ignore: Tuple[str, ...] = (),
 ):
-    group = group or dist.distributed_c10d._get_default_group()
-    rank, world_size = group.rank(), group.size()
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(), sharded_module.named_parameters()
     ):
@@ -969,18 +972,22 @@ def check_1d_sharded_parity(
         cls.assertEqual(replicated_name, clean_sharded_name)
         cls.assertIsInstance(sharded_param, DTensor)
         assert isinstance(sharded_param, DTensor)  # mypy
-        param_chunks = torch.chunk(replicated_param, world_size, dim=0)
-        cls.assertEqual(sharded_param._local_tensor, param_chunks[rank])
-        if not check_grads:
-            continue
+        mesh, placements = sharded_param.device_mesh, sharded_param.placements
+        if tuple(placements) == (Shard(0), Shard(0)):
+            raise AssertionError(
+                "FSDP's (Shard(0), Shard(0)) layout differs from distribute_tensor(), "
+                "so we cannot check for equality using it"
+            )
+        sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
+        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue
         cls.assertIsNotNone(sharded_param.grad)
-        grad_chunks = torch.chunk(replicated_param.grad, world_size, dim=0)
+        sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
         assert isinstance(sharded_param.grad, DTensor)  # mypy
-        cls.assertEqual(sharded_param.grad._local_tensor, grad_chunks[rank])
+        cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
 def run_subtests(
@@ -1350,6 +1357,53 @@ class FSDPTest(MultiProcessTestCase):
                 exact_device=True,
                 msg="FSDP did not match DDP",
             )
+
+
+def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+    def fully_shard_with_compiled_compute(*args, **kwargs):
+        # compile ``module._call_impl``
+        # to showcase how to include user-registered hooks
+        if compile_compute_on_module is None or isinstance(
+            args[0], compile_compute_on_module
+        ):
+            args[0].compile()
+        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+
+    class FullyShardPatch(Enum):
+        # apply ``partial`` in order to use ``Enum.value``
+        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
+        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
+        # add FULL for tracing FSDP
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
+            for fully_shard_patch in FullyShardPatch:
+                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
+                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    continue
+                imported_fully_shard = (
+                    f"{func.__module__}.{original_fully_shard.__name__}"
+                )
+                with mock.patch(
+                    imported_fully_shard,
+                    fully_shard_patch.value,
+                ):
+                    func(*args, **kwargs)
+                    torch.distributed.barrier()
+                # mock.patch.__exit__ does not work with multi-thread
+                # thread 1 set {func.__module__}.fully_shard
+                # thread 2 read {func.__module__}.fully_shard and thought it is original
+                # hence we manually reset them after __exit__
+                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
+                setattr(
+                    import_path(), original_fully_shard.__name__, original_fully_shard
+                )
+
+        return wrapper
+
+    return decorator
 
 
 class SkipModule(nn.Module):

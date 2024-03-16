@@ -116,7 +116,7 @@ void CommandBuffer::bind_descriptors(VkDescriptorSet descriptors) {
   state_ = CommandBuffer::State::DESCRIPTORS_BOUND;
 }
 
-void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
+void CommandBuffer::insert_barrier(PipelineBarrier& pipeline_barrier) {
   VK_CHECK_COND(
       state_ == CommandBuffer::State::DESCRIPTORS_BOUND ||
           state_ == CommandBuffer::State::RECORDING,
@@ -124,18 +124,21 @@ void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
       "is not DESCRIPTORS_BOUND or RECORDING.");
 
   if (pipeline_barrier) {
-    std::vector<VkBufferMemoryBarrier> buffer_memory_barriers(4);
+    if (!pipeline_barrier.buffer_barrier_handles.empty()) {
+      pipeline_barrier.buffer_barrier_handles.clear();
+    }
     for (const api::BufferMemoryBarrier& memory_barrier :
          pipeline_barrier.buffers) {
-      buffer_memory_barriers.push_back(memory_barrier.handle);
+      pipeline_barrier.buffer_barrier_handles.push_back(memory_barrier.handle);
     }
 
-    std::vector<VkImageMemoryBarrier> image_memory_barriers(4);
+    if (!pipeline_barrier.image_barrier_handles.empty()) {
+      pipeline_barrier.image_barrier_handles.clear();
+    }
     for (const api::ImageMemoryBarrier& memory_barrier :
          pipeline_barrier.images) {
-      image_memory_barriers.push_back(memory_barrier.handle);
+      pipeline_barrier.image_barrier_handles.push_back(memory_barrier.handle);
     }
-
     vkCmdPipelineBarrier(
         handle_, // commandBuffer
         pipeline_barrier.stage.src, // srcStageMask
@@ -143,10 +146,14 @@ void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
         0u, // dependencyFlags
         0u, // memoryBarrierCount
         nullptr, // pMemoryBarriers
-        buffer_memory_barriers.size(), // bufferMemoryBarrierCount
-        buffer_memory_barriers.data(), // pMemoryBarriers
-        image_memory_barriers.size(), // imageMemoryBarrierCount
-        image_memory_barriers.data()); // pImageMemoryBarriers
+        pipeline_barrier.buffers.size(), // bufferMemoryBarrierCount
+        !pipeline_barrier.buffers.empty()
+            ? pipeline_barrier.buffer_barrier_handles.data()
+            : nullptr, // pMemoryBarriers
+        pipeline_barrier.images.size(), // imageMemoryBarrierCount
+        !pipeline_barrier.images.empty()
+            ? pipeline_barrier.image_barrier_handles.data()
+            : nullptr); // pImageMemoryBarriers
   }
 
   state_ = CommandBuffer::State::BARRIERS_INSERTED;
@@ -413,7 +420,7 @@ void CommandPool::flush() {
 }
 
 void CommandPool::allocate_new_batch(const uint32_t count) {
-  // No-ops if there are still command buffers availble
+  // No-ops if there are still command buffers available
   if (in_use_ < buffers_.size()) {
     return;
   }

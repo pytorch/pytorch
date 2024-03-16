@@ -22,3 +22,11 @@ Process Context
 .. autoclass:: SubprocessContext
 
 .. autoclass:: RunProcsResult
+
+.. autoclass:: DefaultLogsSpecs
+    :members:
+
+.. autoclass:: LogsDest
+
+.. autoclass:: LogsSpecs
+    :members:

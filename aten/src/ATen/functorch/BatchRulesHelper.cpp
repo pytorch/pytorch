@@ -7,7 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/WrapDimUtils.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
   if (!maybe_batch_dim.has_value()) {
@@ -204,4 +204,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
   return std::make_tuple(tensor_, other_);
 }
 
-}}
+} // namespace at::functorch

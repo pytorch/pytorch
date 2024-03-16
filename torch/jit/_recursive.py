@@ -996,6 +996,10 @@ def try_compile_fn(fn, loc):
             f"Consider manually annotating `{fn}` with @torch.jit.script."
         )
 
+    # The object returned by __prepare_scriptable__ might have a different closure.
+    # Resolve it here to get the right resolution callback.
+    fn = fn.__prepare_scriptable__() if hasattr(fn, "__prepare_scriptable__") else fn  # type: ignore[operator]
+
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function
     # object

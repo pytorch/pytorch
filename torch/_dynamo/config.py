@@ -5,7 +5,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -370,6 +370,12 @@ optimize_user_defined_triton_kernels = True
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
+# A set of logging functions which will be reordered to the end of graph breaks,
+# allowing dynamo to construct larget graph. Note that there are some
+# limitations to this, such as how it does not correctly print objects that were
+# mutated after the print statement.
+reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
@@ -388,8 +394,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 
 # Enables caching of dispatches to fake tensors.
 fake_tensor_cache_enabled = (
-    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1")
-    == "1"
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "1") == "1"
 )
 
 # Enables cross checking between the fake tensor cache and dispatch.

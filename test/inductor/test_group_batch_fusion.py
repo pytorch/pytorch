@@ -6,7 +6,7 @@ import unittest
 import torch
 import torch._inductor
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
@@ -285,6 +285,7 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_fusion"],
                 0,
             )
+            self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced)
@@ -297,6 +298,7 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_fusion"],
                 3,
             )
+            self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
             counters.clear()
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -468,6 +470,8 @@ class TestPostGradBatchLinearFusion(TestCase):
             counters["inductor"]["batch_fusion"],
             2,
         )
+        self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
+        self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
 
 
 class TestFindIndependentSubsetGreedy(TestCase):

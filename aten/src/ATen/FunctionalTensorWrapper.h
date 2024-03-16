@@ -56,7 +56,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(
       const Tensor& view_value,
       const FunctionalTensorWrapper* base,
-      functionalization::ViewMeta meta);
+      const functionalization::ViewMeta& meta);
 
   // Get the underlying, actual tensor, that doesn't know anything about
   // functionalization.
@@ -130,7 +130,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // from the base tensor. This method is used by inplace-view ops like
   // transpose_. It appends a ViewMeta to the existing stack, and refreshes the
   // tensor by replaying the views off of the alias.
-  void mutate_view_meta(at::functionalization::ViewMeta meta);
+  void mutate_view_meta(const at::functionalization::ViewMeta& meta);
 
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);
@@ -221,7 +221,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Note that value is not taken by reference: internally, the wrapper will
   // change the value tensor that it points to over time.
   Tensor value_;
-  int64_t level_;
+  int64_t level_{};
   // These two counters are used for identifying
   // whether all the mutations on a given tensor are hidden from autograd or
   // not. If we have an input mutation that is hidden from autograd, then once
@@ -324,9 +324,11 @@ Tensor create_functional_tensor_with_view_meta(
 std::vector<Tensor> create_functional_tensor_with_view_meta(
     ITensorListRef view_to_wrap,
     const Tensor& base,
-    functionalization::ViewMeta meta);
+    const functionalization::ViewMeta& meta);
 
-void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
+void mutate_view_meta(
+    const Tensor& self,
+    const functionalization::ViewMeta& meta);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(

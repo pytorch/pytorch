@@ -5,7 +5,6 @@ import unittest
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
@@ -26,6 +25,7 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck

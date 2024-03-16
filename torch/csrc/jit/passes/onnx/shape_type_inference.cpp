@@ -77,10 +77,7 @@ void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
     TypePtr inferred_type) {
-  TypePtr mergedType;
-  bool inferred;
-  std::tie(mergedType, inferred) =
-      MergeInferredType(existing_type, inferred_type);
+  auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }

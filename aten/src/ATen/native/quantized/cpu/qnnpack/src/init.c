@@ -81,7 +81,7 @@ static void init(void) {
       .packA = pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
       .mr = 4,
       .nr = 8,
-      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
+      .kr = 4, // kr is really 1 but we set it to 4 because we reuse 4x4 prepacking kernel
       .log2_mr = 2,
       .log2_row_block_size = 3,
       .row_block_size = 8,
@@ -193,7 +193,7 @@ static void init(void) {
       .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon,
       .mr = 8,
       .nr = 8,
-      .kr = 4, // kr is really 1 but we set it to 4 because we resuse 4x4 prepacking kernel
+      .kr = 4, // kr is really 1 but we set it to 4 because we reuse 4x4 prepacking kernel
       .log2_mr = 3,
       .log2_row_block_size = 3,
       .row_block_size = 8,

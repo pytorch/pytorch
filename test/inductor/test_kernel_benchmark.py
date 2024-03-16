@@ -5,10 +5,10 @@ import sys
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -343,6 +343,25 @@ class TestKernelBenchmark(TestCase):
         # num_gb = (1000 * 2000 + 1000 * 3000 + 3000 * 2000) * 2 / 1e9
         #        = 0.022
         self.check_bandwidth(compiled_module, "0.022")
+
+    def test_star_dep(self):
+        """
+        Test the bandwidth estimation for StarDep
+        """
+
+        @torch.compile
+        def f(a, b):
+            a[b] = 3.0
+
+        a = torch.rand(10000, 5000, device=GPU_TYPE)
+        b = torch.randint(
+            0, 10000, [20000], device=GPU_TYPE, dtype=torch.int32
+        ).unsqueeze(1)
+        f(a, b)
+        compiled_module = self.get_compiled_module()
+        # 20000 * 4 = 80KB for b
+        # 20000 * 5000 * 4 = 200MB for a
+        self.check_bandwidth(compiled_module, "0.200")
 
 
 if __name__ == "__main__":

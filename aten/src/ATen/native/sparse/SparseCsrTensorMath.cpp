@@ -196,7 +196,7 @@ Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
 namespace native {
 
 using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO.
+// certain utility functions are usable from sparse COO.
 using namespace at::sparse;
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
@@ -222,8 +222,7 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
+  auto [compressed_indices, plain_indices] = getCompressedPlainIndices(sparse);
   return at::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
       plain_indices.clone(),
@@ -356,8 +355,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (self.layout() == kStrided) {
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(mask);
+    auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(mask);
     auto mask_values = mask.values();
     auto dense_mask = at::_sparse_compressed_tensor_unsafe(
         compressed_indices,
@@ -1066,8 +1064,6 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor col_indices = sparse.col_indices();
   Tensor values = sparse.values();
   auto numel = values.numel();
-  Tensor new_col_indices;
-  Tensor columns_map;
 
   /*
     Calling at::_unique constitutes the main bottleneck of this
@@ -1075,7 +1071,7 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
     invariant:
       csr.sum(dim=0) == csr.transpose(0, 1).sum(dim=1)
   */
-  std::tie(new_col_indices, columns_map) = at::_unique(col_indices, true, true);
+  auto [new_col_indices, columns_map] = at::_unique(col_indices, true, true);
   auto nnz = new_col_indices.numel();
 
   Tensor new_crow_indices = at::empty({2}, col_indices.options());
@@ -1456,7 +1452,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
         /*transpose*/false);
     row = coo_indices.select(0, 0);
 
-    // calculte the global index for CSC
+    // calculate the global index for CSC
     // and get the conversion permute pattern
     Tensor index = col.mul(self.size(0)).add_(row);
     permute = index.argsort();

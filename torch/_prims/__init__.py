@@ -113,6 +113,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "frexp",
     "gcd",
     "ge",
     "gt",
@@ -3007,6 +3008,23 @@ fft_c2r = _make_prim(
     impl_aten=_fft_c2r_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
+)
+
+
+def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: "torch.frexp() only supports floating-point dtypes",
+    )
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int32)
+
+
+frexp = _make_prim(
+    schema="frexp(Tensor self) -> (Tensor mantissa, Tensor exponent)",
+    meta=_frexp_meta,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    impl_aten=torch.frexp,
+    doc="",
 )
 
 register_rng_prims()

@@ -31,7 +31,7 @@ inline Tensor fold(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.fold
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.fold
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::FoldFuncOptions` class to
@@ -77,7 +77,7 @@ inline Tensor unfold(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.unfold
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.unfold
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::UnfoldFuncOptions` class

@@ -5,6 +5,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
+#include <memory>
 
 namespace at {
 

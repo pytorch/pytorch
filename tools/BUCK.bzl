@@ -124,6 +124,8 @@ def define_tools_targets(
             "autograd/templates/TraceType.cpp",
             "autograd/templates/VariableType.cpp",
             "autograd/templates/VariableType.h",
+            "autograd/templates/ViewFuncs.cpp",
+            "autograd/templates/ViewFuncs.h",
             "autograd/templates/annotated_fn_args.py.in",
             "autograd/templates/python_enum_tag.cpp",
             "autograd/templates/python_fft_functions.cpp",

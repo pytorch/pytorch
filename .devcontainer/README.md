@@ -46,7 +46,7 @@ If you are using [Visual Studio Code Remote - SSH](https://code.visualstudio.com
 
 ## Step 6: Open in DevContainer
 
-1. In VSCode, use the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P` on macOS) to run the "Remote-Containers: Open Folder in Container..." command.
+1. In VSCode, use the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P` on macOS) to run the "Dev Containers: Open Folder in Container..." command.
 2. You will be prompted with two options: CPU dev container or CUDA dev container. Choose the one you want to run.
 
 ## Step 7: Wait for Building the Environment

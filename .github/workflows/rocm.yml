@@ -18,6 +18,13 @@ concurrency:
 permissions: read-all
 
 jobs:
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
   linux-focal-rocm6_0-py3_8-build:
     name: linux-focal-rocm6.0-py3.8
     uses: ./.github/workflows/_linux-build.yml
@@ -41,7 +48,9 @@ jobs:
       contents: read
     name: linux-focal-rocm6.0-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm6_0-py3_8-build
+    needs:
+      - linux-focal-rocm6_0-py3_8-build
+      - target-determination
     with:
       build-environment: linux-focal-rocm6.0-py3.8
       docker-image: ${{ needs.linux-focal-rocm6_0-py3_8-build.outputs.docker-image }}

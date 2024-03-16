@@ -193,7 +193,15 @@ Tensor log_softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float).log();
+  // After computing softmax, some values are so small that they are below the
+  // float16 precision. These values are represented as 0 in float16 and result
+  // in -inf when log is applied. According to Wikipedia:
+  // https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Exponent_encoding,
+  // the minimum strictly positive (subnormal) value is 2^−24 ≈ 5.9605 × 10^−8.
+  // Therefore, we add 6 x 10^-8 to the output of softmax to avoid the numerical
+  // issue.
+  float epsilon = 6e-8;
+  return softmax_internal(input_arg, dim, half_to_float).add(epsilon).log();
 }
 
 #ifdef USE_VULKAN_API

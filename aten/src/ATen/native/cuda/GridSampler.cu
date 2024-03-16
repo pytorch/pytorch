@@ -104,7 +104,7 @@ namespace {
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
-        // assign nearest neighor pixel value to output pixel
+        // assign nearest neighbour pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
@@ -287,7 +287,7 @@ namespace {
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
         index_t iz_nearest = static_cast<index_t>(std::nearbyint(iz));
 
-        // assign nearest neighor pixel value to output pixel
+        // assign nearest neighbour pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
@@ -434,7 +434,7 @@ namespace {
           index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
           index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
-          // assign nearest neighor pixel value to output pixel
+          // assign nearest neighbour pixel value to output pixel
           scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
           index_t NC_offset = n * gInp_sN;
           for (index_t c = 0; c < C; ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
@@ -724,7 +724,7 @@ namespace {
           auto iy_nearest = static_cast<index_t>(std::nearbyint(iy));
           auto iz_nearest = static_cast<index_t>(std::nearbyint(iz));
 
-          // assign nearest neighor pixel value to output pixel
+          // assign nearest neighbour pixel value to output pixel
           scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
           index_t NC_offset = n * gInp_sN;
           for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC) {

@@ -1,4 +1,3 @@
-import math
 from typing import List, Optional
 
 import torch
@@ -44,9 +43,6 @@ class RAdam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-
-        if foreach is False and capturable:
-            raise ValueError("Capturable not supported with single tensor RAdam")
 
         defaults = dict(
             lr=lr,
@@ -115,6 +111,8 @@ class RAdam(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -212,7 +210,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
         {_differentiable_doc}
-        {_capturable_doc} For RAdam, capturable is only supported when foreach=True.
+        {_capturable_doc}
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
@@ -300,14 +298,17 @@ def _single_tensor_radam(
     capturable: bool,
     has_complex: bool,
 ):
-    if capturable:
-        raise RuntimeError("capturable is not supported for single tensor RAdam (when foreach=False)")
-
     for i, param in enumerate(params):
         grad = grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
+
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            assert (param.is_cuda and step_t.is_cuda) or (
+                param.is_xla and step_t.is_xla
+            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -317,10 +318,7 @@ def _single_tensor_radam(
 
         # update step
         step_t += 1
-        step = _get_value(step_t)
-
-        bias_correction1 = 1 - beta1 ** step
-        bias_correction2 = 1 - beta2 ** step
+        step = step_t if capturable else _get_value(step_t)
 
         if weight_decay != 0:
             if decoupled_weight_decay:
@@ -332,6 +330,9 @@ def _single_tensor_radam(
         exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
+        bias_correction1 = 1 - beta1 ** step
+        bias_correction2 = 1 - beta2 ** step
+
         # correcting bias for the first moving moment
         bias_corrected_exp_avg = exp_avg / bias_correction1
 
@@ -340,23 +341,32 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
-        if rho_t > 5.0:
-            # Compute the variance rectification term and update parameters accordingly
-            rect = math.sqrt(
+        def _compute_rect():
+            return (
                 (rho_t - 4)
                 * (rho_t - 2)
                 * rho_inf
                 / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            )
+            ) ** 0.5
+
+        def _compute_adaptive_lr():
             exp_avg_sq_sqrt = exp_avg_sq.sqrt()
             if differentiable:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
-            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
+
+            return (bias_correction2 ** 0.5) / exp_avg_sq_sqrt
+
+        # Compute the variance rectification term and update parameters accordingly
+        if capturable:
+            update = torch.where(rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0)
+            param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
         else:
-            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
+            if rho_t > 5.0:
+                param.add_(bias_corrected_exp_avg * lr * _compute_adaptive_lr() * _compute_rect(), alpha=-1.0)
+            else:
+                param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
 
 def _multi_tensor_radam(

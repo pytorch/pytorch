@@ -3,7 +3,7 @@ import json
 import unittest
 
 import torch
-import torch._dynamo.test_case
+import torch._inductor.test_case
 import torch._inductor.utils
 
 from torch._inductor import config
@@ -16,7 +16,7 @@ from torch.utils._triton import has_triton
 HAS_TRITON = has_triton()
 
 
-class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+class DynamoProfilerTests(torch._inductor.test_case.TestCase):
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
@@ -148,6 +148,6 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     run_tests()

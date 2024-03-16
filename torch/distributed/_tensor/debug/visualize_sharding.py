@@ -130,11 +130,16 @@ def compute_local_shape_and_global_offset(
         return tuple(local_shape), tuple(global_offset)
 
 
-def visualize_sharding(dtensor):
+def visualize_sharding(dtensor, header=""):
     """
     Visualizes sharding in 1D-2D dtensors
     Requires tabulate, install with `pip install tabulate`
+
+    note: no sharding info will be printed for empty tensors
     """
+    if dtensor.numel() == 0:  # we do not print for empty dtensors
+        return
+
     if len(dtensor.shape) >= 3:
         raise RuntimeError(
             "visualize sharding is only implemented for 1D or 2D dtensor"
@@ -142,6 +147,18 @@ def visualize_sharding(dtensor):
     placements = dtensor.placements
     device_mesh = dtensor.device_mesh
     device_type = dtensor.device_mesh.device_type
+
+    if device_mesh.get_coordinate() is None:  # current rank is not in the mesh
+        return
+
+    # Only display the visualization once for each DTensor, on the rank whose
+    # coordinate is 0 on all dimensions. For example, if the mesh is a full mesh,
+    # we will only print on rank 0.
+    local_rank_zero_on_all_dim = all(
+        device_mesh.get_local_rank(mesh_dim=dim) == 0 for dim in range(device_mesh.ndim)
+    )
+    if not local_rank_zero_on_all_dim:
+        return
 
     device_map = _mesh_to_coordinate(device_mesh, device_type)
     all_offsets = []
@@ -153,5 +170,7 @@ def visualize_sharding(dtensor):
 
     # Convert offsets to blocks with row_ranges for tabulate
     blocks = _convert_offset_to_ranges(all_offsets)
-    if device_mesh.get_rank() == 0:
-        print(_create_table(blocks))
+
+    # Print the table
+    print(header)
+    print(_create_table(blocks))

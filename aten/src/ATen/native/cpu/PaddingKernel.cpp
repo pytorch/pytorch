@@ -17,7 +17,7 @@ struct PaddingParams {
   int64_t nbatch;
   int64_t channels;
 
-  // use vectorized logic on width when output index is in [pad, input_witdh + pad),
+  // use vectorized logic on width when output index is in [pad, input_width + pad),
   // applies only to Channels First format when pad_l and pad_r are both positive.
   bool is_padding_positive_width;
 

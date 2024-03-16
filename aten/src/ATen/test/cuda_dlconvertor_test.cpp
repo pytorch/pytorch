@@ -8,10 +8,6 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <string.h>
-#include <iostream>
-#include <sstream>
-
 using namespace at;
 TEST(TestDlconvertor, TestDlconvertorCUDA) {
   manual_seed(123);

@@ -442,16 +442,14 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   if (self.scalar_type() == kBool) {
-    Tensor output, inverse;
-    std::tie(output, inverse, std::ignore) = unique_cpu_bool_template(
+    auto [output, inverse, _] = unique_cpu_bool_template(
         self, return_inverse, /* return_counts */false);
     return std::make_tuple(output, inverse);
   }
   return AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "unique", [&] {
-    Tensor output, inverse;
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
-    std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(
+    auto [output, inverse, _] = unique_cpu_sorted_template<scalar_t>(
         self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
     return std::make_tuple(output, inverse);
   });

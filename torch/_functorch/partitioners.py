@@ -5,6 +5,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
 )
+from torch.fx.experimental._backward_state import BackwardState
 import torch
 import torch.fx as fx
 import operator
@@ -20,6 +21,7 @@ from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
@@ -124,6 +126,9 @@ def _is_bwd_seed_offset(node):
 def _is_fwd_seed_offset(node):
     return node.op == "placeholder" and ("fwd_seed" in node.target or "fwd_base_offset" in node.target)
 
+def _is_backward_state(node):
+    return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
+
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
@@ -132,38 +137,49 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     return fwd_outputs, bwd_outputs
 
 
+def _remove_by_name(saved_values, name):
+    for saved_value in saved_values:
+        if saved_value.name == name:
+            saved_values.remove(saved_value)
+            break
+
+def _placeholders(nodes):
+    # Avoid making an entire pass over the graph if we only care about the input placeholders
+    result = []
+    for node in nodes:
+        if node.op == 'placeholder':
+            result.append(node)
+        else:
+            break  # placeholders are all at the start of graph
+    return result
+
+
 def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
-    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
-    bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
+    placeholders = _placeholders(joint_module.graph.nodes)
+    primal_inputs = [*filter(_is_primal, placeholders)]
+    tangent_inputs = [*filter(_is_tangent, placeholders)]
+    fwd_seed_offset_inputs = [*filter(_is_fwd_seed_offset, placeholders)]
+    bwd_seed_offset_inputs = [*filter(_is_bwd_seed_offset, placeholders)]
+    backward_state_inputs = [*filter(_is_backward_state, placeholders)]
 
-    # Construct the forward module
-    # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
-    fwd_graph = _extract_graph_with_inputs_outputs(
-        joint_module.graph,
-        primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes
-    )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
         bwd_outputs
     )
 
-    # This is to filter out saved values that don't actually end up being used by the backwards pass
-    for node in bwd_graph.nodes:
-        if node.op == 'placeholder' and not node.users:
-            for saved_value in saved_values:
-                if saved_value.name == node.name:
-                    saved_values.remove(saved_value)
-                    break
+    for node in _placeholders(bwd_graph.nodes):
+        assert node.op == 'placeholder'
+        # This is to filter out saved values that don't actually end up being used by the backwards pass
+        if not node.users:
+            _remove_by_name(saved_values, node.name)
+            _remove_by_name(saved_sym_nodes, node.name)
+        elif _is_backward_state(node):
+            # BackwardState is saved directly
+            _remove_by_name(saved_values, node.name)
+            assert backward_state_inputs
 
-            for saved_sym in saved_sym_nodes:
-                if saved_sym.name == node.name:
-                    saved_sym_nodes.remove(saved_sym)
-                    break
 
     # Now that we have the finalized list of saved values, we need to ensure
     # we propagate all symbols which are referenced by backwards inputs.
@@ -216,7 +232,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs + backward_state_inputs,
         bwd_outputs
     )
 
@@ -863,7 +879,7 @@ def min_cut_rematerialization_partition(
         if is_sym_node(node):
             weight = sym_node_size(node)
         elif is_non_tensor_node:
-            weight = math.inf
+            weight = 0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
         else:
             weight = get_node_weight(node)
 

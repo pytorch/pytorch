@@ -32,6 +32,9 @@ class TestCustomOperators(TestCase):
             torch.ops.custom.cos(x)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_dynamo_pystub_suggestion(self):
         x = torch.randn(3)
 
@@ -39,7 +42,7 @@ class TestCustomOperators(TestCase):
         def f(x):
             return torch.ops.custom.asin(x)
 
-        with self.assertRaisesRegex(RuntimeError, r'unsupported operator: .* \(you may need to `import nonexistent`'):
+        with self.assertRaisesRegex(RuntimeError, r'unsupported operator: .* you may need to `import nonexistent`'):
             f(x)
 
     def test_abstract_impl_pystub_faketensor(self):
@@ -61,7 +64,7 @@ def forward(self, arg0_1):
     def test_abstract_impl_pystub_meta(self):
         x = torch.randn(3, device="meta")
         self.assertNotIn("my_custom_ops2", sys.modules.keys())
-        with self.assertRaisesRegex(NotImplementedError, r"import the 'my_custom_ops2'"):
+        with self.assertRaisesRegex(NotImplementedError, r"'my_custom_ops2'"):
             y = torch.ops.custom.sin.default(x)
         torch.ops.import_module("my_custom_ops2")
         y = torch.ops.custom.sin.default(x)

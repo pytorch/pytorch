@@ -11,7 +11,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch's PyTorch Operator Hacks]
 //
@@ -312,4 +312,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
   m.impl("feature_alpha_dropout_", dropout_hack::feature_alpha_dropout_);
 }
 
-}}
+} // namespace at::functorch

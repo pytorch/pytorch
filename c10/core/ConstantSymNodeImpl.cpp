@@ -3,15 +3,15 @@
 namespace c10 {
 
 // This is used to support the case where the lhs is a constant symnode
-// and the rhs is a singleton symnode. This situation occurs today when we
-// perform a binary op between singleton int and plain int and the
-// singleton promotes the int into a constant symnode. If we'd like to
+// and the rhs is a nested int symnode. This situation occurs today when we
+// perform a binary op between nested int and plain int and the
+// int is promoted into a constant symnode. If we'd like to
 // support more combinations in the future, we may need to implement some
 // kind of multiple dispatch.
 #define DEFINE_BINARY_OP(OP, ROP)                                        \
   template <typename T>                                                  \
   c10::SymNode ConstantSymNodeImpl<T>::OP(const c10::SymNode& other) {   \
-    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());           \
+    TORCH_INTERNAL_ASSERT(other->is_nested_int());                       \
     return other->ROP(                                                   \
         c10::intrusive_ptr<ConstantSymNodeImpl<T>>::reclaim_copy(this)); \
   }

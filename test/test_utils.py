@@ -845,7 +845,7 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyXPUModule:
+class DummyPrivateUse1Module:
     @staticmethod
     def is_available():
         return True
@@ -873,11 +873,12 @@ class DummyXPUModule:
 
 class TestExtensionUtils(TestCase):
     def tearDown(self):
-        # Clean up from test_external_module_register
-        if hasattr(torch, "xpu"):
-            delattr(torch, "xpu")
-        if "torch.xpu" in sys.modules:
-            del sys.modules["torch.xpu"]
+        # Clean up
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if hasattr(torch, backend_name):
+            delattr(torch, backend_name)
+        if f"torch.{backend_name}" in sys.modules:
+            del sys.modules[f"torch.{backend_name}"]
 
     def test_external_module_register(self):
         # Built-in module
@@ -886,20 +887,20 @@ class TestExtensionUtils(TestCase):
 
         # Wrong device type
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module('dummmy', DummyXPUModule)
+            torch._register_device_module('dummmy', DummyPrivateUse1Module)
 
         with self.assertRaises(AttributeError):
-            torch.xpu.is_available()  # type: ignore[attr-defined]
+            torch.privateuseone.is_available()  # type: ignore[attr-defined]
 
-        torch._register_device_module('xpu', DummyXPUModule)
+        torch._register_device_module('privateuseone', DummyPrivateUse1Module)
 
-        torch.xpu.is_available()  # type: ignore[attr-defined]
+        torch.privateuseone.is_available()  # type: ignore[attr-defined]
 
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module('xpu', DummyXPUModule)
+            torch._register_device_module('privateuseone', DummyPrivateUse1Module)
 
-    def test_external_module_and_backend_register(self):
+    def test_external_module_register_with_renamed_backend(self):
         torch.utils.rename_privateuse1_backend('foo')
         with self.assertRaisesRegex(RuntimeError, "has already been set"):
             torch.utils.rename_privateuse1_backend('dummmy')
@@ -913,7 +914,7 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
             with torch.autocast(device_type=custom_backend_name):
                 pass
-        torch._register_device_module('foo', DummyXPUModule)
+        torch._register_device_module('foo', DummyPrivateUse1Module)
 
         torch.foo.is_available()  # type: ignore[attr-defined]
         with torch.autocast(device_type=custom_backend_name):

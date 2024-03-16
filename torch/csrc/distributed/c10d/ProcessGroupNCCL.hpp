@@ -1,5 +1,12 @@
 #pragma once
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #ifdef USE_C10D_NCCL
 
 #include <atomic>
@@ -99,6 +106,8 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
 
+constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
+
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 
@@ -139,6 +148,59 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
      "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
+
+#if defined(__linux__)
+struct DumpPipe {
+  DumpPipe(int rank) {
+    std::string fileStem =
+        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
+    if (fileStem.empty() ||
+        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+      return;
+    }
+    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
+    std::string filename = c10::str(fileStem, rank, ".pipe");
+    TORCH_CHECK(
+        unlink(filename.c_str()) != -1 || errno == ENOENT,
+        "Error removing existing named pipe ",
+        filename);
+    TORCH_CHECK(
+        mkfifo(filename.c_str(), 0666) != -1,
+        "Error creating named pipe ",
+        filename);
+    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
+    LOG(INFO) << "Pipe file " << filename
+              << " has been opened, write to it to trigger NCCL Debug Dump.";
+    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
+  }
+  bool shouldDump() {
+    if (fd_ == -1) {
+      return false;
+    }
+    char buf[128];
+    // non-blocking from O_NONBLOCK above.
+    // Ignore EINTR because we already will poll this
+    // again later.
+    ssize_t bytesRead = read(fd_, &buf, 128);
+    return bytesRead > 0;
+  }
+  ~DumpPipe() {
+    if (fd_ != -1) {
+      close(fd_);
+    }
+  }
+
+ private:
+  int fd_ = -1;
+};
+#else
+struct DumpPipe {
+  DumpPipe(int rank) {}
+  bool shouldDump() {
+    return false;
+  }
+};
+#endif
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -403,6 +465,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ~ProcessGroupNCCL() override;
 
+  uint64_t getUid() {
+    return static_cast<uint64_t>(uid_);
+  }
+
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
@@ -565,7 +631,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return true if abort is successful, otherwise false
   bool abort(c10::optional<std::string> abortReason = c10::nullopt);
 
-  void shutdown();
+  void shutdown(c10::optional<std::string> reason = c10::nullopt);
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -592,13 +658,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
+  // Ensure thaht if record is True, the work obj will be enqueued via
+  // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
-      const std::vector<at::Tensor>& outputs = {});
+      const std::vector<at::Tensor>& outputs = {},
+      bool record = false);
+
+  // In the timeout case and we will dump debug info such as the NCCL flight
+  // recorder to storage. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
+  bool dumpDebuggingInfo();
 
  private:
   int globalRankStart;
@@ -700,11 +774,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void runHookLoop();
 
-  // In the timeout case and we will dump debug info such as the NCCL flight
-  // recorder to storage. Down the road, if we have more complicated or blocking
-  // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo();
-
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
@@ -724,6 +793,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return the rank_ of the the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
+  // Returns the global ranks of a PG.
+  const std::vector<uint64_t>& groupRanks() const;
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -735,25 +807,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
-  // Create a thread that dumps debug info to the file specified as
-  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
-  // Serializes all dumping activity, but allows concurrent calls.
-  // Each call returns a future, which can be checked or waited on
-  // for dump completion.
-  std::future<bool> launchAsyncDebugDump();
-
-  // Helper to wait up to the specified timeout and then abandon the dump.
-  // Logs on timeout, and asserts the future's status is as expected.
-  void waitForDumpOrTimeout(
-      std::future<bool>& fut,
-      const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime,
-      size_t timeout_sec = 30);
-
   // A helper function to wait for a future to complete or timeout.
   void waitForFutureOrTimeout(
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
-      const std::string& futDescription);
+      const std::string& futDescription,
+      bool throwException = false);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -834,7 +893,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
-  // Extra time of sleep when waiting for timeout dump to finish.
+  // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
@@ -869,6 +928,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
+
+  // This is the signal from watchdog threads to indicate whether the monitor
+  // thread should dump. Making it static so that it is accessiable from all the
+  // PGs. With this flag, monitor thread would dump debug info under any one of
+  // the 3 conditions: 1: this flag is set to true by the watchdog thread when
+  // it detects a timeout. 2: timeout signal is received from
+  // other ranks through tcpstore 3: no heartbeat of watchdog Note that only the
+  // monitor thread from PG0 should dump the debug info and only once
+  static std::atomic<bool> shouldDump_;
 
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
@@ -985,15 +1053,23 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static thread_local uint64_t ncclActiveGroupCounter_;
 
   // Counting for the sequential number of NCCL collective call.
+  // (specifically, how many actual kernels we launched, which differs from
+  // op_id_ when coalescing is enabled)
   uint64_t seq_{0};
+
+  // Incrementing counter for logical operations (collective or p2p) issued on
+  // the ProcessGroup
+  uint64_t op_id_{0};
 
   // the sequential number of the last colletive enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
-  uint64_t lastEnqueuedSeq_;
+  // initialized to be -1 to indicate no collective has been enqueued
+  int64_t lastEnqueuedSeq_{-1};
 
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
-  uint64_t lastCompletedSeq_;
+  // initialized to be -1 to indicate no collective has been completed
+  int64_t lastCompletedSeq_{-1};
 
   std::exception_ptr watchDogException_ = nullptr;
 

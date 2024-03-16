@@ -247,6 +247,15 @@ class TestCuda(TestCase):
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_copy_non_blocking_type_conversion(self):
+        a = torch.ones(1, device="cuda")
+        b = torch.zeros(1, device="cpu", pin_memory=True)
+        c = torch.empty(1, device="cuda", dtype=torch.long)
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        b.copy_(a, non_blocking=True)
+        c.copy_(b, non_blocking=True)
+        self.assertEqual(a, c, exact_dtype=False)
+
 
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
@@ -1627,7 +1636,6 @@ torch.cuda.synchronize()
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_rnn(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
@@ -1676,7 +1684,7 @@ torch.cuda.synchronize()
                 # Autocast wrapper requires at::_cudnn_rnn is autograd-exposed.  This check can't guarantee
                 # at::_cudnn_rnn is autograd-exposed, but if it fires, it indicates some funny business has
                 # occurred and we should double check that at::_cudnn_rnn remains autograd-exposed.
-                self.assertEqual(out.grad_fn.name(), "CudnnRnnBackward0")
+                self.assertEqual(out.grad_fn.name(), "MiopenRnnBackward0" if torch.version.hip else "CudnnRnnBackward0")
                 out.sum().backward()
                 grads = [p.grad.clone() for p in rnn.parameters()]
 
@@ -2643,6 +2651,46 @@ exit(2)
             model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
         )
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_graph_make_graphed_callables_same_pool(self):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+        models = []
+        num_models = 3
+        for _ in range(num_models):
+            models.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(32, 128),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(128, 128),
+                ).cuda()
+            )
+        # we will reuse the same pool for all graph captures
+        mempool = torch.cuda.graph_pool_handle()
+        graphed_models = []
+        for model in models:
+            x = torch.randn([64, 32], device="cuda")
+            graphed_model = deepcopy(model)
+            graphed_model = torch.cuda.make_graphed_callables(graphed_model, (x,), pool=mempool)
+            graphed_models.append(graphed_model)
+
+        for model, graphed_model in zip(models, graphed_models):
+            x = torch.randn([64, 32], device="cuda")
+            y = model(x)
+            yg = graphed_model(x)
+            l = y.norm()
+            lg = yg.norm()
+            l.backward()
+            lg.backward()
+
+            self.assertEqual(y, yg)
+            self.assertEqual(l, lg)
+            for p, pg in zip(model.parameters(), graphed_model.parameters()):
+                self.assertEqual(p, pg)
+                self.assertEqual(p.grad, pg.grad)
+                self.assertNotEqual(p.data_ptr(), pg.data_ptr())
+                self.assertNotEqual(p.grad.data_ptr, pg.grad.data_ptr)
+
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
             params = [
@@ -2696,9 +2744,9 @@ exit(2)
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach,
-                              "decoupled_weight_decay": decoupled_weight_decay})
-            for optimizer_ctor, foreach, decoupled_weight_decay in product(
-                (torch.optim.NAdam,), (False, True), (False, True),)
+                              "decoupled_weight_decay": decoupled_weight_decay, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
+                (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
@@ -2707,12 +2755,9 @@ exit(2)
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
-            (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True), (0, 0.1))
-        ] + [
-            (torch.optim.RAdam, {"lr": 0.1, "foreach": True, "decoupled_weight_decay": decoupled_weight_decay,
-                                 "weight_decay": weight_decay})
-            for decoupled_weight_decay, weight_decay in product((False, True), (0.0, 0.1))
+            (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True),
+                                                                           (False, True), (0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2724,7 +2769,8 @@ exit(2)
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
-                                                                 torch.optim.NAdam), (True, False)):
+                                                                 torch.optim.ASGD, torch.optim.Adamax,
+                                                                 torch.optim.NAdam, torch.optim.RAdam), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
@@ -3222,6 +3268,42 @@ class TestCudaMallocAsync(TestCase):
                 self.assertTrue(('thealloc' in ss) == (context != 'state'))
             finally:
                 torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    def test_memory_plots_history_context(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            x = None
+
+            def should_capture1():
+                nonlocal x
+                x = torch.rand(4, 4, device='cuda')
+
+            def should_not_capture():
+                nonlocal x
+                x = torch.rand(3, 4, device='cuda')
+
+            def should_capture2():
+                nonlocal x
+                x = torch.rand(4, 4, device='cuda')
+
+            # Recording with context and python call stacks should capture the call stack.
+            torch.cuda.memory._record_memory_history(context="all", stacks="python")
+            should_capture1()
+            # Recording with context=None should not capture the call stack.
+            torch.cuda.memory._record_memory_history(context=None)
+            should_not_capture()
+            # Recording with context and python call stacks should capture the call stack.
+            torch.cuda.memory._record_memory_history(context="all", stacks="python")
+            should_capture2()
+
+            ss = json.dumps(torch.cuda.memory._snapshot())
+            self.assertTrue('should_capture1' in ss)
+            self.assertTrue('should_not_capture' not in ss)
+            self.assertTrue('should_capture2' in ss)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
