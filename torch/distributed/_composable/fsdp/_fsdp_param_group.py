@@ -1,6 +1,6 @@
 import contextlib
 
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -15,7 +15,7 @@ from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
     foreach_all_gather_copy_out,
-    foreach_reduce_scatter,
+    foreach_reduce,
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
@@ -54,6 +54,10 @@ class FSDPCommContext:
         # Reduce-scatter stream gives separate execution "thread" for post-
         # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
+        # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
+        # since collectives use different network resources and can overlap
+        # in the typical intra-node sharding / inter-node replication case
+        self.all_reduce_stream = torch.cuda.Stream()
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -118,19 +122,20 @@ class FSDPParamGroup:
         # of the output's grad fns and later query the autograd engine whether
         # any grad fn will execute in the current backward to know to prefetch.
         self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
-        # Whether to reduce-scatter or all-reduce gradients, respectively
-        # (can be set to false to save communication during gradient
-        # accumulation); all-reducing without reduce-scatter is disallowed
-        self.reduce_scatter_grads: bool = True
+        # Whether to reduce gradients at all (whether for FSDP or HSDP)
+        self.reduce_grads: bool = True
+        # Whether to all-reduce gradients for HSDP; only used if
+        # `self.reduce_grads` is true, in which case setting this to false
+        # means reduce-scatter but no all-reduce
         self.all_reduce_grads: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
         self._all_gather_result: Optional[AllGatherResult] = None
-        # Holds the reduce-scatter view-out CUDA event that marks the end of
-        # the group's post-backward (e.g. reduce-scatter and div), which should
-        # be waited on at the end of backward
-        self._reduce_scatter_view_out_event: Optional[torch.cuda.Event] = None
+        # Holds the reduce-scatter/all-reduce view-out CUDA event that marks the end of
+        # the group's post-backward (e.g. reduce-scatter, all-reduce and div), which
+        # should be waited on at the end of backward
+        self._post_reduce_view_out_event: Optional[torch.cuda.Event] = None
         # Holds the reshard-after-forward CUDA event when resharding to a
         # different world size, which should be waited on in the next unshard
         self._reshard_after_forward_event: Optional[torch.cuda.Event] = None
@@ -164,7 +169,10 @@ class FSDPParamGroup:
         if self._reduce_dtype == torch.float32:
             # Use NCCL's AVG op to divide after reduction since it is more
             # performant and fp32 has sufficient precision
-            self._grad_divide_factors: Optional[Tuple[float, float]] = None
+            self._grad_divide_factors: Union[Tuple[None, None], Tuple[float, float]] = (
+                None,
+                None,
+            )
             return
         # For N data parallel workers, each worker computes g_i, and they
         # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
@@ -298,7 +306,7 @@ class FSDPParamGroup:
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
-            if not self.reduce_scatter_grads:
+            if not self.reduce_grads:
                 self.reshard()
                 return
             # Save the autograd-computed gradients before resharding to only
@@ -314,7 +322,7 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with torch.profiler.record_function("FSDP::post_backward_reduce"):
-            self._reduce_scatter_view_out_event = foreach_reduce_scatter(
+            self._post_reduce_view_out_event = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
                 self._reduce_scatter_process_group,
@@ -323,12 +331,16 @@ class FSDPParamGroup:
                 self._reduce_dtype,
                 self.device,
                 self._grad_divide_factors,
+                self._all_reduce_process_group
+                if self._should_all_reduce_grads()
+                else None,
+                self.comm_ctx.all_reduce_stream,
             )
 
     def finalize_backward(self):
-        if self._reduce_scatter_view_out_event is not None:
-            torch.cuda.current_stream().wait_event(self._reduce_scatter_view_out_event)
-            self._reduce_scatter_view_out_event = None
+        if self._post_reduce_view_out_event is not None:
+            torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
+            self._post_reduce_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
         self.all_forward_output_grad_fns.clear()
@@ -465,6 +477,15 @@ class FSDPParamGroup:
         mesh_info = self.mesh_info
         assert isinstance(mesh_info, FSDPMeshInfo)
         return mesh_info.shard_process_group
+
+    @property
+    def _all_reduce_process_group(self) -> dist.ProcessGroup:
+        mesh_info = self.mesh_info
+        assert isinstance(mesh_info, HSDPMeshInfo)
+        return mesh_info.replicate_process_group
+
+    def _should_all_reduce_grads(self) -> bool:
+        return isinstance(self.mesh_info, HSDPMeshInfo) and self.all_reduce_grads
 
 
 def _get_param_module_infos(

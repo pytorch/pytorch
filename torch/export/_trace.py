@@ -45,7 +45,7 @@ from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 
-from .dynamic_shapes import _process_constraints, Constraint
+from .dynamic_shapes import _process_constraints
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -61,6 +61,7 @@ from .graph_signature import (
     ExportGraphSignature,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 
 
@@ -315,7 +316,7 @@ def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -346,7 +347,7 @@ def _export_to_torch_ir(
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
-                    constraints=constraints,  # type: ignore[arg-type]
+                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
@@ -475,7 +476,7 @@ def _export_non_strict(
 
     is_joint = graph_signature.backward_signature is not None
 
-    def make_argument_spec(node) -> ArgumentSpec:
+    def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
             return ConstantArgument(value=node)
@@ -484,7 +485,10 @@ def _export_non_strict(
             "val" in node.meta
         ), f"{node} is not a constant or a node with a 'val' metadata field"
         val = node.meta["val"]
-        if isinstance(val, FakeTensor):
+        if i < len(graph_signature.input_tokens):
+            # TODO: We should be checking for a different type, once we add a new type
+            return TokenArgument(name=node.name)
+        elif isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
@@ -508,13 +512,15 @@ def _export_non_strict(
         grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
         loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
         inputs=[
-            make_argument_spec(node)
-            for node in gm.graph.nodes
+            make_argument_spec(i, node)
+            for i, node in enumerate(gm.graph.nodes)
             if node.op == "placeholder"
         ],
         outputs=[
-            make_argument_spec(node)
-            for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
+            make_argument_spec(i, node)
+            for i, node in enumerate(
+                pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
+            )
         ],
         input_tokens=graph_signature.input_tokens,
         output_tokens=graph_signature.output_tokens,
@@ -700,9 +706,8 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
     _EXPORT_FLAGS = flags
 
-    constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes) or []
-
     kwargs = kwargs or {}
+    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
 
     constant_attrs = _gather_constant_attrs(mod)
 
@@ -785,7 +790,7 @@ def _export(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, constraints)
+        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
@@ -867,7 +872,7 @@ def _export(
         mod,
         args,
         kwargs,
-        constraints,
+        dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
         _log_export_usage=False,
