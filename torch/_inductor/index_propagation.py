@@ -28,16 +28,37 @@ import sympy
 from typing_extensions import TypeAlias
 
 import torch
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._prims_common import (
+    dtype_to_type,
+    is_boolean_dtype,
+    is_float_dtype,
+    is_integer_dtype,
+)
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+
+
+_ExprType = Union[sympy.Expr, float, int, bool]
+
+
+def _is_constant(val: _ExprType):
+    if isinstance(val, sympy.Basic):
+        return val.is_number
+    return isinstance(val, (int, float, bool))
 
 
 @dataclass
 class TypedExpr:
     """A SymPy expression with associated type"""
 
-    expr: sympy.Expr
+    expr: _ExprType
     dtype: torch.dtype
+
+    def is_constant(self):
+        return _is_constant(self.expr)
+
+    def __post_init__(self):
+        if _is_constant(self.expr):
+            self.expr = dtype_to_type(self.dtype)(self.expr)
 
 
 class SymPyOps:
@@ -54,31 +75,20 @@ class SymPyOps:
 
     @staticmethod
     def constant(value: Union[int, float, bool], dtype: torch.dtype) -> TypedExpr:
-        if is_boolean_dtype(dtype):
-            expr = sympy.Integer(bool(value))
-        elif is_integer_dtype(dtype):
-            expr = sympy.Integer(int(value))
-        else:
-            expr = sympy.Float(float(value))
-        return TypedExpr(expr, dtype)
+        return TypedExpr(value, dtype)
 
     @staticmethod
-    def index_expr(value: sympy.Expr, dtype: torch.dtype) -> Union[int, TypedExpr]:
-        if isinstance(value, int):
-            value = sympy.Integer(value)
+    def index_expr(value: Union[sympy.Expr, int], dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
     def to_dtype(
-        value: Any, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
-    ) -> Union[int, TypedExpr]:
-        if isinstance(value.expr, (sympy.Integer, sympy.Float)):
-            return SymPyOps.constant(value.expr, dtype)
-        elif is_integer_dtype(dtype) and is_integer_dtype(value.dtype):
-            return SymPyOps.index_expr(value.expr, dtype)
-        else:
-            # TODO: Inductor doesn't handle floating point in sympy expressions well at the moment
+        value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+    ) -> TypedExpr:
+        result = TypedExpr(value.expr, dtype)
+        if is_floating_dtype(dtype) and not result.is_constant():
             return NotImplemented
+        return result
 
     @staticmethod
     def square(x: TypedExpr) -> TypedExpr:
@@ -177,10 +187,9 @@ class IndexPropagation:
 
     def materialize_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
         # Construct a new constant/index_expr from the SymPy expression
-        if isinstance(expr, sympy.Integer):
-            return self._inner.constant(int(expr), dtype)
-        elif expr.is_number:
-            return self._inner.constant(float(expr), dtype)
+        if _is_constant(expr):
+            val = dtype_to_type(dtype)(expr)
+            return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
 
     def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
