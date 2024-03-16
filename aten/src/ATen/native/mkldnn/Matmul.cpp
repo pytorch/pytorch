@@ -82,7 +82,7 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  TORCH_CHECK(false, __func__, ": ATen not compiled with MKLDNN support");
+  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
 }
 
 } // namespace native

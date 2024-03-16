@@ -150,7 +150,6 @@
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
-#include <iostream>
 
 namespace at {
 
@@ -3509,16 +3508,17 @@ Tensor _weight_int8pack_mm_cpu(
 }
 
 Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) {
-  TORCH_CHECK(self.dim() == 2, __func__, ": Expected self to be of dimension 2 but got ", self.dim());
-  TORCH_CHECK(mat2.dim() == 2, __func__, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
-  TORCH_CHECK(self.size(1) == mat2.size(0), __func__, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
-  TORCH_CHECK(self.dtype() == at::kChar, __func__, ": Expected self dtype to be of type int8 but got ", self.dtype());
-  TORCH_CHECK(mat2.dtype() == at::kChar, __func__, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
-  TORCH_CHECK(result.dtype() == at::kInt, __func__, ": Expected result dtype to be of type kInt but got ", result.dtype());
-  TORCH_CHECK(result.size(0) == self.size(0), __func__, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
-  TORCH_CHECK(result.size(1) == mat2.size(1), __func__, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
-  TORCH_CHECK(result.dim() == 2, __func__, ": Expected result to be of dimension 2 but got ", result.dim());
-  TORCH_CHECK(result.is_contiguous(), __func__, ": Expected result to be contiguous.");
+  constexpr char* func_name = "int_mm_out_cpu";
+  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
+  TORCH_CHECK(result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
+  TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
+  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
 
   if (result.numel() == 0 || self.size(1) == 0) {
     return result.zero_();
@@ -3530,7 +3530,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
     } catch (const std::exception& e) {
-      TORCH_WARN(__func__, " failed, switching to BLAS gemm: ", e.what());
+      TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
     }
   }
   if (!dispatched) {
