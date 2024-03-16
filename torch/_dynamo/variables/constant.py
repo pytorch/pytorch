@@ -83,6 +83,9 @@ class ConstantVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def is_python_constant(self):
+        return True
+
     @property
     def items(self):
         """
