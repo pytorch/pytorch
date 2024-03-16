@@ -14551,8 +14551,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         decorators=[skipCUDAIf(TEST_WITH_ROCM, "ROCm doesn't support efficient attention")],
         skips=(
             # Device mismatch due to philox seed and offset
