@@ -62,6 +62,7 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
     from functorch import make_fx
 
     from torch._dispatch.python import enable_python_dispatcher
+    from torch._guards import detect_fake_mode
     from ..utils import get_fake_value
     from .base import MutableLocal
     from .builder import SourcelessBuilder
@@ -94,11 +95,13 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
             return inner
 
         wrapped_fn = wrapper_fn(fn)
+        fake_mode = detect_fake_mode(fake_value_args)
 
-        with enable_python_dispatcher():
-            fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
-                fake_value_args, fake_value_kwargs
-            )
+        with fake_mode:
+            with enable_python_dispatcher():
+                fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
+                    fake_value_args, fake_value_kwargs
+                )
 
         if function_key is not None:
             function_key_to_fx[function_key] = fx_g
