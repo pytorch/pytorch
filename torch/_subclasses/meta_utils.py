@@ -166,9 +166,12 @@ class MetaConverter:
     def meta_storage(self, s: torch.UntypedStorage, callback):
         # Use a Weak Ref to s in order to not leak memory
         if self.get_storage_memo(s) is None:
-            self.storage_memo[WeakIdRef(s)] = callback(
-                lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
-            ).untyped_storage()
+            self.set_storage_memo(
+                s,
+                callback(
+                    lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
+                ).untyped_storage(),
+            )
         return self.get_storage_memo(s)
 
     # This function assumes that it's possible to do the conversion
