@@ -13,6 +13,7 @@ from torch.export.graph_signature import (
     InputKind,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
@@ -351,7 +352,7 @@ def _verify_exported_program_signature(exported_program) -> None:
                     f"Custom object {custom_obj} is not in the constants dictionary."
                 )
         elif input_spec.kind == InputKind.TOKEN:
-            if not isinstance(input_spec.arg, TensorArgument):
+            if not isinstance(input_spec.arg, TokenArgument):
                 raise SpecViolationError(
                     f"Constant tensor {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
                 )
