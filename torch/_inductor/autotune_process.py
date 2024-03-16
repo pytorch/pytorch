@@ -539,6 +539,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
                 matrix_instr_nonkdim=self.matrix_instr_nonkdim,
             )
         else:

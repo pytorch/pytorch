@@ -35,6 +35,7 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    Sequence,
     Set,
     TypeVar,
     Union,
@@ -170,6 +171,7 @@ def do_bench(*args, **kwargs):
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
 
+
 def get_primitive_bitwidth(dtype: torch.dtype):
     if dtype.is_floating_point:
         return torch.finfo(dtype).bits
@@ -206,26 +208,25 @@ def get_read_only_benchmark_value(
     )
     needed_bytes = needed_size * get_primitive_bitwidth(dtype)
 
-    tc_params = []
     tc = torch._guards.TracingContext.try_get()
-    tc_params = [] if tc is None else tc.params_flat
+    tc_params: List[torch.Tensor] = [] if tc is None else tc.params_flat  # type: ignore[assignment]
+
     gm = V.graph.module
     for mod_tensor in itertools.chain(gm.parameters(), gm.buffers(), tc_params):
-        # MM benchmarking can be sensitive to mantissa
-        # Dont take from integer tensors bc they may be sparse
-        if not mod_tensor.is_floating_point():
-            continue
-
-        if not mod_tensor.device == device:
-            continue
-
         mod_tensor = (
             mod_tensor.data if type(mod_tensor) is torch.nn.Parameter else mod_tensor
         )
         if type(mod_tensor) is not torch.Tensor or not torch._C._has_storage(
             mod_tensor
         ):
-            breakpoint()
+            continue
+
+        # MM benchmarking can be sensitive to mantissa
+        # Dont take from integer tensors bc they may be sparse
+        if not mod_tensor.is_floating_point():
+            continue
+
+        if not mod_tensor.device == device:
             continue
 
         if not mod_tensor.untyped_storage().nbytes() >= needed_size:
@@ -243,7 +244,7 @@ def get_read_only_benchmark_value(
             storage_offset=0,
             size=[needed_size],
             stride=[1],
-        )
+        )  # type: ignore[call-overload]
         out_tensor = torch.as_strided(buffer, size, stride)
 
         V.graph.module_storages_in_benchmark_use.add(stor_data_ptr)
@@ -772,13 +773,6 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-def output_node(gm: torch.fx.GraphModule):
-    """Get the output node from an FX graph"""
-    last_node = next(iter(reversed(gm.graph.nodes)))
-    assert last_node.op == "output"
-    return last_node
-
-
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
@@ -997,6 +991,13 @@ class IndentedBuffer:
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
 
+    def __add__(self, other):
+        assert self._indent == other._indent
+        res = IndentedBuffer(initial_indent=self._indent)
+        res.writelines(self._lines)
+        res.writelines(other._lines)
+        return res
+
 
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
@@ -1076,7 +1077,7 @@ def use_cutlass_template(layout):
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
     )
