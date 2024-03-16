@@ -2057,7 +2057,6 @@ class CommonTemplate:
         self.common(forward, (y,))
 
     def test_div_by_zero(self):
-
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
             return (
