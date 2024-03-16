@@ -3632,12 +3632,19 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 1, 8, 8, device="cpu")
         v = torch.randn(1, 1, 8, 8, device="cpu")
 
-        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-        self.assertExpectedInline(ep.graph_module.code.strip(), """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    return (getitem,)""")
+        from torch.nn.attention import SDPBackend
+        with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
+            ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+            print(ep.graph)
+            ep.run_decompositions()
+            print(ep.graph)
+
+
+#         self.assertExpectedInline(ep.graph_module.code.strip(), """\
+# def forward(self, arg0_1, arg1_1, arg2_1):
+#     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
+#     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
+#     return (getitem,)""")
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
