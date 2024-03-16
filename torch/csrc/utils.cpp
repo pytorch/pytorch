@@ -220,7 +220,7 @@ void THPPointer<THPStorage>::free() {
 
 void storage_fill(const at::Storage& self, uint8_t value) {
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t.fill_(value);
 }
 
@@ -229,7 +229,7 @@ void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t[idx].fill_(value);
 }
 
@@ -238,7 +238,7 @@ uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   return self_t[idx].item<uint8_t>();
 }
 

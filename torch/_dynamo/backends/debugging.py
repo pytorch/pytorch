@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import dataclasses
 import functools
 from importlib import import_module

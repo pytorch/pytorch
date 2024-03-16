@@ -199,7 +199,7 @@ class BasicEvaluation:
             while (
                 current_kernel_index < len(cuda_kernel_events)
                 and (cuda_kernel_events[current_kernel_index].start_us()) * 1000
-                <= start_time
+                <= start_time  # type: ignore[possibly-undefined]
             ):
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1
@@ -207,7 +207,7 @@ class BasicEvaluation:
 
             if hasattr(event, "start_us"):
                 queue_depth_list.append(
-                    Interval(start_time, end_time, current_queue_depth)
+                    Interval(start_time, end_time, current_queue_depth)  # type: ignore[possibly-undefined]
                 )
             elif hasattr(event, "start_time_ns"):
                 self.metrics[EventKey(event)].queue_depth = current_queue_depth

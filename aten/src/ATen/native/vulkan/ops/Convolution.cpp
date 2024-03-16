@@ -4,6 +4,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Copy.h>
@@ -293,7 +294,8 @@ static api::ShaderInfo get_shader(
 
   if (quantized) {
     if (transposed) {
-      TORCH_CHECK(false, "Quantized TConv not supported!");
+      shader = VK_KERNEL(quantized_conv_transpose2d);
+      return shader;
     }
 
     switch (method) {
@@ -318,7 +320,7 @@ static api::ShaderInfo get_shader(
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_LOOKUP_KERNEL(conv2d);
+      shader = VK_KERNEL(conv2d);
       break;
     case Conv2dDepthwise:
       shader = VK_KERNEL(conv2d_dw);
@@ -334,7 +336,7 @@ static api::ShaderInfo get_shader(
       }
       break;
     case Conv2dPointwise:
-      shader = VK_LOOKUP_KERNEL(conv2d_pw);
+      shader = VK_KERNEL(conv2d_pw_output_tile_2x2);
       break;
   }
   return shader;
@@ -834,21 +836,33 @@ Tensor quantized_convolution(
 
 namespace conv1d {
 
-// This implementation only cover a special case. It only supports
-// input = (n=1, input_channel, lengths)
-// ouput = (n=1, output_channel, lengths - kernel_size + 1)
-// stride=1, padding=0, dilation=1, groups=input_channels=output_channels
-//
-// Hence:
-// weight's shape should be (output_channel, 1, kernel_size)
-// bias's shape (if applicable) should be (output_channel,)
-//
-// In this implementation, it reduces to running a 1d convolution for reach
-// channel.
-// There are multiple perf improvement opportunities: e.g. width-packing
-// input and weight tensors, batch reading when groups is low.
+vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
+  Tensor weight = weight_arg;
 
-Tensor conv1d(
+  if (weight.is_cpu()) {
+    weight = weight.vulkan();
+  }
+
+  TORCH_CHECK(weight.is_vulkan(), "Weight must be on Vulkan device!");
+
+  vTensor v_weight = convert(weight);
+  if (v_weight.gpu_memory_layout() ==
+      api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED) {
+    v_weight = packing::convert_image_channels_packed_to_width_packed(v_weight);
+  }
+
+  TORCH_CHECK(
+      v_weight.gpu_memory_layout() == api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      "After packing, the v_weight must be in TENSOR_WIDTH_PACKED format");
+
+  return v_weight;
+}
+
+/*
+ * This is a full implementation. For algorithm details, refer to the shader
+ * kernel code.
+ */
+Tensor run_conv1d_context_impl(
     const Tensor& input_arg,
     const Tensor& weight_arg,
     const c10::optional<Tensor>& bias_arg_opt,
@@ -864,7 +878,8 @@ Tensor conv1d(
   const IntArrayRef& input_sizes = input.sizes();
   const IntArrayRef& weight_sizes = weight.sizes();
 
-  int32_t weight_out_channels = static_cast<int32_t>(weight_sizes[0]);
+  int32_t in_channels = static_cast<int32_t>(input_sizes[1]);
+  int32_t out_channels = static_cast<int32_t>(weight_sizes[0]);
   int32_t kernel_size = static_cast<int32_t>(weight_sizes[2]);
 
   Tensor bias;
@@ -875,45 +890,44 @@ Tensor conv1d(
       bias = bias_arg_opt.value().vulkan();
     }
   } else {
-    bias = at::zeros({weight_out_channels}).vulkan();
+    bias = at::zeros({out_channels}).vulkan();
   }
 
   TORCH_CHECK(input.dim() == 3, "input must be a 3-dim tensor");
   TORCH_CHECK(weight.dim() == 3, "weight must be a 3-dim tensor");
-  TORCH_CHECK(stride == IntArrayRef(1), "stride must be 1");
-  TORCH_CHECK(padding == IntArrayRef(0), "padding must be 1");
-  TORCH_CHECK(dilation == IntArrayRef(1), "dilation must be 1");
-
-  TORCH_CHECK(input_sizes[0] == 1, "Only support single batch");
-  TORCH_CHECK(input_sizes[1] == groups, "input_channel must equals to groups");
   TORCH_CHECK(
-      weight_sizes[0] == groups, "weight.sizes()[0] must equals to groups");
-  TORCH_CHECK(weight_sizes[1] == 1, "weight.sizes()[1] must equals to 1");
+      in_channels % groups == 0, "in_channels must be divisible by groups");
+  TORCH_CHECK(
+      out_channels % groups == 0, "out_channels must be divisible by groups");
 
   const vTensor& v_input = convert(input);
-  const IntArrayRef v_input_sizes = v_input.sizes();
-
   const vTensor& v_weight = convert(weight);
   const vTensor& v_bias = convert(bias);
 
   vTensor v_output{
       context,
-      {
-          v_input_sizes[0],
-          weight_out_channels,
-          v_input_sizes[2] - kernel_size + 1,
-      },
+      conv_output_size(input_sizes, weight_sizes, padding, stride, dilation),
       v_input.dtype(),
   };
 
   const struct Block final {
-    int32_t out_channels;
-    int32_t in_lengths;
+    int32_t in_length;
     int32_t kernel_size;
+    int32_t stride;
+    int32_t padding;
+    int32_t dilation;
+    int32_t in_group_size;
+    int32_t out_group_size;
+    int32_t batch_size;
   } block{
-      weight_out_channels,
       static_cast<int32_t>(input_sizes[2]),
       kernel_size,
+      static_cast<int32_t>(stride[0]),
+      static_cast<int32_t>(padding[0]),
+      static_cast<int32_t>(dilation[0]),
+      static_cast<int32_t>(in_channels / groups),
+      static_cast<int32_t>(out_channels / groups),
+      static_cast<int32_t>(input_sizes[0]),
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -925,7 +939,7 @@ Tensor conv1d(
       // pipeline barrier
       pipeline_barrier,
       // global work group size
-      {1, static_cast<uint32_t>(weight_out_channels), 1},
+      {1, static_cast<uint32_t>(out_channels), 1},
       // local work group size
       {1, 1, 1},
       // fence handle
@@ -1112,13 +1126,36 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       output_max));
 }
 
+c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /* transposed = */ true,
+      /* quantized = */ true,
+      output_padding,
+      groups,
+      output_min,
+      output_max));
+}
+
 Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,
     double scale,
     int64_t zero_point) {
   api::Context* const context = api::context();
-
   // Validate input tensor is a Vulkan tensor, then convert to vTensor
   TORCH_CHECK(input_arg.is_vulkan(), "Input tensor must be Vulkan!");
   const vTensor& v_input = convert(input_arg);
@@ -1356,9 +1393,94 @@ Tensor conv2d_clamp_run(
   return context->run(input);
 }
 
+Conv1dPackedContext::Conv1dPackedContext(
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const IntArrayRef dilation_arg,
+    const int64_t groups)
+    : unpacked_{c10::AnyType::get()} {
+  packed_.reserve(Packed::NumArgs);
+  packed_.emplace_back(
+      convert(conv1d::pack_weights_using_width_packing(weight.vulkan())));
+  packed_.emplace_back(bias->vulkan());
+  packed_.emplace_back(stride_arg);
+  packed_.emplace_back(padding_arg);
+  packed_.emplace_back(dilation_arg);
+  packed_.emplace_back(safe_downcast<int32_t>(groups));
+
+  compute_shader_ = VK_KERNEL(conv1d);
+
+  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+    unpacked_.emplace_back(stride_arg.vec());
+    unpacked_.emplace_back(padding_arg.vec());
+    unpacked_.emplace_back(dilation_arg.vec());
+    unpacked_.emplace_back(safe_downcast<int32_t>(groups));
+  }
+}
+
+Conv1dPackedContext Conv1dPackedContext::pack(c10::impl::GenericList unpacked) {
+  return Conv1dPackedContext(
+      unpacked.get(Unpacked::Weight).toTensor(),
+      get_optional_tensor(unpacked, Unpacked::Bias),
+      unpacked.get(Unpacked::Stride).toIntVector(),
+      unpacked.get(Unpacked::Padding).toIntVector(),
+      unpacked.get(Unpacked::Dilation).toIntVector(),
+      unpacked.get(Unpacked::Groups).toInt());
+}
+
+c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups) {
+  return c10::make_intrusive<Conv1dPackedContext>(
+      Conv1dPackedContext(weight, bias, stride, padding, dilation, groups));
+}
+
+Tensor convolution1d(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const int64_t groups) {
+  Conv1dPackedContext conv1d_context =
+      Conv1dPackedContext(weight, bias, stride, padding, dilation, groups);
+
+  return run_conv1d_context(
+      input, c10::make_intrusive<Conv1dPackedContext>(conv1d_context));
+}
+
+Tensor run_conv1d_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv1dPackedContext>& context) {
+  const Tensor weight =
+      context->get_val(Conv1dPackedContext::Packed::Weight).toTensor();
+  const c10::optional<Tensor>& bias_opt =
+      context->get_val(Conv1dPackedContext::Packed::Bias).toTensor();
+  const auto stride =
+      context->get_val(Conv1dPackedContext::Packed::Stride).toIntVector();
+  const auto padding =
+      context->get_val(Conv1dPackedContext::Packed::Padding).toIntVector();
+  const auto dilation =
+      context->get_val(Conv1dPackedContext::Packed::Dilation).toIntVector();
+  const auto groups =
+      context->get_val(Conv1dPackedContext::Packed::Groups).toInt();
+  return conv1d::run_conv1d_context_impl(
+      input, weight, bias_opt, stride, padding, dilation, groups);
+}
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("convolution_overrideable", convolution);
-  m.impl(TORCH_SELECTIVE_NAME("aten::conv1d"), TORCH_FN(conv1d::conv1d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::conv1d"), TORCH_FN(convolution1d));
 }
 
 } // namespace ops

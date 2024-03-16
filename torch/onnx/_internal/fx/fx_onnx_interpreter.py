@@ -112,7 +112,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         #    torch.jit.Value, fx_name_to_onnxscript_value[fx_node_arg.name],
         #    in TorchScript graph.
         return fx_name_to_onnxscript_value[onnx_tensor.name]
-    if isinstance(onnx_tensor, (tuple, list)) and any(
+    elif isinstance(onnx_tensor, (tuple, list)) and any(
         isinstance(node, torch.fx.Node)
         and fx_type_utils.is_torch_symbolic_type(node.meta.get("val"))
         for node in onnx_tensor
@@ -128,15 +128,41 @@ def _retrieve_or_adapt_input_to_graph_set(
                 List[int],
             ]
         ] = []
+        # onnx_tensor contains a list of scalars which could be one of
+        #   - tensor with empty shape,
+        #   - tensor with tensor with shape (1,),
+        #   - torch.SymInt,
+        #   - int
+        #   - ...
+        # They should all be promoted to tensor with shape (1,)
+        # in order to call ONNX's Concat.
         for tensor in onnx_tensor:
+            # Prepare `tensor` as input of ONNX's Concat.
+
             if isinstance(
                 tensor, torch.fx.Node
             ) and fx_type_utils.is_torch_symbolic_type(tensor.meta.get("val")):
-                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
+                # In this case, tensor is a torch.SymInt from Dynamo's perspective.
+                # It might be mapped to tensor with shape () or (1,) in ONNX.
+                element_value = fx_name_to_onnxscript_value[tensor.name]
+                if isinstance(
+                    element_value, onnxscript_graph_building.TorchScriptTensor
+                ):
+                    # All elements sequence_mixed_elements will be send to onnx's Concat
+                    # as inputs. Therefore, they are required to have the same rank.
+                    # Since tensors with rank=0 (i.e., scalar) cannot be concated, all
+                    # scalars are promoted to tensors with shape (1,).
+                    with onnxscript.evaluator.default_as(tracer):
+                        element_value = onnxscript.opset18.Reshape(element_value, [1])  # type: ignore[arg-type, type-var]
+                sequence_mixed_elements.append(element_value)
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
                 # dim, and onnx-script will promote it to tensor(int64)
                 sequence_mixed_elements.append([tensor])
+            else:
+                raise RuntimeError(
+                    f"Unsupported type in sequence_mixed_elements: {type(tensor)}"
+                )
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
         # so list of sym_ints is concatenated to a tensor before calling ONNX op.
@@ -292,7 +318,7 @@ def _fill_in_default_kwargs(
 ) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
     """Find and Fill in the not provided kwargs with default values."""
 
-    # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+    # TODO: aten::sym_size has overload, but fx graph is using
     # overloadpacket for some reasons.
     # https://github.com/pytorch/pytorch/issues/97201
     # We manually assigned overload for aten::sym_size.
@@ -827,11 +853,6 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
-        # TODO: Constant tensors and buffer/weights are both categorized into `get_attr`,
-        # but they are different to ONNX. We need to distinguish them.
-        # Constant tensors should become ONNX constants in the graph, while buffers/weights ONNX initializers.
-        # For now they are all converted to ONNX initializers.
-
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."

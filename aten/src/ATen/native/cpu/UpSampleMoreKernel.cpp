@@ -14,11 +14,12 @@ namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
 
-template <typename acc_t, typename scalar_t>
+template <typename acc_t, typename scalar_t,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
   TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
               "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
-  using Vec = vec::Vectorized<acc_t>;
+  using Vec = Vectorized<acc_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
     Vec gin_vec = Vec::loadu(gin + d) + Vec::loadu(gout + d);
@@ -29,14 +30,15 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
   }
 }
 
-template <>
-void inline nearest_channels_last_acc(float* gin, BFloat16* gout, int64_t size) {
-  using bVec = vec::Vectorized<BFloat16>;
-  using fVec = vec::Vectorized<float>;
+template <typename acc_t, typename scalar_t,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
+void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
+  using bVec = Vectorized<scalar_t>;
+  using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_bfloat16_float(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -47,11 +49,12 @@ void inline nearest_channels_last_acc(float* gin, BFloat16* gout, int64_t size) 
   }
 }
 
-template <typename acc_t, typename scalar_t>
+template <typename acc_t, typename scalar_t,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
 void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
   TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
               "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
-  using Vec = vec::Vectorized<acc_t>;
+  using Vec = Vectorized<acc_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
     Vec gin_vec = Vec::loadu(gin + d) + Vec(w) * Vec::loadu(gout + d);
@@ -62,14 +65,15 @@ void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_
   }
 }
 
-template <>
-void inline linear_channels_last_acc(float* gin, BFloat16* gout, float w, int64_t size) {
-  using bVec = vec::Vectorized<BFloat16>;
-  using fVec = vec::Vectorized<float>;
+template <typename acc_t, typename scalar_t,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
+void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
+  using bVec = Vectorized<scalar_t>;
+  using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_bfloat16_float(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + fVec(w) * gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + fVec(w) * gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -330,7 +334,7 @@ void upsample_nearest1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_w});
   });
 }
@@ -339,7 +343,7 @@ void _upsample_nearest_exact1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "_upsample_nearest_exact1d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_w});
   });
 }
@@ -350,11 +354,11 @@ void upsample_nearest2d_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_nearest2d_backward_cl", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest2d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
       cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_h, scales_w});
     });
   }
@@ -366,11 +370,11 @@ void _upsample_nearest_exact2d_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "_upsample_nearest_exact2d_backward_cl", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact2d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "_upsample_nearest_exact2d_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact2d_backward", [&] {
       cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_h, scales_w});
     });
   }
@@ -382,9 +386,15 @@ void upsample_nearest3d_backward_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
-  });
+  if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest3d_backward_cl", [&] {
+      cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
+      cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
+    });
+  }
 }
 
 void _upsample_nearest_exact3d_backward_kernel_impl(
@@ -393,9 +403,15 @@ void _upsample_nearest_exact3d_backward_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "_upsample_nearest_exact3d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
-  });
+  if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact3d_backward_cl", [&] {
+      cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact3d_backward", [&] {
+      cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
+    });
+  }
 }
 
 template <typename scalar_t, typename scale_type>
@@ -726,7 +742,7 @@ void upsample_linear1d_backward_kernel_impl(
     const Tensor& grad_output,
     bool align_corners,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_linear1d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_linear1d_backward", [&] {
     cpu_upsample_linear_backward<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_w});
   });
 }
@@ -738,11 +754,11 @@ void upsample_bilinear2d_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_bilinear2d_backward_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_bilinear2d_backward_channels_last", [&] {
       cpu_upsample_linear_backward_channels_last<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_bilinear2d_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_bilinear2d_backward", [&] {
       cpu_upsample_linear_backward<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_h, scales_w});
     });
   }
@@ -756,11 +772,11 @@ void upsample_trilinear3d_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_trilinear3d_backward_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_trilinear3d_backward_channels_last", [&] {
       cpu_upsample_linear_backward_channels_last<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_d, scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad_output.scalar_type(), "upsample_trilinear3d_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_trilinear3d_backward", [&] {
       cpu_upsample_linear_backward<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_d, scales_h, scales_w});
     });
   }

@@ -51,6 +51,10 @@ CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppS
 
 CppFunction::~CppFunction() = default;
 
+void Library::reset() {
+  registrars_.clear();
+}
+
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)

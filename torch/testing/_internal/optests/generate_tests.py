@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import datetime
 import difflib
 import functools

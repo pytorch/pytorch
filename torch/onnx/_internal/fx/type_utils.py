@@ -79,6 +79,27 @@ def from_python_type_to_onnx_attribute_type(
     return _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE.get(dtype)
 
 
+def from_python_type_to_onnx_tensor_element_type(type: type):
+    """
+    Converts a Python type to the corresponding ONNX tensor element type.
+    For example, `from_python_type_to_onnx_tensor_element_type(float)` returns
+    `onnx.TensorProto.FLOAT`.
+
+    Args:
+      type (type): The Python type to convert.
+
+    Returns:
+      int: The corresponding ONNX tensor element type.
+
+    """
+    _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
+        float: onnx.TensorProto.FLOAT,  # type: ignore[attr-defined]
+        int: onnx.TensorProto.INT64,  # type: ignore[attr-defined]
+        bool: onnx.TensorProto.BOOL,  # type: ignore[attr-defined]
+    }
+    return _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE.get(type)
+
+
 def is_torch_symbolic_type(value: Any) -> bool:
     return isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat))
 
@@ -103,6 +124,10 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     torch.float64: {"tensor(double)"},
     torch.float32: {"tensor(float)"},
     torch.float16: {"tensor(float16)"},
+    torch.float8_e4m3fn: {"tensor(float8_e4m3fn)"},
+    torch.float8_e4m3fnuz: {"tensor(float8_e4m3fnuz)"},
+    torch.float8_e5m2: {"tensor(float8_e5m2)"},
+    torch.float8_e5m2fnuz: {"tensor(float8_e5m2fnuz)"},
     torch.int16: {"tensor(int16)"},
     torch.int32: {"tensor(int32)"},
     torch.int64: {"tensor(int64)"},
@@ -153,6 +178,10 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.float64: "f64",
     torch.float32: "f32",
     torch.float16: "f16",
+    torch.float8_e4m3fn: "e4m3fn",
+    torch.float8_e4m3fnuz: "e4m3fnuz",
+    torch.float8_e5m2: "f8e5m2",
+    torch.float8_e5m2fnuz: "e5m2fnuz",
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
@@ -179,6 +208,10 @@ _TORCH_DTYPE_TO_NUMPY_DTYPE = {
 _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE = {
     onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
     onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
+    onnx.TensorProto.FLOAT8E5M2: torch.float8_e5m2,  # type: ignore[attr-defined]
+    onnx.TensorProto.FLOAT8E5M2FNUZ: torch.float8_e5m2fnuz,  # type: ignore[attr-defined]
+    onnx.TensorProto.FLOAT8E4M3FN: torch.float8_e4m3fn,  # type: ignore[attr-defined]
+    onnx.TensorProto.FLOAT8E4M3FNUZ: torch.float8_e4m3fnuz,  # type: ignore[attr-defined]
     onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
     onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
     onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]

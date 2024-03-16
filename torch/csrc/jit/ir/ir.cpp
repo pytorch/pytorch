@@ -354,10 +354,7 @@ std::ostream& Node::print(
       }
     }
     if (auto file_line_col = r.file_line_col()) {
-      std::string filename;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t line, col;
-      std::tie(filename, line, col) = *file_line_col;
+      auto [filename, line, col] = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
   }

@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
@@ -315,6 +316,10 @@ class TestCommon(TestCase):
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
+        CHECK_CONJ_SKIPS = {
+            torch._refs.linalg.svd,
+        }
+
         with FakeTensorMode() as mode:
             pass
 
@@ -341,12 +346,12 @@ class TestCommon(TestCase):
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
-                prims.utils.compare_tensor_meta(result, meta_result)
+                prims.utils.compare_tensor_meta(result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS)
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         self.assertTrue(isinstance(b, FakeTensor))
-                        prims.utils.compare_tensor_meta(a, b)
+                        prims.utils.compare_tensor_meta(a, b, check_conj=op.op not in CHECK_CONJ_SKIPS)
 
     def _ref_test_helper(
         self,
@@ -480,6 +485,8 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
+        if TEST_WITH_ROCM and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2") and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
@@ -492,6 +499,8 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
+        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -500,6 +509,8 @@ class TestCommon(TestCase):
     @parametrize('executor', ['aten',])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
+        if TEST_WITH_ROCM and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2") and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
             "_refs.logsumexp",
@@ -988,6 +999,38 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @ops(
+        [op for op in op_db if op.supports_out and (op.supports_autograd or op.is_factory_function)],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float, torch.cfloat]
+    )
+    def test_out_requires_grad_error(self, device, dtype, op):
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+
+        # Call op to get prototype for out arguments
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+        any_requires_grad = False
+
+        def set_requires_grad(x):
+            nonlocal any_requires_grad
+            if isinstance(x, torch.Tensor) and (
+                x.is_floating_point() or x.is_complex()
+            ):
+                any_requires_grad = True
+                x.requires_grad_(True)
+            return x
+
+        out = pytree.tree_map_(set_requires_grad, expect)
+        if not any_requires_grad:
+            # Skip ops without any floating point outputs, e.g. isnan
+            return
+
+        msg = (
+            "functions with out=... arguments don't support automatic "
+            "differentiation, but one of the arguments requires grad."
+        )
+        with self.assertRaises(RuntimeError, msg=msg):
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
@@ -1529,6 +1572,56 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_cow_input(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        def is_strided_tensor(arg):
+            return torch.is_tensor(arg) and arg.layout == torch.strided
+
+        for sample in samples:
+            args_raw = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            args_copy = []
+            args = []
+
+            # Convert strided tensor inputs to COW tensors
+            for idx, arg in enumerate(args_raw):
+                if is_strided_tensor(arg):
+                    args_copy.append(arg.clone().detach())
+                    args.append(torch._lazy_clone(arg))
+                else:
+                    if torch.is_tensor(arg):
+                        args_copy.append(arg.clone().detach())
+                    else:
+                        args_copy.append(copy.deepcopy(arg))
+                    args.append(arg)
+
+            res = op.get_op()(*args, **kwargs)
+
+            # Check that COW inputs remain COW after the op is executed
+            for idx, arg in enumerate(args):
+                if is_strided_tensor(arg):
+                    is_cow = torch._C._is_cow_tensor(arg)
+
+                    if op.supports_cow_input_no_materialize:
+                        self.assertTrue(
+                            is_cow,
+                            msg=(
+                                f"Argument {idx} unexpectedly materializes. "
+                                "Either set `supports_cow_input_no_materialize=False` "
+                                "in this operation's OpInfo or change the "
+                                "implementation to avoid materialization."))
+
+                    if is_cow:
+                        orig = args_copy[idx]
+                        self.assertTrue(
+                            torch.allclose(arg, orig, rtol=0, atol=0, equal_nan=True),
+                            msg=(
+                                f"Argument {idx} avoided materialization, "
+                                "but the operation mutated its data."
+                            ))
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
             self.assertEqual(a.size(), b.size())
@@ -1560,6 +1653,7 @@ class TestCompositeCompliance(TestCase):
                     _assert_match_metadata(new_inp, inp)
                     new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
+                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()
@@ -1778,7 +1872,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
-# ouput tensor properties
+# output tensor properties
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1866,7 +1960,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.floor_divide',
-        '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
         '_refs.index_copy_',
@@ -1953,7 +2046,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full_like',  # missing "layout"
-        '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
         '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
@@ -1968,7 +2060,12 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
-        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
+        '_refs.view_as_complex',  # TorchInductor does not support complex at the moment.
+        # the decompositions for these ops are slightly different
+        # because of out handling
+        '_refs.var_mean',
+        '_refs.std_mean',
+        '_refs.native_layer_norm',
     }
 
     @parametrize("op", ref_ops_names)
@@ -2095,6 +2192,20 @@ fake_autocast_backward_xfails = {
 
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
+    def setUp(self):
+        # Turn on FakeTensor caching and cross-checking for these tests:
+        cache_enabled = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_enabled", True
+        )
+        cache_enabled.start()
+        self.addCleanup(cache_enabled.stop)
+
+        cache_crosscheck = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_crosscheck_enabled", True
+        )
+        cache_crosscheck.start()
+        self.addCleanup(cache_crosscheck.stop)
+
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
         if op.variant_test_name:
@@ -2133,6 +2244,7 @@ class TestFakeTensor(TestCase):
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        self.assertEqual(fake_out, real_out)
                         continue
 
                     self.assertTrue(isinstance(fake_out, FakeTensor))
