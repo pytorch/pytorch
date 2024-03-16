@@ -92,7 +92,48 @@ def print_perfetto_ui_url(manifold_path: str) -> None:
         + urllib.parse.quote_plus(manifold_path)
     )
     print(f"The trace is accessible at:\n{url}")
+
+
+import socket
+from datetime import datetime, timedelta
+
+TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
+
+# Keep a max of 100,000 alloc/free events in the recorded history
+# leading up to the snapshot.
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+
+def start_record_memory_history() -> None:
+   if not torch.cuda.is_available():
+       print("CUDA unavailable. Not recording memory history")
+       return
+
+   print("Starting snapshot record_memory_history")
+   torch.cuda.memory._record_memory_history(
+       max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+   )
+
+def stop_record_memory_history() -> None:
+   if not torch.cuda.is_available():
+       print("CUDA unavailable. Not recording memory history")
+       return
+
+   print("Stopping snapshot record_memory_history")
+   torch.cuda.memory._record_memory_history(enabled=None)
+
+def export_memory_snapshot(file_prefix) -> None:
+   if not torch.cuda.is_available():
+       print("CUDA unavailable. Not exporting memory snapshot")
+       return
+
+   try:
+       print(f"Saving snapshot to local file: {file_prefix}.pickle")
+       torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+   except Exception as e:
+       print(f"Failed to capture memory snapshot {e}")
+       return
 # ======== REMOVE WHEN READY TO MERGE ========
+
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
@@ -164,13 +205,14 @@ def run(model, optim, n_iter):
         torch_log.warning("END FORWARD")
         # torch.storage.resize_count_and_loc = {}
         loss = out.sum()
-        losses.append(loss)
+        losses.append(loss.item())
         torch.storage.resize_count_and_loc = {}
         torch_log.warning("BACKWARD")
         # torch_log.warning("OUT GRAPH\n%s", make_dot(loss))
         loss.backward()
         torch_log.warning("END BACKWARD")
         optim.step()
+        torch.cuda.synchronize()
     print(f"losses: {losses}")
     return losses
 
@@ -210,8 +252,10 @@ def main_eager(n_iter):
     return res
 
 
-def execute_and_profile(callable, profiler_trace_path):
+def execute_and_profile(callable, profiler_trace_path, memory_snapshot_file_prefix):
     from torch.profiler import profile, ProfilerActivity
+    if dist.get_rank() == 0:
+        start_record_memory_history()
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         ret = callable()
     if dist.get_rank() == 0:
@@ -221,6 +265,8 @@ def execute_and_profile(callable, profiler_trace_path):
         manifold_path = upload_trace_file(profiler_trace_path)
         if manifold_path:
             print_perfetto_ui_url(manifold_path)
+        export_memory_snapshot(memory_snapshot_file_prefix)
+        stop_record_memory_history()
     return ret
 
 
@@ -238,12 +284,14 @@ if __name__ == "__main__":
     losses_compiled = execute_and_profile(
         lambda: main_compiled(n_iter=n_iter),
         "compiled_trace.json",
+        "compiled_memory_snapshot",
     )
     print(f"losses_compiled: {losses_compiled}")
     losses_eager = execute_and_profile(
         lambda: main_eager(n_iter=n_iter),
         "eager_trace.json",
+        "eager_memory_snapshot",
     )
     print(f"losses_eager: {losses_eager}")
     for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-        assert torch.allclose(loss_compiled, loss_eager, rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
+        assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
