@@ -523,3 +523,18 @@ TEST(OptimTest, CheckLRChange_StepLR_Adam) {
 
   check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
 }
+
+TEST(OptimTest, CheckLRChange_ReduceLROnPlateau_Adam) {
+  torch::Tensor parameters = torch::zeros({1});
+  auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
+
+	const SchedulerMode scheduler_mode = SchedulerMode::min;
+  const float factor = 0.5;
+  const int patience = 20;
+  ReduceLROnPlateauScheduler reduce_lr_on_plateau_scheduler(optimizer, SchedulerMode::min, factor, patience);
+
+  // The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {{1, 1e-3}, {25, 5e-4}};
+
+  check_lr_change(optimizer, reduce_lr_on_plateau_scheduler, expected_epoch_lrs);
+}
