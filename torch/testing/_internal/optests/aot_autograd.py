@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 import torch.utils._pytree as pytree
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed

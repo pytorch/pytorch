@@ -2,12 +2,15 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from torch.utils._pytree import (
     _dict_flatten,
+    _dict_flatten_with_keys,
     _dict_unflatten,
     _list_flatten,
+    _list_flatten_with_keys,
     _list_unflatten,
     Context,
     register_pytree_node,
 )
+
 from ._compatibility import compatibility
 
 
@@ -93,5 +96,17 @@ def _immutable_list_unflatten(
     return immutable_list(_list_unflatten(values, context))
 
 
-register_pytree_node(immutable_dict, _immutable_dict_flatten, _immutable_dict_unflatten)
-register_pytree_node(immutable_list, _immutable_list_flatten, _immutable_list_unflatten)
+register_pytree_node(
+    immutable_dict,
+    _immutable_dict_flatten,
+    _immutable_dict_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_dict",
+    flatten_with_keys_fn=_dict_flatten_with_keys,
+)
+register_pytree_node(
+    immutable_list,
+    _immutable_list_flatten,
+    _immutable_list_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_list",
+    flatten_with_keys_fn=_list_flatten_with_keys,
+)

@@ -14,8 +14,9 @@ from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
     skipIfNoX86,
-    skipIfNoDynamoSupport,
+    skipIfNoInductorSupport,
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
@@ -250,10 +251,13 @@ class TestHelperModules:
             return self.linear(x)
 
     class LinearUnaryModule(torch.nn.Module):
-        def __init__(self, use_bias, postop, inplace_postop) -> None:
+        def __init__(self, use_bias, postop, inplace_postop=False, post_op_algo='none') -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            self.postop = postop(inplace=inplace_postop)
+            if postop == nn.GELU:
+                self.postop = postop(approximate=post_op_algo)
+            else:
+                self.postop = postop(inplace=inplace_postop)
 
         def forward(self, x):
             return self.postop(self.linear(x))
@@ -325,7 +329,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
@@ -339,7 +343,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         )
         return export_model, prepare_model, convert_model
 
-@skipIfNoDynamoSupport
+@skipIfNoInductorSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d(self):
@@ -376,7 +380,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
-        Test pattern of conv2d with unary post ops (such as relu, hardtanh, relu6) with X86InductorQuantizer.
+        Test pattern of conv2d with unary post ops (such as relu, hardtanh, hardswish, relu6) with X86InductorQuantizer.
         """
         unary_map = {
             "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
@@ -384,7 +388,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
@@ -1008,6 +1014,45 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
+    def test_linear_unary_gelu(self):
+        """
+        Test pattern of linear with unary post ops (e.g. gelu) with X86InductorQuantizer.
+        """
+        use_bias_list = [True, False]
+        postop = nn.GELU
+        post_op_algorithm = ['none', 'tanh']
+        cases = itertools.product(use_bias_list, post_op_algorithm)
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias, post_op_algo in cases:
+                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, post_op_algo=post_op_algo).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the gelu
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.linear.default,
+                    torch.ops.aten.gelu.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
+    @skipIfTorchDynamo("very slow")
+    @skipIfNoX86
     def test_qat_conv2d(self):
         """
         Test QAT pattern of conv2d_bn with X86InductorQuantizer.
@@ -1044,6 +1089,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 is_qat=True,
             )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_unary(self):
         """
@@ -1056,7 +1102,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
         }
 
         with override_quantized_engine("x86"):
@@ -1093,6 +1141,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary(self):
         """
@@ -1135,6 +1184,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary2(self):
         """
@@ -1177,6 +1227,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary_unary(self):
         """

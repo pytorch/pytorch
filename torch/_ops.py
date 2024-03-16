@@ -4,7 +4,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, Type, Union
+from typing import Any, Callable, Dict, Set, Type, Union
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -149,7 +149,7 @@ class OperatorBase:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
-            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+            return fn(_PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
             return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
@@ -227,7 +227,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_higher_order_ops = {}
+_higher_order_ops: Dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
@@ -265,6 +265,29 @@ class HigherOrderOperator(OperatorBase):
 
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
+
+        # [NOTE] We have to register pre-dispatch key implementation
+        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # mutations. This is problematic when we are functionalizing HOP
+        # during pre-dispatch because when the inner tracer starts, it will see
+        # that PreDispatch key is still active. In that case, we just redispatch
+        # it to next key. This is only safe to do when PreDispatch key stack has no
+        # active modes.
+        # TODO (tmanlaibaatar) Make it generic fallback mechanism
+        def _(*args, **kwargs):
+            if _len_torch_dispatch_stack_pre_dispatch() == 0:
+                with torch._C._ExcludeDispatchKeyGuard(
+                    torch._C.DispatchKeySet(DispatchKey.PreDispatch)
+                ):
+                    return self(*args, **kwargs)
+            raise AssertionError(
+                """
+                Can't directly invoke HOP implementation at PreDispatch key
+                if there are active modes on PreDispatch mode stack.
+                """
+            )
+
+        self.py_impl(torch._C.DispatchKey.PreDispatch)(_)
 
     def py_impl(self, k):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
@@ -335,7 +358,13 @@ class HigherOrderOperator(OperatorBase):
                 f"could not find kernel for HigherOrderOperator {self._name} "
                 f"at dispatch key {final_key} (resolved from {dispatch_key})"
             )
-        self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
+
+        # [NOTE] We shouldn't cache PreDispatch kernel here because depending
+        # on what modes are active, predispatch behaviour is different.
+        # Also we do same thing for normal ops:
+        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+        if dispatch_key != torch._C.DispatchKey.PreDispatch:
+            self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
         # C++ kernel to call into
@@ -500,7 +529,7 @@ def mode_stack_state_for_pre_dispatch():
     return _mode_stack_state_for_pre_dispatch
 
 
-cached_ops = set()
+cached_ops: Set["OpOverload"] = set()
 
 
 def add_cached_op(op_overload):
@@ -567,8 +596,8 @@ class OpOverload(OperatorBase):
 
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # use `self_` to avoid naming collide with aten ops arguments that
-        # named "self". This way, all the aten ops can be called by kwargs.
-        return self_._op(*args, **(kwargs or {}))
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
@@ -590,6 +619,11 @@ class OpOverload(OperatorBase):
     @property
     def namespace(self):
         return self._schema.name.split("::")[0]
+
+    def _handle(self):
+        return torch._C._dispatch_find_schema_or_throw(
+            self._schema.name, self._schema.overload_name
+        )
 
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
@@ -683,6 +717,7 @@ class OpOverload(OperatorBase):
                             ).has(torch._C.DispatchKey.Python):
                                 overload_types.append(type(a))
                         # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
                         return curr_mode.__torch_dispatch__(
                             self, overload_types, args, kwargs
                         )
