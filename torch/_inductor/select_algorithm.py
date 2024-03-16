@@ -688,7 +688,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -892,6 +891,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def autotune(choices, precompile_fn):
             try:
                 import time
+
                 start = time.time()
                 precompile_fn()
                 print("Precompile took", time.time() - start)
