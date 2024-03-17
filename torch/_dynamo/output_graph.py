@@ -469,8 +469,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
-
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
