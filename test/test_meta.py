@@ -292,7 +292,19 @@ class TestMetaConverter(TestCase):
         self.assertIs(y, z)
         self.assertEqual(len(m.tensor_memo), 1)
         self.assertEqual(len(m.storage_memo), 1)
+        self.assertEqual(len(m.describer.lookup_tensor), 1)
+        self.assertEqual(len(m.describer.lookup_storage), 1)
         del x
+        # Entries from Tensor -> int get deallocated when the real tensor
+        # disappears...
+        self.assertEqual(len(m.describer.lookup_tensor), 0)
+        self.assertEqual(len(m.describer.lookup_storage), 0)
+        del y
+        del z
+        # ... but the int -> FakeTensor entries don't die until the fake
+        # tensors themselves die (because the user may have held onto the
+        # int key and are expecting to get a consistent fake tensor in
+        # this case)
         self.assertEqual(len(m.tensor_memo), 0)
         self.assertEqual(len(m.storage_memo), 0)
         li = []
@@ -301,7 +313,13 @@ class TestMetaConverter(TestCase):
             li.append(torch.rand([i]))
             r.append(m(li[-1]))
         self.assertEqual(len(m.tensor_memo), 4)
+        self.assertEqual(len(m.storage_memo), 4)
+        self.assertEqual(len(m.describer.lookup_tensor), 4)
+        self.assertEqual(len(m.describer.lookup_storage), 4)
         del li
+        self.assertEqual(len(m.describer.lookup_tensor), 0)
+        self.assertEqual(len(m.describer.lookup_storage), 0)
+        del r
         self.assertEqual(len(m.tensor_memo), 0)
         self.assertEqual(len(m.storage_memo), 0)
 
