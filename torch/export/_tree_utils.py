@@ -50,7 +50,7 @@ def is_equivalent(
     Returns:
         True if the two TreeSpecs are equivalent, False otherwise.
     """
-    if not equivalence_fn(spec1.type, spec1.context, spec2.type, spec2.context):
+    if not equivalence_fn(spec1.type, spec1._context, spec2.type, spec2._context):
         return False
 
     # Recurse on children

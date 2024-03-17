@@ -31,10 +31,10 @@ class TestTreeUtils(TestCase):
             if type1 is None or type2 is None:
                 return type1 is type2 and context1 == context2
 
-            if issubclass(type1, (dict, OrderedDict)) and issubclass(
-                type2, (dict, OrderedDict)
-            ):
-                return context1 == context2
+            if type1 in {dict, OrderedDict} and type2 in {dict, OrderedDict}:
+                keys1 = set(context1[0] if type1 is dict else context1)
+                keys2 = set(context2[0] if type2 is dict else context2)
+                return keys1 == keys2
 
             return type1 is type2 and context1 == context2
 
