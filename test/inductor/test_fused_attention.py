@@ -855,6 +855,9 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_17_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
         )
+        test_sdpa_rewriter_18_cuda = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
+        )
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
         use_static_shapes = False
