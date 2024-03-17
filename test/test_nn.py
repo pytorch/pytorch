@@ -4899,6 +4899,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_cudnn_bf16(self):
+        # THNN
+        input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        m = nn.BatchNorm2d(3).cuda()
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        thnn_input_grad = input.grad.data.clone()
+        self.assertEqualTypeString(thnn_output, input)
+        # cuDNN
+        if TEST_CUDNN:
+            input.grad = None
+            m = m.float()
+            cudnn_output = m(input)
+            cudnn_output.sum().backward()
+            cudnn_input_grad = input.grad.data.clone()
+            self.assertEqualTypeString(cudnn_output, input)
+            self.assertEqual(cudnn_output, thnn_output)
+            self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_nonaffine_cuda_half_input(self):
         input = torch.randn(16, 3, 24, 24, dtype=torch.half, device="cuda")
         m = nn.BatchNorm2d(3, affine=False).cuda().float()  # keep running stats in FP32
