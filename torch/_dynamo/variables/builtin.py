@@ -525,6 +525,18 @@ class BuiltinVariable(VariableTracker):
                         ),
                         lambda tx, a, b: ConstantVariable(op(a.fn, b.fn)),
                     ),
+                    (
+                        (
+                            NNModuleVariable,
+                            NNModuleVariable,
+                        ),
+                        lambda tx, a, b: ConstantVariable(
+                            op(
+                                tx.output.get_submodule(a.module_key),
+                                tx.output.get_submodule(b.module_key),
+                            )
+                        ),
+                    ),
                     ((size_or_tuple, size_or_tuple), list_compare_nocheck),
                     (
                         (variables.BaseListVariable, variables.BaseListVariable),
