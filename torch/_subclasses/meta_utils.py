@@ -175,7 +175,7 @@ class MetaTensorDescriber:
         if is_traceable_wrapper_subclass(t):
             attrs, ctx = t.__tensor_flatten__()
             subclass_kwargs["attrs"] = {
-                self.describe_tensor(getattr(t, attr)) for attr in attrs
+                attr: self.describe_tensor(getattr(t, attr)) for attr in attrs
             }
             subclass_kwargs["ctx"] = ctx
             subclass_kwargs["type"] = type(t)
@@ -186,7 +186,9 @@ class MetaTensorDescriber:
         return MetaTensorDesc(
             id=self.get_tensor_id(t),
             # TODO: sometimes these error
-            storage=self.describe_storage(t.untyped_storage()),
+            storage=self.describe_storage(t.untyped_storage())
+            if not (is_batchedtensor(t) or is_gradtrackingtensor(t))
+            else None,
             is_inference=t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
@@ -441,10 +443,10 @@ class MetaConverter:
                     return shape_env._create_symbolic_sizes_strides_storage_offset(
                         t_size,
                         t_stride,
-                        t_offset,
+                        t_storage_offset,
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
-                        symbolic_context,
+                        symbolic_context=symbolic_context,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
