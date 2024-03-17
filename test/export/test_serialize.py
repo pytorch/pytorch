@@ -27,6 +27,7 @@ from torch._export.serde.serialize import (
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save
+import torch.export._trace
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -234,6 +235,19 @@ class TestSerialize(TestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
+    def setUp(self):
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            if IS_WINDOWS:
+                lib_file_path = find_library_location('torchbind_test.dll')
+            torch.ops.load_library(str(lib_file_path))
+
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
         # source_fn/nn_module_stack as there is an issue with
@@ -307,13 +321,26 @@ class TestDeserialize(TestCase):
                     node2.meta.get("source_fn_stack", None),
                 )
 
-    def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True, use_pre_dispatch=True) -> None:
+    def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True, use_pre_dispatch=True, strict=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
         def _check_graph(pre_dispatch):
             if pre_dispatch:
-                ep = torch.export._trace._export(fn, copy.deepcopy(inputs), {}, dynamic_shapes=dynamic_shapes, pre_dispatch=True)
+                ep = torch.export._trace._export(
+                    fn,
+                    copy.deepcopy(inputs),
+                    {},
+                    dynamic_shapes=dynamic_shapes,
+                    pre_dispatch=True,
+                    strict=strict
+                )
             else:
-                ep = torch.export.export(fn, copy.deepcopy(inputs), {}, dynamic_shapes=dynamic_shapes)
+                ep = torch.export.export(
+                    fn,
+                    copy.deepcopy(inputs),
+                    {},
+                    dynamic_shapes=dynamic_shapes,
+                    strict=strict
+                )
             ep.graph.eliminate_dead_code()
 
             serialized_artifact = serialize(ep, opset_version={"aten": 0})
@@ -645,6 +672,56 @@ class TestDeserialize(TestCase):
         inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
         model = MyModule().eval().cuda()
         self.check_graph(model, (inp,))
+
+    def test_custom_obj_tuple_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        with enable_torchbind_tracing():
+            self.check_graph(m, inputs, strict=False)
+
+    def test_custom_obj(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, a)
+                return x + b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        with enable_torchbind_tracing():
+            self.check_graph(m, inputs, strict=False)
+
+    def test_custom_obj_list_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_list_return(self.attr, x)
+                y = a[0] + a[1] + a[2]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        with enable_torchbind_tracing():
+            self.check_graph(m, inputs, strict=False)
 
 
 instantiate_parametrized_tests(TestDeserialize)
