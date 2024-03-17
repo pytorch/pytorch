@@ -896,7 +896,7 @@ class TensorVariable(VariableTracker):
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
-    def set_name_hint(self, name):
+    def set_name_hint(self, name: str):
         # Only rename at the top-level scope, this is to avoid the confusion between
         # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
         # where mutation is prohibited and it's difficult to differentiate it with renaming.
