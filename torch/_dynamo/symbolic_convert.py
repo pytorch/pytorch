@@ -1198,6 +1198,10 @@ class InstructionTranslatorBase(
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
         op = inst.argval
+        if op == "in" or op == "not in":
+            self.push(right.call_method(self, "__contains__", [left], {}))
+            if op == "not in":
+                self.UNARY_NOT(inst)
         if right.is_python_constant():
             if left.is_python_constant():
                 # constant fold
@@ -1228,17 +1232,11 @@ class InstructionTranslatorBase(
                 return self.push(
                     ConstantVariable(supported_const_comparison_ops[op](object(), None))
                 )
-
-        if op == "in" or op == "not in":
-            self.push(right.call_method(self, "__contains__", [left], {}))
-            if op == "not in":
-                self.UNARY_NOT(inst)
-        else:
-            self.push(
-                BuiltinVariable(supported_comparison_ops[op]).call_function(
-                    self, [left, right], {}
-                )
+        self.push(
+            BuiltinVariable(supported_comparison_ops[op]).call_function(
+                self, [left, right], {}
             )
+        )
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
