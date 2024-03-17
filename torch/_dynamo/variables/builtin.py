@@ -580,7 +580,6 @@ class BuiltinVariable(VariableTracker):
             assert op not in op_handlers
             op_handlers[op] = create_cmp_op_handlers(op)
 
-        assert operator.ne in op_handlers
         return op_handlers
 
     @staticmethod
