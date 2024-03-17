@@ -4496,6 +4496,29 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         mark_node_as_mutating(self, variable)
 
 
+class BindNNParameter(ExternKernelAlloc):
+    def __init__(self, variable, placeholder):
+        variable.freeze_layout()
+        super().__init__(
+            variable.get_layout(),
+            [variable, placeholder],
+            python_kernel_name="torch.ops.prims._bind_nn_parameter",
+        )
+        V.graph.never_reuse_buffers.add(variable.data.get_name())
+        V.graph.never_reuse_buffers.add(placeholder.get_name())
+        V.graph.never_reuse_buffers.add(self.get_name())
+        mark_node_as_mutating(self, variable, placeholder)
+
+    def get_alias_names(self):
+        return [self.inputs[0].get_name(), self.inputs[1].get_name()]
+
+    def get_mutation_names(self):
+        return [self.inputs[1].get_name()]
+
+    def has_side_effects(self):
+        return True
+
+
 class ScatterFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly.
