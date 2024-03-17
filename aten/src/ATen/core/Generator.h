@@ -1,8 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <deque>
 #include <mutex>
 #include <utility>
-#include <cstdint>
 
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
