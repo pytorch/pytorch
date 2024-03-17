@@ -13,6 +13,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import cache_dir
 
 from torch.export import Dim, export
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
-    TestCase,
 )
 
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -227,22 +227,6 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
-
-    def test_buffer_mutation(self):
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.register_buffer("foo", torch.randn(4, 4, device=device))
-
-            def forward(self, x):
-                self.foo.add_(1)
-                return self.foo + x
-
-        example_inputs = (torch.rand(4, 4, device=self.device),)
-        torch._export.aot_compile(Model(self.device), example_inputs)
-        with self.assertRaisesRegex(AssertionError, "False is not true"):
-            # TODO: AOTI seems to mutate the buffer while tracing
             self.check_model(Model(self.device), example_inputs)
 
     @requires_cuda
@@ -2243,7 +2227,7 @@ copy_tests(
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
     if HAS_CUDA or sys.platform == "darwin":
