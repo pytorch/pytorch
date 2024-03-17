@@ -42,7 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ..fx import GraphModule
-from .backends.registry import lookup_backend
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -76,7 +76,18 @@ class Unset(Enum):
     token = 0
 
 
+cached_backends: Dict[int, CompilerFn] = {}
+
 unset = Unset.token
+
+
+def _reset_guarded_backend_cache():
+    global cached_backends
+    for backend in cached_backends.values():
+        if hasattr(backend, "reset"):
+            backend.reset()
+    cached_backends.clear()
+
 
 DONT_WRAP_FILES = {
     # For tracing into fx modules
@@ -233,6 +244,10 @@ class _TorchDynamoContext:
         self.cleanup_fns: List[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         patch_fn()
+
+        # Save the backends so that we can reset them during torch._dynamo.reset
+        backend = innermost_fn(callback)
+        cached_backends.setdefault(id(backend), backend)
 
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
