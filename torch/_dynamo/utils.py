@@ -1027,16 +1027,20 @@ def check_unspec_python_args(args, kwargs):
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
+        elif not isinstance(x, ConstantVariable):
             return False
-        else:
-            pass
-
     return unspec_count > 0
 
 
 def check_unspec_or_constant_args(args, kwargs):
-    return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    # A fused version of:
+    # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    from .variables.tensor import UnspecializedPythonVariable
+
+    for x in itertools.chain(args, kwargs.values()):
+        if not (x.is_python_constant() or isinstance(x, UnspecializedPythonVariable)):
+            return False
+    return True
 
 
 def check_numpy_ndarray_args(args, kwargs):
