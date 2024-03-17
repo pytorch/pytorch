@@ -8464,7 +8464,7 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         # invalid margin
         (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
          dict(margin=-1.0),
-         ValueError, "margin must be greater than 0"),
+         ValueError, "margin must be greater than 0, got -1.0"),
 
         # shape mismatch
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
