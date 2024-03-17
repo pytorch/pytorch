@@ -370,8 +370,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.var_getattr(tx, args[0].as_python_constant())
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
-    def rename(self, tx, name):
-        return self
+    def set_name_hint(self, name):
+        pass
 
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""
