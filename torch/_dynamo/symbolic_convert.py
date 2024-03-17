@@ -111,9 +111,17 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
-compare_op_handlers = {
+compare_op_handlers: Dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
+handle_contains = BuiltinVariable(operator.contains).call_function
+handle_not = BuiltinVariable(operator.not_).call_function
+compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
+    tx, [*reversed(args)], {}
+)
+compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
+    tx, [handle_contains(tx, [*reversed(args)], {})], {}
+)
 
 
 @dataclasses.dataclass
