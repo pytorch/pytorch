@@ -10,7 +10,7 @@ in `runtime_wrappers`.
 import logging
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 import torch
 import torch.utils.dlpack
@@ -175,6 +175,32 @@ def aot_dispatch_base(
     return compiled_fn
 
 
+def _output_node(gm: torch.fx.GraphModule) -> torch.fx.Node:
+    """Return the output node of a graph"""
+    # reversed() since we expect output at end of graph
+    return next(n for n in reversed(gm.graph.nodes) if n.op == "output")
+
+
+def _input_node(gm: torch.fx.GraphModule, i: int) -> torch.fx.Node:
+    """Fetch the i-th placeholder in the graph"""
+    seen = 0
+    for n in gm.graph.nodes:
+        if n.op == "placeholder":
+            if seen == i:
+                return n
+            seen += 1
+    raise IndexError(f"input {i} does not exist, only {seen} inputs in graph")
+
+
+def _can_detach(node: torch.fx.Node):
+    """
+    Avoid calling .detach() on inputs passed to _bind_nn_parameter()
+    """
+    from torch._dynamo.create_parameter_op import _bind_nn_parameter
+
+    return all(n.target is not _bind_nn_parameter for n in node.users)
+
+
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: List[Any],
@@ -295,8 +321,8 @@ def aot_dispatch_autograd(
         # and we will end up with a zero grad at x.
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
-        _indices_of_inps_to_detach = []
-        bw_outs = next(n for n in bw_module.graph.nodes if n.op == "output").args[0]
+        _indices_of_inps_to_detach: List[int] = []
+        bw_outs: Sequence[torch.fx.Node] = _output_node(bw_module).args[0]  # type: ignore[assignment]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).
@@ -311,7 +337,7 @@ def aot_dispatch_autograd(
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
             for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None:
+                if bw_out is None and _can_detach(_input_node(fx_g, i)):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
@@ -486,8 +512,10 @@ def aot_dispatch_autograd(
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
-                ctx.mark_dirty(deduped_flat_tensor_args[i])
-                marked_dirty_inps.append(deduped_flat_tensor_args[i])
+                arg = deduped_flat_tensor_args[i]
+                if not (arg.requires_grad and arg.is_leaf):  # would error
+                    ctx.mark_dirty(arg)
+                marked_dirty_inps.append(arg)
 
             if not CompiledFunction._fakify_first_call:
                 if CompiledFunction.metadata.is_rng_op_functionalized:

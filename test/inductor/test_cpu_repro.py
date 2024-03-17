@@ -12,6 +12,7 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
+from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -2982,6 +2983,35 @@ class CPUReproTests(TestCase):
         self.assertRaises(RuntimeError, lambda: func(example_inputs))
         self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
 
+    def test_nn_param_assign(self):
+        # https://github.com/pytorch/pytorch/issues/99569
+        class Model2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
+                self.batchnorm = nn.BatchNorm2d(num_features=5)
+                self.conv_weight = torch.randn(5, 3, 3, 3)
+                self.conv_bias = torch.randn(5)
+
+            def forward(self, x):
+                self.conv.weight = nn.Parameter(self.conv_weight)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
+                self.conv.eval()
+                x = self.conv(x)
+                x = self.batchnorm(x)
+                x = F.relu(x)
+                return x
+
+        input_tensor = torch.randn(1, 3, 10, 10)
+        func = Model2().to("cpu")
+
+        with torch.no_grad():
+            func.train(False)
+            v1 = func(input_tensor)
+            jit_func = torch.compile(func, fullgraph=True)
+            v2 = jit_func(input_tensor)
+            self.assertEqual(v1, v2)
+
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
@@ -3524,9 +3554,46 @@ class CPUReproTests(TestCase):
         # TODO: support vectorized int64 masked load
         assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @config.patch({"cpp.dynamic_threads": True})
+    def test_reduction_with_dynamic_threads(self):
+        def fn(a, b):
+            return a.sum(), b.sum()
+
+        self.common(
+            fn,
+            (torch.randn(1000), torch.rand(1000)),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_float64(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.weight2 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.bias = torch.nn.Parameter(torch.randn(10, dtype=torch.float64))
+
+            def forward(self, x1):
+                v1 = torch.mm(x1, self.weight1)
+                v2 = torch.addmm(self.bias, x1, self.weight2)
+                return (v1, v2)
+
+        mod = M().eval()
+        v = torch.randn(10, 10, dtype=torch.float64)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
     if HAS_CPU and not IS_MACOS:
