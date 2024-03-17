@@ -100,8 +100,8 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    supported_comparison_ops,
     supported_const_comparison_ops,
-    supported_tensor_comparison_ops,
     SymNodeVariable,
     TensorVariable,
 )
@@ -117,6 +117,7 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+in_or_not_in = dict.fromkeys(("in", "not in"))
 
 
 @dataclasses.dataclass
@@ -876,8 +877,8 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> List[VariableTracker]:
-        assert n >= 0
-        return list(reversed([self.pop() for _ in range(n)]))
+        self.stack, result = self.stack[:-n], self.stack[-n:]
+        return result
 
     def LOAD_FAST(self, inst):
         name = inst.argval
@@ -1199,56 +1200,44 @@ class InstructionTranslatorBase(
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
         op = inst.argval
-        supported_any = dict(
-            itertools.chain(
-                supported_tensor_comparison_ops.items(),
-                supported_const_comparison_ops.items(),
-            )
-        )
-        if (
-            isinstance(
-                left,
-                (
-                    TensorVariable,
-                    SymNodeVariable,
-                    NNModuleVariable,
-                    BaseListVariable,
-                    UserDefinedVariable,
-                    BaseUserFunctionVariable,
-                    ConstDictVariable,
-                ),
-            )
-            and isinstance(right, ConstantVariable)
-            and right.value is None
-            and op in supported_const_comparison_ops
-        ):
-            # <non-None> is None
-            self.push(
-                ConstantVariable.create(
-                    supported_const_comparison_ops[op](object(), right.value)
+        if right.is_python_constant():
+            if left.is_python_constant():
+                # constant fold
+                return self.push(
+                    ConstantVariable(
+                        supported_comparison_ops[op](
+                            left.as_python_constant(), right.as_python_constant()
+                        ),
+                    )
                 )
-            )
-
-        elif (
-            left.is_python_constant()
-            and right.is_python_constant()
-            and op in supported_any
-        ):
-            # constant fold
-            self.push(
-                ConstantVariable.create(
-                    supported_any[op](
-                        left.as_python_constant(), right.as_python_constant()
+            elif (
+                op in supported_const_comparison_ops
+                and right.as_python_constant() is None
+                and isinstance(
+                    left,
+                    (
+                        TensorVariable,
+                        SymNodeVariable,
+                        NNModuleVariable,
+                        BaseListVariable,
+                        UserDefinedVariable,
+                        BaseUserFunctionVariable,
+                        ConstDictVariable,
                     ),
                 )
-            )
-        elif op in ("in", "not in"):
+            ):
+                # <non-None> is None
+                return self.push(
+                    ConstantVariable(supported_const_comparison_ops[op](object(), None))
+                )
+
+        if op in in_or_not_in:
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
         else:
             self.push(
-                BuiltinVariable(supported_any[op]).call_function(
+                BuiltinVariable(supported_comparison_ops[op]).call_function(
                     self, [left, right], {}
                 )
             )
