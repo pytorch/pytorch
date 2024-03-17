@@ -884,14 +884,12 @@ def min_cut_rematerialization_partition(
         import heapq
         fusible = [(start_node.fw_order, start_node)]
         start_pos = start_node.fw_order
-        # print("---------", start_node, start_node.fw_order)
         start_order = start_node.fw_order
         while len(fusible) > 0:
             _, cur = heapq.heappop(fusible)
             if cur in visited:
                 continue
             visited.add(cur)
-            # print(cur, cur.fw_order, len(fusible))
             if cur.fw_order > start_order + 50 and len(fusible) == 0:
                 print("force materializing ", cur, start_node, cur.fw_order, start_node.fw_order)
                 nx_graph.add_edge("source", cur.name + "_in", capacity=math.inf)
@@ -901,28 +899,32 @@ def min_cut_rematerialization_partition(
                 if user in required_fw_nodes and is_fusible(cur, user):
                     heapq.heappush(fusible, (user.fw_order, user))
 
-    def users_all_fusible(node, max_range):
-        for user in node.users:
-            if user not in required_fw_nodes:
-                return True
-            if user.fw_order > max_range:
-                return True
-            if not is_fusible(node, user):
-                return False
-            return all([users_all_fusible(user, max_range)])
+    def find_first_unfusible(start_nodes, max_range):
+        sorted_nodes = []
+        for n in start_nodes:
+            heapq.heappush(sorted_nodes, (n.fw_order, n, True))
+
+        while len(sorted_nodes) > 0:
+            _, node, node_is_fusible = heapq.heappop(sorted_nodes)
+            if not node_is_fusible:
+                return node.fw_order
+            if node.fw_order > max_range:
+                continue
+            for user in node.users:
+                if user in required_fw_nodes:
+                    heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
+        return max_range
 
     for used_node in joint_graph.nodes:
         if used_node not in required_fw_nodes:
             continue
         orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
         fw_users = [user for user in used_node.users if user in required_fw_nodes]
-        if len(orders) > 0 and max(orders) - min(orders) > 5:
-            if all(users_all_fusible(user, max(orders)) for user in fw_users) and not get_aten_target(node) == operator.getitem:
-                print("all fusible", used_node, fw_users, orders)
-                continue
-            print("forcing ", used_node, fw_users, orders)
-            for user in tuple(used_node.users)[1:]:
-                if user in required_fw_nodes:
+        if len(orders) > 0:
+            first_unfusible_use = find_first_unfusible(fw_users, max(orders))
+            for user in tuple(used_node.users):
+                if user in required_fw_nodes and user.fw_order > first_unfusible_use:
+                    print(f"forcing {used_node} -> {user} {user.fw_order}")
                     nx_graph.add_edge("source", user.name+"_in", capacity=math.inf)
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
