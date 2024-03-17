@@ -167,6 +167,9 @@ class BuiltinVariable(VariableTracker):
             operator.ior,
             operator.index,
         }
+        from .tensor import supported_comparison_ops
+
+        fns.update(supported_comparison_ops.values())
         fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
         return fns
 

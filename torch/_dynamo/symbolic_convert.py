@@ -99,17 +99,11 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import (
-    supported_comparison_ops,
-    supported_const_comparison_ops,
-    SymNodeVariable,
-    TensorVariable,
-)
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    UserDefinedVariable,
 )
 
 log = logging.getLogger(__name__)
@@ -117,6 +111,9 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+compare_op_handlers = {
+    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+}
 
 
 @dataclasses.dataclass
@@ -1196,49 +1193,7 @@ class InstructionTranslatorBase(
             unimplemented(f"FOR_ITER {typestr(it)}")
 
     def COMPARE_OP(self, inst):
-        left, right = self.popn(2)
-        op = inst.argval
-        if right.is_python_constant():
-            if left.is_python_constant():
-                # constant fold
-                return self.push(
-                    ConstantVariable(
-                        supported_comparison_ops[op](
-                            left.as_python_constant(), right.as_python_constant()
-                        ),
-                    )
-                )
-            elif (
-                op in supported_const_comparison_ops
-                and right.as_python_constant() is None
-                and isinstance(
-                    left,
-                    (
-                        TensorVariable,
-                        SymNodeVariable,
-                        NNModuleVariable,
-                        BaseListVariable,
-                        UserDefinedVariable,
-                        BaseUserFunctionVariable,
-                        ConstDictVariable,
-                    ),
-                )
-            ):
-                # <non-None> is None
-                return self.push(
-                    ConstantVariable(supported_const_comparison_ops[op](object(), None))
-                )
-
-        if op == "in" or op == "not in":
-            self.push(right.call_method(self, "__contains__", [left], {}))
-            if op == "not in":
-                self.UNARY_NOT(inst)
-        else:
-            self.push(
-                BuiltinVariable(supported_comparison_ops[op]).call_function(
-                    self, [left, right], {}
-                )
-            )
+        self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
