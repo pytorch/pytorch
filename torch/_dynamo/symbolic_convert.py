@@ -117,7 +117,6 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
-in_or_not_in = dict.fromkeys(("in", "not in"))
 
 
 @dataclasses.dataclass
@@ -877,8 +876,7 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> List[VariableTracker]:
-        self.stack, result = self.stack[:-n], self.stack[-n:]
-        return result
+        return [*reversed([self.pop() for _ in range(n)])]
 
     def LOAD_FAST(self, inst):
         name = inst.argval
@@ -1231,7 +1229,7 @@ class InstructionTranslatorBase(
                     ConstantVariable(supported_const_comparison_ops[op](object(), None))
                 )
 
-        if op in in_or_not_in:
+        if op == "in" or op == "not in":
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)

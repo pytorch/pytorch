@@ -546,13 +546,7 @@ class BuiltinVariable(VariableTracker):
             and self.tensor_args(*args, *kwargs.values())
             and not (
                 fn is operator.getitem
-                and (
-                    (
-                        isinstance(args[0], ConstDictVariable)
-                        and isinstance(args[1], variables.TensorVariable)
-                    )
-                    or isinstance(args[0], variables.TensorVariable)
-                )
+                and not isinstance(args[0], variables.TensorVariable)
             )
         ):
             try:
