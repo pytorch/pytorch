@@ -320,11 +320,12 @@ def _warn_traceable_deprecated():
 
 
 class _IsTraceableWarning:
+    def __init__(self, value):
+        self.value = value
+
     def __get__(self, obj, klass=None):
         _warn_traceable_deprecated()
-        if klass is None:
-            klass = type(obj)
-        return klass._is_traceable  # type: ignore[attr-defined]
+        return self.value
 
 
 class FunctionMeta(type):
@@ -351,8 +352,7 @@ class FunctionMeta(type):
                 _warn_traceable_deprecated()
                 # already emitted warning, no need to install _IsTraceableWarning
             else:
-                cls._is_traceable = attrs.pop("is_traceable")
-                cls.is_traceable = _IsTraceableWarning()
+                cls.is_traceable = _IsTraceableWarning(attrs.pop("is_traceable"))
 
         super().__init__(name, bases, attrs)
 
