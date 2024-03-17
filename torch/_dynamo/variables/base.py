@@ -30,7 +30,7 @@ class ParentsTracker:
 
     def __init__(self):
         # logically this is a set, but we use a dict to ensure deterministic ordering
-        self.parents: Dict[ParentsTracker, bool] = dict()
+        self.parents: Dict[ParentsTracker, bool] = {}
 
     def add(self, parent):
         self.parents[parent] = True
@@ -153,6 +153,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "parents_tracker",
         "user_code_variable_name",
     }
+
+    # can set to false in subclasses if there are guaranteed to be no VTs stored on self
+    _has_child_nodes = True
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
@@ -401,12 +404,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __post_init__(self, *args, **kwargs):
         if self.parents_tracker is None:
             self.parents_tracker = ParentsTracker()
-        # visit children 1 level deep and ensure parent is set properly
-        VariableTracker.apply(
-            lambda node: node.parents_tracker.add(self.parents_tracker),
-            [v for k, v in self.__dict__.items() if k not in self._nonvar_fields],
-            skip_fn=lambda _: True,
-        )
+        if self._has_child_nodes:
+            # visit children 1 level deep and ensure parent is set properly
+            VariableTracker.apply(
+                lambda node: node.parents_tracker.add(self.parents_tracker),
+                [v for k, v in self.__dict__.items() if k not in self._nonvar_fields],
+                skip_fn=lambda _: True,
+            )
 
 
 def typestr(*objs):
