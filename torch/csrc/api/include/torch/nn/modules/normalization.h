@@ -17,7 +17,7 @@ namespace nn {
 
 /// Applies Layer Normalization over a mini-batch of inputs as described in
 /// the paper `Layer Normalization`_ .
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LayerNorm to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LayerNorm to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LayerNormOptions` class to learn what
@@ -78,7 +78,7 @@ TORCH_MODULE(LayerNorm);
 /// Applies local response normalization over an input signal composed
 /// of several input planes, where channels occupy the second dimension.
 /// Applies normalization across channels.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LocalResponseNorm to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LocalResponseNorm to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LocalResponseNormOptions` class to
@@ -152,7 +152,7 @@ TORCH_MODULE(CrossMapLRN2d);
 
 /// Applies Group Normalization over a mini-batch of inputs as described in
 /// the paper `Group Normalization`_ .
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GroupNorm to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.GroupNorm to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GroupNormOptions` class to learn what
