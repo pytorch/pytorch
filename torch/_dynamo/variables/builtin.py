@@ -462,17 +462,22 @@ class BuiltinVariable(VariableTracker):
             if op in supported_const_comparison_ops.values():
                 # Tensor is None, List is not None, etc
                 none_result = op(object(), None)
+                if op.__name__.startswith("is_"):
 
-                def obj_op_none(tx, a, b: ConstantVariable):
-                    if b.value is None or b.value is True or b.value is False:
+                    def never(tx, a, b):
                         return ConstantVariable(none_result)
 
-                def none_op_obj(tx, a: ConstantVariable, b):
-                    if a.value is None or a.value is True or a.value is False:
-                        return ConstantVariable(none_result)
+                    obj_op_none = never
+                    none_op_obj = never
+                else:
 
-                def never(tx, a, b):
-                    return ConstantVariable(none_result)
+                    def obj_op_none(tx, a, b: ConstantVariable):
+                        if b.value is None or b.value is True or b.value is False:
+                            return ConstantVariable(none_result)
+
+                    def none_op_obj(tx, a: ConstantVariable, b):
+                        if a.value is None or a.value is True or a.value is False:
+                            return ConstantVariable(none_result)
 
                 types_that_are_never_none = (
                     TensorVariable,
@@ -484,9 +489,6 @@ class BuiltinVariable(VariableTracker):
                     ConstDictVariable,
                     BaseTorchVariable,
                 )
-                if op.__name__.startswith("is_"):
-                    obj_op_none = never
-                    none_op_obj = never
                 result.extend(
                     [
                         (
@@ -567,7 +569,8 @@ class BuiltinVariable(VariableTracker):
             if op.__name__.startswith("is_"):
 
                 def handle_is(tx, left, right):
-                    # If the two objects are of different type, we can safely return False and True for `is` and `is not`, respectively
+                    # If the two objects are of different type, we can safely return False
+                    # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
                         return ConstantVariable.create(op.__name__ != "is_")
 
