@@ -46,7 +46,7 @@ PyObject* get_backend(PyObject* callback) {
   while (py::hasattr(handle, "_torchdynamo_orig_callable")) {
     handle = handle.attr("_torchdynamo_orig_callable");
   }
-  while (py::hasattr(handle, "compiler_fn")) {
+  if (py::hasattr(handle, "compiler_fn")) {
     handle = handle.attr("compiler_fn");
   }
   return handle.ptr();
