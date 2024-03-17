@@ -755,8 +755,8 @@ def min_cut_rematerialization_partition(
         print()
 
     def is_materialized_backwards(node):
-        if get_aten_target(node) in view_ops:
-            return False
+        # if get_aten_target(node) in view_ops:
+        #     return False
         cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
@@ -901,7 +901,29 @@ def min_cut_rematerialization_partition(
                 if user in required_fw_nodes and is_fusible(cur, user):
                     heapq.heappush(fusible, (user.fw_order, user))
 
+    def users_all_fusible(node, max_range):
+        for user in node.users:
+            if user not in required_fw_nodes:
+                return True
+            if user.fw_order > max_range:
+                return True
+            if not is_fusible(node, user):
+                return False
+            return all([users_all_fusible(user, max_range)])
 
+    for used_node in joint_graph.nodes:
+        if used_node not in required_fw_nodes:
+            continue
+        orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
+        fw_users = [user for user in used_node.users if user in required_fw_nodes]
+        if len(orders) > 0 and max(orders) - min(orders) > 5:
+            if all(users_all_fusible(user, max(orders)) for user in fw_users) and not get_aten_target(node) == operator.getitem:
+                print("all fusible", used_node, fw_users, orders)
+                continue
+            print("forcing ", used_node, fw_users, orders)
+            for user in tuple(used_node.users)[1:]:
+                if user in required_fw_nodes:
+                    nx_graph.add_edge("source", user.name+"_in", capacity=math.inf)
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
