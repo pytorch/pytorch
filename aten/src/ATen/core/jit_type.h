@@ -20,11 +20,11 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 struct Function;
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
 
 namespace c10 {
 

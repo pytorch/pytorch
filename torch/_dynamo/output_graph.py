@@ -471,8 +471,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
-
     def synthetic_graph_input(self, fn, args):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
