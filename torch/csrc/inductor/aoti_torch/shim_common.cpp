@@ -219,6 +219,22 @@ AOTITorchError aoti_torch_get_stride(
   });
 }
 
+AOTITorchError aoti_torch_get_dtype_name(
+    AtenTensorHandle tensor,
+    uint32_t str_len,
+    char* ret_dtype_str) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    std::stringstream ss;
+    ss << t->dtype().name();
+    auto dtype_str = ss.str();
+    if ((dtype_str.size() + 1) > str_len) {
+      return AOTI_TORCH_FAILURE;
+    }
+    strncpy(ret_dtype_str, dtype_str.c_str(), str_len);
+  });
+}
+
 AOTITorchError aoti_torch_get_dtype(
     AtenTensorHandle tensor,
     int32_t* ret_dtype) {

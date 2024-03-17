@@ -201,6 +201,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_stride(AtenTensorHandle tensor, int64_t d, int64_t* ret_stride);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_dtype_name(
+    AtenTensorHandle tensor,
+    uint32_t str_len,
+    char* ret_dtype);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_dtype(AtenTensorHandle tensor, int32_t* ret_dtype);
 

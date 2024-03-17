@@ -50,6 +50,10 @@ class CppWrapperCpu(WrapperCodeGen):
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
+        # Specify the max length for any dtype name. This is used for making a temp
+        # array of "char"s to hold the dtype name of a tensor. It's only used in
+        # debug_compile mode. 50 should be enough.
+        self.max_dtype_name_len = 50
 
         from .cpp import cexpr, CppPrinter
 
@@ -253,6 +257,92 @@ class CppWrapperCpu(WrapperCodeGen):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
+    def generate_input_output_runtime_checks(self):
+        dtype_to_name = {
+            torch.bfloat16: "c10::BFloat16",
+            torch.float16: "c10::Half",
+            torch.float32: "float",
+            torch.float64: "double",
+            torch.bool: "bool",
+            torch.int8: "signed char",
+            torch.int16: "short int",
+            torch.int32: "int",
+            torch.int64: "long int",
+            torch.uint8: "unsigned char",
+            # the following dtype(s) are not supported by cpp_wrapper
+            # torch.uint16, torch.uint32, torch.uint64, torch.uint32
+            torch.complex32: "c10::complex<c10::Half>",
+            torch.complex64: "c10::complex<float>",
+            torch.complex128: "c10::complex<double>",
+            torch.float8_e4m3fn: "c10::Float8_e4m3fn",
+            torch.float8_e5m2: "c10::Float8_e5m2",
+            torch.float8_e4m3fnuz: "c10::Float8_e4m3fnuz",
+            torch.float8_e5m2fnuz: "c10::Float8_e5m2fnuz",
+        }
+
+        # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
+        # real input/output tensor match ones provided at compile time via sample
+        # input/output.
+        def gen_check(handle_kind, idx, name, tensor):
+            self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
+            self.codegen_tensor_dtype_name_var_decl(self.prefix, name)
+            expected_dtype = dtype_to_name[tensor.dtype]
+            self.prefix.splice(
+                f"""
+                    if (std::string("{expected_dtype}") != {name}_dtype_name) {{
+                        std::stringstream ss;
+                        ss << "{handle_kind}[{idx}]: unmatched dtype, "
+                           << "expected: {expected_dtype}, " << "but got: "
+                           << {name}_dtype_name << "\\n";
+                        throw std::runtime_error(ss.str());
+                    }}
+                """
+            )
+            self.codegen_input_size_var_decl(self.prefix, name)
+            for dim_idx, d in enumerate(tensor.get_size()):
+                if not isinstance(d, (int, sympy.Integer)):
+                    continue
+                self.prefix.splice(
+                    f"""
+                        if ({d} != {name}_size[{dim_idx}]) {{
+                            std::stringstream ss;
+                            ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
+                               << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
+                               << "\\n";
+                            throw std::runtime_error(ss.str());
+                        }}
+                    """
+                )
+            self.codegen_input_stride_var_decl(self.prefix, name)
+            for stride_idx, s in enumerate(tensor.get_stride()):
+                if not isinstance(s, (int, sympy.Integer)):
+                    continue
+                self.prefix.splice(
+                    f"""
+                        if ({s} != {name}_stride[{stride_idx}]) {{
+                            std::stringstream ss;
+                            ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
+                               << "expected: {s}, " << "but got: " << {name}_stride[{stride_idx}]
+                               << "\\n";
+                            throw std::runtime_error(ss.str());
+                        }}
+                    """
+                )
+
+        # force noinline to avoid any potential compilation slowdown due to aggressive
+        # inline done by the host compiler
+        self.prefix.splice(
+            """
+            AOTI_NOINLINE static void __check_inputs_outputs(
+                AtenTensorHandle* input_handles,
+                AtenTensorHandle* output_handles) {
+            """
+        )
+        with self.prefix.indent():
+            for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
+                gen_check("input_handles", idx, name, tensor)
+        self.prefix.writeline("}")
+
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
@@ -317,6 +407,13 @@ class CppWrapperCpu(WrapperCodeGen):
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
+                    """
+                # Since we are removing non-abi-compatible mode, let's generate
+                # runtime checks only for abi_compatible mode to avoid extra branches.
+                if config.aot_inductor.debug_compile and config.abi_compatible:
+                    self.generate_input_output_runtime_checks()
+                    run_impl_proto += """
+                        __check_inputs_outputs(input_handles, output_handles);
                     """
                 if config.use_minimal_arrayref_interface:
                     self.prefix.splice(
@@ -483,6 +580,19 @@ class CppWrapperCpu(WrapperCodeGen):
                 continue
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
+
+    def codegen_tensor_dtype_name_var_decl(self, code: IndentedBuffer, name):
+        if config.abi_compatible:
+            code.writeline(f"char {name}_dtype_name[{self.max_dtype_name_len}];")
+            code.writeline(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype_name"
+                f"({name}, {self.max_dtype_name_len}, {name}_dtype_name));"
+            )
+        else:
+            # Note that we don't have a corresponding class method from
+            # the WrapperCodeGen since this method is used for asserting AOTI
+            # cpp wrapper code.
+            code.writeline(f"auto {name}_dtype_name = {name}.dtype().name();")
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.abi_compatible:
