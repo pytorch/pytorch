@@ -42,7 +42,6 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
@@ -67,13 +66,7 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import (
-    _is_top_level_scope,
-    is_side_effect_safe,
-    MutableLocal,
-    typestr,
-    VariableTracker,
-)
+from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -643,6 +636,7 @@ class InstructionTranslatorBase(
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
+    exec_recorder: Optional[ExecutionRecorder]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -855,7 +849,7 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except Exception as e:
-                if config.replay_record_enabled:
+                if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
                 raise
             finally:
@@ -887,23 +881,30 @@ class InstructionTranslatorBase(
 
     def LOAD_FAST(self, inst):
         name = inst.argval
-        if name in self.f_locals and config.replay_record_enabled:
+
+        if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
-        if name.startswith(".") and name not in self.symbolic_locals:
-            # This happens in dict/list comprehensions
-            name = name.replace(".", "implicit")
-        assert name not in self.cell_and_freevars()
-        if name not in self.symbolic_locals:
-            unimplemented("undefined LOAD_FAST")
-        self.push(self.symbolic_locals[name])
+        try:
+            self.push(self.symbolic_locals[name])
+        except KeyError:
+            if name.startswith("."):
+                try:
+                    # This happens in dict/list comprehensions
+                    self.push(self.symbolic_locals[name.replace(".", "implicit")])
+                except KeyError:
+                    unimplemented("undefined LOAD_FAST (implicit)")
+            else:
+                unimplemented("undefined LOAD_FAST")
+
+        # for continuation functions
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
 
-        if inst.argval in self.f_locals and config.replay_record_enabled:
+        if self.exec_recorder and inst.argval in self.f_locals:
             self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
 
         if inst.argval not in self.symbolic_locals:
@@ -913,11 +914,7 @@ class InstructionTranslatorBase(
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        # Only rename at the top-level scope, this is to avoid the confusion between
-        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
-        # where mutation is prohibited and it's difficult to differentiate it with renaming.
-        if _is_top_level_scope(current_scope_id()):
-            loaded_vt = loaded_vt.rename(self, name)
+        loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
@@ -929,11 +926,16 @@ class InstructionTranslatorBase(
         self.push(ClosureVariable(name=inst.argval))
 
     def LOAD_CONST(self, inst):
-        # For empty tuples, create empty TupleVariable
-        if isinstance(inst.argval, tuple) and not inst.argval:
-            self.push(TupleVariable([]))
-        else:
+        i = inst.arg
+        if i is None:
             self.push(ConstantVariable.create(value=inst.argval))
+        else:
+            val = self._constants_cache[i]
+            if not val:
+                self._constants_cache[i] = val = ConstantVariable.create(
+                    value=inst.argval
+                )
+            self.push(val)
 
     def get_global_source(self, name):
         source: Source
@@ -958,7 +960,7 @@ class InstructionTranslatorBase(
 
         name = inst.argval
 
-        if config.replay_record_enabled:
+        if self.exec_recorder:
             if name in self.f_globals:
                 self.exec_recorder.add_global_var(name, self.f_globals[name])
             else:
@@ -1089,7 +1091,7 @@ class InstructionTranslatorBase(
             else:
                 source = self.import_source(module_name)
 
-        if config.replay_record_enabled:
+        if self.exec_recorder:
             self.exec_recorder.add_local_mod(recorded_name, value)
 
         if istype(value, (types.ModuleType, DummyModule)):
@@ -2031,7 +2033,12 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
+        if config.replay_record_enabled:
+            self.exec_recorder = ExecutionRecorder(
+                code=f_code, code_options=code_options
+            )
+        else:
+            self.exec_recorder = None
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
@@ -2058,6 +2065,9 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
+        self._constants_cache: List[Optional[VariableTracker]] = [None] * len(
+            f_code.co_consts
+        )
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
