@@ -1,7 +1,3 @@
-#if defined(USE_ROCM) && defined(_WIN32)
-#define ROCM_ON_WINDOWS
-#endif
-
 #ifdef _WIN32
 #include <wchar.h> // _wgetenv for nvtx
 #endif
