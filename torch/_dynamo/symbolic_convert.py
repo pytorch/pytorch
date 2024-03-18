@@ -221,7 +221,6 @@ class InstructionTranslatorGraphState(NamedTuple):
     block_stack: List[BlockStackEntry]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     lineno: int
 
     def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
@@ -631,7 +630,6 @@ class InstructionTranslatorBase(
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
@@ -735,15 +733,10 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        assert isinstance(self.instruction_pointer, int)
-        inst = self.instructions[self.instruction_pointer]
-        self.current_instruction = inst
-        self.instruction_pointer += 1
-        try:
-            self.next_instruction = self.instructions[self.instruction_pointer]
-        except IndexError:
-            self.instruction_pointer = None
-            self.next_instruction = None
+        ip = self.instruction_pointer
+        assert ip is not None
+        self.current_instruction = inst = self.instructions[ip]
+        self.instruction_pointer = ip + 1
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
@@ -821,6 +814,10 @@ class InstructionTranslatorBase(
 
         def update_block_stack(self, inst):
             pass
+
+    @property
+    def next_instruction(self):
+        return self.instructions[self.instruction_pointer]
 
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
@@ -1165,7 +1162,6 @@ class InstructionTranslatorBase(
         bytecode counter by delta
         """
         # Python 3.8 only
-        assert self.next_instruction is not None
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
         self.instruction_pointer = self.indexof[inst.target]
@@ -1830,8 +1826,6 @@ class InstructionTranslatorBase(
         )
         if sys.version_info >= (3, 11):
             # see create_call_resume_at for block stack details
-            assert self.next_instruction
-            assert self.next_instruction.exn_tab_entry
             target = self.next_instruction.exn_tab_entry.target
         else:
             target = inst.target
@@ -1865,7 +1859,6 @@ class InstructionTranslatorBase(
             list(self.block_stack),
             self.instruction_pointer,
             self.current_instruction,
-            self.next_instruction,
             self.lineno,
         )
 
@@ -1878,7 +1871,6 @@ class InstructionTranslatorBase(
             self.block_stack,
             self.instruction_pointer,
             self.current_instruction,
-            self.next_instruction,
             self.lineno,
         ) = state
         self.output.restore_graphstate(output_state)
@@ -1962,7 +1954,6 @@ class InstructionTranslatorBase(
         self.stack = []
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
-        self.next_instruction = None
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.generic_context_manager_depth = 0
