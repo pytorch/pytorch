@@ -2,7 +2,6 @@
 
 import sys
 import unittest
-from typing import Dict, Sequence
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -230,9 +229,6 @@ if __name__ == "__main__":
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
-
-
-instantiate_device_type_tests(TestXpu, globals())
 
 
 if __name__ == "__main__":
