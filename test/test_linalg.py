@@ -5816,7 +5816,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
         if TEST_WITH_ROCM:
             _test(17, k, n, use_transpose_a, use_transpose_b, False)
-        elif version >= (11, 7):
+        
+        if version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
                 if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
