@@ -1056,6 +1056,9 @@ def make_fx(f,
             # NB: don't match on bools
             elif type(x) is int and tracing_mode == "symbolic":
                 return shape_env.create_symintnode(shape_env.create_symbol(x, source, positive=None), hint=x, source=source)
+            elif isinstance(x, torch.ScriptObject):
+                from torch._subclasses.fake_tensor import _fakify_script_object
+                return _fakify_script_object(x)
 
             return x
 

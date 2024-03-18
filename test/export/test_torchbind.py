@@ -38,9 +38,11 @@ class TestExportTorchbind(TestCase):
                 return cls(real_tq.clone_queue())
 
             def push(self, x):
+                print('push', self.queue, x)
                 self.queue.append(x)
 
             def pop(self):
+                print('pop', self.queue)
                 return self.queue.pop(0)
 
             def size(self):
@@ -347,7 +349,8 @@ def forward(self, attr, arg0_1):
             ).fill_(-1)
         )
         x = torch.ones(2, 3)
-        gm = make_fx(mod)(tq, x)
+        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
+            gm = make_fx(mod, tracing_mode="fake", _allow_non_fake_inputs=True)(tq, x)
         self.assertExpectedInline(
             gm.code.strip("\n"),
             """\
@@ -370,6 +373,39 @@ def forward(self, arg0_1, arg1_1):
     """,
         )
         self._assert_equal_skip_script_object(mod(tq, x), gm(tq, x))
+
+    def test_fake_tensor_queue(self):
+        class FakeTensorQueue:
+            def __init__(self, q):
+                self.queue = q
+
+            @classmethod
+            def from_real(cls, real_tq):
+                return cls(real_tq.clone_queue())
+
+            def push(self, x):
+                self.queue.append(x)
+                print("after push", self.queue)
+
+            def pop(self):
+                return self.queue.pop(0)
+                print("after pop", self.queue)
+
+            def size(self):
+                return len(self.queue)
+
+        real_tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        # ret = real_tq.push(torch.ones(1, 1))
+        tq = FakeTensorQueue([])
+        tq2 = torch._C._mirror_script_obj_with_python(real_tq, tq)
+        t = torch.randn(1, 1)
+        c = tq2.push(t)
+        a = tq2.pop()
+
 
     def test_tensor_queue_aot_export(self):
         class Model(torch.nn.Module):
@@ -438,6 +474,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 x_sin = tq.pop() - tq.size()
                 return self.linear(x_sin), self.linear(x_cos), tq
 
+        class FakeTensorQueue:
+            def __init__(self, q):
+                self.queue = q
+
+            @classmethod
+            def from_real(cls, real_tq):
+                return cls(real_tq.clone_queue())
+
+            def push(self, x):
+                print('push', self.queue, x)
+                self.queue.append(x)
+
+            def pop(self):
+                print('pop', self.queue)
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
         mod = Model()
         tq = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
@@ -446,7 +501,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         x = torch.ones(2, 3)
         with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
-            gm, _ = aot_export_module(mod, (tq, x), trace_joint=False)
+            fake_tq = FakeTensorQueue.from_real(tq)
+            tq2 = torch._C._mirror_script_obj_with_python(tq, fake_tq)
+            fake_tq = FakeTensorQueue.from_real(tq)
+            tq2 = torch._C._mirror_script_obj_with_python(tq, fake_tq)
+            gm, _ = aot_export_module(mod, (tq2, x), trace_joint=False)
             self.assertExpectedInline(
                 gm.code.strip("\n"),
                 """\

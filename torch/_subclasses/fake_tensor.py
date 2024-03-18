@@ -801,13 +801,14 @@ class DispatchCacheInfo:
     bypasses: Dict[str, int]
     size: int
 
+# The cache has two purposes;
+# 1. avoid creating two fake objects for the same script object
+# 2. keep the fake object alive.
+_cached_fake_script_object= {}
 
-cached_fake_script_obj = {}
-
-
-def _cached_fakify_script_object(x):
-    if hash(x) in cached_fake_script_obj:
-        return cached_fake_script_obj[hash(x)]
+def _fakify_script_object(x):
+    if hash(x) in _cached_fake_script_object:
+        return _cached_fake_script_object[hash(x)]
 
     full_qualname = x._type().qualified_name()
     splits = full_qualname.split(".")
@@ -831,13 +832,16 @@ def _cached_fakify_script_object(x):
             f" doesn't implement a from_real classmethod. Please add it to the fake class."
         )
     fake_x = fake_class.from_real(x)
-    cached_fake_script_obj[hash(x)] = fake_x
-    return fake_x
+    # cpp_class = torch._C._get_custom_class_python_wrapper(ns, class_name)
+    # new_class = type(fake_class.__name__, (cpp_class, fake_class), fake_class.__dict__())
+    mirrored_obj = torch._C._mirror_script_obj_with_python(x, fake_x)
+    _cached_fake_script_object[hash(x)] = fake_x
+    return mirrored_obj
 
 
-def _maybe_cached_fakify_script_object(args, kwargs):
+def _maybe_fakify_script_object(args, kwargs):
     return pytree.tree_map_only(
-        torch.ScriptObject, lambda x: _cached_fakify_script_object(x), (args, kwargs)
+        torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
     )
 
 
@@ -1270,14 +1274,6 @@ class FakeTensorMode(TorchDispatchMode):
             )
             # NOTE: incr is intentionally unused for a RAII pattern
             incr = IncrementRecursionCount()
-
-        # NOTE: Skip fakifying inputs to torch.ops.profiler because they only have c++ implementation
-        # and are performance critical. The suggested workaround will cause non-eligible overhead.
-        if func not in {
-            torch.ops.profiler._record_function_enter_new,
-            torch.ops.profiler._record_function_exit._RecordFunction,
-        }:
-            args, kwargs = _maybe_cached_fakify_script_object(args, kwargs)
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]

@@ -855,11 +855,7 @@ void initJitScriptBindings(PyObject* module) {
               "_properties", [](Object& self) { return self.get_properties(); })
           .def("__copy__", &Object::copy)
           .def(
-              "__hash__",
-              [](const Object& self) {
-                // Similar to Tensor's `__hash__`, which is `id()`.
-                return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
-              })
+              "__hash__", &Object::_hash)
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__

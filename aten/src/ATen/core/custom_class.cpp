@@ -106,6 +106,10 @@ static std::vector<std::unique_ptr<jit::Function>>& customClassMethods() {
   return customClassMethods;
 }
 
+void deregisterCustomClassMethods() {
+  customClassMethods().clear();
+}
+
 void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
   customClassMethods().emplace_back(std::move(fn));
 }

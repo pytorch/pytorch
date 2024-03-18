@@ -180,6 +180,11 @@ struct TORCH_API Object {
     return _ivalue()->slots().size();
   }
 
+  std::size_t _hash() {
+    // Similar to Tensor's `__hash__`, which is `id()`.
+    return std::hash<c10::ivalue::Object*>{}(_ivalue().get());
+  }
+
   // shallow copy the object
   Object copy() const;
 

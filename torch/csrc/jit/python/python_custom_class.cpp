@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/python/python_custom_class.h>
 
+#include <pybind11/embed.h>
+
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
 #include <fmt/format.h>
@@ -36,6 +38,11 @@ struct ScriptClassFunctionPtr {
   }
   Function* function_;
 };
+
+static std::unordered_map<std::size_t, py::object>& customAbstractObjectCache() {
+  static std::unordered_map<std::size_t, py::object> cache;
+  return cache;
+}
 
 void initPythonCustomClassBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -94,6 +101,125 @@ void initPythonCustomClassBindings(PyObject* module) {
         c10::ClassTypePtr class_type = named_type->cast<ClassType>();
         return ScriptClass(c10::StrongTypePtr(
             std::shared_ptr<CompilationUnit>(), std::move(class_type)));
+      });
+
+  m.def(
+    "_delete_fake",
+  [](py::object mirror_obj)  {
+    // deregisterCustomClassMethods();
+  });
+  m.def(
+      "_mirror_script_obj_with_python",
+      [](py::handle real_obj, py::object mirror_obj) {
+        // create a custom_type based on this object
+        auto cprint = [](auto str) {
+          std::cout << str << std::endl;
+        };
+
+        auto real_qual_class_name = py::cast<std::string>(real_obj.attr("__qualname__"));
+        auto mirror_ns = "__torch__.torch.classes._mirrored_class.";
+        auto qual_class_name = mirror_ns + real_qual_class_name + "_python_mirror";
+
+        auto class_type_ptr = torch::getCustomClass(qual_class_name);
+        if (!class_type_ptr) {
+          cprint("registering qual_class_name:" + qual_class_name);
+
+          class_type_ptr = at::ClassTypePtr(at::ClassType::create(
+            c10::QualifiedName(qual_class_name),
+            std::weak_ptr<CompilationUnit>(),
+            /*is_module=*/false,
+            std::move(qual_class_name + " is a mirrored implementation of " + real_qual_class_name
+              + ". All methods on mirrored object is forwarded to python.")));
+
+          auto register_py_fake_func = [cprint, qual_class_name](auto py_real_obj, auto class_type_ptr, auto py_fake_obj, auto method_name){
+            auto schema = py::cast<c10::FunctionSchema>(py_real_obj.attr(py::cast(method_name)).attr("schema"));
+            auto forward_py_func = [cprint, method_name, schema](jit::Stack& stack) {
+              cprint("forwarding_function: " + method_name);
+              py::gil_scoped_acquire g;
+
+              auto self_arg = stack[0];
+              auto py_args = createPyObjectForStack(std::move(stack));
+              cprint("forwarding_function: 0");
+              py::list arg_list = py::isinstance<py::tuple>(py_args) ? py_args : py::make_tuple(py_args);
+
+              cprint("forwarding_function: 1");
+              py::slice slice1(1, len(arg_list), 1);
+              py::slice slice0(0, 1, 1);
+              cprint("forwarding_function: 2");
+              auto arg_list1 = py::cast<py::tuple>(arg_list[slice1]);
+              auto arg_list2 = py::cast<py::tuple>(arg_list[slice0]);
+
+
+              std::cout << self_arg << std::endl;
+              auto fake_obj = customAbstractObjectCache()[std::hash<c10::ivalue::Object*>{}(self_arg.toObject().get())];
+              TORCH_CHECK(!fake_obj.is_none(), "fake object is None");
+
+              py::print(fake_obj);
+              py::print(py::hasattr(fake_obj, py::cast(method_name)));
+              auto ret = fake_obj.attr(py::cast(method_name))(*arg_list1);
+
+              cprint("forwarding_function: 3");
+              stack = jit::Stack();
+              if (schema.returns().size() == 1) {
+                auto ret_schema = schema.returns()[0];
+                if (ret_schema.type() == c10::NoneType::get()) {
+                  stack.emplace_back();
+                } else {
+                  auto ret_type = ret_schema.type();
+                  stack.emplace_back(toIValue(ret, ret_type));
+                }
+              } else {
+                auto ret_schema = schema.returns();
+                for (size_t i = 0; i < ret_schema.size(); ++i) {
+                  auto ret_type = ret_schema[i].type();
+                  stack.emplace_back(toIValue(ret[py::cast(i)], ret_type));
+                }
+              }
+              cprint("forwarding_function: 4");
+            };
+
+            auto method = std::make_unique<jit::BuiltinOpFunction>(
+                c10::QualifiedName(qual_class_name+ "." + method_name),
+                schema,
+                std::move(forward_py_func),
+                std::move(std::string("heihei.haha.") + method_name));
+            class_type_ptr->addMethod(method.get());
+            registerCustomClassMethod(std::move(method));
+          };
+
+          auto real_obj_cpp = py::cast<Object>(real_obj);
+          for (auto func: real_obj_cpp.type()->methods()) {
+            auto name = func->name();
+            std::cout << name << std::endl;
+            if (name != "__init__") {
+              if (py::hasattr(mirror_obj, py::cast(name))){
+                register_py_fake_func(real_obj, class_type_ptr, mirror_obj, name);
+              } else {
+                std::cout << "mirror object doesn't implement " << name << std::endl;
+              }
+            }
+          }
+
+          // TODO cache the registration and avoid capturing object into
+          // the lambda.
+          cprint(
+            "registering custom class " + qual_class_name + " with torch::jit::registerCustomClass"
+          );
+          torch::registerCustomClass(class_type_ptr);
+        }
+
+        cprint(
+          "Done registering custom class "
+        );
+        auto instance = Object(
+          at::ivalue::Object::create(c10::StrongTypePtr(std::shared_ptr<CompilationUnit>(), class_type_ptr),
+          /*numSlots=*/1)
+        );
+        auto obj = py::cast(instance);
+        py::print("hash in python:");
+        customAbstractObjectCache().insert(std::make_pair<std::size_t, py::object>(py::cast<std::size_t>(obj.attr("__hash__")()), std::move(mirror_obj)));
+        // customAbstractObjectCache().insert({obj.attr("__hash__")(), mirror_obj});
+        return obj;
       });
 }
 

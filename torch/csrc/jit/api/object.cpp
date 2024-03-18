@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/api/object.h>
+#include <iostream>
 
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
