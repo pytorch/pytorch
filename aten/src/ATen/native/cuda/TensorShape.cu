@@ -15,10 +15,6 @@
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #endif
 
-
-#include<stdio.h>
-#include <inttypes.h>
-
 namespace at::native {
 
 namespace detail {
@@ -316,15 +312,8 @@ __device__ __inline__ void copy_chunk_with_pad(
     }
     return;
   }
-  printf("\nsame type branch\n\n");
   char* dst = reinterpret_cast<char*>(dst_ptr);
   char* src = reinterpret_cast<char*>(src_ptr);
-
-  printf("before fast path. blockIdx.x: %" PRId64 ", blockIdx.y: %" PRId64 ", blockIdx.z: %" PRId64 ", thread_idx: %" PRId64 ", dst[thread_idx]: %" PRId64 ", max_chunk_size: %" PRId64 ", actual_chunk_size: %" PRId64 ", num_threads: %" PRId64 "\n\n",
-    (int64_t)blockIdx.x, (int64_t)blockIdx.y, (int64_t)blockIdx.z, thread_idx, (int64_t)dst[thread_idx], max_chunk_size, actual_chunk_size, num_threads
-  );
-
-
   // Fast path when the number of threads is larger than the number of bytes to
   // be copied (i.e., max_chunk_size). In this case, each thread only copies 1
   // byte. For 0 <= thread_idx < actual_chunk_size, the thread copies data from
@@ -337,17 +326,9 @@ __device__ __inline__ void copy_chunk_with_pad(
     }
     if (thread_idx < max_chunk_size) {
       dst[thread_idx] = val;
-    printf("inside fast path. blockIdx.x: %" PRId64 ", blockIdx.y: %" PRId64 ", blockIdx.z: %" PRId64 ", thread_idx: %" PRId64 ", dst[thread_idx]: %" PRId64 ", max_chunk_size: %" PRId64 ", actual_chunk_size: %" PRId64 ", num_threads: %" PRId64 "\n\n",
-      (int64_t)blockIdx.x, (int64_t)blockIdx.y, (int64_t)blockIdx.z, thread_idx, (int64_t)dst[thread_idx], max_chunk_size, actual_chunk_size, num_threads
-    );
     }
     return;
   }
-
-  printf("after fast path. blockIdx.x: %" PRId64 ", blockIdx.y: %" PRId64 ", blockIdx.z: %" PRId64 ", thread_idx: %" PRId64 ", dst[thread_idx]: %" PRId64 ", max_chunk_size: %" PRId64 ", actual_chunk_size: %" PRId64 ", num_threads: %" PRId64 "\n\n",
-    (int64_t)blockIdx.x, (int64_t)blockIdx.y, (int64_t)blockIdx.z, thread_idx, (int64_t)dst[thread_idx], max_chunk_size, actual_chunk_size, num_threads
-  );
-
   // Split dst array into three parts:
   // [dst, dst+align_off), [dst+align_off, dst+align_end), [dst+align_end,
   // dst+max_chunk_size) The second part is aligned with BYTES_PER_THREAD(=16
@@ -430,14 +411,6 @@ static __global__ void chunk_cat_cuda_kernel(
           actual_tensor_sizes[tensor_idx] -
               chunk_idx * pad_tensor_chunk_sizes[tensor_idx] /
                   dst_to_src_ratio));
-  int64_t src_offset = slice_idx * actual_tensor_sizes[tensor_idx] +
-      chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio;
-  int64_t dst_offset = slice_idx * slice_size +
-      chunk_idx * chunk_size + tensor_idx_to_start_tensor_bytes[tensor_idx];
-  if (thread_idx == 0) {
-    printf("slice_idx: %" PRId64 ", chunk_idx: %" PRId64 ", tensor_idx: %" PRId64 ", tile_idx: %" PRId64 ", max_chunk_size: %" PRId64 ", actual_copy_size: %" PRId64 ", num_threads: %" PRId64 ", src_offset: %" PRId64 ", dst_offset: %" PRId64 "\n",
-            slice_idx, chunk_idx, tensor_idx, tile_idx, pad_tensor_chunk_sizes[tensor_idx], actual_copy_size, num_threads, src_offset, dst_offset);
-  }
   copy_chunk_with_pad<dst_t, src_t>(
       reinterpret_cast<dst_t*>(dst_addr),
       reinterpret_cast<src_t*>(src_addr),
@@ -456,15 +429,18 @@ bool all_contiguous(TensorList tensors) {
 }
 
 // Gets metadata for chunk_cat.
-std::tuple<int64_t, int64_t, int64_t, int64_t,
-std::vector<int64_t>,
-std::vector<int64_t>,
-std::vector<int64_t>,
-std::vector<int64_t>,
-std::vector<int64_t>,
-std::vector<int64_t>,
-std::vector<int64_t>
->
+std::tuple<
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>>
 get_chunk_cat_metadata(
     TensorList tensors,
     int64_t dim,
@@ -529,29 +505,17 @@ get_chunk_cat_metadata(
   const int64_t num_blocks_per_chunk = start_block_idx_per_tensor_chunk.back();
   const int64_t slice_size = num_chunks * chunk_size;
   return std::make_tuple(
-    chunk_size,
-    leading_dim,
-    num_blocks_per_chunk,
-    slice_size,
-    srcs,
-    block_idx_to_tensor_idx,
-    tensor_idx_to_start_tensor_bytes,
-    start_block_idx_per_tensor_chunk,
-    actual_tensor_sizes,
-    pad_tensor_chunk_sizes,
-    num_blocks_per_tensor_chunk
-  );
-  // auto packed = detail::pack_vecs(
-  //     {&srcs,
-  //      &block_idx_to_tensor_idx,
-  //      &tensor_idx_to_start_tensor_bytes,
-  //      &start_block_idx_per_tensor_chunk,
-  //      &actual_tensor_sizes,
-  //      &pad_tensor_chunk_sizes,
-  //      &num_blocks_per_tensor_chunk},
-  //     device);
-  // return std::make_tuple(
-  //     chunk_size, leading_dim, num_blocks_per_chunk, slice_size, packed.second);
+      chunk_size,
+      leading_dim,
+      num_blocks_per_chunk,
+      slice_size,
+      srcs,
+      block_idx_to_tensor_idx,
+      tensor_idx_to_start_tensor_bytes,
+      start_block_idx_per_tensor_chunk,
+      actual_tensor_sizes,
+      pad_tensor_chunk_sizes,
+      num_blocks_per_tensor_chunk);
 }
 
 // See [CUDA kernel for chunk_cat_cuda]
@@ -565,17 +529,20 @@ void _chunk_cat_out_cuda_contiguous(
     int64_t src_elem_size) {
   const auto device = tensors[0].device();
   auto
-      [chunk_size, leading_dim, num_blocks_per_chunk, slice_size,     srcs,
-    block_idx_to_tensor_idx,
-    tensor_idx_to_start_tensor_bytes,
-    start_block_idx_per_tensor_chunk,
-    actual_tensor_sizes,
-    pad_tensor_chunk_sizes,
-    num_blocks_per_tensor_chunk
-] =
+      [chunk_size,
+       leading_dim,
+       num_blocks_per_chunk,
+       slice_size,
+       srcs,
+       block_idx_to_tensor_idx,
+       tensor_idx_to_start_tensor_bytes,
+       start_block_idx_per_tensor_chunk,
+       actual_tensor_sizes,
+       pad_tensor_chunk_sizes,
+       num_blocks_per_tensor_chunk] =
           get_chunk_cat_metadata(
               tensors, dim, num_chunks, dst_elem_size, src_elem_size);
-    auto packed = detail::pack_vecs(
+  auto packed = detail::pack_vecs(
       {&srcs,
        &block_idx_to_tensor_idx,
        &tensor_idx_to_start_tensor_bytes,
@@ -584,18 +551,11 @@ void _chunk_cat_out_cuda_contiguous(
        &pad_tensor_chunk_sizes,
        &num_blocks_per_tensor_chunk},
       device);
-
   std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
       tensors[0].sizes(), dim, num_chunks, chunk_size, dst_elem_size);
-  TORCH_WARN("\n\nbefore out.numel(): ", out.numel(), "\n\n");
-  // at::native::resize_output(out, view_sizes);
-  out.resize_(view_sizes);
-  TORCH_WARN("\n\nafter out.numel(): ", out.numel(), "\n\n ");
+  at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
-  TORCH_WARN("\n\n", "num_blocks_per_chunk:", num_blocks_per_chunk, ", num_chunks:", num_chunks, ", leading_dim:", leading_dim, "\n\n");
-  TORCH_WARN("\n\ndst_elem_size:", dst_elem_size, ", src_elem_size:", src_elem_size, "\n\n");
-  cudaDeviceSynchronize();
   detail::chunk_cat_cuda_kernel<<<
       blocks,
       threads,
@@ -777,30 +737,36 @@ void split_with_sizes_copy_out_cuda(
 
 Tensor _chunk_cat_cuda(TensorList tensors, int64_t dim, int64_t num_chunks) {
   dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
-  // if (detail::all_contiguous(tensors)) {
-  //   // Return a tensor with the same dtype as input tensors
-  //   int64_t elem_size = tensors[0].element_size();
-  //   auto
-  //       [chunk_size,
-  //        leading_dim,
-  //        num_blocks_per_chunk,
-  //        slice_size,
-  //        device_ptrs] =
-  //           detail::get_chunk_cat_metadata(
-  //               tensors, dim, num_chunks, elem_size, elem_size);
-  //   auto view_sizes = detail::get_chunk_cat_out_sizes(
-  //       tensors[0].sizes(), dim, num_chunks, chunk_size, elem_size);
-  //   Tensor out =
-  //       tensors[0]
-  //           .new_empty(chunk_size * num_chunks * leading_dim / elem_size)
-  //           .view(view_sizes);
-  //   // Type-agnostic copy since out and input tensors have the same type.
-  //   detail::_chunk_cat_out_cuda_contiguous<char, char>(
-  //       tensors, dim, num_chunks, out, elem_size, elem_size);
-  //   return out;
-  // } else {
+  if (detail::all_contiguous(tensors)) {
+    // Return a tensor with the same dtype as input tensors
+    int64_t elem_size = tensors[0].element_size();
+    auto
+        [chunk_size,
+         leading_dim,
+         num_blocks_per_chunk,
+         slice_size,
+         srcs,
+         block_idx_to_tensor_idx,
+         tensor_idx_to_start_tensor_bytes,
+         start_block_idx_per_tensor_chunk,
+         actual_tensor_sizes,
+         pad_tensor_chunk_sizes,
+         num_blocks_per_tensor_chunk] =
+            detail::get_chunk_cat_metadata(
+                tensors, dim, num_chunks, elem_size, elem_size);
+    auto view_sizes = detail::get_chunk_cat_out_sizes(
+        tensors[0].sizes(), dim, num_chunks, chunk_size, elem_size);
+    Tensor out =
+        tensors[0]
+            .new_empty(chunk_size * num_chunks * leading_dim / elem_size)
+            .view(view_sizes);
+    // Type-agnostic copy since out and input tensors have the same type.
+    detail::_chunk_cat_out_cuda_contiguous<char, char>(
+        tensors, dim, num_chunks, out, elem_size, elem_size);
+    return out;
+  } else {
     return at::native::_chunk_cat(tensors, dim, num_chunks);
-  // }
+  }
 }
 
 Tensor& _chunk_cat_out_cuda(
