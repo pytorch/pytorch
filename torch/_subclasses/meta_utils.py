@@ -924,6 +924,7 @@ class MetaConverter:
                             assert t.unwrapped is not None
                             assert t.level is not None
                             disable_functorch = torch._C._DisableFuncTorch
+                            ft = get_unwrapped(t)
                             with disable_functorch():
                                 ft = _to_fake_tensor(t.unwrapped)
                             lvl = t.level
