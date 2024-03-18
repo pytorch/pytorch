@@ -773,10 +773,7 @@ class BuiltinVariable(VariableTracker):
             builder = SourcelessBuilder().__call__
 
             if (
-                all(
-                    issubclass(x, (ConstantVariable, SymNodeVariable))
-                    for x in arg_types
-                )
+                all(issubclass(x, ConstantVariable) for x in arg_types)
                 and not has_kwargs
             ):
 
