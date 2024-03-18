@@ -202,6 +202,13 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
         self.assertNotEqual(hash(mesh), hash(mesh2))
+        self.assertNotEqual(mesh, mesh2)
+
+        # We make a duplicate by = to make sure mesh and mesh_copy have the same reference id.
+        mesh_copy = mesh
+        self.assertEqual(hash(mesh), hash(mesh_copy))
+        self.assertEqual(mesh, mesh_copy)
+
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
