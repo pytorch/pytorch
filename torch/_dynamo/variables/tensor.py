@@ -129,7 +129,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
-        _is_name_set=False,
+        _is_name_set=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -145,7 +145,10 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self._is_name_set = _is_name_set
+        if _is_name_set is None:
+            # no need to rename inputs
+            _is_name_set = self.proxy.node.op == "placeholder"
+        self._is_name_set: bool = _is_name_set
 
     def as_proxy(self):
         return self.proxy
