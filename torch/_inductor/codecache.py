@@ -417,6 +417,13 @@ def _reduce_fake_tensor(t):
 def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
+    If we see tensors, we know they're constants stored as attributes on
+    the GraphModule. Include the values in the key calculation. Small
+    tensors will be inlined, so we can't serve the same cache entry for
+    different values anyway. Large constants are treated as parameters,
+    so we could conceivably reuse a cache entry. To do that, however,
+    PyCodeCache would need more complexity to create a new module from its
+    cache, but with the right constants attached as attributes.
     """
     if t.is_mkldnn:
         # TODO: These tensors don't currently pickle, so we can't cache a
@@ -424,17 +431,18 @@ def _reduce_tensor(t):
         # get pickling support, we can remove this.
         raise BypassFxGraphCache()
 
-    # If we see tensors, we know they're constants stored as attributes on
-    # the GraphModule. See tensor lowering; small constants are inlined. If
-    # we see a small tensor, therefore, no reference will ultimately remain
-    # in the generated code. So we need to include its value in the cache key.
-    # Large constants are effectively treated as inputs and we consider only
-    # their metadata.
+    # Very large tensors could be expensive to copy to cpu and hash. Let's
+    # at least report if we find slowness.
+    start = time()
+    values = t.tolist()
+    elapsed = time() - start
+    if elapsed > 1.0:
+        warnings.warn(
+            f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
+        )
+
     metadata = extract_tensor_metadata(t)
-    if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
-        return (_ident, (TensorMetadataAndValues(metadata, t.tolist()),))
-    else:
-        return (_ident, (metadata,))
+    return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
 def _reduce_symint(s):
