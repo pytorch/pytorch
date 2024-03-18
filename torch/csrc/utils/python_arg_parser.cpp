@@ -793,7 +793,7 @@ static bool is_int_or_symint(PyObject* obj) {
   // for regular tensors it's redundant with the test below.
   if (THPVariable_Check(obj)) {
     auto& var = THPVariable_Unpack(obj);
-    if (var.numel() == 1 &&
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(var.sym_numel().sym_eq(1)) &&
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       return true;
     }
