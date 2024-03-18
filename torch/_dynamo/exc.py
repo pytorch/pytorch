@@ -188,9 +188,8 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
 def unimplemented(msg: str, *, from_exc: Optional[Exception] = None) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
     if from_exc is not None:
-        raise Unsupported(msg) from e
+        raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
-
 
 
 def warning(msg: str) -> None:
