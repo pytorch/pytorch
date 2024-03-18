@@ -275,7 +275,7 @@ threeOutputs linalg_lu_unpack_batch_rule(
   // LU and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must
   // match So if only one of them is being vmapped over, we must expand out that
   // dimension.
-  if (LU_bdim.has_value() ^ pivots_bdim.has_value()) {
+  if (LU_bdim.has_value() != pivots_bdim.has_value()) {
     auto bdim_size = get_bdim_size2(LU, LU_bdim, pivots, pivots_bdim);
     LU_ = ensure_has_bdim(LU_, LU_bdim.has_value(), bdim_size);
     pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
