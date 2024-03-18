@@ -451,7 +451,6 @@ get_chunk_cat_metadata(
       dst_elem_size % src_elem_size == 0,
       "get_chunk_cat_metadata error: only support dst_elem_size % src_elem_size == 0");
   auto num_tensors = tensors.size();
-  const auto device = tensors[0].device();
   int64_t leading_dim = 1;
   auto first_tensor_sizes = tensors[0].sizes();
   if (dim > 0) {
