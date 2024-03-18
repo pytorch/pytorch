@@ -1,5 +1,7 @@
-#if !defined(C10_MOBILE) && !defined(ANDROID)
 #pragma once
+#include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE)
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 

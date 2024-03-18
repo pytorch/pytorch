@@ -1,4 +1,6 @@
-#if !defined(C10_MOBILE) && !defined(ANDROID)
+#include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE)
 #include <ATen/DynamicLibrary.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>

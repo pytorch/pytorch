@@ -1,5 +1,7 @@
-#if !defined(C10_MOBILE) && !defined(ANDROID)
 #pragma once
+#include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE)
 
 #include <ATen/Tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
