@@ -53,10 +53,10 @@ static void clamp_mps_graph(CachedGraph* cachedGraph,
   if (input_dtype != max_dtype) {
     maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
   }
-  // clampWithTensor doesn't propagate NaN through so simulate it as composition of 
+  // clampWithTensor doesn't propagate NaN through so simulate it as composition of
   // minimumWithNaNPropagationWithPrimaryTensor and maximumWithNaNPropagationWithPrimaryTensor
   if (maxTensor) {
-    outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:ouputTensor
+    outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:outputTensor
                                                         secondaryTensor:maxTensor
                                                                    name:nil];
   }
