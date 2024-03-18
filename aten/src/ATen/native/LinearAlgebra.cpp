@@ -2814,6 +2814,46 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  
+  bool all_reduction_dims_are_one_dimensional = true;
+  if (opt_dim.has_value()) {
+    for (const auto i : c10::irange(dim.size())) {
+      size_t dim_ = maybe_wrap_dim(dim[i], self.dim());
+      if (size[dim_] != 1){
+        all_reduction_dims_are_one_dimensional = false;
+        break;
+      }
+    }
+  } else {
+    // all dims are 1-dimensional
+    for (size_t dim_ = 0; dim_ < size.size(); dim_++) {
+      if (size[dim_] != 1){
+        all_reduction_dims_are_one_dimensional = false;
+        break;
+      }
+    }
+  }
+  
+  if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
+    Tensor result_tmp = self.clone();
+    if (!keepdim) {
+      if (opt_dim.has_value()) {
+        result_tmp.squeeze_(dim);
+      } else {
+        // all dims are 1-dimensional
+        result_tmp.squeeze_();
+      }
+    }
+    if (ord != 0.0) {
+      result_tmp.abs_();
+    } else {
+      result_tmp.ne_(0);
+    }
+    result.copy_(result_tmp);
+    return;
+  }
+  
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
   // https://github.com/pytorch/pytorch/issues/52648
