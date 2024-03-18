@@ -2044,8 +2044,6 @@ CUDA_TEST_FAILURES = {
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
-    # no ABI shim fn for torch.sort; remove this when adding one
-    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
