@@ -347,6 +347,9 @@ static constexpr auto kOutSplit = "Out split size";
 static constexpr auto kGlobalRankStart = "Global rank start";
 static constexpr auto kGlobalRankStride = "Global rank stride";
 static constexpr auto kGroupSize = "Group size";
+static constexpr auto kProcessGroupId = "Process Group ID";
+static constexpr auto kGroupRanks = "Process Group Ranks";
+
 static constexpr int32_t kTruncatLength = 30;
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
@@ -402,6 +405,22 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   map.emplace(
       kGlobalRankStride, std::to_string(debugInfo->getGlobalRankStride()));
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
+  map.emplace(kProcessGroupId, std::to_string(debugInfo->getProcessGroupId()));
+  auto& groupRanks = debugInfo->getGroupRanks();
+  if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
+    map.emplace(
+        kGroupRanks, fmt::format("\"[{}]\"", fmt::join(groupRanks, ", ")));
+  } else if (groupRanks.size() > kTruncatLength) {
+    map.emplace(
+        kGroupRanks,
+        fmt::format(
+            "\"[{}, ..., {}]\"",
+            fmt::join(
+                groupRanks.begin(),
+                groupRanks.begin() + kTruncatLength - 1,
+                ", "),
+            groupRanks.back()));
+  }
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
   return map;
@@ -612,12 +631,10 @@ uint64_t computeFlops(
     }
     // format of the input is defined in
     // torch.ao.nn.quantized.functional.conv2d()
-    uint64_t minibatch = 0, in_channels = 0, input_h = 0, input_w = 0;
-    uint64_t out_channels = 0, kernel_h = 0, kernel_w = 0;
     const uint64_t conv2d_multiply_factor = 2;
-    std::tie(minibatch, in_channels, input_h, input_w) = std::make_tuple(
+    auto [minibatch, in_channels, input_h, input_w] = std::make_tuple(
         input_sizes[0], input_sizes[1], input_sizes[2], input_sizes[3]);
-    std::tie(out_channels, std::ignore, kernel_h, kernel_w) = std::make_tuple(
+    auto [out_channels, _, kernel_h, kernel_w] = std::make_tuple(
         kernel_sizes[0], kernel_sizes[1], kernel_sizes[2], kernel_sizes[3]);
     uint64_t output_h =
         (input_h + 2 * padding[0] - dilation[0] * (kernel_h - 1) - 1) /

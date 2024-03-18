@@ -309,7 +309,6 @@ coverage_ignore_functions = [
     "reference_representation_rewrite",
     # torch.ao.quantization.pt2e.utils
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
     "get_default_qat_qconfig",
@@ -668,6 +667,8 @@ coverage_ignore_functions = [
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
     "input_reshard",
+    # torch.distributed.tensor.parallel.loss
+    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
     # torch.distributions.utils
@@ -944,7 +945,7 @@ coverage_ignore_functions = [
     "is_channels_last_strides_3d",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
-    "is_singleton",
+    "is_nested_int",
     "is_symbol_binding_fx_node",
     "is_symbolic",
     # torch.fx.experimental.unification.core
