@@ -22,6 +22,16 @@ def prepend_predicates(inputs, num_predicates=1):
     return result
 
 
+def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
+    result = []
+    device = inputs[0].device
+    # iterate over the cartesian product of counter values
+    for values in itertools.product(*([counter_values] * num_counters)):
+        counters = [torch.tensor(v, device=device) for v in values]
+        result.append((*counters, *inputs))
+    return result
+
+
 class CondModels:
     class Simple(torch.nn.Module):
         def forward(self, p, a, b):
@@ -187,7 +197,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_simple_control_flow(self, device, dynamic):
+    def test_cond_simple_control_flow(self, device, dynamic):
         # cond control flow without nesting
         self._run_test(
             model=CondModels.Simple(),
@@ -202,7 +212,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_nested_control_flow(self, device, dynamic):
+    def test_cond_nested_control_flow(self, device, dynamic):
         # cond control flow with nesting
         self._run_test(
             model=CondModels.Nested(),
@@ -219,7 +229,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_outer_code_before_after(self, device, dynamic):
+    def test_cond_outer_code_before_after(self, device, dynamic):
         # some code before and after the conditional
         self._run_test(
             model=CondModels.OuterCode(),
@@ -234,7 +244,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_multiple_outputs(self, device, dynamic):
+    def test_cond_multiple_outputs(self, device, dynamic):
         # multiple outputs with different shapes
         self._run_test(
             model=CondModels.MultipleOutputs(),
@@ -249,7 +259,7 @@ class CondTests(TestCase):
 
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
-    def test_advanced_dynamic_shapes(self, device):
+    def test_cond_advanced_dynamic_shapes(self, device):
         # subgraphs input shapes include symbolic expressions
         class Model(torch.nn.Module):
             def forward(self, p, a, b):
@@ -276,7 +286,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_use_buffers_from_outer_scope(self):
+    def test_cond_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         self._run_test(
             model=CondModels.OuterBuffers(),
@@ -290,7 +300,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_reintepret_view_inputs_outputs(self):
+    def test_cond_reintepret_view_inputs_outputs(self):
         # ReinterpretView in inputs and outputs of the subgraphs
         self._run_test(
             model=CondModels.ReinterpretView(),
@@ -305,7 +315,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_subgraphs_with_parameters(self, device, dynamic):
+    def test_cond_subgraphs_with_parameters(self, device, dynamic):
         # nested Modules with parameters
         self._run_test(
             model=CondModels.Parameters(device),
@@ -315,7 +325,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_aliasing_outputs(self):
+    def test_cond_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
             def forward(self, p, a, b):
@@ -386,7 +396,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_inductor_fx_passes_recursively_applied(self):
+    def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         def pre_grad_pass_counter(gm):
@@ -419,7 +429,112 @@ class CondTests(TestCase):
         self.assertEqual(counters["post_grad"], 11)
 
 
+class WhileModels:
+    class Simple(torch.nn.Module):
+        def forward(self, ci, a, b):
+            def cond_fn(i, x, y):
+                return i > 0
+
+            def body_fn(i, x, y):
+                return i - 1, x + y, y - x
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [ci, a, b])
+
+    class Nested(torch.nn.Module):
+        def forward(self, ci, cj, a, b):
+            def cond_fn(i1, j1, x1, y1):
+                return i1 > 0
+
+            def body_fn(i1, j1, x1, y1):
+                # def cond_fn_nested(i2, j2, x2, y2):
+                #     return j2 > 0
+
+                # def body_fn_nested(i2, j2, x2, y2):
+                #     return i2.clone(), j2 - 1, x2 + 3.14, y2 - 2.71
+
+                # i1, j1, x1, y1 = torch._higher_order_ops.while_loop(
+                #     cond_fn_nested, body_fn_nested, [i1, j1, x1, y1]
+                # )
+
+                return i1 - 1, j1.clone(), x1 * 2, y1 / 2
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (ci, cj, a, b))
+
+
+class WhileTests(TestCase):
+    def _run_test(
+        self,
+        model,
+        inputs,
+        device,
+        dynamic=False,
+        num_counters=1,
+    ):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        inputs = [inp.to(device=device) for inp in inputs]
+        input_sets = [inputs]
+        if dynamic:
+            larger_inputs = []
+            for inp in inputs:
+                # tile every first dim 5x
+                tiling = [5] + [1] * (inp.ndim - 1)
+                larger_inputs.append(torch.tile(inp, tiling))
+            input_sets.append(larger_inputs)
+            for inputs in input_sets:
+                for inp in inputs:
+                    # mark every first dim as dynamic
+                    if inp.ndim:
+                        torch._dynamo.mark_dynamic(inp, 0)
+
+        for inputs in input_sets:
+            for inputs_with_counters in prepend_counters(inputs, num_counters):
+                result = model(*inputs_with_counters)
+                result_compiled = compiled_model(*inputs_with_counters)
+                self.assertEqual(result, result_compiled)
+
+                print()
+                print("inputs:", [x.sum() for x in inputs_with_counters])
+                print("outputs:", [x.sum() for x in result])
+                print()
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_while_simple_control_flow(self, device, dynamic):
+        # while_loop control flow without nesting
+        self._run_test(
+            model=WhileModels.Simple(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    # @requires_cuda
+    # @parametrize("device", ["cpu", "cuda"])
+    # @parametrize("dynamic", [False, True])
+    # def test_while_nested_control_flow(self, device, dynamic):
+    #     # while_loop control flow with nesting
+    #     self._run_test(
+    #         model=WhileModels.Nested(),
+    #         inputs=(
+    #             torch.randn(10, 20),
+    #             torch.randn(10, 20),
+    #         ),
+    #         device=device,
+    #         dynamic=dynamic,
+    #         num_counters=2,
+    #     )
+
+
 instantiate_parametrized_tests(CondTests)
+instantiate_parametrized_tests(WhileTests)
 
 
 if __name__ == "__main__":

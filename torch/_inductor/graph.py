@@ -860,6 +860,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
+        if isinstance(result, TensorBox):
+            # nested subgraphs can have singleton outputs
+            result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
