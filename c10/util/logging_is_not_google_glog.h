@@ -19,10 +19,10 @@ const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
 namespace c10 {
 
 // Log severity level constants.
-const int GLOG_FATAL = 3;
-const int GLOG_ERROR = 2;
-const int GLOG_WARNING = 1;
-const int GLOG_INFO = 0;
+constexpr int GLOG_FATAL = 3;
+constexpr int GLOG_ERROR = 2;
+constexpr int GLOG_WARNING = 1;
+constexpr int GLOG_INFO = 0;
 
 class C10_API MessageLogger {
  public:

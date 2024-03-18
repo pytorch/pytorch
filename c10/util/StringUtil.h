@@ -103,7 +103,7 @@ struct _str_wrapper<const char*> final {
 // destructing a stringstream or even constructing a string.
 template <>
 struct _str_wrapper<> final {
-  static CompileTimeEmptyString call() {
+  static constexpr CompileTimeEmptyString call() {
     return CompileTimeEmptyString();
   }
 };
