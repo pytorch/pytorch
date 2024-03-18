@@ -847,7 +847,7 @@ class FakeTensorMode(TorchDispatchMode):
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: List[Tuple[bool, Optional[FakeTensorMode]]] = []
 
-        self.shape_env = shape_env
+        self.shape_env: ShapeEnv = shape_env
 
         self.stack = "".join(traceback.format_stack())
 

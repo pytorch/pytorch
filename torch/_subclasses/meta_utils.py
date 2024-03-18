@@ -715,8 +715,10 @@ class MetaConverter:
             real_to_fake_mapping = {}
             if t.is_traceable_wrapper_subclass:
                 assert t.attrs is not None
-                assert t.ctx is not None
+                # NB: t.ctx could be None if the subclass in question has no
+                # meaningful context
                 assert t.type is not None
+
                 # Fake-ify t naively here; this is only done so we can get fake-ified inner
                 # tensors with the correct relationships to the outer sizes / strides for use
                 # in view replay. It's done beforehand here because it's not easy to do when
