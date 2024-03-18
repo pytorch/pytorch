@@ -338,7 +338,6 @@ class TestMkldnnFusion(JitTestCase):
                     )
                     self.assertEqual(ref, fused)
 
-
     def test_conv_transpose_unary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, kernel_size, **kwargs):
