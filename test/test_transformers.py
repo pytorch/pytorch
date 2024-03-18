@@ -1624,7 +1624,7 @@ class TestSDPAFailureModes(NNTestCase):
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
 
-        self.assertFalse(torch.isnan(out).all())
+        self.assertFalse(torch.isnan(out).any(), "Output should not contain NaNs!")
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
