@@ -13,6 +13,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.create_parameter_op import _bind_nn_parameter
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -5917,6 +5918,12 @@ def resize_storage_bytes_(variable, new_size):
     variable.realize()
     ir.ResizeStorageBytes(variable, new_size)
     return variable
+
+
+@register_lowering(_bind_nn_parameter)
+def create_nn_parameter(self, placeholder):
+    self.realize()
+    return TensorBox.create(ir.BindNNParameter(self, placeholder))
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
