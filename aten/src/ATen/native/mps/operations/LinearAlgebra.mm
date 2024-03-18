@@ -4,6 +4,8 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
+// For MTLLanguageVersion_3_1
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,7 +31,7 @@ static const char* METAL_LINALG = R"MATMUL_METAL(
 using namespace metal;
 template<typename T>
 T dot_product(constant T *v1, constant T* v2, ulong2 strides, uint32_t size) {
-  T rc = 0.0;
+  T rc = T(0.0);
   for (uint32_t i = 0; i < size; ++i) {
     rc += v1[i * strides.x] * v2[i * strides.y];
   }
@@ -69,6 +71,9 @@ kernel void naive_matmul<DTYPE>(                                           \
 
 INSTANTIATE_NAIVE_MM(float);
 INSTANTIATE_NAIVE_MM(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_NAIVE_MM(bfloat);
+#endif
 )MATMUL_METAL";
 
 id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
@@ -79,7 +84,8 @@ id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
 
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
   linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG encoding:NSASCIIStringEncoding]
                                        options:options
                                          error:&error];
