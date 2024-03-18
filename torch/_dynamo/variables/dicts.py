@@ -750,7 +750,7 @@ class CustomizedDictVariable(ConstDictVariable):
         # triggered on the child functions of __post_init__. This upsets export.
         # Since, we know that ModelOutput __post_init__ is not worth optimizing,
         # we just wrap the instance creation in torch._dynamo.disable(),
-        # regardless whethers its export or not.
+        # regardless whether its export or not.
         if is_hf_model_output:
             # load torch._dynamo.disable
             codegen.append_output(codegen.create_load_global("torch", True, add=True))
