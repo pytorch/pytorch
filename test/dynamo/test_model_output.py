@@ -256,6 +256,18 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(model(x), opt_model(x)))
 
+    @maybe_skip
+    def test_reconstruction(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                return CausalLMOutputWithPast(loss=x, logits=None)
+
+        model = Model()
+        x = torch.randn(1, 1, 1, 1)
+        eo = torch._dynamo.export(Model(), aten_graph=True)(x)
+        self.assertTrue(same(model(x), eo.graph_module(x)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
