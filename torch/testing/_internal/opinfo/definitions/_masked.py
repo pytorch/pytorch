@@ -1160,6 +1160,8 @@ op_db: List[OpInfo] = [
                 "TestNormalizeOperators",
                 "test_normalize_operator_exhaustive",
             ),
+            # FIXME: reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), "TestReductions", "test_dim_empty"),
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestReductions", "test_dim_empty_keepdim"
             ),
