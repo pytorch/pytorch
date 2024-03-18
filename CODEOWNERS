@@ -6,6 +6,9 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
+#
+# To propagate the changes in this file to autoreviewers, please run:
+#   .github/scripts/update_auto_review_from_codeowners.py
 
 /torch/utils/cpp_extension.py @fmassa @soumith @ezyang
 
@@ -51,7 +54,7 @@ nn/qat/ @jerryzh168
 /test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 
 # CI
-/.ci  @pytorch/pytorch-dev-infra
+/.ci/  @pytorch/pytorch-dev-infra
 
 # Docker
 /.ci/docker/ @jeffdaily
