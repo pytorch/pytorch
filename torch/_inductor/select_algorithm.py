@@ -890,18 +890,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return wait_on_futures
 
-        def autotune(choices, precompile_fn):
-            try:
-                import time
-
-                start = time.time()
-                precompile_fn()
-                print("Precompile took", time.time() - start)
-            except TimeoutError:
-                log.warning(
-                    "Precompilation phase took longer than timeout allowed. Continuing"
-                )
-                pass
+        def autotune(choices):
             return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -911,13 +900,16 @@ class AlgorithmSelectorCache(PersistentCache):
             tuning_pool.initialize()
 
         def do_autotuning(precompile_fn):
-            autotune_local = functools.partial(autotune, precompile_fn=precompile_fn)
+            precompile_start_ts = time.time()
+            precompile_fn()
+            precompile_elapse = time.time() - precompile_start_ts
+
             autotune_start_ts = time.time()
             timings = self.lookup(
                 choices,
                 name,
                 repr([self.key_of(x) for x in input_nodes]),
-                autotune_local,
+                autotune,
             )
             autotune_elapse = time.time() - autotune_start_ts
 
@@ -929,7 +921,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
-                self.log_results(name, input_nodes, timings, autotune_elapse)
+                self.log_results(name, input_nodes, timings, autotune_elapse, precompile_elapse)
 
             return timings
 
@@ -1108,6 +1100,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: List[ir.IRNode],
         timings: Dict[ChoiceCaller, float],
         elapse: float,
+        precompile_elapse: float
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
@@ -1144,7 +1137,7 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds ({precompile_elapse:.4f} precompile)\n")
 
     @staticmethod
     def benchmark_example_value(node, written_to=False):
