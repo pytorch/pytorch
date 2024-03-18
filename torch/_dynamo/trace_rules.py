@@ -195,7 +195,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
     # functorch/jacrev
     "torch._functorch.eager_transforms.jacrev": UserFunctionVariable,
-    "torch._functorch.eager_transforms.jacrev_impl": UserFunctionVariable,
     "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
     "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
     "torch._functorch.eager_transforms._safe_zero_index": UserFunctionVariable,
@@ -216,7 +215,6 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/jacfwd
     "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
-    "torch._functorch.eager_transforms.jacfwd_impl": UserFunctionVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
