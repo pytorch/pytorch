@@ -641,8 +641,6 @@ def get_device_type_test_bases():
         # ramping up support.
         # elif torch.backends.mps.is_available():
         #   test_bases.append(MPSTestBase)
-        if torch.xpu.is_available():
-            test_bases.append(XPUTestBase)
 
     return test_bases
 
