@@ -14,12 +14,21 @@ from sysconfig import get_paths as gp
 from typing import Any, List, NamedTuple, Optional, Pattern
 
 # PyTorch directory root
-result = subprocess.run(
-    ["git", "rev-parse", "--show-toplevel"],
-    stdout=subprocess.PIPE,
-    check=True,
-)
-PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
+def scm_root():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"]
+        )
+    except subprocess.CalledProcessError:
+        pass
+    try:
+        return subprocess.check_output(["hg", "root"])
+    except subprocess.CalledProcessError:
+        pass
+    raise RuntimeError("Unable to find SCM root")
+
+result = scm_root()
+PYTORCH_ROOT = result.decode("utf-8").strip()
 IS_WINDOWS: bool = os.name == "nt"
 
 
