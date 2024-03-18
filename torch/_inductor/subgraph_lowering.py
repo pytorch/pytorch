@@ -72,13 +72,18 @@ class InputDescriptor:
 
 
 class TracingOpsHandler(WrapperHandler[T]):
-    def __init__(self, tracer):
+    def __init__(self, tracer, num_inputs):
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
         self.tracer = tracer
 
-    def placeholder(self, name):
-        return self.tracer.create_proxy("placeholder", name, (), {})
+        self.placeholders = [
+            self.tracer.create_proxy("placeholder", f"input{i}", (), {})
+            for i in range(num_inputs)
+        ]
+
+    def placeholder(self, idx):
+        return self.placeholders[idx]
 
     def output(self, *args):
         return self.tracer.create_node(
@@ -86,36 +91,37 @@ class TracingOpsHandler(WrapperHandler[T]):
         )
 
 
-def lower_pointwise_subgraph(gm: torch.fx.GraphModule, inputs: List[InputDescriptor]):
+def lower_pointwise_subgraph(subgraph: ir.Subgraph, inputs: List[InputDescriptor]):
     # Lower subgraph to ir.Pointwise nodes
-    def fake_inner_fn(idx, name):
-        return ops.placeholder(name)
+    def fake_inner_fn(loop_idx, input_idx):
+        return ops.placeholder(input_idx)
 
     graph_inputs = [
         ir.Pointwise.create(
             device=desc.device,
             dtype=desc.dtype,
-            inner_fn=functools.partial(fake_inner_fn, name=f"input{i}"),
+            inner_fn=functools.partial(fake_inner_fn, input_idx=i),
             ranges=[],
         )
         for i, desc in enumerate(inputs)
     ]
-    subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
-    with V.set_graph_handler(subgraph):  # type: ignore[arg-type]
-        subgraph.run(*graph_inputs)
+    gm = subgraph.graph_module
+    pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
+    with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
+        pw_subgraph.run(*graph_inputs)
 
     # Combine multiple pointwise computations into a single graph module
     # Do this by tracing through each individually and doing CSE
     tracer = torch.fx.Tracer()
     tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
-    trace_ops = SimpleCSEHandler(TracingOpsHandler(tracer))
+    trace_ops = SimpleCSEHandler(TracingOpsHandler(tracer, len(inputs)))
 
-    outputs = subgraph.graph_outputs
+    outputs = pw_subgraph.graph_outputs
 
     with V.set_ops_handler(trace_ops):
         output_irs = []
 
-        for out_var in subgraph.graph_outputs:
+        for out_var in outputs:
             assert isinstance(out_var, ir.TensorBox)
             assert out_var.get_size() == []
             assert isinstance(out_var.data, ir.StorageBox)

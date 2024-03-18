@@ -11,8 +11,9 @@ test_classes = {}
 
 
 def mocked_non_strict_export(*args, **kwargs):
+    # If user already specified strict, don't make it non-strict
     if "strict" in kwargs:
-        del kwargs["strict"]
+        return export(*args, **kwargs)
     return export(*args, **kwargs, strict=False)
 
 

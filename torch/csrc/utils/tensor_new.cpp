@@ -44,8 +44,7 @@ using at::Tensor;
 using at::TensorOptions;
 using c10::optional;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 namespace {
 const int MAX_DIMS = 128;
 
@@ -155,6 +154,8 @@ ScalarType infer_scalar_type(PyObject* obj) {
         return ScalarType::ComplexFloat;
       case ScalarType::Double:
         return ScalarType::ComplexDouble;
+      case ScalarType::Half:
+        return ScalarType::ComplexHalf;
       default:
         TORCH_CHECK(false, "invalid default scalar type for complex");
     }
@@ -535,6 +536,7 @@ void check_base_legacy_new(
         c10::DispatchKey::SparseCUDA,
         c10::DispatchKey::SparseHIP,
         c10::DispatchKey::SparseXPU,
+        c10::DispatchKey::SparsePrivateUse1,
     });
     TORCH_CHECK(
         expected_key_set.has(dispatch_key),
@@ -1786,5 +1788,4 @@ Tensor asarray(
   return tensor;
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
