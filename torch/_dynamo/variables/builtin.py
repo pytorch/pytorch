@@ -99,7 +99,6 @@ def _polyfill_call_impl(name):
 
 
 class BuiltinVariable(VariableTracker):
-    _has_child_nodes = False
     _SENTINEL = object()
 
     @classmethod
