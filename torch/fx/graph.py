@@ -111,6 +111,10 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
+def _is_from_triton(name) -> bool:
+    return name == "triton"
+
+
 class _Namespace:
     """A context for associating names uniquely with objects.
 
