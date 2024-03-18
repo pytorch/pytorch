@@ -168,7 +168,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
         threadpool);
     if (status != pytorch_qnnp_status_success) {
       pytorch_qnnp_log_error(
-          "failed to run decovolution op setup to setup indirection buffer.");
+          "failed to run deconvolution op setup to setup indirection buffer.");
       return status;
     }
   }

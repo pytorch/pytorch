@@ -102,6 +102,17 @@ struct DeviceStats {
   // COUNT: total number of oversize blocks requiring malloc
   Stat oversize_segments;
 
+  // COUNT: total number of synchronize_and_free_events() calls
+  int64_t num_sync_all_streams = 0;
+
+  // COUNT: total number of CUDA allocation calls. This includes both cuMemMap
+  // and cudaMalloc.
+  int64_t num_device_alloc = 0;
+
+  // COUNT: total number of CUDA free calls. This includes both cuMemUnmap
+  // and cudaFree.
+  int64_t num_device_free = 0;
+
   // SIZE: maximum block size that is allowed to be split.
   int64_t max_split_size = 0;
 };
@@ -111,8 +122,8 @@ typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
 struct BlockInfo {
-  int64_t size = 0;
-  int64_t requested_size = 0;
+  size_t size = 0;
+  size_t requested_size = 0;
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
@@ -122,12 +133,12 @@ struct BlockInfo {
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
 struct SegmentInfo {
-  int64_t device = 0;
-  int64_t address = 0;
-  int64_t total_size = 0;
-  int64_t requested_size = 0; // unrounded, actually requested size
-  int64_t allocated_size = 0;
-  int64_t active_size = 0;
+  c10::DeviceIndex device = 0;
+  size_t address = 0;
+  size_t total_size = 0;
+  size_t requested_size = 0; // unrounded, actually requested size
+  size_t allocated_size = 0;
+  size_t active_size = 0;
   cudaStream_t stream = nullptr;
   bool is_large = false;
   bool is_expandable = false;
@@ -165,7 +176,7 @@ struct TraceEntry {
   TraceEntry(
       Action action,
       c10::DeviceIndex device,
-      int64_t addr,
+      size_t addr,
       size_t size,
       cudaStream_t stream,
       approx_time_t time,
@@ -175,21 +186,33 @@ struct TraceEntry {
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(static_cast<int64_t>(size)) {
+        size_(size) {
     time_.approx_t_ = time;
   }
   Action action_;
-  int device_;
-  int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
+  c10::DeviceIndex device_;
+  size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_{};
-  int64_t size_;
+  size_t size_;
   trace_time_ time_{};
+};
+
+struct AllocatorConfigInfo {
+  double garbage_collection_threshold;
+  size_t max_split_size;
+  size_t pinned_num_register_threads;
+  bool expandable_segments;
+  bool release_lock_on_malloc;
+  bool pinned_use_host_register;
+  std::string last_allocator_settings;
+  std::vector<size_t> roundup_power2_divisions;
 };
 
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+  AllocatorConfigInfo config_metadata;
 };
 
 // returns the pointers freed in the pool
@@ -212,9 +235,9 @@ std::string format_size(uint64_t size);
 
 using OutOfMemoryObserver = std::function<void(
     int64_t device,
-    int64_t allocated,
-    int64_t device_total,
-    int64_t device_free)>;
+    size_t allocated,
+    size_t device_total,
+    size_t device_free)>;
 
 using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 

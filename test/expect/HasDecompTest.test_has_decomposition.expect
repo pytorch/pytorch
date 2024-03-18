@@ -387,6 +387,7 @@ aten::_linalg_det
 aten::_linalg_det.result
 aten::_linalg_eigh
 aten::_linalg_eigh.eigenvalues
+aten::_linalg_eigvals
 aten::_linalg_slogdet
 aten::_linalg_slogdet.sign
 aten::_linalg_solve_ex
@@ -472,6 +473,7 @@ aten::_resize_output.out
 aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
+aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
@@ -539,6 +541,7 @@ aten::_test_optional_floatlist
 aten::_test_optional_floatlist.out
 aten::_test_optional_intlist
 aten::_test_optional_intlist.out
+aten::_test_parallel_materialize
 aten::_test_warn_in_autograd
 aten::_test_warn_in_autograd.out
 aten::_thnn_fused_gru_cell
@@ -603,6 +606,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out
@@ -772,8 +776,6 @@ aten::fractional_max_pool3d
 aten::fractional_max_pool3d.output
 aten::fractional_max_pool3d_backward
 aten::fractional_max_pool3d_backward.grad_input
-aten::frexp.Tensor
-aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
 aten::full.names
@@ -830,12 +832,6 @@ aten::int_repr.out
 aten::is_coalesced
 aten::is_pinned
 aten::is_set_to
-aten::isin.Scalar_Tensor
-aten::isin.Scalar_Tensor_out
-aten::isin.Tensor_Scalar
-aten::isin.Tensor_Scalar_out
-aten::isin.Tensor_Tensor
-aten::isin.Tensor_Tensor_out
 aten::kaiser_window
 aten::kaiser_window.beta
 aten::kaiser_window.beta_out
@@ -848,10 +844,9 @@ aten::lift_fresh_copy
 aten::lift_fresh_copy.out
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
-aten::linalg_cross
-aten::linalg_cross.out
 aten::linalg_eig
 aten::linalg_eig.out
+aten::linalg_eigvals.out
 aten::linalg_householder_product
 aten::linalg_householder_product.out
 aten::linalg_inv_ex
@@ -1322,11 +1317,8 @@ aten::unsqueeze_copy.out
 aten::upsample_bicubic2d.out
 aten::upsample_bicubic2d_backward
 aten::upsample_bicubic2d_backward.grad_input
-aten::upsample_bilinear2d.out
 aten::upsample_bilinear2d_backward
 aten::upsample_bilinear2d_backward.grad_input
-aten::upsample_linear1d
-aten::upsample_linear1d.out
 aten::upsample_linear1d_backward
 aten::upsample_linear1d_backward.grad_input
 aten::upsample_nearest1d.out
@@ -1338,8 +1330,6 @@ aten::upsample_nearest2d_backward.grad_input
 aten::upsample_nearest3d.out
 aten::upsample_nearest3d_backward
 aten::upsample_nearest3d_backward.grad_input
-aten::upsample_trilinear3d
-aten::upsample_trilinear3d.out
 aten::upsample_trilinear3d_backward
 aten::upsample_trilinear3d_backward.grad_input
 aten::values
