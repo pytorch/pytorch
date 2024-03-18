@@ -39,9 +39,7 @@ dead_code_elimination = True
 # [@compile_ignored: runtime_behaviour]
 cache_size_limit = 8
 
-# [@compile_ignored: runtime_behaviour] controls the maximum number of entries
-# for a code object. This limit is just a safeguard mechanism to prevent
-# horrible recompilations.
+# [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_cache_size_limit = 256
 
 # whether or not to specialize on int inputs.  This only has an effect with
