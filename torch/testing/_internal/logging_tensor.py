@@ -6,7 +6,7 @@ from typing import Iterator, List, Optional
 import logging
 import contextlib
 import itertools
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, validate_wrapped_ordering
 from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
@@ -65,6 +65,10 @@ class LoggingTensor(torch.Tensor):
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem.detach() if r.requires_grad else elem
         return r
+
+    def __init__(self, elem, *args, **kwargs):
+        validate_wrapped_ordering(self, elem)
+        super().__init__()
 
     def __repr__(self):
         return super().__repr__(tensor_contents=f"{self.elem}")

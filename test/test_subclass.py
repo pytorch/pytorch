@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_tensor import LoggingTensor
 from torch.utils._pytree import tree_map
-from torch.utils._python_dispatch import handle_subclass_ordering, check_wrapped_ordering
+from torch.utils._python_dispatch import handle_subclass_ordering, validate_wrapped_ordering, set_ordering
 
 # The current test methodology in this file is to test a variety of real use cases
 # with a set of fully-fledged tensor subclasses. In the future, this may change
@@ -282,7 +282,7 @@ class TestSubclass(TestCase):
                 return t, {}
 
             def __init__(self, t):
-                check_wrapped_ordering(self, t)
+                validate_wrapped_ordering(self, t)
                 self._t = t
 
             @handle_subclass_ordering
@@ -294,22 +294,41 @@ class TestSubclass(TestCase):
 
         class A(BaseUnwrapper):
             pass
+        set_ordering(A, "__main__.C")
+        set_ordering(A, "torch.testing._internal.logging_tensor.LoggingTensor")
 
         class B(BaseUnwrapper):
             pass
 
         class C(BaseUnwrapper):
-            __lower_priority = ("__main__.TestSubclass.test_priority.<locals>.A")
+            pass
 
         class D(C):
             pass
 
         class E(D):
-            __lower_priority = ("__main__.TestSubclass.test_priority.<locals>.A")
+            pass
 
         tensor = torch.rand(2)
-        with self.assertRaisesRegex(RuntimeError, "A"):
-            A(C(tensor))
+
+        # Check bad ordering setting
+        with self.assertRaisesRegex(RuntimeError, "Conflicting ordering being added"):
+            set_ordering(C, A)
+        with self.assertRaisesRegex(RuntimeError, "Conflicting ordering being added"):
+            set_ordering(C, D)
+
+        # Ensure defined orderings are correct
+        with self.assertRaisesRegex(RuntimeError, r"Wrapping.*A.*LoggingTensor"):
+            LoggingTensor(A(tensor))
+        with self.assertRaisesRegex(RuntimeError, r"Wrapping.*A.*C"):
+            C(A(tensor))
+        A(LoggingTensor(tensor))
+        A(C(tensor))
+
+        A(B(tensor))
+        B(A(tensor))
+
+        set_ordering(C, A)
 
 
 

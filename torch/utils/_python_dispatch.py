@@ -6,6 +6,7 @@ import inspect
 
 import warnings
 from dataclasses import dataclass
+from collections import defaultdict
 import torch
 import torchgen
 from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at, \
@@ -497,41 +498,67 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     ])
     return outs_to_return
 
+
+_SUBLCASS_PRIORITY_RULES = defaultdict(set)
+_SUBCLASS_MAP = {}
+
 @functools.cache
 def _get_cls_name(cls):
-    return f"""{inspect.getmodule(cls)}.{cls.__name__}"""
+    if isinstance(cls, str):
+        return cls
+    else:
+        name = f"""{getattr(cls, "__module__", "_unknown_mod_")}.{cls.__name__}"""
+        _SUBCLASS_MAP[name] = cls
+        return name
 
-@functools.cache
 def _get_cls_object(cls_s):
-    mod_s, name = cls_s.rsplit(".", 1)
-    mod = importlib.import_module(mod_s)
+    if cls_s in _SUBCLASS_MAP:
+        return _SUBCLASS_MAP[cls_s]
+    else:
+        mod_s, name = cls_s.rsplit(".", 1)
+        try:
+            mod = importlib.import_module(mod_s)
+        except:
+            return None
 
-    return getattr(mod, name, None)
+        return getattr(mod, name, None)
 
 @functools.cache
 def _known_lower_priority(cls1_s, cls2_s):
-    print(cls1_s, cls2_s)
-    cls1 = _get_cls_object(cls1_s)
-    cls2 = _get_cls_object(cls2_s)
-    print(cls1, cls2)
-    if cls1 is None or cls2 is None:
+    if cls1_s is None or cls2_s is None:
         return False
 
-    # Walk up the mro? Is that enough?
-    if cls1_s in getattr(cls2, "__lower_priority", []):
+    cls1 = _get_cls_object(cls1_s)
+    cls2 = _get_cls_object(cls2_s)
+    if cls1 and cls2 and issubclass(cls1, cls2):
         return True
 
-    if issubclass(cls2, cls1):
-        return True
+    for next_cls_s in _SUBLCASS_PRIORITY_RULES[cls1_s]:
+        next_cls = _get_cls_object(next_cls_s)
 
+        if next_cls_s == cls2_s:
+            return True
+        else:
+            if _known_lower_priority(next_cls_s, cls2_s):
+                return True
     return False
 
-def check_wrapped_ordering(self, other):
+
+def validate_wrapped_ordering(self, other):
     self_s = _get_cls_name(type(self))
     other_s = _get_cls_name(type(other))
     if _known_lower_priority(other_s, self_s):
         raise RuntimeError(f"Wrapping an instance of {other_s} in an instance of {self_s} is not allowed")
 
+
+def set_ordering(cls1_, cls2_):
+    cls1_s = _get_cls_name(cls1_)
+    cls2_s = _get_cls_name(cls2_)
+
+    if _known_lower_priority(cls2_s, cls1_s):
+        raise RuntimeError("Conflicting ordering being added")
+
+    _SUBLCASS_PRIORITY_RULES[cls1_s].add(cls2_s)
 
 def handle_subclass_ordering(user_fn):
     if not isinstance(user_fn, classmethod):
@@ -545,7 +572,8 @@ def handle_subclass_ordering(user_fn):
         cls_s = _get_cls_name(cls)
 
         for t in types:
-            if _known_lower_priority(_get_cls_name(t), cls_s):
+            if cls_s not in _SUBLCASS_PRIORITY_RULES or
+                _known_lower_priority(_get_cls_name(t), cls_s):
                 return NotImplemented
 
         # Direct call into the subclass to avoid infinite recursion
