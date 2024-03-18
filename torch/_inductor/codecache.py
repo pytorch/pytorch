@@ -917,8 +917,7 @@ def install_gcc_via_conda() -> str:
 
 
 def is_gcc() -> bool:
-    # Mac OS not support real gcc, it is acturally a clang.
-    if sys.platform == "darwin":
+    if sys.platform == "darwin" and is_apple_clang():
         return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
 
