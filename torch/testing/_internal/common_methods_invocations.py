@@ -509,6 +509,19 @@ def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad
         else:
             yield SampleInput(sample.input, args=(args[2], args[3], training, momentum, eps))
 
+def sample_inputs__batch_norm_with_update(op_info, device, dtype, requires_grad, **kwargs):
+    samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+    for sample in samples:
+        # torch.native_batch_norm does not support 0 numel tensors
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        if sample.input.numel() == 0:
+            continue
+        args = sample.args
+        momentum = sample.kwargs.get('momentum', 0.5)
+        eps = sample.kwargs.get('eps', 1e-5)
+        if any(args[i] is None for i in range(4)):
+            continue
+        yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], momentum, eps))
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -13094,6 +13107,40 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
+           )
+           ),
+    OpInfo('_batch_norm_with_update',
+           op=torch.ops.aten._batch_norm_with_update,
+           aten_name='_batch_norm_with_update',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
+           sample_inputs_func=sample_inputs__batch_norm_with_update,
+           skips=(
+               # NotImplementedError: Could not run
+               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
+               # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+                            "TestCompositeCompliance", "test_forward_ad"),
+               # _batch_norm_with_update expects contiguous inputs for cudnn and miopen
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure,
+                            'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
+               # _batch_norm_with_update does not have python bindings
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # aten out variants do not accept out= kwarg, only python out variants
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
