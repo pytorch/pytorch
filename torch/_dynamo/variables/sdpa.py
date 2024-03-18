@@ -49,9 +49,8 @@ class SDPAParamsVariable(VariableTracker):
         assert self.source is None
         assert self.param_vars is not None
         codegen.load_import_from("torch._C", "_SDPAParams")
-        for var in self.param_vars:
-            codegen(var)
-        return create_call_function(len(self.param_vars), True)
+        codegen.foreach(self.param_vars)
+        codegen.extend_output(create_call_function(len(self.param_vars), True))
 
     def as_proxy(self):
         return self.proxy

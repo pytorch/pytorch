@@ -31,6 +31,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 
 #include <atomic>
 #include <chrono>
@@ -347,6 +348,11 @@ void Engine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
     bool should_increment) {
+  // pthread_setname_np restricts the name to 16 characters including
+  // the null byte.
+  std::string thread_name = "pt_autograd_" + std::to_string(device);
+  c10::setThreadName(thread_name);
+
   c10::set_terminate_handler();
   if (should_increment) {
     increment_non_reentrant_thread_count();
@@ -873,14 +879,7 @@ void validate_outputs(
       continue;
     }
 
-    if (!metadata.is_same_shape(grad)) {
-      if (metadata.is_expandable_to_shape(grad)) {
-        grad = metadata.reduce_grad(grad);
-      } else {
-        const auto message = metadata.incompatible_shape_error_message(i, grad);
-        TORCH_CHECK(false, format_error(message.str()));
-      }
-    }
+    grad = metadata.maybe_reduce(i, std::move(grad), format_error);
 
     bool input_is_complex =
         isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
@@ -1215,7 +1214,7 @@ auto Engine::execute(
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
   // accumulate_grad is true if and only if the frontend call was to
-  // grad(), not backward(). grad() returns the sum of the gradients
+  // backward(), not grad(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
   TORCH_CHECK_VALUE(
       accumulate_grad || !outputs.empty(), "grad requires non-empty inputs.");

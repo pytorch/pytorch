@@ -224,11 +224,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def __str__(self):
-        return f"{self.__class__.__name__}()"
-
     def __repr__(self):
-        return str(self)
+        return f"{self.__class__.__name__}()"
 
     def python_type(self):
         """
@@ -368,7 +365,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
+        unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
         return self

@@ -80,8 +80,11 @@ class TritonSplitScanKernel(TritonKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
 
-    def scan(self, dtype, combine_fn, value):
+    def scan(self, dtypes, combine_fn, values):
         import triton.language as tl
+
+        (dtype,) = dtypes
+        (value,) = values
 
         compute_type = triton_compute_type(dtype)
         compute_type_triton = getattr(tl, compute_type[3:])
@@ -119,7 +122,7 @@ class TritonSplitScanKernel(TritonKernel):
         value = cse_compute(f"{value}.to({compute_type})")
         value = cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2)
+        combine_helper_fn = self._lift_helper(combine_fn, 1)
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
@@ -162,7 +165,9 @@ class TritonSplitScanKernel(TritonKernel):
         combined_result = cse_compute(
             f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"
         )
-        return cse_compute(f"tl.where(roffset == 0, {block_scan}, {combined_result})")
+        return (
+            cse_compute(f"tl.where(roffset == 0, {block_scan}, {combined_result})"),
+        )
 
     def _get_heuristic(self):
         return "split_scan"

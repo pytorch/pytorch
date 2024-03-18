@@ -2,7 +2,6 @@
 
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/C++17.h>
 
 namespace at {
 
@@ -80,7 +79,7 @@ struct TORCH_API NamesMode {
 // A RAII, thread local (!) guard that enables or disables names upon
 // construction, and sets it back to the original value upon destruction.
 struct TORCH_API NoNamesGuard {
-  NoNamesGuard() : prev_mode(NamesMode::is_enabled()), initialized(true) {
+  NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
     NamesMode::set_enabled(false);
   }
   ~NoNamesGuard() {
@@ -94,7 +93,7 @@ struct TORCH_API NoNamesGuard {
   }
  private:
   bool prev_mode;
-  bool initialized;
+  bool initialized{true};
 };
 
 void check_names_valid_for(const TensorBase& tensor, DimnameList names);

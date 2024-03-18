@@ -986,6 +986,10 @@ def hardtanh(
             raise RuntimeError(
                 "Cannot do hardtanh on an unsigned type with negative limits"
             )
+
+    if min_val > max_val:  # type: ignore[operator]
+        raise ValueError("min_val cannot be greater than max_val")
+
     return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
 
 

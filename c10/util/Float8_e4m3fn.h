@@ -15,7 +15,6 @@
 /// and inspired by Half implementation from pytorch/c10/util/Half.h
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
