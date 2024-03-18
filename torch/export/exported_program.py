@@ -49,6 +49,7 @@ from .graph_signature import (  # noqa: F401
     OutputSpec,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 
 
