@@ -710,12 +710,14 @@ class GuardBuilder(GuardBuilderBase):
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
-        self._produce_guard_code(guard, [code])
+        self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_type_match_guard(
                 obj_id, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, [code])
 
     def DICT_VERSION(self, guard: Guard):
         # ___check_dict_version is same as `dict_version(x) == y`
@@ -723,7 +725,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         version = dict_version(self.get(guard.name))
         code = f"___dict_version({ref}) == {version}"
-        self._produce_guard_code(guard, [code])
+        self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             # TODO(anijain2305) - Delete this when DictGuardManager uses tags
@@ -731,18 +733,22 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_dict_version_guard(
                 val, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, [code])
 
     def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
         dict_ref = self.arg_ref(guard)
 
         maybe_not = "not " if invert else ""
         code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
-        self._produce_guard_code(guard, [code])
+        self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_dict_contains_guard(
                 not invert, key, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',
@@ -758,15 +764,18 @@ class GuardBuilder(GuardBuilderBase):
         # to DICT_KEYS.
         ref = self.arg_ref(guard)
         code = f"not {ref}"
-        self._produce_guard_code(guard, [code])
+        self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             # BOOL_FALSE is a weird guard. It is used to effectively check
             # len(dict) == 0. Since it is used only and only for dicts, we don't
             # have to anything here. DictGuardManager internally stores the size
-            # of the dict, and checks its size on every invocation. Just
+            # of the dict, and checks its size on every invocation. PyDict_Size
+            # is very fast, so we don't need BOOL_FALSE optimization. Just
             # construct the dict guard manager to install a DictGuardManager.
             self.get_guard_manager(guard)
+        else:
+            self._produce_guard_code(guard, [code])
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
@@ -780,12 +789,14 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         id_val = self.id_ref(val)
         code = f"___check_obj_id({ref}, {id_val})"
-        self._produce_guard_code(guard, [code])
+        self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_id_match_guard(
                 id_val, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, [code])
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
         # cache size logic
@@ -805,12 +816,14 @@ class GuardBuilder(GuardBuilderBase):
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
-        self._produce_guard_code(guard, [code])
+        self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_data_ptr_guard(
                 obj, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
         assert isinstance(
@@ -827,8 +840,9 @@ class GuardBuilder(GuardBuilderBase):
             code = f"hasattr({ref}, {attr!r})"
         else:
             code = f"not hasattr({ref}, {attr!r})"
-
-        self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
+        self._set_guard_export_info(
+            guard, [code], provided_guarded_object=self.get(base)
+        )
 
         if config.enable_cpp_guard_manager:
             base_manager = self.get_guard_manager_from_source(base_source)
@@ -842,6 +856,8 @@ class GuardBuilder(GuardBuilderBase):
                 base_manager.add_no_hasattr_guard(
                     attr, get_verbose_code_parts(code, guard)
                 )
+        else:
+            self._produce_guard_code(guard, [code])
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
@@ -850,7 +866,7 @@ class GuardBuilder(GuardBuilderBase):
         cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
             # TODO(anijain2305) - Consider this moving this guard to C++
@@ -863,6 +879,8 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_manager.root.add_lambda_guard(
                 fn, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, code)
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -913,12 +931,14 @@ class GuardBuilder(GuardBuilderBase):
             self.TYPE_MATCH(guard)
             code = list()
             code.append(f"__math_isnan({ref})")
-            self._produce_guard_code(guard, code)
+            self._set_guard_export_info(guard, code)
 
             if config.enable_cpp_guard_manager:
                 self.get_guard_manager(guard).add_lambda_guard(
                     CLOSURE_VARS["__math_isnan"], get_verbose_code_parts(code, guard)
                 )
+            else:
+                self._produce_guard_code(guard, code)
             return
 
         # Python math library doesn't support complex nan, so we need to use numpy
@@ -926,12 +946,14 @@ class GuardBuilder(GuardBuilderBase):
             self.TYPE_MATCH(guard)
             code = list()
             code.append(f"__numpy_isnan({ref})")
-            self._produce_guard_code(guard, code)
+            self._set_guard_export_info(guard, code)
 
             if config.enable_cpp_guard_manager:
                 self.get_guard_manager(guard).add_lambda_guard(
                     CLOSURE_VARS["__numpy_isnan"], get_verbose_code_parts(code, guard)
                 )
+            else:
+                self._produce_guard_code(guard, code)
             return
 
         if config.enable_cpp_guard_manager:
@@ -940,7 +962,7 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_equals_match_guard(
                 val, get_verbose_code_parts(code, guard)
             )
-            self._produce_guard_code(guard, code)
+            self._set_guard_export_info(guard, code)
             return
 
         code = list()
@@ -971,6 +993,7 @@ class GuardBuilder(GuardBuilderBase):
         # and NaN tests
         code.append(f"{ref} == {val!r}")
         self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, code)
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
@@ -1030,12 +1053,13 @@ class GuardBuilder(GuardBuilderBase):
         else:
             code.append(f"len({ref}) == {len(value)}")
 
-        self._produce_guard_code(guard, code)
-
+        self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_length_check_guard(
                 len(value), get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, code)
 
     def DICT_LENGTH(self, guard):
         self.SEQUENCE_LENGTH(guard)
@@ -1051,8 +1075,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
-
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
             t = type(value)
@@ -1061,6 +1084,8 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_tuple_iterator_length_guard(
                 tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, code)
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
@@ -1068,7 +1093,7 @@ class GuardBuilder(GuardBuilderBase):
         ref_b = self.arg_ref(source_b.name())
 
         code = [f"{ref_b} is {ref_a}"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
             install_tensor_aliasing_guard(
@@ -1076,6 +1101,8 @@ class GuardBuilder(GuardBuilderBase):
                 self.get_guard_manager_from_source(source_b),
                 get_verbose_code_parts(code, guard),
             )
+        else:
+            self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
         # Guard on the keys and their order
@@ -1095,19 +1122,22 @@ class GuardBuilder(GuardBuilderBase):
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
+        self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
             self.add_dict_keys_guard(value, guard)
-
-        self._produce_guard_code(guard, code)
+        else:
+            self._produce_guard_code(guard, code)
 
     def WEAKREF_ALIVE(self, guard):
         code = [f"{self.arg_ref(guard)} is not None"]
-        self._produce_guard_code(guard, code)
 
+        self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_weakref_alive_guard(
                 get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, code)
 
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
@@ -1119,8 +1149,7 @@ class GuardBuilder(GuardBuilderBase):
         code = list()
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
-        self._produce_guard_code(guard, code)
-
+        self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
             # TODO(anijain2305) - Consider moving this guard to C++. anijain2305
             # tried but unable to come up with a testcase that installs this
@@ -1131,6 +1160,8 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_lambda_guard(
                 fn, get_verbose_code_parts(code, guard)
             )
+        else:
+            self._produce_guard_code(guard, code)
 
     def DICT_CONST_KEYS(self, guard):
         """Constant keys match"""
@@ -1144,11 +1175,12 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
-
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
             self.add_dict_keys_guard(value, guard)
+        else:
+            self._produce_guard_code(guard, code)
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
@@ -1168,30 +1200,14 @@ class GuardBuilder(GuardBuilderBase):
         import torch.utils._device as m
 
         code = [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_default_device_guard(
                 get_verbose_code_parts(code, guard)
             )
-
-    def BACKEND_MATCH(self, guard: Guard):
-        """Guard on backend matching based on id of current_backend"""
-        assert guard.source is GuardSource.GLOBAL
-        backend_id = id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)
-        code = [f"___check_current_backend({backend_id})"]
-        self._produce_guard_code(guard, code)
-
-        if config.enable_cpp_guard_manager:
-            # TODO(anijain2305,williamwen42) - Move this guard to C++
-            check_backend = torch._dynamo.eval_frame.check_current_backend
-
-            def fn(x):
-                return check_backend(backend_id)
-
-            self.get_guard_manager(guard).add_lambda_guard(
-                fn, get_verbose_code_parts(code, guard)
-            )
+        else:
+            self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
@@ -1252,8 +1268,9 @@ class GuardBuilder(GuardBuilderBase):
         # postprocessing, so don't freeze yet
         if not self.check_fn_manager.output_graph.export:
             output_graph.shape_env.freeze()
+
         for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+            self._set_guard_export_info(guard, [shape_guard])
 
         if config.enable_cpp_guard_manager:
             # Install all the symbolic guards in one lambda guard. These are run
@@ -1265,6 +1282,9 @@ class GuardBuilder(GuardBuilderBase):
                 get_verbose_code_parts(code_parts, guard),
                 closure_vars={**SYMPY_INTERP, **CLOSURE_VARS},
             )
+        else:
+            for shape_guard in guards:
+                self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module() or guard.originating_source.is_dict_key():
@@ -1401,12 +1421,20 @@ class GuardBuilder(GuardBuilderBase):
                             get_verbose_code_parts(code_part, guard),
                         )
             if len(code) > 0:
-                self._produce_guard_code(guard, code)
+                self._set_guard_export_info(guard, code)
+                if not config.enable_cpp_guard_manager:
+                    self._produce_guard_code(guard, code)
 
-    # A util that appends guarded code, or, in the case of export, adds data onto guards
-    def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False
-    ):
+    # A util that appends guarded code
+    def _produce_guard_code(self, guard, code_list, shape_env=False):
+        assert not config.enable_cpp_guard_manager
+        if shape_env:
+            self.shape_env_code.append(GuardCodeList(code_list, guard))
+        else:
+            self.code.append(GuardCodeList(code_list, guard))
+
+    # A util that in the case of export, adds data onto guards
+    def _set_guard_export_info(self, guard, code_list, provided_guarded_object=None):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
         # than they should.  See TestMisc.test_release_module_memory
@@ -1421,11 +1449,6 @@ class GuardBuilder(GuardBuilderBase):
         assert func_name in dir(
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
-
-        if shape_env:
-            self.shape_env_code.append(GuardCodeList(code_list, guard))
-        else:
-            self.code.append(GuardCodeList(code_list, guard))
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -1834,7 +1857,6 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
-            "___check_current_backend": torch._dynamo.eval_frame.check_current_backend,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
