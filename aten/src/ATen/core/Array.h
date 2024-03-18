@@ -10,6 +10,7 @@ namespace at::detail {
 
 template <typename T, int size_>
 struct Array {
+  // NOLINTNEXTLINE(*c-array*)
   T data[size_];
 
   C10_HOST_DEVICE T operator[](int i) const {
