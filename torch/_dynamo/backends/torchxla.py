@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import logging
-import warnings
 
 from functorch.compile import make_boxed_func
 
