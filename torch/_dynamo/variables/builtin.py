@@ -697,12 +697,9 @@ class BuiltinVariable(VariableTracker):
         handlers = []
 
         if any(issubclass(t, LazyVariableTracker) for t in arg_types):
-
-            def realize_and_respatch(tx, args, kwargs):
-                args = [v.realize() for v in args]
-                return obj.call_function(tx, args, kwargs)
-
-            return realize_and_respatch
+            return lambda tx, args, kwargs: obj.call_function(
+                tx, [v.realize() for v in args], kwargs
+            )
 
         if obj.can_insert_in_graph() and not (
             fn is operator.getitem
