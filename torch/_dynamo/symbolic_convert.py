@@ -1202,6 +1202,8 @@ class InstructionTranslatorBase(
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
+            return
+
         if right.is_python_constant():
             if left.is_python_constant():
                 # constant fold
