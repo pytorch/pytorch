@@ -140,6 +140,8 @@ jobs:
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
+        with:
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Parse ref
         id: parse-ref
@@ -318,6 +320,7 @@ jobs:
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
           use-gha: ${{ inputs.use-gha }}
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Collect backtraces from coredumps (if any)
         if: always()
