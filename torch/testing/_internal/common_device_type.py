@@ -641,8 +641,6 @@ def get_device_type_test_bases():
         # ramping up support.
         # elif torch.backends.mps.is_available():
         #   test_bases.append(MPSTestBase)
-        if torch.xpu.is_available():
-            test_bases.append(XPUTestBase)
 
     return test_bases
 
@@ -699,6 +697,8 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
+    if only_for == 'xpu' and TEST_XPU and XPUTestBase not in test_bases:
+        test_bases.append(XPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
