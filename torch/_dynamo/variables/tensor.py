@@ -57,6 +57,7 @@ from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+# Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
     ">": operator.gt,
     "<": operator.lt,
@@ -65,12 +66,23 @@ supported_tensor_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+# Ops that allow tensor <op> None
 supported_const_comparison_ops = {
     "is": operator.is_,
     "is not": operator.is_not,
     "==": operator.eq,
     "!=": operator.ne,
 }
+supported_comparison_ops = {
+    **supported_tensor_comparison_ops,
+    **supported_const_comparison_ops,
+}
+supported_tensor_comparison_op_values = dict.fromkeys(
+    supported_tensor_comparison_ops.values()
+)
+supported_const_comparison_op_values = dict.fromkeys(
+    supported_const_comparison_ops.values()
+)
 
 
 class TensorVariable(VariableTracker):

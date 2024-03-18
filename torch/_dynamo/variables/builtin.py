@@ -1526,8 +1526,8 @@ class BuiltinVariable(VariableTracker):
         )
         from .lists import SizeVariable
         from .tensor import (
-            supported_const_comparison_ops,
-            supported_tensor_comparison_ops,
+            supported_const_comparison_op_values,
+            supported_tensor_comparison_op_values,
         )
 
         op = self.fn
@@ -1540,7 +1540,7 @@ class BuiltinVariable(VariableTracker):
                 isinstance(x, (NNModuleVariable, ConstantVariable))
                 for x in [left, right]
             )
-            and op in supported_const_comparison_ops.values()
+            and op in supported_const_comparison_op_values
         ):
             left = (
                 tx.output.get_submodule(left.module_key)
@@ -1555,7 +1555,7 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
-            if op not in supported_const_comparison_ops.values():
+            if op not in supported_const_comparison_op_values:
                 _unimplemented()
             if not isinstance(right, UserFunctionVariable):
                 _unimplemented()
@@ -1594,7 +1594,7 @@ class BuiltinVariable(VariableTracker):
                 else:
                     return ConstantVariable.create(not is_result)
 
-            if op not in supported_tensor_comparison_ops.values():
+            if op not in supported_tensor_comparison_op_values:
                 _unimplemented()
             if (
                 isinstance(left, TensorVariable)
@@ -1618,7 +1618,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
-            if op not in supported_tensor_comparison_ops.values():
+            if op not in supported_tensor_comparison_op_values:
                 _unimplemented()
 
             proxy = tx.output.create_proxy(
