@@ -266,6 +266,7 @@ class MetaTensorDescriber:
             is_coalesced=t.is_coalesced() if t.is_sparse else None,
             # TODO: I actually think recursing here is correct, but we have at
             # least an infinite cycle from base -> values -> base
+            # https://github.com/pytorch/pytorch/issues/122089
             crow_indices=self.describe_tensor(t.crow_indices(), recurse=False)
             if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
             else None,
