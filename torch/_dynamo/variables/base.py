@@ -93,6 +93,8 @@ def is_side_effect_safe(m: MutableLocalBase):
 
 
 class VariableTrackerMeta(type):
+    all_subclasses = []
+
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
         if type.__instancecheck__(
@@ -103,6 +105,10 @@ class VariableTrackerMeta(type):
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
+
+    def __init__(cls, name, bases, attrs):
+        super().__init__(name, bases, attrs)
+        VariableTrackerMeta.all_subclasses.append(cls)
 
 
 class VariableTracker(metaclass=VariableTrackerMeta):

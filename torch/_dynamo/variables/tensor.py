@@ -222,7 +222,7 @@ class TensorVariable(VariableTracker):
             elif not callable(example_value):
                 from .builder import SourcelessBuilder
 
-                return SourcelessBuilder()(tx, example_value)
+                return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
@@ -672,7 +672,7 @@ class TensorVariable(VariableTracker):
 
         tensor = self.as_proxy().node.meta["example_value"]
         out = tolist(tensor, self.as_proxy())
-        return SourcelessBuilder()(tx, out)
+        return SourcelessBuilder.create(tx, out)
 
     def method_backward(self, *args, **kwargs):
         unimplemented("Tensor.backward")
