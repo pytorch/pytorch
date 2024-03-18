@@ -241,9 +241,9 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
-        from torch.utils._triton import has_triton
+        from torch.utils._triton import has_triton_package
 
-        if has_triton():
+        if has_triton_package():
             import triton
 
         if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
@@ -281,7 +281,7 @@ class TracerBase:
 
         elif isinstance(a, torch._ops.OpOverload):
             return a
-        elif has_triton() and isinstance(a, triton.language.dtype):
+        elif has_triton_package() and isinstance(a, triton.language.dtype):
             return a
 
         if isinstance(a, Proxy):

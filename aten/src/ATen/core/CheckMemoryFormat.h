@@ -1,6 +1,6 @@
 #include <c10/core/TensorOptions.h>
 
-namespace c10 { namespace impl {
+namespace c10::impl {
 
 inline c10::optional<MemoryFormat>
 check_tensor_options_and_extract_memory_format(
@@ -22,4 +22,4 @@ check_tensor_options_and_extract_memory_format(
   }
 }
 
-}} // namespace impl namespace c10
+} // namespace impl namespace c10
