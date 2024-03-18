@@ -2394,9 +2394,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.Linear2(res)
 
         N, D_in, H, D_out, inner = 2, 2, 2, 2, 4
-        model = ReplayMutation(D_in, H, inner).to("cuda")
+        model = ReplayMutation(D_in, H, inner)
         model2 = copy.deepcopy(model)
-        input = torch.ones(N, D_in, device="cuda")
+        input = torch.ones(N, D_in)
 
         # Keep some intermediate value in model.x
         model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
