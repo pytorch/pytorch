@@ -595,42 +595,19 @@ class BuiltinVariable(VariableTracker):
             assert op not in op_handlers
             op_handlers[op] = create_cmp_op_handlers(op)
 
-        for op in op_handlers.keys():
-            op_handlers[op] = (op_handlers[op], dict())
         return op_handlers
 
     @staticmethod
-    def _find_binop_handler(op, a, b):
-        handlers_and_cache = BuiltinVariable._binop_handlers().get(op)
-        if handlers_and_cache is None:
+    def _find_binop_handler(op, a_type, b_type):
+        handlers = BuiltinVariable._binop_handlers().get(op)
+        if handlers is None:
             return None
 
-        handlers, cache = handlers_and_cache
-        cache_key = (type(a), type(b))
-        hit = cache.get(cache_key, False)
-        if hit is not False:
-            return hit
-
-        a_type = type(a)
-        b_type = type(b)
         matches = []
         for (type1, type2), handler in handlers:
             if issubclass(a_type, type1) and issubclass(b_type, type2):
                 matches.append(handler)
-
-        if not matches:
-            result = None
-        elif len(matches) == 1:
-            result = matches[0]
-        else:
-
-            def result(*args):
-                for fn in matches:
-                    rv = fn(*args)
-                    if rv:
-                        return rv
-
-        return result
+        return matches
 
     def can_insert_in_graph(self):
         return self.fn in self._fx_graph_functions()
@@ -680,6 +657,14 @@ class BuiltinVariable(VariableTracker):
             any_tensor = any_tensor or isinstance(arg, variables.TensorVariable)
         return any_tensor
 
+    def tensor_args_type(self, arg_types):
+        any_tensor = False
+        for arg_type in arg_types:
+            if issubclass(arg_type, variables.GetAttrVariable):
+                return False
+            any_tensor = any_tensor or issubclass(arg_type, variables.TensorVariable)
+        return any_tensor
+
     def python_and_tensor_constant_only(self, *args, **kwargs):
         tensor_args = []
         non_tensor_args = []
@@ -704,191 +689,251 @@ class BuiltinVariable(VariableTracker):
             args, kwargs
         )
 
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from . import UserFunctionVariable
-        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+    @staticmethod
+    def _make_handler(fn, arg_types: List[type], has_kwargs: bool):
+        from .builder import SourcelessBuilder
+        from .lazy import LazyVariableTracker
 
-        fn = self.fn
-        args = [v.realize() for v in args]
-        kwargs = {k: v.realize() for k, v in kwargs.items()}
-        if (
-            self.can_insert_in_graph()
-            and self.tensor_args(*args, *kwargs.values())
-            and not (
-                fn is operator.getitem
-                and not isinstance(args[0], variables.TensorVariable)
+        obj = BuiltinVariable(fn)
+        handlers = []
+
+        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
+            return lambda tx, args, kwargs: obj.call_function(
+                tx, [v.realize() for v in args], kwargs
             )
+
+        if obj.can_insert_in_graph() and not (
+            fn is operator.getitem
+            and not issubclass(arg_types[0], variables.TensorVariable)
         ):
-            try:
-                # Constant fold for constant tensor and python constants
-                if self.python_and_tensor_constant_only(*args, **kwargs):
-                    from ..bytecode_transformation import unique_id
-                    from .functions import invoke_and_store_as_constant
-
-                    return invoke_and_store_as_constant(
-                        tx, fn, unique_id(fn.__name__), args, kwargs
-                    )
-
-                if fn in IN_PLACE_DESUGARING_MAP and isinstance(
-                    args[0], variables.ConstantVariable
-                ):
-                    # In-place operators like += usually mustate tensor
-                    # values, but in the edge case of immutable values they
-                    # re-bind the variable.
-                    #
-                    # The easiest way to keep the graph consistent in this
-                    # scenario is to de-sugar eagerly.
-                    fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
-
-                if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
-                    # Standard indexing will force specialization due to
-                    # __index__.  Rewrite as a regular torch op which will
-                    # trace fine
-                    fn, args = torch.select, [
-                        args[0],
-                        variables.ConstantVariable.create(0),
-                        args[1],
-                    ]
-
-                # Interaction between ndarray and tensors:
-                #   We prefer the tensor op whenever there are tensors involved
-                if check_numpy_ndarray_args(args, kwargs) and not any(
-                    type(arg) == variables.TensorVariable for arg in args
-                ):
-                    proxy = tx.output.create_proxy(
-                        "call_function",
-                        numpy_operator_wrapper(fn),
-                        *proxy_args_kwargs(args, kwargs),
-                    )
-
-                    return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
-
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    fn,
-                    *proxy_args_kwargs(args, kwargs),
-                )
-                if any(isinstance(arg, FakeItemVariable) for arg in args):
-                    return wrap_fx_proxy_cls(
-                        FakeItemVariable,
-                        tx,
-                        proxy,
-                    )
-                elif check_unspec_python_args(args, kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = fn(*_args, **_kwargs)
-
-                    need_unwrap = any(
-                        x.need_unwrap
-                        for x in itertools.chain(args, kwargs.values())
-                        if isinstance(x, variables.UnspecializedPythonVariable)
-                    )
-
-                    return wrap_fx_proxy_cls(
-                        UnspecializedPythonVariable,
-                        tx,
-                        proxy,
-                        raw_value=raw_value,
-                        need_unwrap=need_unwrap,
-                    )
-                elif all(isinstance(x, SymNodeVariable) for x in args):
-                    return SymNodeVariable.create(tx, proxy, None)
-                else:
-                    # Work around for vision_maskrcnn due to precision difference
-                    # specialize the dividend when float divide by tensor
-                    if fn is operator.truediv and isinstance(
-                        args[0], variables.UnspecializedPythonVariable
-                    ):
-                        args[0] = args[0].convert_to_constant(tx)
-                    return wrap_fx_proxy(tx, proxy)
-
-            except NotImplementedError:
-                unimplemented(f"partial tensor op: {self} {args} {kwargs}")
-
-        # Handle cases like int(torch.seed())
-        # Also handle sym_float to sym_int cases
-        if fn in (int, float) and isinstance(
-            args[0], (SymNodeVariable, variables.TensorVariable)
-        ):
-            if isinstance(args[0], variables.TensorVariable):
-                item = args[0].call_method(tx, "item", [], {})
-            else:
-                item = args[0]
-            fn_ = sym_int if fn is int else sym_float
-            out = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    (item.as_proxy(),),
-                    {},
-                ),
-            )
-            return out
-
-        # Handle `str` on a user defined function
-        if fn is str and args and isinstance(args[0], (UserFunctionVariable)):
-            return variables.ConstantVariable.create(value=str(args[0].fn))
+            if obj.tensor_args_type(arg_types):
+                return obj._handle_insert_op_in_graph
+            elif has_kwargs:
+                # need runtime check for kwargs
+                handlers.append(obj._handle_insert_op_in_graph)
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
-        if len(args) == 2 and len(kwargs) == 0:
+        if len(arg_types) == 2 and not has_kwargs:
             # Try to find a handler for the arg types; otherwise, fall through to constant handler
-            binop_handler = BuiltinVariable._find_binop_handler(fn, args[0], args[1])
-            if binop_handler:
-                res = binop_handler(tx, args[0], args[1])
-                if res is not None:
-                    return res
+            binop_handlers = BuiltinVariable._find_binop_handler(fn, *arg_types)
+            if not binop_handlers:
+                pass
+            elif len(binop_handlers) == 1:
+                (binop_handler,) = binop_handlers
+                handlers.append(lambda tx, args, _: binop_handler(tx, *args))
+            else:
 
-        handler = getattr(self, f"call_{fn.__name__}", None)
-        if handler:
-            try:
-                result = handler(tx, *args, **kwargs)
-                if result is not None:
-                    return result
-            except TypeError:
-                # Check if binding is bad. inspect signature bind is expensive.
-                # So check only when handler call fails.
+                def call_binop_handlers(tx, args, _):
+                    for fn in binop_handlers:
+                        rv = fn(tx, *args)
+                        if rv:
+                            return rv
+
+                handlers.append(call_binop_handlers)
+
+        self_handler = getattr(obj, f"call_{fn.__name__}", None)
+        if self_handler:
+
+            def call_self_handler(tx, args, kwargs):
                 try:
-                    inspect.signature(handler).bind(tx, *args, **kwargs)
-                except TypeError as e:
-                    has_constant_handler = self.has_constant_handler(args, kwargs)
+                    result = self_handler(tx, *args, **kwargs)
+                    if result is not None:
+                        return result
+                except TypeError:
+                    # Check if binding is bad. inspect signature bind is expensive.
+                    # So check only when handler call fails.
+                    try:
+                        inspect.signature(self_handler).bind(tx, *args, **kwargs)
+                    except TypeError as e:
+                        has_constant_handler = obj.has_constant_handler(args, kwargs)
+                        if not has_constant_handler:
+                            log.warning(
+                                "incorrect arg count %s %s and no constant handler",
+                                self_handler,
+                                e,
+                            )
+                            unimplemented(
+                                f"invalid handler args {self_handler} {args} {kwargs}"
+                            )
+                    else:
+                        raise
+                except Unsupported as exc:
+                    has_constant_handler = obj.has_constant_handler(args, kwargs)
                     if not has_constant_handler:
-                        log.warning(
-                            "incorrect arg count %s %s and no constant handler",
-                            handler,
-                            e,
+                        raise
+                    # Actually, we will handle this just fine
+                    exc.remove_from_stats()
+
+            handlers.append(call_self_handler)
+
+        if obj.can_constant_fold_through():
+            builder = SourcelessBuilder().__call__
+
+            if (
+                all(issubclass(x, ConstantVariable) for x in arg_types)
+                and not has_kwargs
+            ):
+
+                def constant_fold_handler(tx, args, kwargs):
+                    # fast path
+                    return builder(
+                        tx,
+                        fn(
+                            *[x.as_python_constant() for x in args],
+                        ),
+                    )
+
+            else:
+
+                def constant_fold_handler(tx, args, kwargs):
+                    # path with a runtime check
+                    if check_unspec_or_constant_args(args, kwargs):
+                        return builder(
+                            tx,
+                            fn(
+                                *[x.as_python_constant() for x in args],
+                                **{
+                                    k: v.as_python_constant() for k, v in kwargs.items()
+                                },
+                            ),
                         )
-                        unimplemented(f"invalid handler args {handler} {args} {kwargs}")
-                else:
-                    raise
-            except Unsupported as exc:
-                has_constant_handler = self.has_constant_handler(args, kwargs)
-                if not has_constant_handler:
-                    raise
-                # Actually, we will handle this just fine
-                exc.remove_from_stats()
 
-        # NB: call to has_constant_handler is deliberately delayed post generic
-        # handler because has_constant_handler calls as_python_constant
-        # internally which realizes LazyVariableTracker for ConstantVariables,
-        # unnecessarily putting guards on objects which might not actually be used.
-        has_constant_handler = self.has_constant_handler(args, kwargs)
-        if has_constant_handler:
-            from .builder import SourcelessBuilder
+            handlers.append(constant_fold_handler)
 
-            # constant fold
-            return SourcelessBuilder()(
-                tx,
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
+        error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
+        if len(handlers) == 0:
+            return lambda *args: unimplemented(error_msg)
+        elif len(handlers) == 1:
+            (handler,) = handlers
+
+            def builtin_dipatch(tx, args, kwargs):
+                rv = handler(tx, args, kwargs)
+                if rv:
+                    return rv
+                unimplemented(error_msg)
+
+        else:
+
+            def builtin_dipatch(tx, args, kwargs):
+                for fn in handlers:
+                    rv = fn(tx, args, kwargs)
+                    if rv:
+                        return rv
+                unimplemented(error_msg)
+
+        return builtin_dipatch
+
+    def _handle_insert_op_in_graph(self, tx, args, kwargs):
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+
+        if kwargs and not self.tensor_args(*args, *kwargs.values()):
+            return
+
+        fn = self.fn
+        try:
+            # Constant fold for constant tensor and python constants
+            if self.python_and_tensor_constant_only(*args, **kwargs):
+                from ..bytecode_transformation import unique_id
+                from .functions import invoke_and_store_as_constant
+
+                return invoke_and_store_as_constant(
+                    tx, fn, unique_id(fn.__name__), args, kwargs
+                )
+
+            if fn in IN_PLACE_DESUGARING_MAP and isinstance(
+                args[0], variables.ConstantVariable
+            ):
+                # In-place operators like += usually mustate tensor
+                # values, but in the edge case of immutable values they
+                # re-bind the variable.
+                #
+                # The easiest way to keep the graph consistent in this
+                # scenario is to de-sugar eagerly.
+                fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
+
+            if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                # Standard indexing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                fn, args = torch.select, [
+                    args[0],
+                    variables.ConstantVariable.create(0),
+                    args[1],
+                ]
+
+            # Interaction between ndarray and tensors:
+            #   We prefer the tensor op whenever there are tensors involved
+            if check_numpy_ndarray_args(args, kwargs) and not any(
+                type(arg) == variables.TensorVariable for arg in args
+            ):
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    numpy_operator_wrapper(fn),
+                    *proxy_args_kwargs(args, kwargs),
+                )
+
+                return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                fn,
+                *proxy_args_kwargs(args, kwargs),
             )
+            if any(isinstance(arg, FakeItemVariable) for arg in args):
+                return wrap_fx_proxy_cls(
+                    FakeItemVariable,
+                    tx,
+                    proxy,
+                )
+            elif check_unspec_python_args(args, kwargs):
+                _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                raw_value = fn(*_args, **_kwargs)
 
-        return super().call_function(tx, args, kwargs)
+                need_unwrap = any(
+                    x.need_unwrap
+                    for x in itertools.chain(args, kwargs.values())
+                    if isinstance(x, variables.UnspecializedPythonVariable)
+                )
+
+                return wrap_fx_proxy_cls(
+                    UnspecializedPythonVariable,
+                    tx,
+                    proxy,
+                    raw_value=raw_value,
+                    need_unwrap=need_unwrap,
+                )
+            elif all(isinstance(x, SymNodeVariable) for x in args):
+                return SymNodeVariable.create(tx, proxy, None)
+            else:
+                # Work around for vision_maskrcnn due to precision difference
+                # specialize the dividend when float divide by tensor
+                if fn is operator.truediv and isinstance(
+                    args[0], variables.UnspecializedPythonVariable
+                ):
+                    args[0] = args[0].convert_to_constant(tx)
+                return wrap_fx_proxy(tx, proxy)
+
+        except NotImplementedError:
+            unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+
+    call_function_handler_cache = {}
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if kwargs:
+            kwargs = {k: v.realize() for k, v in kwargs.items()}
+            key = (self.fn, *(type(x) for x in args), True)
+        else:
+            key = (self.fn, *(type(x) for x in args))
+
+        handler = self.call_function_handler_cache.get(key)
+        if not handler:
+            self.call_function_handler_cache[key] = handler = self._make_handler(
+                self.fn, [type(x) for x in args], bool(kwargs)
+            )
+        return handler(tx, args, kwargs)
 
     def call_method(
         self,
@@ -909,6 +954,35 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(items)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def _call_int_float(self, tx, arg):
+        # Handle cases like int(torch.seed())
+        # Also handle sym_float to sym_int cases
+        if isinstance(arg, (SymNodeVariable, variables.TensorVariable)):
+            if isinstance(arg, variables.TensorVariable):
+                item = arg.call_method(tx, "item", [], {})
+            else:
+                item = arg
+            fn_ = sym_int if self.fn is int else sym_float
+            from torch._dynamo.variables.builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_,
+                    (item.as_proxy(),),
+                    {},
+                ),
+            )
+
+    call_int = _call_int_float
+    call_float = _call_int_float
+
+    def call_str(self, tx, arg):
+        # Handle `str` on a user defined function
+        if isinstance(arg, (variables.UserFunctionVariable)):
+            return variables.ConstantVariable.create(value=str(arg.fn))
 
     def _call_min_max(self, tx, *args):
         if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
