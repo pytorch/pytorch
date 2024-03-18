@@ -734,7 +734,8 @@ class InstructionTranslatorBase(
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         ip = self.instruction_pointer
-        assert ip is not None
+        if ip is None:
+            return False
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
 
@@ -817,7 +818,7 @@ class InstructionTranslatorBase(
 
     @property
     def next_instruction(self):
-        return self.instructions[self.instruction_pointer]
+        return self.instructions[self.instruction_pointer]  # type: ignore[index]
 
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
@@ -842,11 +843,7 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
-                while (
-                    self.instruction_pointer is not None
-                    and not self.output.should_exit
-                    and self.step()
-                ):
+                while not self.output.should_exit and self.step():
                     pass
             except BackendCompilerFailed:
                 raise
