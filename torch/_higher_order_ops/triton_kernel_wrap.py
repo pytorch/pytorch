@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
 import torch.utils._pytree as pytree
+import torch
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
@@ -669,3 +670,27 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: 
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
+
+
+def triton_kernel_call(kernel, grid, *args, **kwargs):
+    if torch._dynamo.is_compiling():
+        return kernel[grid](*args, **kwargs)
+
+    # TODO: callable grid
+    # TODO: don't add if already exists?
+    kernel_id = kernel_side_table.add_kernel(kernel)
+    # TODO: dedup normalized_kwargs logic with dynamo
+    normalized_kwargs = {**dict(zip(kernel.arg_names, args)), **kwargs}
+    return triton_kernel_wrapper_mutation(
+        kernel_idx=kernel_id,
+        grid=[grid],
+        kwargs=normalized_kwargs)
+
+
+def triton_wrapper(kernel):
+    class Wrapper:
+        def __getitem__(self, grid):
+            def inner(*args, **kwargs):
+                return triton_kernel_call(kernel, grid, *args, **kwargs)
+            return inner
+    return Wrapper()

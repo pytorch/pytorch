@@ -848,6 +848,7 @@ SUPPORTED_RETURN_TYPES = {
     float: "float",
     bool: "bool",
     torch.types.Number: "Scalar",
+    None: "()",
 }
 
 
