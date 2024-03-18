@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.logging_tensor import LoggingTensor
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import handle_subclass_ordering, validate_wrapped_ordering, set_ordering
 
 # The current test methodology in this file is to test a variety of real use cases
@@ -288,7 +288,7 @@ class TestSubclass(TestCase):
             @handle_subclass_ordering
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs=None):
-                order.append(cls)
+                order.append(cls.__name__)
                 rs = tree_map_only(torch.Tensor, lambda t: cls(t), func(*tree_map_only(cls, lambda t: t._t, args), **tree_map_only(cls, lambda t: t._t, kwargs or {})))
                 return rs
 
@@ -328,8 +328,20 @@ class TestSubclass(TestCase):
         A(B(tensor))
         B(A(tensor))
 
-        set_ordering(C, A)
 
+        # Always put the one that should run first on the right side
+        # to ensure the priority is not from default handling
+        C(tensor) + A(C(tensor))
+        self.assertEqual(order, ['A', 'C'])
+        order = []
+
+        torch.add(A(tensor), B(tensor))
+        self.assertEqual(order, ['B', 'A'])
+        order = []
+
+        C(tensor) + A(B(tensor))
+        self.assertEqual(order, ['A', 'B', 'C'])
+        order = []
 
 
 instantiate_parametrized_tests(TestSubclass)

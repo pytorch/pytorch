@@ -528,10 +528,16 @@ def _known_lower_priority(cls1_s, cls2_s):
     if cls1_s is None or cls2_s is None:
         return False
 
+    if cls1_s == cls2_s:
+        return False
+
     cls1 = _get_cls_object(cls1_s)
     cls2 = _get_cls_object(cls2_s)
     if cls1 and cls2 and issubclass(cls1, cls2):
         return True
+
+    if cls1_s not in _SUBLCASS_PRIORITY_RULES:
+        return False
 
     for next_cls_s in _SUBLCASS_PRIORITY_RULES[cls1_s]:
         next_cls = _get_cls_object(next_cls_s)
@@ -559,6 +565,7 @@ def set_ordering(cls1_, cls2_):
         raise RuntimeError("Conflicting ordering being added")
 
     _SUBLCASS_PRIORITY_RULES[cls1_s].add(cls2_s)
+    _SUBLCASS_PRIORITY_RULES[cls2_s] = set()
 
 def handle_subclass_ordering(user_fn):
     if not isinstance(user_fn, classmethod):
@@ -571,12 +578,14 @@ def handle_subclass_ordering(user_fn):
     def wrapped_dispatch(cls, func, types, args, kwargs=None):
         cls_s = _get_cls_name(cls)
 
-        for t in types:
-            if cls_s not in _SUBLCASS_PRIORITY_RULES or
-                _known_lower_priority(_get_cls_name(t), cls_s):
-                return NotImplemented
+        if cls_s in _SUBLCASS_PRIORITY_RULES:
+            for t in types:
+                t_s = _get_cls_name(t)
+                if t_s not in _SUBLCASS_PRIORITY_RULES or \
+                    _known_lower_priority(t_s, cls_s):
+                    return NotImplemented
 
         # Direct call into the subclass to avoid infinite recursion
         return user_fn.__func__(cls, func, types, args, kwargs)
 
-    return wrapped_dispatch
+    return classmethod(wrapped_dispatch)
