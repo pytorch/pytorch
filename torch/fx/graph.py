@@ -111,6 +111,10 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
+def _is_from_triton(name) -> bool:
+    return name == "triton"
+
+
 class _Namespace:
     """A context for associating names uniquely with objects.
 
@@ -380,14 +384,14 @@ class CodeGen:
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
-        from torch.utils._triton import has_triton
+        from torch.utils._triton import has_triton_package
 
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
 
-        if has_triton():
+        if has_triton_package():
             import triton
             globals_[triton.__name__] = triton
             from torch.utils._triton import patch_triton_dtype_repr

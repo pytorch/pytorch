@@ -248,6 +248,36 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_constant_handling(self, device):
+        """
+        Test that different constants are recognized correctly.
+        """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn1(x):
+            return x + torch.tensor(list(range(0, 12)), device=device)
+
+        def fn2(x):
+            return x + torch.tensor(list(range(1, 13)), device=device)
+
+        a = torch.rand(12, device=device)
+
+        compiled_fn1 = torch.compile(fn1)
+        compiled_fn2 = torch.compile(fn2)
+
+        # A call to fn1 should miss in the cache.
+        self.assertEqual(fn1(a), compiled_fn1(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # A call to fn2 should also miss (the constant is different)
+        self.assertEqual(fn2(a), compiled_fn2(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @config.patch({"fx_graph_cache": True})
     def test_generated_kernel_count(self):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
@@ -313,12 +343,9 @@ class TestFxGraphCache(TestCase):
 class TestFxGraphCacheHashing(TestCase):
     def test_tensor_constants(self):
         """
-        Test the handling of small vs. large tensor constants.
+        Test the hashing of tensor constants.
         """
         data = FxGraphCachePickler.dumps(torch.tensor(list(range(9))))
-        self.assertIsInstance(pickle.loads(data), TensorMetadata)
-
-        data = FxGraphCachePickler.dumps(torch.tensor(list(range(8))))
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
     def test_hash_fake_tensors(self):
