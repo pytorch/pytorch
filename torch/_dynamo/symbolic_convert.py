@@ -758,7 +758,7 @@ class InstructionTranslatorBase(
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
-            return True
+            return not self.output.should_exit
         except ReturnValueOp:
             return False
         except Unsupported:
@@ -843,7 +843,7 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
-                while not self.output.should_exit and self.step():
+                while self.step():
                     pass
             except BackendCompilerFailed:
                 raise
