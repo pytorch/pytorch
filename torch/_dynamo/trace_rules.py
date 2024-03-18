@@ -2270,7 +2270,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.autograd._register_py_tensor_class_for_device",
         "torch.autograd._tensor_or_tensors_to_tuple",
         "torch.autograd.backward",
-        "torch.autograd.forward_ad.maybe_load_decompositions",
+        "torch.autograd.forward_ad._maybe_load_decompositions",
         "torch.autograd.function._iter_filter",
         "torch.autograd.function._iter_jit_values",
         "torch.autograd.function._iter_None_tensors",
