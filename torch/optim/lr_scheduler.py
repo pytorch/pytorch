@@ -13,15 +13,6 @@ __all__ = ['LambdaLR', 'MultiplicativeLR', 'StepLR', 'MultiStepLR', 'ConstantLR'
            'ExponentialLR', 'SequentialLR', 'CosineAnnealingLR', 'ChainedScheduler', 'ReduceLROnPlateau',
            'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR', 'PolynomialLR', 'LRScheduler']
 
-EPOCH_DEPRECATION_WARNING = (
-    "The epoch parameter in `scheduler.step()` was not necessary and is being "
-    "deprecated where possible. Please use `scheduler.step()` to step the "
-    "scheduler. During the deprecation, if epoch is different from None, the "
-    "closed form is used instead of the new chainable form, where available. "
-    "Please open an issue if you are unable to replicate your use case: "
-    "https://github.com/pytorch/pytorch/issues/new/choose."
-)
-
 def _check_verbose_deprecated_warning(verbose):
     """Raises a warning when verbose is not the default value."""
     if verbose != "deprecated":
@@ -138,14 +129,6 @@ class LRScheduler:
                               "`lr_scheduler.step()`. See more details at "
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
 
-            # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
-            elif self.optimizer._step_count < 1:
-                warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
-                              "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
-                              "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
-                              "will result in PyTorch skipping the first value of the learning rate schedule. "
-                              "See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
         with _enable_get_lr_call(self):
@@ -153,7 +136,6 @@ class LRScheduler:
                 self.last_epoch += 1
                 values = self.get_lr()
             else:
-                warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = self._get_closed_form_lr()
@@ -1060,8 +1042,6 @@ class ReduceLROnPlateau(LRScheduler):
         current = float(metrics)
         if epoch is None:
             epoch = self.last_epoch + 1
-        else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
         self.last_epoch = epoch
 
         if self.is_better(current, self.best):
