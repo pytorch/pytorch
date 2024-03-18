@@ -108,8 +108,9 @@ def build_torch_function_fn(tx, value, source):
 
 def can_dispatch_torch_function(tx, args, kwargs):
     if tx.output.torch_function_enabled:
-        all_args = pytree.arg_tree_leaves(*args, **kwargs)
-        return any(has_torch_function(arg) for arg in all_args)
+        for arg in (*args, *kwargs.values()):
+            if has_torch_function(arg):
+                return True
     else:
         return False
 
