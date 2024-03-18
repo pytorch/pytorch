@@ -294,7 +294,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.storage_memo), 1)
         del x
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
         r = []
@@ -304,7 +303,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
@@ -708,8 +706,11 @@ meta_function_device_expected_failures_only_outplace = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     torch.native_batch_norm: {bf16, f16},
     torch._native_batch_norm_legit: {bf16, f16},
+    torch.ops.aten._batch_norm_with_update: {bf16, f16},
     torch.native_layer_norm: {bf16, f16},
 }
 
@@ -724,8 +725,11 @@ meta_function_device_expected_failures['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     torch.native_batch_norm: {f32, f64},
     torch._native_batch_norm_legit: {f32, f64},
+    torch.ops.aten._batch_norm_with_update: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -850,9 +854,13 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     aten.native_batch_norm.default: {bf16, f16},
     aten._native_batch_norm_legit.default: {bf16, f16},
     aten._native_batch_norm_legit.no_stats: {bf16, f16},
+    aten._batch_norm_with_update.default: {bf16, f16},
+
     aten.native_layer_norm.default: {bf16, f16},
     aten.histc.default: {f16},
     aten.histc.out: {f16},
@@ -877,9 +885,13 @@ meta_dispatch_device_expected_failures['cuda'] = {
 
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
+
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
+    aten._batch_norm_with_update.default: {f32, f64},
 
     # If the computation dtype is different from the input
     # dtype this will fail. CPU execution may also have a

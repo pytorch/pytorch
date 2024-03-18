@@ -43,28 +43,29 @@ static void clamp_mps_graph(CachedGraph* cachedGraph,
 
   cachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
-  MPSGraphTensor* minTensor = cachedGraph->minTensor;
-  MPSGraphTensor* maxTensor = cachedGraph->maxTensor;
+  auto minTensor = cachedGraph->minTensor;
+  auto maxTensor = cachedGraph->maxTensor;
+  auto outputTensor = cachedGraph->inputTensor;
+
   if (input_dtype != min_dtype) {
     minTensor = castMPSTensor(mpsGraph, cachedGraph->minTensor, input_dtype);
   }
   if (input_dtype != max_dtype) {
     maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
   }
-  if (cachedGraph->minTensor && cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
-                                           minValueTensor:minTensor
-                                           maxValueTensor:maxTensor
-                                                     name:nil];
-  } else if (cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:maxTensor
-                                                              name:nil];
-  } else if (cachedGraph->minTensor) {
-    cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:minTensor
-                                                              name:nil];
+  // clampWithTensor doesn't propagate NaN through so simulate it as composition of
+  // minimumWithNaNPropagationWithPrimaryTensor and maximumWithNaNPropagationWithPrimaryTensor
+  if (maxTensor) {
+    outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:outputTensor
+                                                        secondaryTensor:maxTensor
+                                                                   name:nil];
   }
+  if (minTensor) {
+    outputTensor = [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:outputTensor
+                                                        secondaryTensor:minTensor
+                                                                   name:nil];
+  }
+  cachedGraph->outputTensor = outputTensor;
 }
 
 static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, string op_name) {
