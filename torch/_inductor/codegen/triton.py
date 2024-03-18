@@ -2473,7 +2473,7 @@ class TritonKernel(Kernel):
             full_scan_vars = combine_fn(tuple(accumulators), result_vars)
             result_vars = [
                 cse_compute(f"tl.where(roffset > 0, {full_scan}, {partial_scan})")
-                for full_scan, partial_scan in full_scan_vars, partial_scan_vars
+                for full_scan, partial_scan in zip(full_scan_vars, partial_scan_vars)
             ]
             for acc_next, accumulator in zip(accs_next, accumulators):
                 self.compute.writeline(f"{accumulator} = {acc_next}")
