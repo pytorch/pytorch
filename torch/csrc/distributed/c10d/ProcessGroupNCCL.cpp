@@ -1460,7 +1460,7 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 }
 
 std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  return c10::str("[PG ", uid_, " Rank ", rank_, "globalRank", globalRank(), "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
