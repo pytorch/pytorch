@@ -327,19 +327,46 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         self.op = op
 
     def _pointwise_node_can_be_fused(self, node: torch.fx.Node):
-        # note: we only consider the case where the inputs are tensors
-        # for mixed precision training, we need to make sure the inputs
-        # of the aten.cat when do the stack should be the same dtype
-        # otherwise, the output of the aten.cat may be not the same as
-        # its inputs, and cause dtype not same error in mm or addmm
         input, other = node.args
         return (
-            input.meta["tensor_meta"].shape == other.meta["tensor_meta"].shape  # type: ignore[union-attr]
-            if hasattr(input, "meta")
+            hasattr(input, "meta")
             and hasattr(other, "meta")
             and "tensor_meta" in input.meta  # type: ignore[union-attr]
             and "tensor_meta" in other.meta  # type: ignore[union-attr]
-            else False
+        )
+
+    def broadcast_shapes(self, input_shape, other_shape):
+        min_length = min(len(input_shape), len(other_shape))
+        max_length = max(len(input_shape), len(other_shape))
+        if len(input_shape) < len(other_shape):
+            input_shape = [1] * (max_length - min_length) + list(input_shape)
+        else:
+            other_shape = [1] * (max_length - min_length) + list(other_shape)
+        shape_list = []
+        for i in range(max_length):
+            shape_list.append(max(input_shape[i], other_shape[i]))
+
+        return torch.Size(shape_list)
+
+    def conduct_tensor_broadcast(self, graph, node, input_node, out_shape):
+        # Repeat to broadcast the node to desired out shape
+        # https://pytorch.org/docs/stable/generated/torch.Tensor.repeat.html#torch.Tensor.repeat
+        input_shape = input_node.meta["tensor_meta"].shape
+        # Append 1s to the input shape to match the output shape length
+        input_shape = [1] * (len(out_shape) - len(input_shape)) + list(input_shape)
+        input_tensor = input_node.meta["val"]
+        repeats = []
+        for s1, s2 in zip(out_shape, input_shape):
+            repeats.append(s1 // s2)
+
+        # Double check repeats are equivalent
+        repeat_out_shape = input_tensor.repeat(repeats).shape
+        assert (
+            repeat_out_shape == out_shape
+        ), "broadcast -> repeat mapping is not equivalent!"
+
+        return graph.call_function(
+            aten.repeat.default, args=(input_node,), kwargs={"repeats": repeats}
         )
 
     def match(self, node: torch.fx.Node):
@@ -349,7 +376,15 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             alpha = node.kwargs.get("alpha", 1.0)
             rounding_mode = node.kwargs.get("rounding_mode", None)
             input, other = node.args
-            shape = list(input.meta["tensor_meta"].shape)  # type: ignore[union-attr]
+            shape = self.broadcast_shapes(
+                input.meta["tensor_meta"].shape,  # type: ignore[union-attr]
+                other.meta["tensor_meta"].shape,  # type: ignore[union-attr]
+            )
+            # note: we only consider the case where the inputs are tensors
+            # for mixed precision training, we need to make sure the inputs
+            # of the aten.cat when do the stack should be the same dtype
+            # otherwise, the output of the aten.cat may be not the same as
+            # its inputs, and cause dtype not same error in mm or addmm
             group_key = (
                 "batch_" + self.op.__name__.lower() + "_post_grad",
                 str(shape),
@@ -368,6 +403,16 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
         for node in subset:
             input, other = node.args
+            # check the shape of the input and other
+            out_shape = self.broadcast_shapes(
+                input.meta["tensor_meta"].shape,  # type: ignore[union-attr]
+                other.meta["tensor_meta"].shape,  # type: ignore[union-attr]
+            )
+            if input.meta["tensor_meta"].shape != out_shape:  # type: ignore[union-attr]
+                input = self.conduct_tensor_broadcast(graph, node, input, out_shape)
+            elif other.meta["tensor_meta"].shape != out_shape:  # type: ignore[union-attr]
+                other = self.conduct_tensor_broadcast(graph, node, other, out_shape)
+
             batch_inputs.append(input)
             batch_others.append(other)
 
