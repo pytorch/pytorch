@@ -5980,8 +5980,8 @@ def associative_scan(input, dim: int, combine_fn: torch.fx.GraphModule):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
-        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
-        for _ in range(2)
+        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+        for x in itertools.chain(input, input)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
     kwargs = _make_scan_inner(input, axis=dim, dtype=None)

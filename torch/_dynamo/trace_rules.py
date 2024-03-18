@@ -222,6 +222,7 @@ manual_torch_name_rule_map = {
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
+    "torch._higher_order_ops.associative_scan.wrap_combine_fn_flat": UserFunctionVariable,
 }
 
 
