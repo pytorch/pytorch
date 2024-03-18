@@ -740,7 +740,28 @@ class CustomizedDictVariable(ConstDictVariable):
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
+        is_hf_model_output = _is_matching_transformers_cls(
+            self.user_cls
+        ) or _is_matching_diffusers_cls(self.user_cls)
+
+        # If the user class is a ModelOutput, then wrap the instance creation in
+        # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
+        # in `create` function, this is not enough. TorchDynamo can still get
+        # triggered on the child functions of __post_init__. This upsets export.
+        # Since, we know that ModelOutput __post_init__ is not worth optimizing,
+        # we just wrap the instance creation in torch._dynamo.disable(),
+        # regardless whethers its export or not.
+        if is_hf_model_output:
+            # load torch._dynamo.disable
+            codegen.append_output(codegen.create_load_global("torch", True, add=True))
+            codegen.append_output(codegen.create_load_attr("_dynamo"))
+            codegen.append_output(codegen.create_load_attr("disable"))
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
+
+        if is_hf_model_output:
+            # Wrap user_cls with disable
+            codegen.extend_output(create_call_function(1, False))
+
         # All the keys are just wrapped strings
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
