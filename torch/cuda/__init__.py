@@ -117,16 +117,8 @@ def is_available() -> bool:
         # API via `cuInit`
         return torch._C._cuda_getDeviceCount() > 0
 
-
-def is_bf16_supported():
-    r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
-    # Check for ROCm, if true return true, no ROCM_VERSION check required,
-    # since it is supported on AMD GPU archs.
-    if torch.version.hip:
-        return True
-
-    device = torch.cuda.current_device()
-
+@lru_cache(maxsize=256)
+def _is_bf16_supported(device):
     # Check for CUDA version and device compute capability.
     # This is a fast way to check for it.
     cuda_version = torch.version.cuda
@@ -140,6 +132,31 @@ def is_bf16_supported():
     # Finally try to create a bfloat16 device.
     return _check_bf16_tensor_supported(device)
 
+@lru_cache(maxsize=256)
+def _is_bf16_compute_supported(device):
+    if not _is_bf16_supported(device):
+        return False
+    try:
+        a = torch.zeros(1, 1, 1, 1, device=torch.device('cuda', device))
+        torch.nn.functional.conv2d(a, a, a.reshape(1), 1, 1, 1, 1)
+        torch.matmul(a, a)
+        return True
+    except RuntimeError:
+        return False
+
+def is_bf16_supported():
+    r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
+    # Check for ROCm, if true return true, no ROCM_VERSION check required,
+    # since it is supported on AMD GPU archs.
+    if torch.version.hip:
+        return True
+
+    device = torch.cuda.current_device()
+    return _is_bf16_supported(device)
+
+def is_bf16_compute_supported():
+    device = torch.cuda.current_device()
+    return _is_bf16_compute_supported(device)
 
 @lru_cache(maxsize=16)
 def _check_bf16_tensor_supported(device: _device_t):
