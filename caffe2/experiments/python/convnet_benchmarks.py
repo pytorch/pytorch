@@ -17,8 +17,6 @@
 # Module caffe2.experiments.python.convnet_benchmarks
 
 
-
-
 """
 Benchmark for common convnets.
 
@@ -82,9 +80,9 @@ pass.
 import argparse
 import time
 
-from caffe2.python import cnn, workspace, core
-
 import caffe2.python.SparseTransformer as SparseTransformer  # type: ignore[import]
+
+from caffe2.python import cnn, core, workspace
 
 
 def MLP(order):
@@ -97,96 +95,70 @@ def MLP(order):
             current = "fc_{}_{}".format(i, j) if i > 0 else "data"
             next_ = "fc_{}_{}".format(i + 1, j)
             model.FC(
-                current, next_,
-                dim_in=d, dim_out=d,
+                current,
+                next_,
+                dim_in=d,
+                dim_out=d,
                 weight_init=model.XavierInit,
-                bias_init=model.XavierInit)
-            model.Sum(["fc_{}_{}".format(depth, j)
-                       for j in range(width)], ["sum"])
-            model.FC("sum", "last",
-                     dim_in=d, dim_out=1000,
-                     weight_init=model.XavierInit,
-                     bias_init=model.XavierInit)
+                bias_init=model.XavierInit,
+            )
+            model.Sum(["fc_{}_{}".format(depth, j) for j in range(width)], ["sum"])
+            model.FC(
+                "sum",
+                "last",
+                dim_in=d,
+                dim_out=1000,
+                weight_init=model.XavierInit,
+                bias_init=model.XavierInit,
+            )
             xent = model.LabelCrossEntropy(["last", "label"], "xent")
             model.AveragedLoss(xent, "loss")
             return model, d
 
 
 def AlexNet(order):
-    model = cnn.CNNModelHelper(order, name="alexnet",
-                               use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="alexnet", use_cudnn=True, cudnn_exhaustive_search=True
+    )
     conv1 = model.Conv(
         "data",
         "conv1",
         3,
         64,
         11,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
         stride=4,
-        pad=2
+        pad=2,
     )
 
     relu1 = model.Relu(conv1, "conv1")
     pool1 = model.MaxPool(relu1, "pool1", kernel=3, stride=2)
     conv2 = model.Conv(
-        pool1,
-        "conv2",
-        64,
-        192,
-        5,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=2
+        pool1, "conv2", 64, 192, 5, ("XavierFill", {}), ("ConstantFill", {}), pad=2
     )
     relu2 = model.Relu(conv2, "conv2")
     pool2 = model.MaxPool(relu2, "pool2", kernel=3, stride=2)
     conv3 = model.Conv(
-        pool2,
-        "conv3",
-        192,
-        384,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        pool2, "conv3", 192, 384, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu3 = model.Relu(conv3, "conv3")
     conv4 = model.Conv(
-        relu3,
-        "conv4",
-        384,
-        256,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu3, "conv4", 384, 256, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu4 = model.Relu(conv4, "conv4")
     conv5 = model.Conv(
-        relu4,
-        "conv5",
-        256,
-        256,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu4, "conv5", 256, 256, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu5 = model.Relu(conv5, "conv5")
     pool5 = model.MaxPool(relu5, "pool5", kernel=3, stride=2)
     fc6 = model.FC(
-        pool5, "fc6", 256 * 6 * 6, 4096, ('XavierFill', {}),
-        ('ConstantFill', {})
+        pool5, "fc6", 256 * 6 * 6, 4096, ("XavierFill", {}), ("ConstantFill", {})
     )
     relu6 = model.Relu(fc6, "fc6")
-    fc7 = model.FC(
-        relu6, "fc7", 4096, 4096, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fc7 = model.FC(relu6, "fc7", 4096, 4096, ("XavierFill", {}), ("ConstantFill", {}))
     relu7 = model.Relu(fc7, "fc7")
-    fc8 = model.FC(
-        relu7, "fc8", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fc8 = model.FC(relu7, "fc8", 4096, 1000, ("XavierFill", {}), ("ConstantFill", {}))
     pred = model.Softmax(fc8, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
     model.AveragedLoss(xent, "loss")
@@ -194,71 +166,39 @@ def AlexNet(order):
 
 
 def OverFeat(order):
-    model = cnn.CNNModelHelper(order, name="overfeat",
-                               use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="overfeat", use_cudnn=True, cudnn_exhaustive_search=True
+    )
     conv1 = model.Conv(
-        "data",
-        "conv1",
-        3,
-        96,
-        11,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        stride=4
+        "data", "conv1", 3, 96, 11, ("XavierFill", {}), ("ConstantFill", {}), stride=4
     )
     relu1 = model.Relu(conv1, "conv1")
     pool1 = model.MaxPool(relu1, "pool1", kernel=2, stride=2)
     conv2 = model.Conv(
-        pool1, "conv2", 96, 256, 5, ('XavierFill', {}), ('ConstantFill', {})
+        pool1, "conv2", 96, 256, 5, ("XavierFill", {}), ("ConstantFill", {})
     )
     relu2 = model.Relu(conv2, "conv2")
     pool2 = model.MaxPool(relu2, "pool2", kernel=2, stride=2)
     conv3 = model.Conv(
-        pool2,
-        "conv3",
-        256,
-        512,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        pool2, "conv3", 256, 512, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu3 = model.Relu(conv3, "conv3")
     conv4 = model.Conv(
-        relu3,
-        "conv4",
-        512,
-        1024,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu3, "conv4", 512, 1024, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu4 = model.Relu(conv4, "conv4")
     conv5 = model.Conv(
-        relu4,
-        "conv5",
-        1024,
-        1024,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu4, "conv5", 1024, 1024, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu5 = model.Relu(conv5, "conv5")
     pool5 = model.MaxPool(relu5, "pool5", kernel=2, stride=2)
     fc6 = model.FC(
-        pool5, "fc6", 1024 * 6 * 6, 3072, ('XavierFill', {}),
-        ('ConstantFill', {})
+        pool5, "fc6", 1024 * 6 * 6, 3072, ("XavierFill", {}), ("ConstantFill", {})
     )
     relu6 = model.Relu(fc6, "fc6")
-    fc7 = model.FC(
-        relu6, "fc7", 3072, 4096, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fc7 = model.FC(relu6, "fc7", 3072, 4096, ("XavierFill", {}), ("ConstantFill", {}))
     relu7 = model.Relu(fc7, "fc7")
-    fc8 = model.FC(
-        relu7, "fc8", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fc8 = model.FC(relu7, "fc8", 4096, 1000, ("XavierFill", {}), ("ConstantFill", {}))
     pred = model.Softmax(fc8, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
     model.AveragedLoss(xent, "loss")
@@ -266,114 +206,54 @@ def OverFeat(order):
 
 
 def VGGA(order):
-    model = cnn.CNNModelHelper(order, name='vgg-a',
-                               use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="vgg-a", use_cudnn=True, cudnn_exhaustive_search=True
+    )
     conv1 = model.Conv(
-        "data",
-        "conv1",
-        3,
-        64,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        "data", "conv1", 3, 64, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu1 = model.Relu(conv1, "conv1")
     pool1 = model.MaxPool(relu1, "pool1", kernel=2, stride=2)
     conv2 = model.Conv(
-        pool1,
-        "conv2",
-        64,
-        128,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        pool1, "conv2", 64, 128, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu2 = model.Relu(conv2, "conv2")
     pool2 = model.MaxPool(relu2, "pool2", kernel=2, stride=2)
     conv3 = model.Conv(
-        pool2,
-        "conv3",
-        128,
-        256,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        pool2, "conv3", 128, 256, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu3 = model.Relu(conv3, "conv3")
     conv4 = model.Conv(
-        relu3,
-        "conv4",
-        256,
-        256,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu3, "conv4", 256, 256, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu4 = model.Relu(conv4, "conv4")
     pool4 = model.MaxPool(relu4, "pool4", kernel=2, stride=2)
     conv5 = model.Conv(
-        pool4,
-        "conv5",
-        256,
-        512,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        pool4, "conv5", 256, 512, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu5 = model.Relu(conv5, "conv5")
     conv6 = model.Conv(
-        relu5,
-        "conv6",
-        512,
-        512,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu5, "conv6", 512, 512, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu6 = model.Relu(conv6, "conv6")
     pool6 = model.MaxPool(relu6, "pool6", kernel=2, stride=2)
     conv7 = model.Conv(
-        pool6,
-        "conv7",
-        512,
-        512,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        pool6, "conv7", 512, 512, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu7 = model.Relu(conv7, "conv7")
     conv8 = model.Conv(
-        relu7,
-        "conv8",
-        512,
-        512,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        relu7, "conv8", 512, 512, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu8 = model.Relu(conv8, "conv8")
     pool8 = model.MaxPool(relu8, "pool8", kernel=2, stride=2)
 
     fcix = model.FC(
-        pool8, "fcix", 512 * 7 * 7, 4096, ('XavierFill', {}),
-        ('ConstantFill', {})
+        pool8, "fcix", 512 * 7 * 7, 4096, ("XavierFill", {}), ("ConstantFill", {})
     )
     reluix = model.Relu(fcix, "fcix")
-    fcx = model.FC(
-        reluix, "fcx", 4096, 4096, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fcx = model.FC(reluix, "fcx", 4096, 4096, ("XavierFill", {}), ("ConstantFill", {}))
     relux = model.Relu(fcx, "fcx")
-    fcxi = model.FC(
-        relux, "fcxi", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fcxi = model.FC(relux, "fcxi", 4096, 1000, ("XavierFill", {}), ("ConstantFill", {}))
     pred = model.Softmax(fcxi, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
     model.AveragedLoss(xent, "loss")
@@ -389,20 +269,35 @@ def net_DAG_Builder(model):
 
 
 def _InceptionModule(
-    model, input_blob, input_depth, output_name, conv1_depth, conv3_depths,
-    conv5_depths, pool_depth
+    model,
+    input_blob,
+    input_depth,
+    output_name,
+    conv1_depth,
+    conv3_depths,
+    conv5_depths,
+    pool_depth,
 ):
     # path 1: 1x1 conv
     conv1 = model.Conv(
-        input_blob, output_name + ":conv1", input_depth, conv1_depth, 1,
-        ('XavierFill', {}), ('ConstantFill', {})
+        input_blob,
+        output_name + ":conv1",
+        input_depth,
+        conv1_depth,
+        1,
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
     )
     conv1 = model.Relu(conv1, conv1)
     # path 2: 1x1 conv + 3x3 conv
     conv3_reduce = model.Conv(
-        input_blob, output_name +
-        ":conv3_reduce", input_depth, conv3_depths[0],
-        1, ('XavierFill', {}), ('ConstantFill', {})
+        input_blob,
+        output_name + ":conv3_reduce",
+        input_depth,
+        conv3_depths[0],
+        1,
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
     )
     conv3_reduce = model.Relu(conv3_reduce, conv3_reduce)
     conv3 = model.Conv(
@@ -411,16 +306,20 @@ def _InceptionModule(
         conv3_depths[0],
         conv3_depths[1],
         3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
+        pad=1,
     )
     conv3 = model.Relu(conv3, conv3)
     # path 3: 1x1 conv + 5x5 conv
     conv5_reduce = model.Conv(
-        input_blob, output_name +
-        ":conv5_reduce", input_depth, conv5_depths[0],
-        1, ('XavierFill', {}), ('ConstantFill', {})
+        input_blob,
+        output_name + ":conv5_reduce",
+        input_depth,
+        conv5_depths[0],
+        1,
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
     )
     conv5_reduce = model.Relu(conv5_reduce, conv5_reduce)
     conv5 = model.Conv(
@@ -429,22 +328,21 @@ def _InceptionModule(
         conv5_depths[0],
         conv5_depths[1],
         5,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=2
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
+        pad=2,
     )
     conv5 = model.Relu(conv5, conv5)
     # path 4: pool + 1x1 conv
-    pool = model.MaxPool(
-        input_blob,
-        output_name + ":pool",
-        kernel=3,
-        stride=1,
-        pad=1
-    )
+    pool = model.MaxPool(input_blob, output_name + ":pool", kernel=3, stride=1, pad=1)
     pool_proj = model.Conv(
-        pool, output_name + ":pool_proj", input_depth, pool_depth, 1,
-        ('XavierFill', {}), ('ConstantFill', {})
+        pool,
+        output_name + ":pool_proj",
+        input_depth,
+        pool_depth,
+        1,
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
     )
     pool_proj = model.Relu(pool_proj, pool_proj)
     output = model.Concat([conv1, conv3, conv5, pool_proj], output_name)
@@ -452,60 +350,40 @@ def _InceptionModule(
 
 
 def Inception(order):
-    model = cnn.CNNModelHelper(order, name="inception",
-                               use_cudnn=True, cudnn_exhaustive_search=True)
+    model = cnn.CNNModelHelper(
+        order, name="inception", use_cudnn=True, cudnn_exhaustive_search=True
+    )
     conv1 = model.Conv(
         "data",
         "conv1",
         3,
         64,
         7,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
+        ("XavierFill", {}),
+        ("ConstantFill", {}),
         stride=2,
-        pad=3
+        pad=3,
     )
     relu1 = model.Relu(conv1, "conv1")
     pool1 = model.MaxPool(relu1, "pool1", kernel=3, stride=2, pad=1)
     conv2a = model.Conv(
-        pool1, "conv2a", 64, 64, 1, ('XavierFill', {}), ('ConstantFill', {})
+        pool1, "conv2a", 64, 64, 1, ("XavierFill", {}), ("ConstantFill", {})
     )
     conv2a = model.Relu(conv2a, conv2a)
     conv2 = model.Conv(
-        conv2a,
-        "conv2",
-        64,
-        192,
-        3,
-        ('XavierFill', {}),
-        ('ConstantFill', {}),
-        pad=1
+        conv2a, "conv2", 64, 192, 3, ("XavierFill", {}), ("ConstantFill", {}), pad=1
     )
     relu2 = model.Relu(conv2, "conv2")
     pool2 = model.MaxPool(relu2, "pool2", kernel=3, stride=2, pad=1)
     # Inception modules
-    inc3 = _InceptionModule(
-        model, pool2, 192, "inc3", 64, [96, 128], [16, 32], 32
-    )
-    inc4 = _InceptionModule(
-        model, inc3, 256, "inc4", 128, [128, 192], [32, 96], 64
-    )
+    inc3 = _InceptionModule(model, pool2, 192, "inc3", 64, [96, 128], [16, 32], 32)
+    inc4 = _InceptionModule(model, inc3, 256, "inc4", 128, [128, 192], [32, 96], 64)
     pool5 = model.MaxPool(inc4, "pool5", kernel=3, stride=2, pad=1)
-    inc5 = _InceptionModule(
-        model, pool5, 480, "inc5", 192, [96, 208], [16, 48], 64
-    )
-    inc6 = _InceptionModule(
-        model, inc5, 512, "inc6", 160, [112, 224], [24, 64], 64
-    )
-    inc7 = _InceptionModule(
-        model, inc6, 512, "inc7", 128, [128, 256], [24, 64], 64
-    )
-    inc8 = _InceptionModule(
-        model, inc7, 512, "inc8", 112, [144, 288], [32, 64], 64
-    )
-    inc9 = _InceptionModule(
-        model, inc8, 528, "inc9", 256, [160, 320], [32, 128], 128
-    )
+    inc5 = _InceptionModule(model, pool5, 480, "inc5", 192, [96, 208], [16, 48], 64)
+    inc6 = _InceptionModule(model, inc5, 512, "inc6", 160, [112, 224], [24, 64], 64)
+    inc7 = _InceptionModule(model, inc6, 512, "inc7", 128, [128, 256], [24, 64], 64)
+    inc8 = _InceptionModule(model, inc7, 512, "inc8", 112, [144, 288], [32, 64], 64)
+    inc9 = _InceptionModule(model, inc8, 528, "inc9", 256, [160, 320], [32, 128], 128)
     pool9 = model.MaxPool(inc9, "pool9", kernel=3, stride=2, pad=1)
     inc10 = _InceptionModule(
         model, pool9, 832, "inc10", 256, [160, 320], [32, 128], 128
@@ -514,9 +392,7 @@ def Inception(order):
         model, inc10, 832, "inc11", 384, [192, 384], [48, 128], 128
     )
     pool11 = model.AveragePool(inc11, "pool11", kernel=7, stride=1)
-    fc = model.FC(
-        pool11, "fc", 1024, 1000, ('XavierFill', {}), ('ConstantFill', {})
-    )
+    fc = model.FC(pool11, "fc", 1024, 1000, ("XavierFill", {}), ("ConstantFill", {}))
     # It seems that Soumith's benchmark does not have softmax on top
     # for Inception. We will add it anyway so we can have a proper
     # backward pass.
@@ -529,21 +405,21 @@ def Inception(order):
 def AddInput(model, batch_size, db, db_type):
     """Adds the data input part."""
     data_uint8, label = model.TensorProtosDBInput(
-        [], ["data_uint8", "label"], batch_size=batch_size,
-        db=db, db_type=db_type
+        [], ["data_uint8", "label"], batch_size=batch_size, db=db, db_type=db_type
     )
     data = model.Cast(data_uint8, "data_nhwc", to=core.DataType.FLOAT)
     data = model.NHWC2NCHW(data, "data")
-    data = model.Scale(data, data, scale=float(1. / 256))
+    data = model.Scale(data, data, scale=float(1.0 / 256))
     data = model.StopGradient(data, data)
     return data, label
 
 
 def AddParameterUpdate(model):
-    """ Simple plain SGD update -- not tuned to actually train the models """
+    """Simple plain SGD update -- not tuned to actually train the models"""
     ITER = model.Iter("iter")
     LR = model.LearningRate(
-        ITER, "LR", base_lr=-1e-8, policy="step", stepsize=10000, gamma=0.999)
+        ITER, "LR", base_lr=-1e-8, policy="step", stepsize=10000, gamma=0.999
+    )
     ONE = model.param_init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
     for param in model.params:
         param_grad = model.param_to_grad[param]
@@ -565,33 +441,29 @@ def Benchmark(model_gen, arg):
         if arg.model == "MLP":
             input_shape = [arg.batch_size, input_size]
 
-    model.param_init_net.GaussianFill(
-        [],
-        "data",
-        shape=input_shape,
-        mean=0.0,
-        std=1.0
-    )
+    model.param_init_net.GaussianFill([], "data", shape=input_shape, mean=0.0, std=1.0)
     model.param_init_net.UniformIntFill(
         [],
         "label",
-        shape=[arg.batch_size, ],
+        shape=[
+            arg.batch_size,
+        ],
         min=0,
-        max=999
+        max=999,
     )
 
     if arg.forward_only:
-        print('{}: running forward only.'.format(arg.model))
+        print("{}: running forward only.".format(arg.model))
     else:
-        print('{}: running forward-backward.'.format(arg.model))
+        print("{}: running forward-backward.".format(arg.model))
         model.AddGradientOperators(["loss"])
         AddParameterUpdate(model)
 
-        if arg.order == 'NHWC':
+        if arg.order == "NHWC":
             print(
-                '==WARNING==\n'
-                'NHWC order with CuDNN may not be supported yet, so I might\n'
-                'exit suddenly.'
+                "==WARNING==\n"
+                "NHWC order with CuDNN may not be supported yet, so I might\n"
+                "exit suddenly."
             )
 
     if not arg.cpu:
@@ -616,84 +488,70 @@ def Benchmark(model_gen, arg):
     plan.AddStep(core.ExecutionStep("run", model.net, arg.iterations))
     start = time.time()
     workspace.RunPlan(plan)
-    print('Spent: {}'.format((time.time() - start) / arg.iterations))
+    print("Spent: {}".format((time.time() - start) / arg.iterations))
     if arg.layer_wise_benchmark:
-        print('Layer-wise benchmark.')
+        print("Layer-wise benchmark.")
         workspace.BenchmarkNet(model.net.Proto().name, 1, arg.iterations, True)
 
 
 def GetArgumentParser():
     parser = argparse.ArgumentParser(description="Caffe2 benchmark.")
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=128,
-        help="The batch size."
-    )
+    parser.add_argument("--batch_size", type=int, default=128, help="The batch size.")
     parser.add_argument("--model", type=str, help="The model to benchmark.")
     parser.add_argument(
-        "--order",
-        type=str,
-        default="NCHW",
-        help="The order to evaluate."
+        "--order", type=str, default="NCHW", help="The order to evaluate."
     )
     parser.add_argument(
-        "--cudnn_ws",
-        type=int,
-        default=-1,
-        help="The cudnn workspace size."
+        "--cudnn_ws", type=int, default=-1, help="The cudnn workspace size."
     )
     parser.add_argument(
         "--iterations",
         type=int,
         default=10,
-        help="Number of iterations to run the network."
+        help="Number of iterations to run the network.",
     )
     parser.add_argument(
         "--warmup_iterations",
         type=int,
         default=10,
-        help="Number of warm-up iterations before benchmarking."
+        help="Number of warm-up iterations before benchmarking.",
     )
     parser.add_argument(
-        "--forward_only",
-        action='store_true',
-        help="If set, only run the forward pass."
+        "--forward_only", action="store_true", help="If set, only run the forward pass."
     )
     parser.add_argument(
         "--layer_wise_benchmark",
-        action='store_true',
-        help="If True, run the layer-wise benchmark as well."
+        action="store_true",
+        help="If True, run the layer-wise benchmark as well.",
     )
     parser.add_argument(
-        "--cpu",
-        action='store_true',
-        help="If True, run testing on CPU instead of GPU."
+        "--cpu", action="store_true", help="If True, run testing on CPU instead of GPU."
     )
     parser.add_argument(
         "--dump_model",
-        action='store_true',
-        help="If True, dump the model prototxts to disk."
+        action="store_true",
+        help="If True, dump the model prototxts to disk.",
     )
     parser.add_argument("--net_type", type=str, default="dag")
     parser.add_argument("--num_workers", type=int, default=2)
     return parser
 
 
-if __name__ == '__main__':
+def main() -> None:
     args = GetArgumentParser().parse_args()
-    if (
-        not args.batch_size or not args.model or not args.order or
-        not args.cudnn_ws
-    ):
+    if not args.batch_size or not args.model or not args.order or not args.cudnn_ws:
         GetArgumentParser().print_help()
 
-    workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
+    workspace.GlobalInit(["caffe2", "--caffe2_log_level=0"])
     model_map = {
-        'AlexNet': AlexNet,
-        'OverFeat': OverFeat,
-        'VGGA': VGGA,
-        'Inception': Inception,
-        'MLP': MLP,
+        "AlexNet": AlexNet,
+        "OverFeat": OverFeat,
+        "VGGA": VGGA,
+        "Inception": Inception,
+        "MLP": MLP,
     }
     Benchmark(model_map[args.model], args)
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover
