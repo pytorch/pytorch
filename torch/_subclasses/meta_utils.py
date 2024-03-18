@@ -374,36 +374,6 @@ class MetaConverter:
 
             return t_symbolic_context
 
-        def _nasty_nested_int_symbolicizing_hack():
-            # A nasty hack to deal with any NJT intermediates created during view replay.
-            # For these, we need to ensure that the corresponding nested ints are made
-            # symbolic.
-            #
-            # Example:
-            #     Consider a NJT1 -> Dense -> NJT2 -> Dense view. During view replay, the
-            #     Dense -> NJT2 part will construct an intermediate, symbolically-sized NJT
-            #     that is immediately deconstructed to return the final dense view. To
-            #     construct this intermediate properly, we need the associated nested int
-            #     to be symbolic. Here we accomplish that by patching the behavior of the
-            #     nested int constructor to wrap the result in an ephemeral SymInt.
-            from unittest.mock import patch
-
-            from torch._dynamo.source import EphemeralSource
-
-            old_get_nested_int = torch._C._get_nested_int
-
-            def symbolic_get_nested_int(_tensor_id_counter, coeff):
-                nested_int = old_get_nested_int(_tensor_id_counter, coeff)
-                sym_source = EphemeralSource("symbolic _get_nested_int()")
-                symbol = shape_env.create_symbol(nested_int, sym_source)
-                return shape_env.create_symintnode(
-                    symbol, hint=nested_int, source=sym_source
-                )
-
-            return patch(
-                "torch._C._get_nested_int", side_effect=symbolic_get_nested_int
-            )
-
         # Returns a fake-ified version of an input view tensor t, given an already fake-ified
         # base. At a high level, we want two things:
         #   1. fake_t should have the same view relationship to the given fake base as the
@@ -514,9 +484,7 @@ class MetaConverter:
 
             # Replay the view, swapping out any non-symbolic SymInts or real tensors
             # for symbolic SymInts or fake tensors.
-            # TODO: Remove this nasty hack when the nested int is stashed onto the offsets!
-            with _nasty_nested_int_symbolicizing_hack():
-                fake_t = t._view_func_unsafe(base, symint_visitor_fn, tensor_visitor_fn)
+            fake_t = t._view_func_unsafe(base, symint_visitor_fn, tensor_visitor_fn)
 
             # Ensure the output has symbolic shapes according to the outer symbolic context.
             # These checks should simplify out any symbols created for closed-over view func
