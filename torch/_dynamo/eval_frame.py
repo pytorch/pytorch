@@ -124,6 +124,7 @@ class OptimizedModule(torch.nn.Module):
         "get_compiler_config",
         "forward",
         "_forward",
+        "__dict__",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
