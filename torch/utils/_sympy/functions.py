@@ -1,7 +1,7 @@
 import sympy
 from sympy import S, Q
 from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
-from typing import Tuple, Set
+from typing import Tuple
 
 __all__ = [
     "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
@@ -328,34 +328,42 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
             )
         elif all(isinstance(a, sympy.Expr) for a in strides):
             import functools
-            def _assume_size_like(symbols: Set[sympy.Symbol]):
+            def assume_size_like(symbols):
                 if len(symbols) == 0:
                     return True
                 from operator import and_
                 assumptions = (Q.nonnegative(sym) & Q.integer(sym) for sym in symbols)
                 return functools.reduce(and_, assumptions)
 
-            def _my_sort(left: Tuple[sympy.Expr], right: Tuple[sympy.Expr]):
+            def optimistic_sort(left: Tuple[sympy.Expr, ...], right: Tuple[sympy.Expr, ...]):
                 left_size, right_size = left[0], right[0]
 
-                if sympy.ask(left_size < 2, _assume_size_like(left_size.free_symbols)):
+                if sympy.ask(left_size < 2, assume_size_like(left_size.free_symbols)):
                     return -1
-                if sympy.ask(right_size < 2, _assume_size_like(right_size.free_symbols)):
+                if sympy.ask(right_size < 2, assume_size_like(right_size.free_symbols)):
                     return 1
-                return _best_effort_sort(left[1], right[1])
 
-            def _best_effort_sort(left: sympy.Expr, right: sympy.Expr):
-                # Try to solve it, if we can't then tough luck.
-                res = sympy.ask(left < right, _assume_size_like(left.free_symbols | right.free_symbols))
+                left_stride, right_stride = left[1], right[1]
+                res = sympy.ask(left_stride < right_stride, assume_size_like(left_stride.free_symbols | right_stride.free_symbols))
+                print(f"strides: {left_stride} < {right_stride} = {res}")
+
+
+                bool2val = {True: 1, None: 0, False: -1}
                 if res is None:
-                    raise ValueError(f"Unable to resolve: {left < right}")
-                return int(res)
+                    _res = sympy.ask(left_stride >= right_stride, assume_size_like(left_stride.free_symbols | right_stride.free_symbols))
+                    print(f"--strides: {left_stride} <= {right_stride} = {_res}")
+                    return bool2val[_res]
+
+                return bool2val[res]
 
             try:
+                print([(sizes, strides) for sizes, strides in zip(sizes, strides)])
                 lengths_and_strides = sorted(
-                    zip(sizes, strides), key=functools.cmp_to_key(_my_sort)
+                    zip(sizes, strides), key=functools.cmp_to_key(optimistic_sort)
                 )
+                print(lengths_and_strides)
             except (ValueError, TypeError):
+                # Sympy could not
                 return None
 
             # Copy from Ed's first shot
@@ -366,15 +374,19 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
                     continue
 
                 if expected_stride is None:
+                    print('None')
                     return None
 
                 if stride != expected_stride:
+                    print(f'{stride} != {expected_stride}')
                     return 0
 
                 if isinstance(length, sympy.Expr):
+                    print(length, expected_stride)
                     expected_stride *= length
+                    print(length, expected_stride)
                 else:
-                    expected_stride = None
+                    expected_stride = -1
             return 1
 
         return None

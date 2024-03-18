@@ -152,6 +152,19 @@ class TestUnbackedSymints(TorchTestCase):
         expected = fn(example_input)
         torch.testing.assert_close(actual, expected)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_colin(self, device):
+        def fn(x):
+            sizes = x.tolist()
+            s = torch.ones(*sizes)
+            t = s.permute([0, 2, 1])
+            return t
+
+        example_input = torch.tensor([1, 2, 3], device=device)
+        actual = torch.compile(fn, fullgraph=True)(example_input)
+        expected = fn(example_input)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(
     TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
