@@ -136,6 +136,19 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_torch_profiler_return_type(self):
+        def fn(x):
+            with torch.profiler.profile() as prof:
+                y = x**2
+            return y, prof
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref, _ = fn(x)
+        opt_fn = torch._dynamo.optimize()(fn)
+        res, res_prof = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(isinstance(res_prof, torch.profiler.profile))
+
     def test_autograd_profiler(self):
         # wrap torch.autograd.profiler.* as NullContextVariable and do nothing
         def fn(x):
