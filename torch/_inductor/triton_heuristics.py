@@ -566,7 +566,7 @@ class CachingAutotuner(KernelInterface):
             CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
         else:
             # There is some divergence between CUDA and ROCm here.
-            # On ROCm's triton we only have the the path to the binary, not the binary itself.
+            # On ROCm's triton we only have the path to the binary, not the binary itself.
             # For ROCm we will copy the binary to the new location instead of writing to file
             import pathlib
 
@@ -585,7 +585,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if (

@@ -46,7 +46,7 @@ def check_for_mutation(
                 break
 
         if stack_trace:
-            msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
+            msg = f"skipping cudagraphs due to mutation on input. Found from : \n {stack_trace}"
             return msg
 
         return default_msg

@@ -1259,7 +1259,7 @@ class IndirectAssertLine(DeferredLineBase):
             return None
         elif assert_min and assert_max:
             # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
+            # It'd be less error-prone to use and/or/not, which is supported by triton
             cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
             cond_print = f"0 <= {self.var} < {size_str}"
         elif assert_min:

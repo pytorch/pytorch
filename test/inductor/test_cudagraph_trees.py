@@ -244,7 +244,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
 
             FileCheck().check(
-                "skipping cudagraphs due to mutaton on input. Found from"
+                "skipping cudagraphs due to mutation on input. Found from"
             ).check("torch.logical_xor").run(captured_output[0])
 
         @requires_multigpu()
@@ -281,7 +281,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 foo(inp())
 
-            FileCheck().check("skipping cudagraphs due to mutaton on input.").check(
+            FileCheck().check("skipping cudagraphs due to mutation on input.").check(
                 ".add_(2)"
             ).run(captured_output[0])
 

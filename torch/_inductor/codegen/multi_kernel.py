@@ -53,7 +53,7 @@ def get_all_call_args(call_args_list):
     It will fail if any kernel has the same argument passed in multiple times.
     Check test_pass_same_arg_multi_times in test_multi_kernel.py
 
-    Instead, we pick the longest call args and assert that otehr call args are
+    Instead, we pick the longest call args and assert that other call args are
     a subset of it.
     """
     return _get_all_args(call_args_list)
@@ -127,7 +127,7 @@ class MultiKernelState:
         )
 
         # add subkernel src code hashes to the multi-kernel source code so changing a
-        # subkernel implementation will result in a differnt py file for
+        # subkernel implementation will result in a different py file for
         # multi-kernel. This makes cache implementation straightforward since
         # we can decide cache file name based on multi-kernel py file name
         # directly.
