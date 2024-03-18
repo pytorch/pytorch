@@ -1358,6 +1358,9 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
+        if isinstance(expr, sympy.Ne):
+            # we're not going to do anything useful with these, so drop them
+            return False
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
@@ -1367,9 +1370,11 @@ class DimConstraints:
             # univariate: can solve these immediately
             s = next(iter(free_symbols))
             # eliminate // and % (see documentation of `rewrite_with_congruences` above)
+            old_n_congruences = len(self._congruences[s])
             expr = self.rewrite_with_congruences(s, expr)
+            new_n_congruences = len(self._congruences[s])
             if expr == sympy.true:
-                return True
+                return old_n_congruences == new_n_congruences
             reduced = expr.subs(self._var_to_val)
             if reduced == sympy.false:
                 self._inconsistencies.append(
@@ -1502,17 +1507,25 @@ class DimConstraints:
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
                 if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
-                    if disable_congruences:
+                    if self._is_supported_congruence(congruence):
+                        base, divisor = congruence.args
+                        tmp_name = f"_{self._dcp.source_name_to_debug_name[self._dcp.symbol_to_source[s][0].name()]}"
+                        tmp = sympy.Symbol(tmp_name, integer=True)
+                        from torch._dynamo.source import ConstantSource
+                        self._dcp.symbol_to_source[tmp] = [ConstantSource(tmp_name)]
+                        r = try_solve(sympy.Eq(base, divisor * tmp), s)
+                        self._dynamic_results.add(self._dcp.doprint(sympy.Eq(s, r[1])))
+                    elif disable_congruences:
                         self._force_specialization(s)
                         self._univariate_inequalities.pop(s, None)
-                    else:
-                        self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
 
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
             try:
                 solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
                 # because this is univariate, the solution is a dynamic (range) constraint
+                if isinstance(solution, sympy.Or):
+                    solution = next(iter(arg for arg in solution.args if arg.subs(self._var_to_val)))
                 if isinstance(solution, sympy.And):
                     for arg in solution.args:
                         self._dynamic_results.add(self._dcp.doprint(arg))
@@ -1550,6 +1563,24 @@ class DimConstraints:
                 (isinstance(lhs, sympy.Integer) and cls._is_supported_equivalence(rhs))
             )
         return isinstance(expr, sympy.Symbol)
+
+    @classmethod
+    def _is_supported_congruence(cls, congruence):
+        base, divisor = congruence.args
+        # Congruences that can be currently expressed with supported Dim ops are
+        # of the form (x + a) % b == 0, where x is a Dim and a and b are constants.
+        # This allows us to derive x as b*y - a for some Dim y.
+        # (See also documentation of dynamic_shapes._DerivedDim.)
+        if isinstance(base, sympy.Add):
+            lhs, rhs = base.args
+            cond = (
+                (isinstance(lhs, sympy.Symbol) and isinstance(rhs, sympy.Integer)) or
+                (isinstance(lhs, sympy.Integer) and isinstance(rhs, sympy.Symbol))
+            )
+        else:
+            cond = isinstance(base, sympy.Symbol)
+        cond = cond and isinstance(divisor, sympy.Integer)
+        return cond
 
     def forced_specializations(self):
         """Returns a dictionary of the names of symbols to their specialized value
@@ -1667,14 +1698,22 @@ class DimConstraints:
             if match is not None:
                 debug_names.update(match.expand(r'\1').split(', '))
 
-            for k, c in results.items():
-                if k not in debug_names:
-                    continue
+            for k, c in sorted(results.items()):
+                # if k not in debug_names:
+                #     continue
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
                         others.append(f"{k} = None  # {other}")
-                    else:
+                    elif self._is_supported_equivalence(other):
+                        s = next(iter(other.free_symbols))
+                        if s not in results:
+                            modulus, remainder = sympy.polys.polytools.div(other, s)
+                            c_min = c.get("min", 2)
+                            min_ = math.ceil((c_min - remainder) / modulus)
+                            c_max = c.get("max", sys.maxsize - 1)
+                            max_ = math.floor((c_max - remainder) / modulus)
+                            dims.append(f"{s} = Dim('{s}', min={min_}, max={max_})  # {c_min} <= {other} <= {c_max}")
                         others.append(f"{k} = {other}")
                 else:
                     min_ = c.get("min", None)
@@ -1888,7 +1927,7 @@ class ShapeEnv:
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
-        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
+        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
         # Set that holds "size-like" symbols.  When we perform
@@ -2711,6 +2750,11 @@ class ShapeEnv:
             symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
         return r
 
+    def add_var_to_val(self, expr: sympy.Symbol, val: int):
+        """ Adds a new symbol to the symbolic environment. """
+        assert expr not in self.var_to_val, f"{expr} already exists"
+        self.var_to_val[expr] = sympy.Integer(val)
+
     def _debug_name(self, source):
         src_name = source.name()
         return self.source_name_to_debug_name.get(src_name, src_name)
@@ -2891,8 +2935,11 @@ class ShapeEnv:
             def get_expression(tensor_dim_src):
                 fake = placeholders[source_index[tensor_dim_src.base.name()]]
                 symint = fake.shape[tensor_dim_src.idx]
-                assert isinstance(symint, torch.SymInt)
-                return symint.node.expr
+                if isinstance(symint, torch.SymInt):
+                    return symint.node.expr
+                else:
+                    assert type(symint) is int, f"Expected int, got {type(symint)}"
+                    return symint
 
             for src1, src2 in equalities_inputs.source_pairs:
                 expr1, expr2 = get_expression(src1), get_expression(src2)
@@ -3403,13 +3450,6 @@ class ShapeEnv:
 
         return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
-    def get_shape_groups(self):
-        """Returns lists of symbols grouped by the expression they are equivalent to"""
-        shape_groups = collections.defaultdict(list)
-        for k, v in self.replacements.items():
-            shape_groups[v].append(k)
-        return shape_groups
-
     def bound_sympy(self, expr: sympy.Expr, size_oblivious: bool = False) -> ValueRanges:
         """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
         var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
@@ -3451,20 +3491,31 @@ class ShapeEnv:
             # Unbacked symints only
             if s in self.var_to_val:
                 continue
+
             subst = {}
-            for ra in self.deferred_runtime_asserts.get(s, ()):
+
+            def add_expr(expr):
+                # Expr and negation
+                subst[canonicalize_bool_expr(expr)] = sympy.true
+                subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
+                if isinstance(expr, sympy.Rel):
+                    # multiplying by -1 changes the direction of the inequality
+                    dual = type(expr)(-expr.rhs, -expr.lhs)
+                    subst[canonicalize_bool_expr(dual)] = sympy.true
+                    subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+
+            for e in itertools.chain(self.guards, self.deferred_runtime_asserts.get(s, ())):
+                e = e.expr
                 if compute_hint:
-                    e = canonicalize_bool_expr(ra.expr.xreplace(self.var_to_val))
-                else:
-                    e = ra.expr
-                # e is already canonical
-                subst[e] = sympy.true
-                subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
+                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+                add_expr(e)
+                # Other relational expressions this expression implies
                 if isinstance(e, sympy.Eq):
-                    subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
-                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.true
-                    subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
-                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
+                    add_expr(sympy.Le(e.lhs, e.rhs))
+                    add_expr(sympy.Ge(e.lhs, e.rhs))
+                elif isinstance(e, sympy.Lt):
+                    add_expr(sympy.Le(e.lhs, e.rhs))
+                    add_expr(sympy.Ne(e.lhs, e.rhs))
 
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
