@@ -2691,6 +2691,42 @@ exit(2)
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr, pg.grad.data_ptr)
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_make_graphed_callables_autocast_bwd(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b):
+                scale = 10
+                return torch.bmm(a * scale, b * scale)
+
+        baseline_in = (
+            torch.randn(2, 576, 1536, device="cuda").requires_grad_(),
+            torch.randn(2, 1536, 1536, device="cuda").requires_grad_(),
+        )
+        candidate_in = tuple(t.detach().clone().requires_grad_() for t in baseline_in)
+
+        half_dtype = torch.bfloat16
+        baseline = Repro()
+        candidate = Repro()
+
+        with torch.autocast(device_type="cuda", enabled=True, dtype=half_dtype, cache_enabled=False):
+            # Test that make_graphed_callables doesn't enable autocast in the backward pass
+            torch.cuda.make_graphed_callables(candidate, candidate_in, disable_autocast_bwd=True)
+        assert all(cc.grad is None for cc in candidate_in)
+
+        with torch.autocast(device_type="cuda", enabled=True, dtype=half_dtype, cache_enabled=False):
+            bloss = baseline(*baseline_in).mean()
+        bloss.backward()
+
+        with torch.autocast(device_type="cuda", enabled=True, dtype=half_dtype, cache_enabled=False):
+            closs = candidate(*candidate_in).mean()
+        closs.backward()
+
+        for i in range(len(baseline_in)):
+            torch.testing.assert_close(baseline_in[i].grad, candidate_in[i].grad)
+
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
             params = [

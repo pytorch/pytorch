@@ -1,4 +1,5 @@
 import gc
+from contextlib import nullcontext
 from typing import Optional
 
 import torch
@@ -187,7 +188,12 @@ class graph:
 
 
 def make_graphed_callables(
-    callables, sample_args, num_warmup_iters=3, allow_unused_input=False, pool=None
+    callables,
+    sample_args,
+    num_warmup_iters=3,
+    allow_unused_input=False,
+    pool=None,
+    disable_autocast_bwd=None,
 ):
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -221,6 +227,9 @@ def make_graphed_callables(
         pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+        disable_autocast_bwd (bool): If True and autocast is enabled, disable autocast when recording
+          the backward graph. Generally, autocast only needs to be enabled for the forward pass
+
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
@@ -318,16 +327,28 @@ def make_graphed_callables(
         ):
             for _ in range(num_warmup_iters):
                 outputs = _pytree.tree_leaves(func(*args))
-                grad_inputs = torch.autograd.grad(
-                    outputs=tuple(o for o in outputs if o.requires_grad),
-                    inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                    grad_outputs=tuple(
-                        torch.empty_like(o) for o in outputs if o.requires_grad
-                    ),
-                    only_inputs=True,
-                    allow_unused=allow_unused_input,
+                autocast_ctx = (
+                    torch.autocast(
+                        device_type=outputs[0].device.type,
+                        enabled=False,
+                        cache_enabled=False,
+                    )
+                    if disable_autocast_bwd and torch.is_autocast_enabled()
+                    else nullcontext()
                 )
-            del outputs, grad_inputs  # type: ignore[possibly-undefined]
+                with autocast_ctx:
+                    grad_inputs = torch.autograd.grad(
+                        outputs=tuple(o for o in outputs if o.requires_grad),
+                        inputs=tuple(
+                            i for i in static_input_surface if i.requires_grad
+                        ),
+                        grad_outputs=tuple(
+                            torch.empty_like(o) for o in outputs if o.requires_grad
+                        ),
+                        only_inputs=True,
+                        allow_unused=allow_unused_input,
+                    )
+            del outputs, grad_inputs
     torch.cuda.synchronize()
 
     # All captures here share a mempool. To avoid replays corrupting each other's memory,
@@ -348,19 +369,26 @@ def make_graphed_callables(
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
-    for static_input_surface, static_outputs, bwd_graph, module_params in zip(
+    for static_input_surface, static_outputs, bwd_graph in zip(
         reversed(per_callable_static_input_surfaces),
         reversed(per_callable_static_outputs),
         reversed(bwd_graphs),
-        reversed(per_callable_module_params),
     ):
         # For now, assumes all static_outputs require grad
         # assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
         static_grad_outputs = tuple(
             torch.empty_like(o) if o.requires_grad else None for o in static_outputs
         )
-
-        with torch.cuda.graph(bwd_graph, pool=mempool):
+        autocast_ctx = (
+            torch.autocast(
+                device_type=static_outputs[0].device.type,
+                enabled=False,
+                cache_enabled=False,
+            )
+            if disable_autocast_bwd and torch.is_autocast_enabled()
+            else nullcontext()
+        )
+        with autocast_ctx, torch.cuda.graph(bwd_graph, pool=mempool):
             grad_inputs = torch.autograd.grad(
                 outputs=tuple(o for o in static_outputs if o.requires_grad),
                 inputs=tuple(i for i in static_input_surface if i.requires_grad),
