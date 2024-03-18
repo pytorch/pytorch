@@ -1608,6 +1608,15 @@ class TensorBase(metaclass=_TensorMeta):
     nbytes: _int
     itemsize: _int
     _has_symbolic_sizes_strides: _bool
+
+    def _view_func_unsafe(
+        self,
+        new_base: Tensor,
+        symint_visitor_fn: Optional[Callable[[_int], _int]] = None,
+        tensor_visitor_fn: Optional[Callable[[Tensor], Tensor]] = None
+    ):
+        ...
+
     ${tensor_method_hints}
 
 _TensorBase = TensorBase
