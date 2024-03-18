@@ -212,10 +212,10 @@ class Sequential(Module):
     # may change dynamically (as is tested in
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
-    def forward(self, input):
+    def forward(self, __input):
         for module in self:
-            input = module(input)
-        return input
+            __input = module(__input)
+        return __input
 
     def append(self, module: Module) -> 'Sequential':
         r"""Append a given module to the end.
