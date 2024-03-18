@@ -4,9 +4,9 @@
 from unittest.mock import patch
 
 import torch
-
-import torch._dynamo.test_case
 import torch._dynamo.testing
+
+import torch._inductor.test_case
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
@@ -34,7 +34,7 @@ STRING_CONSTANT_C = "CONSTANT_C"
 BOOL_CONSTANT_C = True
 
 
-class KernelTests(torch._dynamo.test_case.TestCase):
+class KernelTests(torch._inductor.test_case.TestCase):
     @requires_cuda
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
@@ -1162,7 +1162,7 @@ if HAS_CUDA:
         return x + y, out_ptr
 
 
-class MutationTests(torch._dynamo.test_case.TestCase):
+class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
     @make_mutation_test
@@ -1842,6 +1842,6 @@ globals()[no_opt_test_class.__name__] = no_opt_test_class
 no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     run_tests()
