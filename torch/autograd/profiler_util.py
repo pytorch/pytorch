@@ -285,6 +285,12 @@ class EventList(list):
         ]
 
     def export_stacks(self, path: str, metric: str):
+        # Support passing more meaningful names for privateuse1 users
+        metric = (
+            metric.replace(self._use_device, "privateuse1")
+            if self._use_device
+            else metric
+        )
         if metric not in self.supported_export_stacks_metrics():
             raise ValueError(
                 "metric should be one of: "
@@ -963,6 +969,8 @@ def _build_table(
     )
 
     if sort_by is not None:
+        # Support sorting by more meaningful names for privateuse1 users
+        sort_by = sort_by.replace(use_device, "privateuse1") if use_device else sort_by
         events = EventList(
             sorted(events, key=lambda evt: getattr(evt, sort_by), reverse=True),
             use_cuda=has_cuda_time,
