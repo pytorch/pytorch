@@ -75,37 +75,28 @@ inline std::vector<int64_t> ToVectorint64_t(const ArrayRef<int>& src) {
  * Return product of all dimensions starting from k
  */
 inline int64_t size_from_dim_(int k, IntArrayRef dims) {
-  int64_t r = 1;
-  for (const auto i : c10::irange(k, dims.size())) {
-    r *= dims[i];
-  }
-  return r;
+  return std::reduce(
+      std::next(dims.begin(), k), dims.end(), 1LL, std::multiplies<>{});
 }
 
 // Product of all dims up to k (not including dims[k])
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
   TORCH_CHECK(k >= 0 && static_cast<size_t>(k) <= dims.size());
-  int64_t r = 1;
-  for (const auto i : c10::irange(k)) {
-    r *= dims[i];
-  }
-  return r;
+  return std::reduce(
+      dims.begin(), std::next(dims.begin(), k), 1LL, std::multiplies<>{});
 }
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
 inline int64_t size_between_dim_(int k, int l, IntArrayRef dims) {
   TORCH_CHECK((unsigned)l < dims.size() && (unsigned)k < dims.size());
-  int64_t r = 1;
-  if (k < l) {
-    for (int i = k + 1; i < l; ++i) {
-      r *= dims[i];
-    }
-  } else {
-    for (int i = l + 1; i < k; ++i) {
-      r *= dims[i];
-    }
+  if (l < k) {
+    std::swap(l, k);
   }
-  return r;
+  return std::reduce(
+      std::next(dims.begin(), k + 1),
+      std::next(dims.begin(), l),
+      1LL,
+      std::multiplies<>{});
 }
 
 // Wrap around axis_index if it is negative, s.t., -1 is the last dim
