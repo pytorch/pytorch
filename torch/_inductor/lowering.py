@@ -2205,13 +2205,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        if not meta_val.is_cuda:
-            return arg
 
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if not meta_val.is_cuda:
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
