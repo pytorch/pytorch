@@ -1320,6 +1320,10 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        reason="Dynamic shape check is not expected for exported program in this test suite.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
         config = transformers.MptConfig(
             vocab_size=8096, d_model=64, n_heads=2, n_layers=3
