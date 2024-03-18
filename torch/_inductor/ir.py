@@ -1813,6 +1813,13 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
             freeze=freeze,
         )
         return buffer, x.layout
+    if isinstance(x, SliceView):
+        return as_storage_and_layout(
+            x.data,
+            freeze=freeze,
+            want_contiguous=want_contiguous,
+            stride_order=stride_order,
+        )
     raise NotImplementedError
 
 
