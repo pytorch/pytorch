@@ -708,13 +708,13 @@ def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
 @out_wrapper()
 def slice_backward(
     grad_output: Tensor,
-    input_sizes: List[int],
+    input: Tensor,
     dim: int,
     start: int,
     end: int,
     step: int,
 ):
-    grad_input = grad_output.new_zeros(input_sizes)
+    grad_input = grad_output.new_zeros(input.shape)
     return torch.slice_scatter(grad_input, grad_output, dim, start, end, step)
 
 

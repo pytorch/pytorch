@@ -383,7 +383,7 @@
   self, other: matmul_backward(grad, self, other, grad_input_mask)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
-  tensors: cat_tensors_backward(grad, to_args_sizes_symint(tensors), to_args_scalartypes(tensors), dim)
+  tensors: cat_backward(grad, tensors, dim)
   result: cat_jvp(tensors, dim)
 
 - name: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
@@ -819,7 +819,7 @@
   other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
-  self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
+  self: index_backward_native(grad, 0 * self, indices)
   result: auto_linear
 
 - name: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
@@ -1102,7 +1102,7 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+  self: grad.expand_as(self) / self.sym_numel()
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
@@ -1416,7 +1416,7 @@
 # - name: reshape(Tensor self, IntArrayRef shape)
 
 - name: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
-  self: grad.reshape_symint(self.sym_sizes())
+  self: grad.reshape_as(self)
   result: auto_linear
 
 - name: round(Tensor self) -> Tensor
@@ -1451,12 +1451,12 @@
 - name: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   dispatch:
     Default:
-      self: select_backward_symint(grad, self.sym_sizes(), dim, index)
+      self: select_backward_symint(grad, self, dim, index)
       result: auto_linear
     AutogradNestedTensor:
       self: _nested_select_backward_symint(grad, self, dim, index)
 
-- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
+- name: select_backward(Tensor grad_output, Tensor input, int dim, SymInt index) -> Tensor
   grad_output: grad.select_symint(dim, index)
   result: auto_linear
 
@@ -1492,10 +1492,10 @@
   result: auto_element_wise
 
 - name: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
-  self: slice_backward_wrapper(grad, self.sym_sizes(), dim, start, end, step)
+  self: slice_backward_wrapper(grad, self, dim, start, end, step)
   result: auto_linear
 
-- name: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
+- name: slice_backward(Tensor grad_output, Tensor input, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
   grad_output: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
@@ -1621,13 +1621,13 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes())
+  self: grad.expand_as(self)
   result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
+      self: sum_backward(grad, self, dim, keepdim)
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this function once semantics for nested tensor expand have been settled on
@@ -1814,7 +1814,7 @@
   self: not_implemented("_unique2")
 
 - name: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
-  self: grad.reshape_symint(self.sym_sizes())
+  self: grad.reshape_as(self)
   result: auto_linear
 
 - name: lift(Tensor self) -> Tensor
@@ -1847,7 +1847,7 @@
 - name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
   dispatch:
     Default:
-      self: grad.reshape_symint(self.sym_sizes())
+      self: grad.reshape_as(self)
       result: auto_linear
     AutogradNestedTensor:
       self: grad.reshape_as(self)

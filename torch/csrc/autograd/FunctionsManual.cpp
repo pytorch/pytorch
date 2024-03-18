@@ -726,6 +726,36 @@ Tensor sum_backward(
   }
 }
 
+
+Tensor sum_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    OptionalIntArrayRef opt_dims,
+    bool keepdim) {
+  if (!keepdim) {
+    if (opt_dims.has_value() && !opt_dims.value().empty()) {
+      return unsqueeze_multiple(grad, opt_dims, self.sym_sizes().size())
+          .expand_as(self);
+    }
+  }
+  return grad.expand_as(self);
+}
+
+Tensor sum_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    c10::IntArrayRef dims,
+    bool keepdim) {
+  if (!keepdim && !dims.empty()) {
+    // we are only using `keepdim=true` path for SymInts for now
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Only the keepdim=true path is implemented to support symints in autograd");
+  } else {
+    return grad.expand_as(self);
+  }
+}
+
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -3325,7 +3355,7 @@ Tensor elu_double_backward(
 
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
-    const c10::SymIntArrayRef& input_sizes,
+    const at::Tensor& input,
     int64_t dim,
     c10::optional<c10::SymInt> start,
     c10::optional<c10::SymInt> end,
@@ -3335,7 +3365,7 @@ Tensor slice_backward_wrapper(
 
   return slice_backward_symint(
       grad,
-      input_sizes,
+      input,
       dim,
       std::move(start_val),
       std::move(end_val),

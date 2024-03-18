@@ -184,6 +184,16 @@ at::Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     c10::IntArrayRef dims,
     bool keepdim);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    const at::Tensor& self,
+    at::OptionalIntArrayRef opt_dims,
+    bool keepdim);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    const at::Tensor& self,
+    c10::IntArrayRef dims,
+    bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -612,7 +622,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
     const bool full_matrices);
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
-    const c10::SymIntArrayRef& input_sizes,
+    const at::Tensor& input,
     int64_t dim,
     c10::optional<c10::SymInt> start,
     c10::optional<c10::SymInt> end,

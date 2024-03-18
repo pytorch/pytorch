@@ -369,10 +369,10 @@ static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int
   return maybe_wrap_dim(dim, input_sizes.size()) + num_batch_dims;
 }
 
-Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+Tensor select_backward_batching_rule(const Tensor& grad, const Tensor& input, int64_t dim, int64_t index) {
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
-  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
-  auto physical_dim = getGradInputPhysicalDim(dim, input_sizes, grad_physical.numBatchDims());
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input.sizes()), grad.options());
+  auto physical_dim = getGradInputPhysicalDim(dim, input.sizes(), grad_physical.numBatchDims());
   grad_input.select(physical_dim, index).copy_(grad_physical.tensor());
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }
@@ -389,10 +389,10 @@ Tensor slice_batching_rule(
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+Tensor slice_backward_batching_rule(const Tensor& grad, const Tensor& input, int64_t dim, int64_t start, int64_t end, int64_t step) {
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
-  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
-  auto physical_dim = getGradInputPhysicalDim(dim, input_sizes, grad_physical.numBatchDims());
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input.sizes()), grad.options());
+  auto physical_dim = getGradInputPhysicalDim(dim, input.sizes(), grad_physical.numBatchDims());
   grad_input.slice(physical_dim, start, end, step).copy_(grad_physical.tensor());
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }

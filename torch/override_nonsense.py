@@ -1,6 +1,6 @@
 import torch
 import re
-
+from torch.onnx import symbolic_opset11, symbolic_helper
 
 def extract_int_value(v):
     return int(re.search(r"\[value={(.*)}]", str(v)).group(1))
@@ -16,86 +16,68 @@ def extract_int_array_value(v):
     return [int(i) for i in numbers]
 
 
-def slice_backward_symbolic(g, out_grad, input_sizes, dim, start, end, step):
+def extract_list_len(v):
+    items = re.search(r"ListConstruct\(([^\()]+)\)", str(v)).group(1)
+    items = items.split(", ")
+    return len(items)
 
-    # Extract the slice axis from the string serialization of "dim". We'll
-    # assume this value isn't dynamic...
-    # (there must be a better way to do this...)
-    dimval = extract_int_value(dim)
-    in_static_shape = extract_int_array_value(input_sizes)
-    in_size_at_dim = in_static_shape[dimval]
 
-    # build input gradient shape, which is basically the shape of the output
-    # gradient overridden at the "dim" position:
-    in_grad_shape = g.op(
-        "ScatterElements",
-        g.op("Shape", out_grad),
-        g.op("Constant", value_t=torch.tensor([dimval])),
-        g.op("Constant", value_t=torch.tensor([in_size_at_dim]))
-    )
+def slice_backward_symbolic(g, out_grad, input, dim, start, end, step):
 
     # A tensor full of zeros that we're going to insert the gradients into.
-    in_grad = g.op("ConstantOfShape", in_grad_shape)
-    
-    # We're basically going to do in_grad[..., start:end:step, ...] = out_grad
-    # where the slicing happens on the "dim" axis:
+    input_shape = g.op("Shape", input)
+    in_grad = g.op("ConstantOfShape", input_shape)
 
-    # Extract the start/end/step values in the same (stupid) way, attempting to
-    # handle "until the end of the array" and negative values correctly...
-    # This assumes we're slicing on a non dynamic axis, which is probably
-    # fairly reasonable because why would you slice along eg the batch
-    # dimension you absolute barbarian?
+    # Now we need an array mapping indices in the output
+    # tensor to indices in the input, along the slicing axis:
+    input_dim_size = g.op("Gather", input_shape, dim)
 
-    startval = extract_int_value(start)
-    if startval < 0:
-        startval += in_size_at_dim
+    zero = g.op("Constant", value_t=torch.tensor([0]))
+    one = g.op("Constant", value_t=torch.tensor([1]))
 
-    endval = min(extract_int_value(end), in_size_at_dim)
-    if endval < 0:
-        endval += in_size_at_dim
-    stepval = extract_int_value(step)
+    # All input inds:
+    input_dim_inds = g.op(
+        "Range",
+        zero,
+        input_dim_size,
+        one
+    )
 
-    inds = range(startval, endval, stepval)
-    indices = g.op("Constant", value_t=torch.tensor(inds))
+    input_dim_inds = g.op(
+        "Slice",
+        input_dim_inds,
+        g.op("Reshape", start, one),
+        g.op("Reshape", end, one),
+        g.op("Constant", value_t=torch.tensor([0])),
+        g.op("Reshape", step, one),
+    )
 
-    # Now we need to reshape indices into shape [1,1,...,n,...,1,1], where
-    # n = len(inds) lives on the "dim" axis, then expand so it's got the
-    # same shape as out_grad (let's not just do one reshape in case some
-    # of the axes are dynamic):
-    padded_shape = [1] * len(in_static_shape)
-    padded_shape[dimval] = len(inds)
-    padded_shape = g.op("Constant", value_t=torch.tensor(padded_shape))
-    indices = g.op("Reshape", indices, padded_shape)
-    indices = g.op("Expand", indices, g.op("Shape", out_grad))
+    # we have to reshape/expand this now:
+    dimval = extract_int_value(dim)
+    padded_shape = g.op("ConstantOfShape", g.op("Shape", input_shape), value_t=torch.tensor([1], dtype=torch.int64))
+    padded_shape = g.op(
+        "ScatterElements",
+        padded_shape,
+        g.op("Reshape", dim, one),
+        g.op("Reshape", g.op("Shape", input_dim_inds), one)
+    )
+    input_dim_inds = g.op("Reshape", input_dim_inds, padded_shape)
+    input_dim_inds = g.op("Expand", input_dim_inds, g.op("Shape", out_grad))
 
-    # goddammit, they don't make this incredibly straightforward looking
-    # operation easy do they...
-    grad_input = g.op("ScatterElements", in_grad, indices, out_grad, axis_i=dimval)
-    return grad_input
+    # finally use this array to scatter the gradients into the input grad:
+    return g.op("ScatterElements", in_grad, input_dim_inds, out_grad, axis_i=dimval)
 
 
 # Register the symbolic function for the specific op and version
 torch.onnx.register_custom_op_symbolic('aten::slice_backward', slice_backward_symbolic, 17)
 
 
-def select_backward_symbolic(g, out_grad, input_sizes, dim, index):
+def select_backward_symbolic(g, out_grad, input, dim, index):
 
-    # we can't use input_sizes for the shape of the input gradient, as that
-    # bakes in the value we give it at onnx export time and means the onnx
-    # doesn't work with dynamic shapes. We have to build it from the output
-    # gradient by inserting the size at the selected dimension instead.
-    dimval = extract_int_value(dim)
-    in_static_shape = extract_int_array_value(input_sizes)
-
-    in_grad_shape = g.op("ConcatFromSequence", g.op(
-        "SequenceInsert",
-        g.op("SplitToSequence", g.op("Shape", out_grad), axis_i=0, keepdims_i=1),
-        g.op("Constant", value_t=torch.tensor([in_static_shape[dimval]])),
-        dim
-    ), axis_i=0)
 
     # A tensor full of zeros that we're going to insert the gradients into.
-    in_grad = g.op("ConstantOfShape", in_grad_shape)
+    input_shape = g.op("Shape", input)
+    in_grad = g.op("ConstantOfShape", input_shape)
     
     # We're basically going to do in_grad[..., index, ...] = out_grad
     # where the indexing happens on the "dim" axis.
@@ -112,12 +94,12 @@ def select_backward_symbolic(g, out_grad, input_sizes, dim, index):
     
     # Create a tensor with the same shape, filled with the value "index"
     # so we can use a ScatterElements node:
-    padded_shape = [1] * len(in_static_shape)
-    padded_shape = g.op("Constant", value_t=torch.tensor(padded_shape))
+    padded_shape = g.op("ConstantOfShape", g.op("Shape", input_shape), value_t=torch.tensor([1], dtype=torch.int64))
     indices = g.op("Reshape", index, padded_shape)
     indices = g.op("Expand", indices, out_grad_extraaxis_shape)
 
     # ok, assume the value of "dim" is hard coded/not dynamic:
+    dimval = extract_int_value(dim)
     grad_input = g.op("ScatterElements", in_grad, indices, out_grad_extraaxis, axis_i=dimval)
     return grad_input
 
@@ -234,6 +216,59 @@ def _softmax_backward_data_symbolic(g, out_grad, output, dim, half_to_float):
     return grad_input
 
 torch.onnx.register_custom_op_symbolic('aten::_softmax_backward_data', _softmax_backward_data_symbolic, 17)
+
+
+def _cat_backward_symbolic(g, out_grad, inputs, dim):
+
+    num_inputs = extract_list_len(inputs)
+
+    in_grads = []
+    one = g.op("Constant", value_t=torch.tensor([1], dtype=torch.long))
+    start_idx = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+    for i in range(num_inputs):
+        
+        input = g.op(
+            "SequenceAt",
+            inputs,
+            g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
+        )
+
+        input_shape = g.op("Shape", input)
+        input_dim_size = g.op("Gather", input_shape, dim)
+
+        end_idx = g.op("Add", start_idx, input_dim_size)
+
+        in_grads.append(
+            g.op(
+                "Slice",
+                out_grad,
+                start_idx,
+                end_idx,
+                g.op("Reshape", dim, one)
+            )
+        )
+
+        start_idx = end_idx
+
+    return g.op("SequenceConstruct",*in_grads)
+
+torch.onnx.register_custom_op_symbolic('aten::cat_backward', _cat_backward_symbolic, 17)
+
+
+def index_backward_native_symbolic(g, grad, self, indices):
+
+    shape = g.op(
+        "Shape",
+        self
+    )
+    in_grad = g.op(
+        "ConstantOfShape",
+        shape
+    )
+
+    return symbolic_opset11.index_put(g, in_grad, indices, grad, True)
+
+torch.onnx.register_custom_op_symbolic('aten::index_backward_native', index_backward_native_symbolic, 17)
 
 def layer_norm(x, normalized_shape, weight, bias, eps, unused):
     # Assuming `normalized_shape` is the last 'n' dimensions of `x`

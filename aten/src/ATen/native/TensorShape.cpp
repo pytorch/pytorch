@@ -966,6 +966,50 @@ std::vector<Tensor> tensor_split_sections_symint(const Tensor& self, c10::SymInt
   return splits;
 }
 
+std::vector<Tensor> cat_backward(const Tensor& grad, c10::ArrayRef<at::Tensor> inputs, int64_t dim)
+{
+  std::vector<std::vector<c10::SymInt>> sizes;
+  for(auto &t : inputs)
+  {
+    sizes.emplace_back();
+    for(auto i : t.sym_sizes())
+    {
+      sizes.back().push_back(i);
+    }
+  }
+  std::vector<Tensor> grad_inputs(sizes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  dim = at::legacy_cat_wrap_dim_symint(dim, sizes);
+  c10::SymInt accumulate = 0;
+
+  Tensor grad_;
+  bool grad_is_complex = grad.is_complex();
+  //if (grad_is_complex) {
+  //  grad_ = at::real(grad);
+  //}
+  for (const auto i : c10::irange(sizes.size())) {
+    Tensor grad_val;
+    if (!at::isComplexType(inputs[i].scalar_type()) && grad_is_complex) {
+      // R -> C
+      grad_val = grad_;
+    } else {
+      grad_val = grad;
+    }
+    auto& shape = sizes[i];
+    // If input was empty tensor, gradInput should be empty tensor.
+    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
+      continue;
+    }
+    const auto& size = shape[dim];
+    accumulate += size;
+    grad_inputs[i] = grad_val.narrow_symint(dim, accumulate - size, size);
+  }
+  return grad_inputs;
+}
+
 template <typename T>
 std::vector<Tensor> _tensor_split_indices(const Tensor& self, ArrayRef<T> indices, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
@@ -1868,8 +1912,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   return result;
 }
 
-Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
-  auto grad_input = at::zeros_symint(input_sizes, grad.options());
+Tensor select_backward_symint(const Tensor& grad, const Tensor& input, int64_t dim, c10::SymInt index) {
+  auto grad_input = at::zeros_symint(input.sym_sizes(), grad.options());
   grad_input.select_symint(dim, std::move(index)).copy_(grad);
   return grad_input;
 }
@@ -2559,8 +2603,8 @@ Tensor slice(
   return result;
 }
 
-Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+Tensor slice_backward(const Tensor& grad, const Tensor& input, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input.sizes(), grad.options());
   grad_input.slice(dim, start, end, step).copy_(grad);
   return grad_input;
 }

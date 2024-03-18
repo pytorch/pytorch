@@ -159,7 +159,10 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 
   // Only check version counter in the case without hooks
   // If user provides hooks, we can't track versions through the hooks
-  if (!hooks_) {
+
+  // WHAT AM I EVEN DOING WITH THIS FILE
+  // I'm completely insane for turning this off
+  if (!hooks_ && false) {
     auto current_version = saved_original_
         ? impl::version_counter(data_).current_version()
         : version_counter_.current_version();

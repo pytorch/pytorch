@@ -394,27 +394,23 @@ std::tuple<Tensor, optional<int64_t>> permute_batching_rule(
 
 std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
-    c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
+    const Tensor& input, optional<int64_t> input_bdim,
+    int64_t dim, c10::SymInt index) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
   auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
   dim = maybe_wrap_dim(dim, logical_rank + 1) + 1;
-  c10::SymDimVector input_sizes_(input_sizes.size() + 1);
-  input_sizes_[0] = grad_input_.sym_size(0);
-  std::copy(input_sizes.begin(), input_sizes.end(), input_sizes_.begin() + 1);
-  auto result = at::select_backward_symint(grad_input_, input_sizes_, dim, std::move(index));
+  auto result = at::select_backward_symint(grad_input_, input, dim, std::move(index));
   return std::make_tuple(std::move(result), 0);
 }
 
 std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
-    SymIntArrayRef input_sizes, int64_t dim, c10::SymInt start, c10::SymInt end, c10::SymInt step) {
+    const Tensor& input, optional<int64_t> input_bdim,
+    int64_t dim, c10::SymInt start, c10::SymInt end, c10::SymInt step) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
   auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
-  c10::SymDimVector input_sizes_(input_sizes.size() + 1);
-  input_sizes_[0] = grad_input_.size(0);
-  std::copy(input_sizes.begin(), input_sizes.end(), input_sizes_.begin() + 1);
-  auto result = at::slice_backward_symint(grad_input_, input_sizes_, dim, std::move(start), std::move(end), std::move(step));
+  auto result = at::slice_backward_symint(grad_input_, input, dim, std::move(start), std::move(end), std::move(step));
   return std::make_tuple(std::move(result), 0);
 }
 

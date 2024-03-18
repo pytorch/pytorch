@@ -1459,6 +1459,8 @@
 - func: tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
   variants: function, method
 
+- func: cat_backward(Tensor(a -> *) self, Tensor[] tensors, int dim=0) -> Tensor(a)[]
+
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -3051,6 +3053,13 @@
 
 - func: index_copy.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
+
+- func: index_backward_native(Tensor grad_output, Tensor input, Tensor?[] indices) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: index_backward_native
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   device_check: NoCheck   # delegate to _index_put_impl_, which leverages TensorIterator
@@ -5063,7 +5072,7 @@
     NestedTensorCPU, NestedTensorCUDA: select_nested
   tags: core
 
-- func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
+- func: select_backward(Tensor grad_output, Tensor input, int dim, SymInt index) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
@@ -5348,7 +5357,7 @@
 # NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
 # that if adding specific implementations here!
 
-- func: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
+- func: slice_backward(Tensor grad_output, Tensor input, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False

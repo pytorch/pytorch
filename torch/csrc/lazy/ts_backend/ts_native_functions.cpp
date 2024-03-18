@@ -437,11 +437,11 @@ at::Tensor LazyNativeFunctions::pixel_unshuffle(
 }
 at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
-    c10::SymIntArrayRef input_sizes,
+    const at::Tensor& self,
     int64_t dim,
     c10::SymInt index) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
-      select_backward)>::call(grad_output, input_sizes, dim, index);
+      select_backward)>::call(grad_output, self, dim, index);
 }
 at::Tensor LazyNativeFunctions::_trilinear(
     const at::Tensor& i1,
@@ -512,13 +512,13 @@ at::Tensor LazyNativeFunctions::diagonal_backward_symint(
 
 at::Tensor LazyNativeFunctions::slice_backward_symint(
     const at::Tensor& grad_output,
-    at::SymIntArrayRef input_sizes,
+    const at::Tensor& input,
     int64_t dim,
     c10::SymInt start,
     c10::SymInt end,
     c10::SymInt step) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
-      slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
+      slice_backward)>::call(grad_output, input, dim, start, end, step);
 }
 
 // re-use the composite kernel from core, that way we don't need to provide a

@@ -745,6 +745,11 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
   return self;
 }
 
+Tensor index_backward_native(const Tensor &grad_output, const Tensor &input, const c10::List<c10::optional<at::Tensor>> & indices)
+{
+  return at::index_put(grad_output.new_zeros_symint(input.sym_sizes(), input.options()), indices, grad_output, true);
+}
+
 Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   // Type and device checks
   TORCH_CHECK(index.scalar_type() == ScalarType::Long, "take(): Expected a long tensor for index, but got ", index.scalar_type())
