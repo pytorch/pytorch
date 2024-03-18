@@ -1301,11 +1301,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         yield x.values()
 
-        # Subclass -> Dense -> Subclass -> Dense
-        x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
-        offsets2 = x.offsets().clone().detach()
-        yield nested_view_from_values_offsets(x.values(), offsets2).values()
-
         # Dense -> Subclass -> Dense -> Subclass
         values = torch.randn(10, 5)
         offsets = torch.tensor([0, 3, 6, 10])
@@ -1314,45 +1309,58 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             nested_view_from_values_offsets(values, offsets).values(), offsets
         )
 
+    def _input_view_test(self, nt_view):
+        def fn(x):
+            return x.sin()
+
+        out_ref = fn(nt_view)
+        torch._dynamo.reset()
+        compile_fn = torch.compile(
+            fn, fullgraph=True, backend="aot_eager", dynamic=True
+        )
+        out = compile_fn(nt_view)
+
+        # Check metadata and values are correct
+        self.assertTrue(out.size() == out_ref.size())
+        self.assertTrue(out.stride() == out_ref.stride())
+        if out.is_nested:
+            self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+        else:
+            self.assertTrue(torch.allclose(out, out_ref))
+
+        # Check that no upper/lower bound guards are incurred
+        def backend(gm, args):
+            context = torch._guards.TracingContext.get()
+            guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
+
+            # varies based on the type of view
+            guard_str = "\n".join(guards)
+            if isinstance(nt_view._base, NestedTensor):
+                self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+            else:
+                self.assertExpectedInline(guard_str, """""")
+            return gm
+
+        torch._dynamo.reset()
+        compile_fn = torch.compile(fn, fullgraph=True, backend=backend, dynamic=True)
+        out = compile_fn(nt_view)
+
     def test_inputs_to_compiled_fn_are_views(self):
         for nt_view in self._get_views():
+            self._input_view_test(nt_view)
 
-            def fn(x):
-                return x.sin()
-
-            out_ref = fn(nt_view)
-            torch._dynamo.reset()
-            compile_fn = torch.compile(
-                fn, fullgraph=True, backend="aot_eager", dynamic=True
-            )
-            out = compile_fn(nt_view)
-
-            # Check metadata and values are correct
-            self.assertTrue(out.size() == out_ref.size())
-            self.assertTrue(out.stride() == out_ref.stride())
-            if out.is_nested:
-                self.assertTrue(torch.allclose(out.values(), out_ref.values()))
-            else:
-                self.assertTrue(torch.allclose(out, out_ref))
-
-            # Check that no upper/lower bound guards are incurred
-            def backend(gm, args):
-                context = torch._guards.TracingContext.get()
-                guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
-
-                # varies based on the type of view
-                guard_str = "\n".join(guards)
-                if isinstance(nt_view._base, NestedTensor):
-                    self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
-                else:
-                    self.assertExpectedInline(guard_str, """""")
-                return gm
-
-            torch._dynamo.reset()
-            compile_fn = torch.compile(
-                fn, fullgraph=True, backend=backend, dynamic=True
-            )
-            out = compile_fn(nt_view)
+    # NJT1 -> Dense -> NJT2 -> Dense view
+    # During view replay, the Dense -> NJT2 part will construct an intermediate,
+    # symbolically-sized NJT that is immediately deconstructed to return the final dense
+    # view. To construct this intermediate properly, we need the associated nested int
+    # to be symbolic. This view is expected to fail compilation until symbolic nested ints
+    # are cached onto fake offsets to solve this problem.
+    @unittest.expectedFailure
+    def test_subclass_dense_subclass_dense_view(self):
+        x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
+        offsets2 = x.offsets().clone().detach()
+        nt_view = nested_view_from_values_offsets(x.values(), offsets2).values()
+        self._input_view_test(nt_view)
 
 
 if __name__ == "__main__":
