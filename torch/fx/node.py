@@ -306,10 +306,10 @@ class Node:
         return self._sort_key < other._sort_key
 
     def __ge__(self, other: 'Node'):
-        return self._sort_key >= other._sort_key
+        return self > other or self == other
 
     def __le__(self, other: 'Node'):
-        return self._sort_key <= other._sort_key
+        return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
