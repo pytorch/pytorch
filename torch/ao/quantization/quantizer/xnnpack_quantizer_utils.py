@@ -521,21 +521,21 @@ def _do_annotate_conv_bn(
         ]
     else:
         combinations = [
-            (F.conv1d, _conv1d_bn_example_inputs),
-            (F.conv2d, _conv2d_bn_example_inputs),
+            (F.conv1d, _conv1d_bn_example_inputs),  # type: ignore[list-item]
+            (F.conv2d, _conv2d_bn_example_inputs),  # type: ignore[list-item]
         ]
 
     # Add `is_cuda` and `relu_is_inplace` dimensions
-    combinations = itertools.product(
+    combinations = itertools.product(  # type: ignore[assignment]
         combinations,
         [True, False] if torch.cuda.is_available() else [False],  # is_cuda
         [True, False] if has_relu else [False],  # relu_is_inplace
     )
 
     # Match against all conv dimensions and cuda variants
-    for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:
-        pattern = get_pattern(conv_fn, relu_is_inplace)
-        pattern = get_aten_graph_module(pattern, example_inputs, is_cuda)
+    for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
+        pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
+        pattern = get_aten_graph_module(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
