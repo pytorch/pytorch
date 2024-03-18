@@ -299,11 +299,6 @@ class Node:
         else:  # same length, increase length by 1
             x._sort_key = (*psk, 0)
 
-        # TODO(jansel): remove these debug asserts
-        assert x._sort_key
-        assert psk < x._sort_key
-        assert x._sort_key < nsk or len(nsk) == 0  # root node
-
     def __gt__(self, other: 'Node'):
         return self._sort_key > other._sort_key
 
