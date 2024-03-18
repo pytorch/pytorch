@@ -755,8 +755,8 @@ def min_cut_rematerialization_partition(
         print()
 
     def is_materialized_backwards(node):
-        # if get_aten_target(node) in view_ops:
-        #     return False
+        if get_aten_target(node) in view_ops:
+            return False
         cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
@@ -924,7 +924,7 @@ def min_cut_rematerialization_partition(
             first_unfusible_use = find_first_unfusible(fw_users, max(orders))
             for user in tuple(used_node.users):
                 if user in required_fw_nodes and user.fw_order > first_unfusible_use:
-                    print(f"forcing {used_node} -> {user} {user.fw_order}")
+                    # print(f"forcing {used_node} -> {user} {user.fw_order}")
                     nx_graph.add_edge("source", user.name+"_in", capacity=math.inf)
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
