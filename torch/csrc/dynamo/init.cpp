@@ -6,6 +6,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
+#include <torch/csrc/utils/python_raii.h>
 
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
@@ -13,6 +14,22 @@ static struct PyModuleDef _module =
 namespace torch {
 namespace dynamo {
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
+
+namespace {
+
+// An RAII to save and restore the current local dispatch keyset. Shouldn't
+// normally be needed - mostly for emergency use.
+struct PreserveDispatch {
+  c10::impl::LocalDispatchKeySet m_old;
+
+  ~PreserveDispatch() {
+    c10::impl::_force_tls_local_dispatch_key_set(m_old);
+  }
+
+  PreserveDispatch() : m_old(c10::impl::tls_local_dispatch_key_set()) {}
+};
+
+} // anonymous namespace
 
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
@@ -36,6 +53,9 @@ void initDynamoBindings(PyObject* torch) {
       PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
     throw python_error();
   }
+
+  torch::impl::py_context_manager<PreserveDispatch>(
+      py::handle(dynamo).cast<py::module>(), "_PreserveDispatch");
 
   auto m = py::handle(eval_frame).cast<py::module>();
 
