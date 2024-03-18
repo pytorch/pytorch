@@ -754,14 +754,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), c(), c(), m_bool()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), c(), c(), m_bs1_bool()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
