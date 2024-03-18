@@ -416,6 +416,7 @@ def construct_run(cls, args):
 
     impl_autograd(lib, qualname, post_forward, backward, list_out=True)
     op = torch._library.utils.lookup_op(qualname)
+    print(op._schema)
 
     def run(*args):
         nonlocal input_spec
@@ -456,3 +457,106 @@ SCHEMA_TYPE = {
     bool: "Scalar",
     str: "str",
 }
+
+from torch._custom_op.impl import infer_schema
+
+class BlackBoxDef:
+    def __init__(self, mutable_args, device_type, namespace, schema, fn):
+        self._mutable_args = mutable_args
+        self._namespace = namespace
+        self._schema = schema
+        self._impls = {}
+        self._impls[device_type] = fn
+        self._need_rebuild = True
+        self._name = fn.__name__
+        self._qualname = f"{self._namespace}::{self._name}"
+        self._opoverload = None
+        self._first_fn = fn
+        self._needs_rebuild = True
+
+    def impl(self, device_type):
+        def inner(fn):
+            self._impls[device_type] = fn
+            self._needs_rebuild = True
+        return inner
+
+    def impl_abstract(self, fn):
+        self._impls["abstract"] = fn
+        self._needs_rebuild = True
+
+    def impl_autograd(self, setup_context, backward):
+        self._impls["autograd"] = (setup_context, backward)
+        self._needs_rebuild = True
+
+    def _rebuild(self):
+        schema = infer_schema(self._first_fn)
+        lib = get_library_allowing_overwrite(self._namespace, self._name)
+        lib.define(f"{self._name}{schema}")
+        for typ, fn in self._impls.items():
+            if typ == "abstract":
+                torch.library.impl_abstract(self._qualname, lib=lib)(fn)
+            elif typ == "autograd":
+                impl_autograd(lib, self._qualname, fn[0], fn[1])
+            elif typ is None:
+                torch.library.impl(self._qualname, "CompositeExplicitAutograd", lib=lib)(fn)
+            else:
+                torch.library.impl(self._qualname, typ, lib=lib)(fn)
+        self._opoverload = torch._library.utils.lookup_op(self._qualname)
+        self._needs_rebuild = False
+
+    def __call__(self, *args, **kwargs):
+        if self._needs_rebuild:
+            self._rebuild()
+        return self._opoverload(*args, **kwargs)
+
+
+def def_blackbox(*, mutable_args, device_type=None, namespace=None, schema=None):
+    assert namespace is None
+    assert schema is None
+    namespace = infer_namespace(stacklevel=1)
+
+    def inner(fn):
+        return BlackBoxDef(mutable_args, device_type, namespace, schema, fn)
+    return inner
+
+
+KEEP_ALIVE = []
+
+def def_traceable(*, mutable_args, device_type=None, namespace=None, schema=None):
+    assert namespace is None
+    assert schema is None
+    namespace = infer_namespace(stacklevel=1)
+
+    def inner(fn):
+        if inspect.isclass(fn) and issubclass(fn, torch.autograd.Function):
+            schema = infer_schema(fn.forward)
+            name = fn.__name__
+            qualname = f"{namespace}::{name}"
+            lib = torch.library.Library(namespace, "FRAGMENT")
+
+            torch.library.define(qualname, schema, lib=lib)
+            torch.library.impl(qualname, "CompositeExplicitAutograd", fn.forward, lib=lib)
+            impl_autograd(lib, qualname, fn.setup_context, fn.backward)
+            KEEP_ALIVE.append(lib)
+            op = torch._library.utils.lookup_op(qualname)
+
+            class Whatever:
+                @staticmethod
+                def apply(*args, **kwargs):
+                    return op(*args, **kwargs)
+
+            return Whatever
+        else:
+            schema = infer_schema(fn)
+            name = fn.__name__
+            qualname = f"{namespace}::{name}"
+            lib = torch.library.Library(namespace, "FRAGMENT")
+
+            torch.library.define(qualname, schema, lib=lib)
+            torch.library.impl(qualname, "CompositeExplicitAutograd", fn, lib=lib)
+            op = torch._library.utils.lookup_op(qualname)
+            KEEP_ALIVE.append(lib)
+            return op
+
+
+    return inner
