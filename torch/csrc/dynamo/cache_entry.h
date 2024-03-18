@@ -45,12 +45,14 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   py::object code;
   // root guard manager if exists
   void* root_mgr{nullptr};
+  // backend used to create this cache entry
+  PyObject* backend{nullptr};
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
   std::list<CacheEntry>::iterator _owner_loc;
 
-  CacheEntry(const py::handle& guarded_code);
+  CacheEntry(const py::handle& guarded_code, PyObject* backend);
   ~CacheEntry();
 
   // Warning: returns a reference whose lifetime is controlled by C++
