@@ -894,7 +894,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
-            self.push(self.symbolic_locals[name])
+            self.push(self.symbolic_locals[name].unwrap())
         except KeyError:
             if name.startswith("."):
                 try:
