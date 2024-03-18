@@ -439,7 +439,7 @@ class TORCH_API Tensor: public TensorBase {
     // currently does not support optional of TensorList our approach is to replace
     // backward in native_functions.yaml with _backward and call it here instead.
     if (inputs.has_value()) {
-      TORCH_CHECK(inputs.value().size() > 0, "'inputs' argument to backward cannot be empty")
+      TORCH_CHECK(!inputs.empty(), "'inputs' argument to backward cannot be empty")
       this->_backward(inputs.value(), gradient, retain_graph, create_graph);
     } else {
       this->_backward({}, gradient, retain_graph, create_graph);
