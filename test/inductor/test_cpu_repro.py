@@ -3554,9 +3554,46 @@ class CPUReproTests(TestCase):
         # TODO: support vectorized int64 masked load
         assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @config.patch({"cpp.dynamic_threads": True})
+    def test_reduction_with_dynamic_threads(self):
+        def fn(a, b):
+            return a.sum(), b.sum()
+
+        self.common(
+            fn,
+            (torch.randn(1000), torch.rand(1000)),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_float64(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.weight2 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.bias = torch.nn.Parameter(torch.randn(10, dtype=torch.float64))
+
+            def forward(self, x1):
+                v1 = torch.mm(x1, self.weight1)
+                v2 = torch.addmm(self.bias, x1, self.weight2)
+                return (v1, v2)
+
+        mod = M().eval()
+        v = torch.randn(10, 10, dtype=torch.float64)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
     if HAS_CPU and not IS_MACOS:
