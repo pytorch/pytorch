@@ -1320,9 +1320,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
-    @pytorch_test_common.xfail(
-        error_message="Dynamic shape check failed for graph inputs"
-    )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
         config = transformers.MptConfig(
             vocab_size=8096, d_model=64, n_heads=2, n_layers=3
