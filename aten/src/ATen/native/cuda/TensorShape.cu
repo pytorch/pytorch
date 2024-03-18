@@ -428,7 +428,7 @@ bool all_contiguous(TensorList tensors) {
   return contiguous;
 }
 
-// Gets metadata for chunk_cat.
+// Get metadata for chunk_cat.
 std::tuple<
     int64_t,
     int64_t,
