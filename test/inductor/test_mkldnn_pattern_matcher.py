@@ -2131,6 +2131,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    def test_reproduce_121253_issue(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, weight, bias, beta, alpha):
+                super().__init__()
+                self.weight = weight
+                self.bias = bias
+                self.beta = beta
+                self.alpha = alpha
+
+            def forward(self, x):
+                return torch.addmm(
+                    self.bias, x, self.weight, beta=self.beta, alpha=self.alpha
+                )
+
+        for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
+            mod = Mod(torch.randn(64, 64), torch.randn(64), beta, alpha).eval()
+            with torch.no_grad():
+                x = torch.randn(1, 64)
+                include_ops = []
+                exclude_ops = []
+                if (beta != 1.0 and beta != 0.0) or alpha != 1.0:
+                    exclude_ops = ["mkldnn._linear_pointwise.default"]
+                else:
+                    exclude_ops = ["mkldnn._linear_pointwise.default"]
+                self._test_code_common(mod, (x,), include_ops, [])
+
     @skipIfNoDynamoSupport
     @skipIfRocm
     def test_woq_int8(self):
