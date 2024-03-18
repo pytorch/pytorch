@@ -939,8 +939,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
             output = tuple(
-                subtracer.create_arg(res_proxy)
-                for res_proxy in combine_result_proxies
+                subtracer.create_arg(res_proxy) for res_proxy in combine_result_proxies
             )
             tx.output.create_node("output", "output", (output,), {})
 

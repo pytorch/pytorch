@@ -121,8 +121,8 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ).call_function(tx, [], {})
         except Unsupported as e:
             unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function"
-                from_exc=e
+                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
+                from_exc=e,
             )
 
     def exit(self, tx, *args):
@@ -144,7 +144,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         except Unsupported as e:
             unimplemented(
                 f"Unsupported context manager {self.cm_obj}'s __exit__ function",
-                from_exc=e
+                from_exc=e,
             )
 
         tx.generic_context_manager_depth -= 1
