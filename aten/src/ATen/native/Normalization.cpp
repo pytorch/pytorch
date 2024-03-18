@@ -527,10 +527,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
   }
 
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
-  bool support_bf16 = is_sm8x || is_sm90;
+  static cudaDevicePRop* dprops = at::cuda::getCurrentDeviceProperties();
+  bool support_bf16 = dprops->major >= 8;
 
   const bool use_cudnn = (
       input.is_cuda()
