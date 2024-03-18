@@ -1321,7 +1321,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        error_message="whole graph export entails exactly one guard export"
+        error_message="Dynamic shape check failed for graph inputs"
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
         config = transformers.MptConfig(
