@@ -451,7 +451,7 @@ inline Tensor _sum_to(
     Tensor tensor,
     const c10::ArrayRef<T> shape,
     bool always_return_non_view = false) {
-  if (shape.size() == 0) {
+  if (shape.empty()) {
     return tensor.sum();
   }
 
