@@ -31,8 +31,12 @@ runs:
         zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
 
     - name: Zip test reports for upload
+      if: runner.os != 'Windows' && !inputs.use-gha
       shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
+        # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
         zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv'
 
