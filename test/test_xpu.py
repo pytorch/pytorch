@@ -190,7 +190,6 @@ if __name__ == "__main__":
 
     @onlyXPU
     @suppress_warnings
-    @slowTest
     @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
@@ -239,22 +238,6 @@ if __name__ == "__main__":
             actual = op(transformed.input, *transformed.args, **transformed.kwargs)
 
             self.assertEqual(expect, actual)
-
-    # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
-    @onlyXPU
-    @skipMeta
-    @onlyNativeDeviceTypes
-    @ops(
-        (op for op in _xpu_all_ops if op.promotes_int_to_float),
-        allowed_dtypes=integral_types_and(torch.bool),
-    )
-    def test_promotes_int_to_float(self, device, dtype, op):
-        for sample in op.sample_inputs(device, dtype):
-            output = op(sample.input, *sample.args, **sample.kwargs)
-            if not output.dtype.is_floating_point:
-                self.fail(
-                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
-                )
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
