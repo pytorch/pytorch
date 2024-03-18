@@ -671,7 +671,12 @@ template <>
 void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+#ifdef USE_ROCM
+    // hipblaslt does not support complex gemm yet
+    bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+#else
     bgemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+#endif
   }
   else {
     bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
@@ -682,7 +687,12 @@ template <>
 void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+#ifdef USE_ROCM
+    // hipblaslt does not support complex gemm yet
+    bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+#else
     bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+#endif
   }
   else {
     bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
@@ -1059,7 +1069,12 @@ template <>
 void gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+#ifdef USE_ROCM
+    // hipblaslt does not support complex gemm yet
+    gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+#else
     gemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+#endif
   }
   else {
     gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
@@ -1070,7 +1085,12 @@ template <>
 void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+#ifdef USE_ROCM
+    // hipblaslt does not support complex gemm yet
+    gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+#else
     gemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+#endif
   }
   else {
     gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
