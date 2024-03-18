@@ -4282,6 +4282,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
 
+    def test_super_in_staticmethod(self):
+        class A:
+            @staticmethod
+            def foo():
+                return super().__init__()
+
+        def fn(obj):
+            return obj.foo()
+
+        obj = A()
+
+        try:
+            fn(obj)
+        except Exception as e:
+            orig_str = str(e)
+        self.assertIn("no arguments", orig_str)
+
+        try:
+            torch.compile(backend="eager")(fn)(obj)
+        except Exception as e:
+            compiled_str = str(e)
+        self.assertEqual(orig_str, compiled_str)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
