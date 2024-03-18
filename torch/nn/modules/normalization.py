@@ -354,13 +354,22 @@ class RMSNorm(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        """
+        Re-initialize parameters per initialization scheme in __init__.
+        """
         if self.elementwise_affine:
             init.ones_(self.weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Run forward.
+        """
         return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
 
     def extra_repr(self) -> str:
+        """
+        Extra information for the module.
+        """
         return '{normalized_shape}, eps={eps}, ' \
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
