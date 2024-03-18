@@ -321,3 +321,75 @@ def _get_weight_qparam_keys(
         if weight_qscheme == torch.quantize_per_channel:
             keys.append("weight_axis")
     return keys
+
+
+def _setup_quantization_parameters(
+    module: torch.nn.Module,
+    key: str,
+    weight_qparams: typing.Dict[
+        str, typing.Union[torch.qscheme, torch.dtype, float, int, torch.Tensor]
+    ],
+    device: torch.device,
+) -> None:
+    """
+    Setup the quantization parameters for a module's weight.
+
+    This function configures the module with quantization parameters like
+    qscheme, dtype, scale, zero point, and optionally axis for per-channel
+    quantization. These parameters are set as attributes of the module and
+    registered as buffers if necessary.
+
+    Parameters:
+        module (torch.nn.Module): The module to configure.
+        key (str): The base name of the attributes to set, e.g., 'weight'.
+        weight_qparams (dict): A dictionary containing the quantization parameters.
+            Expected keys are 'qscheme', 'dtype', 'scale', 'zero_point', and optionally 'axis'.
+        device (torch.device): The device to use for creating tensor attributes.
+    """
+    # Setting qscheme and dtype attributes directly
+    weight_qscheme = weight_qparams["qscheme"]
+    weight_dtype = weight_qparams["dtype"]
+    assert weight_qscheme in [
+        None,
+        torch.per_tensor_affine,
+        torch.per_channel_affine,
+    ], Exception(f"qscheme: {weight_qscheme} is not support in {module._get_name()}")
+
+    setattr(module, f"{key}_qscheme", weight_qscheme)
+    setattr(module, f"{key}_dtype", weight_dtype)
+
+    # Conditionally creating and registering buffers for scale and zero_point
+    if weight_qscheme is not None:
+        scale = weight_qparams["scale"]
+        scale_tensor = (
+            scale
+            if isinstance(scale, torch.Tensor)
+            else torch.tensor(scale, dtype=torch.float, device=device)
+        )
+        module.register_buffer(f"{key}_scale", scale_tensor.detach().clone())
+
+        zero_point = weight_qparams["zero_point"]
+        zero_point_tensor = (
+            zero_point
+            if isinstance(zero_point, torch.Tensor)
+            else torch.tensor(zero_point, dtype=torch.int, device=device)
+        )
+        module.register_buffer(f"{key}_zero_point", zero_point_tensor.detach().clone())
+
+        # Handling per-channel quantization axis
+        if weight_qscheme == torch.per_channel_affine:
+            axis = weight_qparams["axis"]
+            axis_tensor = (
+                axis
+                if isinstance(axis, torch.Tensor)
+                else torch.tensor(axis, dtype=torch.int, device=device)
+            )
+            module.register_buffer(f"{key}_axis", axis_tensor.detach().clone())
+        else:
+            # added for TorchScriptability, not used
+            module.register_buffer(
+                f"{key}_axis", torch.tensor(0, dtype=torch.int, device=device)
+            )
+
+    # Saving the axis as an int attribute for compatibility and access convenience
+    setattr(module, f"{key}_axis_int", getattr(module, f"{key}_axis").item())
