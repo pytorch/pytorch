@@ -2,7 +2,7 @@ import torch
 from torch._ops import HigherOrderOperator
 from torch._C._functorch import TransformType
 from torch._functorch.utils import enable_single_level_autograd_function
-import torch.utils._pytree as pytree
+import torch.utils._cxx_pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,

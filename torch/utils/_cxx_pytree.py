@@ -356,6 +356,33 @@ def tree_leaves(
     )
 
 
+def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
+    """C++ version of pytree.arg_tree_leaves. This only exists to match the
+    python API.
+
+    See also :func:`tree_flatten`.
+
+    >>> args = (1, None)
+    >>> kwargs = {'b': (2, [3, 4]),}
+    >>> arg_tree_leaves(*args, **kwargs)
+    [1, None, 2, 3, 4]
+    >>> tree_leaves(*args)
+    [1, None]
+    >>> tree_leaves(**kwargs)
+    [2, 3, 4]
+
+    Args:
+        args (pytree): list of args to flatten.
+        kwargs (pytree): list of keyword arguments to flatten.
+
+    Returns:
+        A list of leaf values.
+    """
+    leaves_args: List[Any] = [optree.tree_leaves(a) for a in args]
+    leaves_kw: List[Any] = [optree.tree_leaves(a) for a in kwargs.values()]
+    return leaves_args + leaves_kw
+
+
 def tree_structure(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
