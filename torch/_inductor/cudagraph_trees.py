@@ -1571,7 +1571,9 @@ def format_tb(frames):
 
     for entry in frames:
         formatted_traceback.append(
-            traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
+            traceback.FrameSummary(
+                entry["filename"], entry["lineno"], entry["name"], line=entry["line"]
+            )
         )
 
     return "".join(traceback.format_list(formatted_traceback))

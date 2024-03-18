@@ -49,15 +49,17 @@ std::vector<IValue> ivalue_symbolize(
   }
   auto s = symbolize(unique_frames);
 
-  IValue line_s = "line";
+  IValue lineno_s = "lineno";
   IValue name_s = "name";
   IValue filename_s = "filename";
+  IValue line_s = "line";
   std::vector<IValue> all_frames;
   for (const auto& f : s.all_frames) {
     auto d = new_dict();
     d.insert(name_s, f.funcname);
     d.insert(filename_s, f.filename);
-    d.insert(line_s, int64_t(f.lineno));
+    d.insert(lineno_s, int64_t(f.lineno));
+    d.insert(line_s, f.line);
     all_frames.emplace_back(std::move(d));
   }
 

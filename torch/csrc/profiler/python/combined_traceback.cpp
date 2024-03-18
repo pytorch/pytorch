@@ -70,7 +70,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
       const std::vector<CapturedTraceback::PyFrame>& to_symbolize,
       SymbolizedTracebacks& result) override {
     py::gil_scoped_acquire acquire;
-    py::str line_s = "line";
+    py::str lineno_s = "lineno";
     py::str name_s = "name";
     py::str filename_s = "filename";
 
@@ -105,7 +105,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
             result.all_frames.emplace_back(unwind::Frame{
                 py::cast<std::string>(h[filename_s]),
                 py::cast<std::string>(h[name_s]),
-                py::cast<uint64_t>(h[line_s])});
+                py::cast<uint64_t>(h[lineno_s])});
           }
         }
       }
@@ -130,15 +130,17 @@ std::vector<py::object> py_symbolize(
   }
   auto s = symbolize(unique_frames);
 
-  py::str line_s = "line";
+  py::str lineno_s = "lineno";
   py::str name_s = "name";
   py::str filename_s = "filename";
+  py::str line_s = "line";
   std::vector<py::dict> all_frames;
   for (const auto& f : s.all_frames) {
     py::dict d;
     d[name_s] = f.funcname;
     d[filename_s] = f.filename;
-    d[line_s] = f.lineno;
+    d[lineno_s] = f.lineno;
+    d[line_s] = f.line;
     all_frames.emplace_back(std::move(d));
   }
 

@@ -139,9 +139,11 @@ SymbolizedTracebacks symbolize(
         if (flc) {
           size_t col = 0;
           std::tie(frame.filename, frame.lineno, col) = *flc;
+          frame.line = f.range.source()->get_line(frame.lineno - 1).str();
         } else {
           frame.filename = "??";
           frame.lineno = 0;
+          frame.line = "??";
         }
         r.tracebacks.back().push_back(r.all_frames.size());
         r.all_frames.emplace_back(std::move(frame));
