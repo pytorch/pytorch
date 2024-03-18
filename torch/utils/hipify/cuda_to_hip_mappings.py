@@ -7286,6 +7286,16 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipblasDrotmg_v2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
+            "CuBlasLtMatrixLayout",
+            ("hipblasLtMatrixLayout_t" if rocm_version >= (6, 0, 0) else "hipblasLtMatrixLayout_t",
+                CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
+            "CuBlasLtMatmulDescriptor",
+            ("hipblasLtMatmulDesc_t" if rocm_version >= (6, 0, 0) else "hipblasLtMatmulDesc_t",
+                CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
             "cublasComputeType_t",
             ("hipblasComputeType_t" if rocm_version >= (6, 0, 0) else "hipblasLtComputeType_t",
                 CONV_MATH_FUNC, API_BLAS)
