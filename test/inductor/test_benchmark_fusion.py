@@ -5,7 +5,7 @@ import sys
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -218,15 +218,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             cls._stack.close()
             super().tearDownClass()
 
-        def _equivalent_output_code_impl(self):
+        def _equivalent_output_code_impl(self, size):
             def foo(m, inp):
                 a = m(inp)
                 return torch.nn.functional.relu(a)
 
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
 
-            m = torch.nn.Linear(512, 512, bias=True).half().cuda()
-            inp = torch.rand([512, 512]).half().cuda()
+            m = torch.nn.Linear(size, size, bias=True).half().cuda()
+            inp = torch.rand([size, size]).half().cuda()
 
             with torch.no_grad():
                 res, code = run_and_get_code(foo_c, m, inp)
@@ -242,9 +242,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
             return code, code2
 
+        @fresh_inductor_cache()
         @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
-            code, code2 = self._equivalent_output_code_impl()
+            code, code2 = self._equivalent_output_code_impl(256)
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
                     "empty_strided_cuda", 1, exactly=True
@@ -256,11 +257,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     out_code[0]
                 )
 
+        @fresh_inductor_cache()
         @torch._inductor.config.patch(debug_filter_choice=filter_extern)
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()
 
-            code, code2 = self._equivalent_output_code_impl()
+            code, code2 = self._equivalent_output_code_impl(512)
 
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
