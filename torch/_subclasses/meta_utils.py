@@ -242,7 +242,13 @@ class MetaTensorDescriber:
             is_inference=t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
-            ndim=t.ndim,
+            # NB: ndim should be OK too but there is a disaster at
+            # python test/dynamo/test_subclasses.py -k test_user_overidden_property_unsupported
+            # Actually, this means that we have a little bit of a problem
+            # here, which is that there is some sensitivity to how exactly an
+            # access is done if you have a __torch_function__ subclass.  Maybe
+            # should disable torch function before doing accesses?
+            ndim=t.dim(),
             dtype=t.dtype,
             is_sparse=is_sparse,
             is_mkldnn=is_mkldnn,
