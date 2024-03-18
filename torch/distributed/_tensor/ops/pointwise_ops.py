@@ -51,8 +51,10 @@ aten = torch.ops.aten
 
 linear_pointwise_ops = [
     aten.div.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
+    aten.div_.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
     aten.to.dtype,
     aten.add.Tensor,
+    aten.add_.Tensor,
 ]
 
 
@@ -70,7 +72,6 @@ pointwise_ops = [
     aten.add.Scalar,
     aten.add.out,
     aten.add_.Scalar,
-    aten.add_.Tensor,
     aten.addcdiv.default,
     aten.addcdiv.out,
     aten.addcdiv_.default,
@@ -546,6 +547,7 @@ for_each_ops = [
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
+    aten._foreach_sub.List,
     aten._foreach_sub_.Scalar,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,

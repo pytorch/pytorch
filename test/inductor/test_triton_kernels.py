@@ -4,13 +4,14 @@
 from unittest.mock import patch
 
 import torch
-
-import torch._dynamo.test_case
 import torch._dynamo.testing
+
+import torch._inductor.test_case
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
@@ -33,7 +34,7 @@ STRING_CONSTANT_C = "CONSTANT_C"
 BOOL_CONSTANT_C = True
 
 
-class KernelTests(torch._dynamo.test_case.TestCase):
+class KernelTests(torch._inductor.test_case.TestCase):
     @requires_cuda
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
@@ -999,10 +1000,8 @@ def forward(self, x_1, output_1):
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
             self.assertTrue("equal_to_1=()" in sources[0])
-            self.assertTrue("ids_of_folded_args=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
-            self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda
@@ -1118,7 +1117,7 @@ if HAS_CUDA:
         return x + y, out_ptr
 
 
-class MutationTests(torch._dynamo.test_case.TestCase):
+class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
     @make_mutation_test
@@ -1185,6 +1184,47 @@ class MutationTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_mutation_test
+    def test_reduce_sum():
+        @triton.jit
+        def reduce_sum_kernel(a_ptr, c_ptr, stride_am, stride_an):
+            offs_am = tl.arange(0, 4)
+            offs_an = tl.arange(0, 4)
+            a_ptrs = a_ptr + (
+                offs_am[:, None] * stride_am + offs_an[None, :] * stride_an
+            )
+            a = tl.load(a_ptrs)
+            m = tl.sum(a, axis=1)
+            tl.store(c_ptr + tl.arange(0, 4), m)
+
+        t = torch.randn(4)
+        kernel = reduce_sum_kernel
+        kwargs = {
+            "a_ptr": t,
+            "c_ptr": t,
+            "stride_am": 4,
+            "stride_an": 4,
+        }
+
+        # TODO(aakhundov): tt.reduce is now supported, but only
+        # in the new MLIR-based Triton analysis pass (not in the
+        # old TTIR string parsing-based one). remove this gating
+        # and use ["c_ptr"] as `expected` after the new Triton
+        # pin lands both in OSS and internally.
+        ttir_module, _ = generate_ttir(kernel, kwargs)
+        if hasattr(ttir_module, "walk"):
+            # with MLIR-based Triton analysis pass
+            expected = ["c_ptr"]
+        else:
+            # with TTIR string parsing-based Triton analysis pass
+            expected = ["a_ptr", "c_ptr"]
+
+        return (
+            kernel,
+            kwargs,
+            expected,
+        )
+
+    @make_mutation_test
     def test_argmax():
         @triton.jit
         def argmax_kernel(a_ptr, c_ptr, stride_am, stride_an):
@@ -1198,16 +1238,71 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             tl.store(c_ptr + tl.arange(0, 4), m)
 
         t = torch.randn(4)
+        kernel = argmax_kernel
+        kwargs = {
+            "a_ptr": t,
+            "c_ptr": t,
+            "stride_am": 4,
+            "stride_an": 4,
+        }
+
+        # TODO(aakhundov): tt.reduce is now supported, but only
+        # in the new MLIR-based Triton analysis pass (not in the
+        # old TTIR string parsing-based one). remove this gating
+        # and use ["c_ptr"] as `expected` after the new Triton
+        # pin lands both in OSS and internally.
+        ttir_module, _ = generate_ttir(kernel, kwargs)
+        if hasattr(ttir_module, "walk"):
+            # with MLIR-based Triton analysis pass
+            expected = ["c_ptr"]
+        else:
+            # with TTIR string parsing-based Triton analysis pass
+            expected = ["a_ptr", "c_ptr"]
+
         return (
-            argmax_kernel,
-            {
-                "a_ptr": t,
-                "c_ptr": t,
-                "stride_am": 4,
-                "stride_an": 4,
-            },
-            # TODO(oulgen): tt.reduce closures are not implemented yet
-            ["a_ptr", "c_ptr"],
+            kernel,
+            kwargs,
+            expected,
+        )
+
+    @make_mutation_test
+    def test_cumsum():
+        @triton.jit
+        def cumsum_kernel(in_ptr, out_ptr, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
+            rindex = tl.arange(0, RBLOCK)[None, :]
+            xindex = tl.arange(0, XBLOCK)[:, None]
+            data = tl.load(in_ptr + rindex)
+            scan = tl.cumsum(data, 1)
+            expected_max = tl.sum(data, 1)
+            tl.device_assert(scan <= expected_max)
+            tl.store(out_ptr + xindex * RBLOCK + rindex, scan)
+
+        t = torch.randn(4)
+        kernel = cumsum_kernel
+        kwargs = {
+            "in_ptr": t,
+            "out_ptr": t,
+            "XBLOCK": 4,
+            "RBLOCK": 16,
+        }
+
+        # TODO(aakhundov): tt.scan is now supported, but only
+        # in the new MLIR-based Triton analysis pass (not in the
+        # old TTIR string parsing-based one). remove this gating
+        # and use ["out_ptr"] as `expected` after the new Triton
+        # pin lands both in OSS and internally.
+        ttir_module, _ = generate_ttir(kernel, kwargs)
+        if hasattr(ttir_module, "walk"):
+            # with MLIR-based Triton analysis pass
+            expected = ["out_ptr"]
+        else:
+            # with TTIR string parsing-based Triton analysis pass
+            expected = ["in_ptr", "out_ptr"]
+
+        return (
+            kernel,
+            kwargs,
+            expected,
         )
 
     @make_mutation_test
@@ -1702,6 +1797,6 @@ globals()[no_opt_test_class.__name__] = no_opt_test_class
 no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     run_tests()
