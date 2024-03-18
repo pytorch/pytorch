@@ -122,7 +122,9 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            self.assertExpectedInline(actual, """\
+            self.assertExpectedInline(
+                actual,
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor):
         l_inputs_0_ = L_inputs_0_
@@ -133,7 +135,8 @@ class GraphModule(torch.nn.Module):
 
         new_grad_1 = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
-""")
+""",
+            )
 
             graph = None
 
