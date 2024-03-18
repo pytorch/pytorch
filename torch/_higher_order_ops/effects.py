@@ -67,6 +67,11 @@ def has_aliasing(op: torch._ops.OpOverload):
 
 
 def has_effects(op, args, kwargs) -> bool:
+    # Skip over the profiler's RecordFunction as they should not show up in the graph
+    _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
+    if op in _skip_ops:
+        return False
+
     return (
         isinstance(op, torch._ops.OpOverload)
         and not has_aliasing(op)
@@ -78,11 +83,9 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     if op in SIDE_EFFECTS:
         return SIDE_EFFECTS[op]
 
-    # TODO(angelayi): Enable this when enabling tokens with export -- this will
-    # break some existing export tests right now
-    # for arg in args:
-    #     if isinstance(arg, torch.ScriptObject):
-    #         return _EffectType.ORDERED
+    for arg in args:
+        if isinstance(arg, torch.ScriptObject):
+            return _EffectType.ORDERED
 
     return None
 
@@ -172,7 +175,9 @@ def handle_effects(
     key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
-        assert allow_token_discovery, f"Could not find a token for effect {key}"
+        assert (
+            allow_token_discovery
+        ), f"Could not find a token for effect {key} which came from the function {op}"
         tokens[key] = torch.tensor([])
     token = tokens[key]
 

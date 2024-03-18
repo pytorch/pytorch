@@ -10,7 +10,7 @@ import threading
 import traceback
 import unittest.mock
 import weakref
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import contextmanager
 from typing import (
     Any,
@@ -88,6 +88,7 @@ class GuardSource(enum.Enum):
     GLOBAL_FSDP_MODULE = 8
     BACKWARD_STATE = 9
     EPHEMERAL = 10
+    SYNTHETIC_LOCAL = 11
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -328,7 +329,7 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 """
 
 
-class Checkpointable(ABC, Generic[T]):
+class Checkpointable(Generic[T]):
     @abstractmethod
     def copy_graphstate(self) -> T:
         ...
@@ -497,6 +498,10 @@ class GuardsSet:
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+
+    def remove_guards_with_source(self, source):
+        """Delete all guards with a given source"""
+        self.inner = {g for g in self.inner if g.originating_source != source}
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
@@ -729,7 +734,7 @@ class TracingContext:
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
         TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name
+            filename, lineno, frame_name, lookup_line=False
         )
 
 
@@ -796,6 +801,10 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+    def subguards_allowed(self):
+        """True if you can guard on attributes of this"""
+        return self.guard_source() != GuardSource.SYNTHETIC_LOCAL
 
 
 # Subclasses can be found in torch/_dynamo/source.py
