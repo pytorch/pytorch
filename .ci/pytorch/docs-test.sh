@@ -7,4 +7,6 @@ echo "Testing pytorch docs"
 
 sudo chown -R jenkins ../workspace
 
+cd docs
+
 make doctest
