@@ -1248,46 +1248,24 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
 
 class DYNAMIC_INDICES : public LeafGuard {
   // C++ equivalent of
-  // if hasattr(value, "_dynamo_dynamic_indices"):
-  //     code.append(
-  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
-  //         noqa: B950
-  //     )
-  // else:
-  //     code.append(
-  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
-  //     )
+  //  code.append(
+  //      f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+  //      if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
+  //      noqa: B950
+  //  )
  public:
-  DYNAMIC_INDICES(
-      bool has_attr,
-      py::set dynamic_indices,
-      py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _has_attr(has_attr),
-        _dynamic_indices(dynamic_indices) {}
+  DYNAMIC_INDICES(py::set dynamic_indices, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _dynamic_indices(dynamic_indices) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Make an interned string
     static PyObject* dynamic_indices_str =
         PyUnicode_InternFromString("_dynamo_dynamic_indices");
-
     PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
-    bool has_attr = true;
     if (indices == nullptr) {
       // Attr absent. Clear exception.
       PyErr_Clear();
-      has_attr = false;
-    }
-
-    // Common case - hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
-    if (!_has_attr) {
-      return !has_attr;
-    }
-
-    // "((x._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-    //       if hasattr(x, '_dynamo_dynamic_indices') else True)
-    if (!has_attr) {
+      // This is true deliberately. If hasattr fails, we return true.
       return true;
     }
 
@@ -1301,9 +1279,6 @@ class DYNAMIC_INDICES : public LeafGuard {
   }
 
  private:
-  // _has_attr is for the common case - hasattr(x, "_dynamo_dynamic_indices') ==
-  // False
-  bool _has_attr;
   py::set _dynamic_indices;
 };
 
@@ -2300,6 +2275,114 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents func.__defaults__ accessor.
+ */
+class FuncDefaultsGuardAccessor : public GuardAccessor {
+ public:
+  FuncDefaultsGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, name, source, example_value) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetDefaults(func); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetDefaults(func);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
+    }
+
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "FuncDefaultsGuardAccessor";
+  }
+};
+
+/**
+ * Represents func.__kwdefaults__ accessor.
+ */
+class FuncKwDefaultsGuardAccessor : public GuardAccessor {
+ public:
+  FuncKwDefaultsGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, name, source, example_value) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetKwDefaults(func); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetKwDefaults(func);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
+    }
+
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "FuncKwDefaultsGuardAccessor";
+  }
+};
+
+/**
  * Represents f_globals acccessor. This sits as a child accessor of the
  * RootGuardManager.
  */
@@ -2583,6 +2666,15 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   return THPVariable_Unpack(obj).data_ptr();
 }
 
+void* convert_to_root_guard_manager(py::object root) {
+  RootGuardManager* root_mgr = root.cast<RootGuardManager*>();
+  return (void*)root_mgr;
+}
+
+bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
@@ -2705,7 +2797,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &DICT_CONTAINS::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
-      .def(py::init<bool, py::set, py::list>())
+      .def(py::init<py::set, py::list>())
       .def("__call__", &DYNAMIC_INDICES::check);
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
@@ -2747,6 +2839,16 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<DictGetItemGuardAccessor>>(
       py_m, "DictGetItemGuardAccessor");
+  py::class_<
+      FuncDefaultsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<FuncDefaultsGuardAccessor>>(
+      py_m, "FuncDefaultsGuardAccessor");
+  py::class_<
+      FuncKwDefaultsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<FuncKwDefaultsGuardAccessor>>(
+      py_m, "FuncKwDefaultsGuardAccessor");
   py::class_<
       GlobalsGuardAccessor,
       GuardAccessor,
@@ -2888,11 +2990,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "add_dynamic_indices_guard",
           [](GuardManager& self,
-             bool has_attr,
              py::set value,
              py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
-                has_attr, value, verbose_code_parts));
+            self.add_leaf_guard(
+                std::make_shared<DYNAMIC_INDICES>(value, verbose_code_parts));
           })
       .def(
           "add_dict_version_guard",
@@ -2935,6 +3036,38 @@ PyObject* torch_c_dynamo_guards_init() {
           "dict_getitem_manager",
           &GuardManager::get_child_manager<DictGetItemGuardAccessor>,
           py::arg("key"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "func_defaults_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::object example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__defaults_accessor__");
+            return self.get_child_manager<FuncDefaultsGuardAccessor>(
+                unique_key, source, example_value);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "func_kwdefaults_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::object example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__kwdefaults_accessor__");
+            return self.get_child_manager<FuncKwDefaultsGuardAccessor>(
+
+                unique_key, source, example_value);
+          },
           py::arg("source"),
           py::arg("example_value"),
           py::return_value_policy::reference)
@@ -3069,6 +3202,17 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_permitted_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 contains, key, verbose_code_parts));
+          })
+      .def(
+          "add_dict_version_guard",
+          [](DictGuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            // DICT_VERSION is used in a very narrow context today to guard on
+            // pytree SUPPPORTED_NODES. We can remove this once we have tags in
+            // DictGuardManager.
+            self.add_permitted_leaf_guard(
+                std::make_shared<DICT_VERSION>(value, verbose_code_parts));
           })
       // Not permitted accesssors
       .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)

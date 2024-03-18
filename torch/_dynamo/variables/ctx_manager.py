@@ -642,6 +642,42 @@ class StreamContextVariable(ContextWrappingVariable):
         self.state.cleanup_assert()
 
 
+class PreserveVersionContextVariable(ContextWrappingVariable):
+    """
+    Wraps torch.autograd._unsafe_preserve_version_counter
+    """
+
+    @staticmethod
+    def constructor(tx):
+        return variables.LambdaVariable(
+            lambda tensor: PreserveVersionContextVariable(
+                tensor,
+                tensor.var_getattr(tx, "_version"),
+            )
+        )
+
+    def __init__(self, tensor, prev_version, **kwargs):
+        kwargs.setdefault("target_values", None)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.prev_version = prev_version
+
+    def enter(self, tx):
+        pass
+
+    def exit(self, tx, *args):
+        from ..tensor_version_op import _unsafe_set_version_counter
+
+        return variables.TorchInGraphFunctionVariable(
+            _unsafe_set_version_counter
+        ).call_function(tx, [self.tensor, self.prev_version], {})
+
+    def reconstruct(self, codegen):
+        unimplemented(
+            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        )
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
