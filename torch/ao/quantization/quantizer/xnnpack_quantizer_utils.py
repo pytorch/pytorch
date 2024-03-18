@@ -358,8 +358,7 @@ def _do_annotate_conv_relu(
         if (
             not isinstance(maybe_conv_node, Node)
             or maybe_conv_node.op != "call_function"
-            or maybe_conv_node.target
-            not in conv_ops
+            or maybe_conv_node.target not in conv_ops
         ):
             continue
         conv_node = maybe_conv_node
@@ -404,16 +403,20 @@ def _annotate_conv_relu(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    return _do_annotate_conv_relu(gm, quantization_config, filter_fn, is_conv_transpose=False)
+    return _do_annotate_conv_relu(
+        gm, quantization_config, filter_fn, is_conv_transpose=False
+    )
 
 
 @register_annotator("conv_transpose_relu")
-def _annotate_conv_relu(
+def _annotate_conv_transpose_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    return _do_annotate_conv_relu(gm, quantization_config, filter_fn, is_conv_transpose=True)
+    return _do_annotate_conv_relu(
+        gm, quantization_config, filter_fn, is_conv_transpose=True
+    )
 
 
 @register_annotator("conv_bn")
@@ -452,7 +455,9 @@ def _annotate_conv_transpose_bn(
     Find conv_transpose + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
-    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=False, is_conv_transpose=True)
+    return _do_annotate_conv_bn(
+        gm, quantization_config, filter_fn, has_relu=False, is_conv_transpose=True
+    )
 
 
 @register_annotator("conv_transpose_bn_relu")
@@ -465,7 +470,9 @@ def _annotate_conv_transpose_bn_relu(
     Find conv_transpose + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
-    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=True, is_conv_transpose=True)
+    return _do_annotate_conv_bn(
+        gm, quantization_config, filter_fn, has_relu=True, is_conv_transpose=True
+    )
 
 
 def _do_annotate_conv_bn(
