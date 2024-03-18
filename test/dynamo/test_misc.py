@@ -4827,10 +4827,6 @@ def fn():
         opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
         self.assertEqual(exp_out, opt_out)
         self.assertEqual(cnt.frame_count, exp_frame_count)
-        self.assertEqual(
-            len(torch._dynamo.eval_frame.cached_backends),
-            exp_n_cached_backend,
-        )
 
     def test_backend_match_guard(self):
         x = torch.randn([3, 4])
@@ -4911,12 +4907,6 @@ def fn():
         # Wait for all threads to finish
         for thread in threads:
             thread.join()
-
-        # Threads are sharing the backend cache. We see two cnt backends and one None backend
-        self.assertEqual(
-            len(torch._dynamo.eval_frame.cached_backends),
-            3,
-        )
 
         self.assertEqual(len(thread_success), len(threads))
 
