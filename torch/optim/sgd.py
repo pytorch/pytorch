@@ -53,10 +53,11 @@ class SGD(Optimizer):
                     has_sparse_grad = True
 
                 state = self.state[p]
-                if len(state) == 0:
-                    state['momentum_buffer'] = torch.clone(p.grad).detach()
+                if group['momentum'] != 0:
+                    if len(state) == 0:
+                        state['momentum_buffer'] = torch.clone(p.grad).detach()
 
-                momentum_buffer_list.append(state['momentum_buffer'])
+                    momentum_buffer_list.append(state['momentum_buffer'])
 
         return has_sparse_grad
 
