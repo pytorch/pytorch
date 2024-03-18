@@ -298,40 +298,8 @@ Tensor fromDLPack(DLManagedTensor* src) {
   return fromDLPack(src, std::move(deleter));
 }
 
-Tensor fromDLPack(const DLManagedTensor* src) {
-  auto deleter = [src](void* self) {
-    if (src->deleter) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      src->deleter(const_cast<DLManagedTensor*>(src));
-    }
-  };
-  return fromDLPack(src, std::move(deleter));
-}
-
 Tensor fromDLPack(
     DLManagedTensor* src,
-    std::function<void(void*)> deleter) {
-  Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
-  ScalarType stype = toScalarType(src->dl_tensor.dtype);
-  if (!src->dl_tensor.strides) {
-    return at::from_blob(
-        src->dl_tensor.data,
-        IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
-        std::move(deleter),
-        at::device(device).dtype(stype),
-        {device});
-  }
-  return at::from_blob(
-      src->dl_tensor.data,
-      IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
-      IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
-      deleter,
-      at::device(device).dtype(stype),
-      {device});
-}
-
-Tensor fromDLPack(
-    const DLManagedTensor* src,
     std::function<void(void*)> deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
