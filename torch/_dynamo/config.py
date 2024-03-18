@@ -323,7 +323,7 @@ numpy_default_int = "int64"
 use_numpy_random_stream = False
 
 # Use C++ guard manager
-enable_cpp_guard_manager = True
+enable_cpp_guard_manager = False
 
 
 def is_fbcode():
