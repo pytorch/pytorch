@@ -1526,6 +1526,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
 
+    bool computeDuration = enableTiming_.load();
+
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
@@ -1609,7 +1611,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Clean up completed work
       if (work.isCompleted()) {
         lastCompletedSeq_ = work.seq_;
-        NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_, computeDuration);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread

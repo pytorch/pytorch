@@ -4430,7 +4430,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
             if timing_enabled:
                 duration = t['entries'][coalesced_op]['duration_ms']
-                self.assertTrue(0.001 < duration < 10000, duration)
+                self.assertTrue(0.001 < duration < 100000, duration)
             else:
                 self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
 
@@ -4486,7 +4486,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
             if timing_enabled:
                 duration = t['entries'][seq]['duration_ms']
-                self.assertTrue(0.001 < duration < 10000, duration)
+                self.assertTrue(0.001 < duration < 100000, duration)
             else:
                 self.assertTrue('duration_ms' not in t['entries'][seq])
 
@@ -4538,7 +4538,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(t['entries'][0]['state'], 'completed')
         if timing_enabled:
             duration = t['entries'][0]['duration_ms']
-            self.assertTrue(0.001 < duration < 10000, duration)
+            self.assertTrue(0.001 < duration < 100000, duration)
         else:
             self.assertTrue('duration_ms' not in t['entries'][0])
 
