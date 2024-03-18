@@ -728,10 +728,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         super().__init__(m)
 
         assert len(flat_args_dynamic_dims) == len(flat_args)
-        matched_input_elements_to_fake = {
-            val: example_fake_inputs[ix]
-            for ix, val in enumerate(matched_input_elements_positions)
-        }
+        assert len(example_fake_inputs) >= len(matched_input_elements_positions)
+        matched_input_elements_to_fake = dict(zip(matched_input_elements_positions, example_fake_inputs))
 
         self.new_args = []
         for i in range(0, len(flat_args)):
