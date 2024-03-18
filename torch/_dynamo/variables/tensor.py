@@ -129,6 +129,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
+        _is_name_set=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -144,6 +145,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self._is_name_set = _is_name_set
 
     def as_proxy(self):
         return self.proxy
@@ -899,8 +901,9 @@ class TensorVariable(VariableTracker):
         # Only rename at the top-level scope, this is to avoid the confusion between
         # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
         # where mutation is prohibited and it's difficult to differentiate it with renaming.
-        if _is_top_level_scope(current_scope_id()):
+        if not self._is_name_set and _is_top_level_scope(current_scope_id()):
             self.proxy.node._rename(name)
+            self._is_name_set = True
 
 
 class SymNodeVariable(VariableTracker):
