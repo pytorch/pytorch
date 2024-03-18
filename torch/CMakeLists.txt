@@ -295,6 +295,11 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+if(BUILD_ONEDNN_GRAPH)
+  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_link_libraries(torch_python PRIVATE caffe2::mkldnn)
+endif()
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE numpy::numpy)
@@ -356,10 +361,6 @@ if(USE_UCC)
   target_compile_definitions(torch_python PRIVATE USE_UCC)
 endif()
 
-if(BUILD_ONEDNN_GRAPH)
-  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
-  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
-endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
