@@ -69,6 +69,7 @@ from .source import (
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
+    SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
 )
@@ -113,6 +114,39 @@ graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
+@dataclass(frozen=True)
+class VariableTrackerCacheKey:
+    vt_id: int
+    # Two different source can point to the same object. However, Dynamo handles
+    # globals and local source differently when it comes to guards and possibly
+    # some other parts as well. So, cache also relies on the source.
+    source: Source
+
+
+class VariableTrackerCache:
+    def __init__(self):
+        self.cache = {}
+
+    def lookup(self, value, source):
+        key = VariableTrackerCacheKey(id(value), source)
+        if key not in self.cache:
+            return None
+        return self.cache[key]
+
+    def add(self, value, source, vt):
+        key = VariableTrackerCacheKey(id(value), source)
+        self.cache[key] = vt
+
+    def clone(self):
+        # Needed for copy and restore graph state
+        new_cache = VariableTrackerCache()
+        new_cache.cache.update(self.cache)
+        return new_cache
+
+    def clear(self):
+        self.cache.clear()
+
+
 class OutputGraphState(NamedTuple):
     input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
@@ -122,6 +156,7 @@ class OutputGraphState(NamedTuple):
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
+    variable_tracker_cache: VariableTrackerCache
     timestamp: int
     non_compliant_ops: Set[torch._ops.OpOverload]
     compliant_custom_ops: Set[torch._ops.OpOverload]
@@ -320,6 +355,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
+        # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
+        # and LOAD_ATTR for same python objects free.
+        self.variable_tracker_cache = VariableTrackerCache()
+        self.unique_var_id = itertools.count()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
         # used to track nodes that are added between calls of copy_graphstate
@@ -388,13 +427,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = []
         self.random_values_var = None
 
+        # Bytecode to insert right before we call the graph
+        self.pregraph_bytecode: List[Instruction] = []
+
         # Use to pass values to backward hooks when using compiled autograd
         self.backward_state: Dict[str, VariableTracker] = {}
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-    def add_backward_state_hook(self, hook: VariableTracker):
-        name = f"hook{len(self.backward_state)}"
+    def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
+        name = f"{prefix}{len(self.backward_state)}"
         assert name not in self.backward_state
         self.backward_state[name] = hook
         return name, self.get_backward_state_proxy()
@@ -429,7 +471,27 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+    def synthetic_graph_input(self, fn, args):
+        """
+        call fn(*args) before the graph runs and turn the result into a fake input.
+        """
+        example_value = fn(*args)
+        varname = self.new_var()
+        cg = PyCodegen(self.root_tx)
+        cg.load_import_from(
+            fn.__module__,
+            fn.__name__,
+        )
+        cg.foreach(map(variables.ConstantVariable.create, args))
+        cg.call_function(len(args), True)
+        cg.store(varname)
+        self.pregraph_bytecode.extend(cg.get_instructions())
+        source = SyntheticLocalSource(varname)
+        result = VariableBuilder(self.root_tx, source)(example_value)
+        TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
+            source
+        )
+        return result
 
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
@@ -589,6 +651,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
+            self.variable_tracker_cache.clone(),
             self.timestamp,
             set(self.non_compliant_ops),
             set(self.compliant_custom_ops),
@@ -607,6 +670,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             global_state,
             self.param_name_to_source,
             self.side_effects,
+            self.variable_tracker_cache,
             self.timestamp,
             self.non_compliant_ops,
             self.compliant_custom_ops,
@@ -704,8 +768,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
-        for i in itertools.count():
-            var = f"{name}_{i}"
+        # In common case, this will be O(1)
+        while True:
+            var = f"{name}_{next(self.unique_var_id)}"
             if var not in existing:
                 self.code_options["co_varnames"] += (var,)
                 return var
@@ -885,6 +950,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
+        prefix_insts.extend(self.pregraph_bytecode)
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -1486,7 +1555,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         missing = fvs - symbol_to_proxy.keys()
                         if missing:
                             i1 = sorted(missing)[0]
-                            assert self.shape_env.is_unbacked_symint(i1), i1
+                            # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
+                            # assert self.shape_env.is_unbacked_symint(i1), i1
                             ras_by_symbol.setdefault(i1, []).append(ra)
                         else:
                             # Convert the sympy expression into a sequence of FX
@@ -1563,6 +1633,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+        self.variable_tracker_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
@@ -1574,6 +1645,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self, register_finalizer: Callable[[fx.GraphModule], None]
     ) -> None:
         self.register_finalizer_fns.append(register_finalizer)
+
+    def example_value_from_input_node(self, node: torch.fx.Node):
+        """Extract the non-fake example tensor"""
+        if node.op == "placeholder":
+            return node.meta["grapharg"].example
+        assert node.op == "get_attr"
+        return self.nn_modules[node.target]  # type: ignore[index]
 
 
 err_epilogue = (

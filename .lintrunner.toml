@@ -46,7 +46,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.11.1',
     'pyflakes==3.1.0',
-    'torchfix==0.4.0',
+    'torchfix==0.4.0 ; python_version >= "3.9"',
 ]
 
 
@@ -187,9 +187,12 @@ command = [
 code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
+    # Enable coverage of headers in aten/src/ATen
+    # and excluding most sub-directories for now.
+    'aten/src/ATen/*.h',
+    'aten/src/ATen/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
-    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
     'torch/csrc/*.h',
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
@@ -201,9 +204,7 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    'c10/**/cuda/*pp',
     'aten/**/cuda/*pp',
-    '**/cuda/*pp',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
