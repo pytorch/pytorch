@@ -656,6 +656,8 @@ class CompilationMetrics:
     fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+    restart_reasons: Set[str]
+    dynamo_time_before_restart_s: float
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
