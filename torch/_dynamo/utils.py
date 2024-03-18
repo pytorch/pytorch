@@ -628,8 +628,8 @@ def proxy_args_kwargs(args, kwargs):
         from .variables.base import typestr
 
         unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-            from_exc=e
+            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            from_exc=e,
         )
 
 

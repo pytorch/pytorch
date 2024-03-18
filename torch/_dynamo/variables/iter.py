@@ -88,7 +88,7 @@ class ItertoolsVariable(VariableTracker):
                         acc = func(tx, [acc, item], {})
                     except Exception as e:
                         unimplemented(
-                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
+                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})",
                             from_exc=e,
                         )
                 items.append(acc)
@@ -159,7 +159,7 @@ class ItertoolsVariable(VariableTracker):
                     )
             except Exception as e:
                 unimplemented(
-                    "Unexpected failure when calling itertools.groupby"
+                    "Unexpected failure when calling itertools.groupby",
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
