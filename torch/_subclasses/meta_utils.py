@@ -6,6 +6,7 @@ import weakref
 
 from dataclasses import dataclass
 from typing import (
+    Any,
     Callable,
     ContextManager,
     Dict,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import SymbolicContext
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 DimList = List
 
@@ -179,7 +180,7 @@ class MetaTensorDescriber:
             size=s.size(),
         )
 
-    def describe_tensor(self, t: torch.Tensor):
+    def describe_tensor(self, t: torch.Tensor, recurse: bool = True):
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -263,20 +264,22 @@ class MetaTensorDescriber:
             else None,
             dense_dim=t.dense_dim() if t.is_sparse or is_sparse_compressed(t) else None,
             is_coalesced=t.is_coalesced() if t.is_sparse else None,
-            crow_indices=self.describe_tensor(t.crow_indices())
-            if t.layout in {torch.sparse_csr, torch.sparse_bsr}
+            # TODO: I actually think recursing here is correct, but we have at
+            # least an infinite cycle from base -> values -> base
+            crow_indices=self.describe_tensor(t.crow_indices(), recurse=False)
+            if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
             else None,
-            col_indices=self.describe_tensor(t.col_indices())
-            if t.layout in {torch.sparse_csr, torch.sparse_bsr}
+            col_indices=self.describe_tensor(t.col_indices(), recurse=False)
+            if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
             else None,
-            ccol_indices=self.describe_tensor(t.ccol_indices())
-            if t.layout in {torch.sparse_csc, torch.sparse_bsc}
+            ccol_indices=self.describe_tensor(t.ccol_indices(), recurse=False)
+            if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
             else None,
-            row_indices=self.describe_tensor(t.row_indices())
-            if t.layout in {torch.sparse_csc, torch.sparse_bsc}
+            row_indices=self.describe_tensor(t.row_indices(), recurse=False)
+            if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
             else None,
-            values=self.describe_tensor(t.values())
-            if is_sparse_compressed(t)
+            values=self.describe_tensor(t.values(), recurse=False)
+            if recurse and is_sparse_compressed(t)
             else None,
             grad=self.describe_tensor(safe_grad(t))
             if safe_grad(t) is not None
@@ -292,7 +295,7 @@ class MetaTensorDescriber:
             else None,
             bdim=maybe_get_bdim(t) if is_batchedtensor_v else None,
             base=self.describe_tensor(t._base)
-            if t._is_view() and t._base is not None
+            if recurse and t._is_view() and t._base is not None
             else None,
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
             view_func=t._view_func_unsafe,
@@ -430,7 +433,7 @@ class MetaConverter:
     def meta_tensor(
         self,
         t: MetaTensorDesc,
-        shape_env=None,
+        shape_env: Optional[ShapeEnv] = None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
@@ -477,7 +480,7 @@ class MetaConverter:
         # This is too aggressive: we do duck sizing and 0/1 simplification
         # as we allocate variables, and we do need to register guards for
         # these cases.
-        maybe_suppress = contextlib.nullcontext
+        maybe_suppress: Callable[[], Any] = contextlib.nullcontext
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
@@ -494,14 +497,14 @@ class MetaConverter:
                 else:
                     # TODO: deduplicate this
                     t_size = tuple(
-                        shape_env.maybe_specialize_sym_int_with_hint(sz)
+                        shape_env._maybe_specialize_sym_int_with_hint(sz)
                         for sz in t.size
                     )
                     t_stride = tuple(
-                        shape_env.maybe_specialize_sym_int_with_hint(sd)
+                        shape_env._maybe_specialize_sym_int_with_hint(sd)
                         for sd in t.stride
                     )
-                    t_storage_offset = shape_env.maybe_specialize_sym_int_with_hint(
+                    t_storage_offset = shape_env._maybe_specialize_sym_int_with_hint(
                         t.storage_offset
                     )
                     return shape_env._create_symbolic_sizes_strides_storage_offset(
@@ -544,8 +547,9 @@ class MetaConverter:
             from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
 
             assert t.attrs is not None
-            assert t.ctx is not None
             assert t.type is not None
+            # NB: t.ctx could be None if the subclass in question has no
+            # meaningful context
 
             assert symbolic_context is None or isinstance(
                 symbolic_context, SubclassSymbolicContext
@@ -924,7 +928,6 @@ class MetaConverter:
                             assert t.unwrapped is not None
                             assert t.level is not None
                             disable_functorch = torch._C._DisableFuncTorch
-                            ft = get_unwrapped(t)
                             with disable_functorch():
                                 ft = _to_fake_tensor(t.unwrapped)
                             lvl = t.level

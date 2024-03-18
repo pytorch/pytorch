@@ -2290,9 +2290,9 @@ class ShapeEnv:
         introduce new symbolic variables.
         """
 
-        ex_size = tuple(self.maybe_specialize_sym_int_with_hint(sz) for sz in ex.size())
-        ex_stride = tuple(self.maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride())
-        ex_storage_offset = self.maybe_specialize_sym_int_with_hint(ex.storage_offset())
+        ex_size = tuple(self._maybe_specialize_sym_int_with_hint(sz) for sz in ex.size())
+        ex_stride = tuple(self._maybe_specialize_sym_int_with_hint(sd) for sd in ex.stride())
+        ex_storage_offset = self._maybe_specialize_sym_int_with_hint(ex.storage_offset())
 
         return self._create_symbolic_sizes_strides_storage_offset(
             ex_size,
@@ -2337,7 +2337,7 @@ class ShapeEnv:
     # The order of checking the guards matters. In this specific example:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
     # we may have an unnessary shape speciliazation for y.
-    def maybe_specialize_sym_int_with_hint(self, maybe_sym) -> int:
+    def _maybe_specialize_sym_int_with_hint(self, maybe_sym) -> int:
         assert isinstance(maybe_sym, (int, torch.SymInt))
         if is_symbolic(maybe_sym):
             assert maybe_sym.node.shape_env is not self, \
