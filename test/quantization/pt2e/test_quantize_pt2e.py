@@ -498,7 +498,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
-    def test_fixed_qparams_qspec(self):
+    def test_fixed_qparams_qspec_ptq(self):
+        self._test_fixed_qparams_qspec(is_qat=False)
+
+    # TODO: refactor and move this to test_quantize_pt2_qat.py
+    def test_fixed_qparams_qspec_qat(self):
+        self._test_fixed_qparams_qspec(is_qat=True)
+
+    def _test_fixed_qparams_qspec(self, is_qat: bool):
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.sigmoid(x)
@@ -534,7 +541,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        m = self._quantize(m, BackendAQuantizer(), example_inputs)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs, is_qat)
         fixed_scale = 1.0 / 256.0
         fixed_zero_point = 0
         for n in m.graph.nodes:
