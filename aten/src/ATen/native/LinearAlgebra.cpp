@@ -2815,7 +2815,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
   auto size = self.sizes();
-  
+
   bool all_reduction_dims_are_one_dimensional = true;
   if (opt_dim.has_value()) {
     for (const auto i : c10::irange(dim.size())) {
@@ -2834,7 +2834,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
       }
     }
   }
-  
+
   if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
     Tensor result_tmp = self.clone();
     if (!keepdim) {
@@ -2853,7 +2853,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     result.copy_(result_tmp);
     return;
   }
-  
+
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
   // https://github.com/pytorch/pytorch/issues/52648
