@@ -32,6 +32,10 @@ def is_available(tensors):
 
 
 def version():
+    if not hasattr(torch._C, "_nccl_version"):
+        warnings.warn("PyTorch is not compiled with NCCL support", stacklevel=2)
+        return (-1, -1, -1)
+
     ver = torch._C._nccl_version()
     major = ver >> 32
     minor = (ver >> 16) & 65535
