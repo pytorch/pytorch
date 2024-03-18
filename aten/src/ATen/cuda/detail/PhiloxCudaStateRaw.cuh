@@ -34,8 +34,8 @@ struct PhiloxCudaState {
     int64_t* ptr;
   };
 
-  Payload seed_;
-  Payload offset_;
+  Payload seed_{};
+  Payload offset_{};
   uint32_t offset_intragraph_ = 0;
   bool captured_ = false;
 };
