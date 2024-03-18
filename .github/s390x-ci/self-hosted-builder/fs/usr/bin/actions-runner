@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -e -u
+
+# Run one job.
+./run.sh --once

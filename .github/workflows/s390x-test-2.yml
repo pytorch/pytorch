@@ -1,0 +1,93 @@
+name: s390x-test-2
+on:
+  schedule:
+    - cron: 0 0 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: [linux.s390x]
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Prepare environment
+      run: |
+        virtualenv -p python3 --system-site-packages venv
+        source venv/bin/activate
+        pip install --upgrade setuptools
+        pip install --upgrade pytest
+        pip install --upgrade expecttest
+        pip install --upgrade typing_extensions
+        pip install --upgrade sympy
+        pip install --upgrade hypothesis
+        pip install --upgrade parameterized
+        pip install --upgrade psutil
+        pip install --upgrade protobuf
+        pip install --upgrade optree
+        pip install --upgrade future
+    - name: Build project
+      run: |
+        source venv/bin/activate
+        python setup.py bdist_wheel
+    - name: Install project
+      run: |
+        source venv/bin/activate
+
+        pip install dist/*.whl
+    - name: Run python tests
+      run: |
+        source venv/bin/activate
+
+        set +e
+
+        cd test
+
+        failedlist=""
+
+        for file in \
+            ./functorch/test_eager_transforms.py \
+            ./inductor/test_minifier_isolate.py \
+            ./jit/test_freezing.py \
+            ./nn/test_convolution.py \
+            ./nn/test_pooling.py \
+            ./test_autograd.py \
+            ./test_cpp_api_parity.py \
+            ./test_cpp_extensions_jit.py \
+            ./test_dispatch.py \
+            ./test_expanded_weights.py \
+            ./test_functionalization.py \
+            ./test_fx_experimental.py \
+            ./test_masked.py \
+            ./test_multiprocessing.py \
+            ./test_serialization.py \
+            ./test_spectral_ops.py \
+            ./test_tensor_creation_ops.py \
+            ./test_tensorexpr.py \
+            ./test_torch.py \
+            ./test_transformers.py \
+            ./test_utils.py \
+            ./test_view_ops.py \
+        ; do
+            echo "Running $file"
+            pytest -v "$file"
+            testresult=$?
+            if [ $testresult -ne 0 ] ; then
+                failedlist="$failedlist\n$file"
+            fi
+            echo "Finished running $file"
+        done
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi
