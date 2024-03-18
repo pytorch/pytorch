@@ -632,8 +632,9 @@ class MetaConverter:
                             r = _add_batch_dim(ft, bdim, lvl)
                         elif is_gradtrackingtensor(t):
                             disable_functorch = torch._C._DisableFuncTorch
+                            ft = get_unwrapped(t)
                             with disable_functorch():
-                                ft = _to_fake_tensor(get_unwrapped(t))
+                                ft = _to_fake_tensor(ft)
                             lvl = torch._C._functorch.maybe_get_level(t)
                             r = torch._C._functorch._wrap_for_grad(ft, lvl)
 
