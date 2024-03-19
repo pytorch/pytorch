@@ -737,6 +737,7 @@ class SimpleElasticAgent(ElasticAgent):
             return result
         except RendezvousGracefulExitError as e:
             log.info("Rendezvous gracefully exited: %s", e)
+            return RunResult(state=WorkerState.SUCCEEDED)
         except SignalException as e:
             log.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)
