@@ -5768,6 +5768,25 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(clamp_result_mps, clamp_result_cpu)
 
+    def test_clamp_nan(self):
+        t_mps = torch.tensor([torch.nan, 1, 2], device="mps")
+        t_cpu = torch.tensor([torch.nan, 1, 2], device="cpu")
+
+        clamp_min_max_mps = torch.clamp(t_mps, min=-100, max=100)
+        clamp_min_max_cpu = torch.clamp(t_cpu, min=-100, max=100)
+
+        self.assertEqual(clamp_min_max_mps, clamp_min_max_cpu)
+
+        clamp_min_mps = torch.clamp(t_mps, min=-100)
+        clamp_min_cpu = torch.clamp(t_cpu, min=-100)
+
+        self.assertEqual(clamp_min_mps, clamp_min_cpu)
+
+        clamp_max_mps = torch.clamp(t_mps, max=100)
+        clamp_max_cpu = torch.clamp(t_cpu, max=100)
+
+        self.assertEqual(clamp_max_mps, clamp_max_cpu)
+
     # Test clamp_min
     def test_clamp_min(self):
         def helper(n, c, h, w):
@@ -11390,6 +11409,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.gelu',
         'nn.functional.glu',
         '_native_batch_norm_legit',
+        '_batch_norm_with_update',
         'native_batch_norm',
         'softmax',
         '_softmax_backward_data',

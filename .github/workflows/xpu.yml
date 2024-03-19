@@ -13,7 +13,7 @@ concurrency:
 jobs:
   linux-jammy-xpu-py3_8-build:
     name: linux-jammy-xpu-py3.8
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-xpu-py3.8
       docker-image-name: pytorch-linux-jammy-xpu-2024.0-py3
