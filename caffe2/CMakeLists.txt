@@ -1137,17 +1137,6 @@ if(USE_XPU)
   #    compilation. add_custom_command requires an explicit dependency.
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
-  if(NOT EXISTS "${TORCH_ROOT}/third_party/torch-xpu-ops/.git")
-    execute_process(
-      COMMAND
-      git clone -b release/2.4 https://github.com/intel/torch-xpu-ops "${TORCH_ROOT}/third_party/torch-xpu-ops")
-  else()
-    execute_process(
-      COMMAND
-      git -C "${TORCH_ROOT}/third_party/torch-xpu-ops" pull)
-  endif()
-
-  set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
       ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
   if(NOT TARGET torch_xpu_ops)
