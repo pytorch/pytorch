@@ -1317,7 +1317,7 @@ void int8_gemm(
   cudaDataType_t abType = CUDA_R_8I;
   cudaDataType_t cType = CUDA_R_32I;
 
-  cuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
+  cublasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
