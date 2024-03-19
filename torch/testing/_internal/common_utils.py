@@ -2886,6 +2886,17 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
+        # For all tests, mock the tmp directory used by the inductor caches.
+        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
+        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
+            "torch._inductor.codecache.cache_dir"
+        )
+        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
+        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
+
+        # Uses a functools.lru_cache to keep a reference to the tmp dir:
+        torch._inductor.codecache.cpp_prefix_path.cache_clear()
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2899,6 +2910,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
+
+        # Clean up the inductor cache dir mock.
+        self._inductor_cache_get_tmp_dir_patch.stop()
+        self._inductor_cache_tmp_dir.cleanup()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
