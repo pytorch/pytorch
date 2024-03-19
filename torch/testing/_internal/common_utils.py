@@ -2912,8 +2912,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             assert torch.get_default_dtype() == torch.float
 
         # Clean up the inductor cache dir mock.
-        self._inductor_cache_get_tmp_dir_patch.stop()
-        self._inductor_cache_tmp_dir.cleanup()
+        if hasattr(self, '_inductor_cache_get_tmp_dir_patch'):
+            self._inductor_cache_get_tmp_dir_patch.stop()
+            self._inductor_cache_tmp_dir.cleanup()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
