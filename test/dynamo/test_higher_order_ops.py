@@ -2715,7 +2715,7 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
         _enter_dual_level = torch._C._enter_dual_level()
 
-        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+        _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions()
 
         child_9 = torch._make_dual(primal_1, t, level = 0);  t = None
 
@@ -2853,7 +2853,7 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
         _enter_dual_level = torch._C._enter_dual_level()
 
-        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+        _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions()
 
         child_15 = torch._make_dual(primal_1, t, level = 0);  t = None
 
@@ -4154,7 +4154,7 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
         _enter_dual_level = torch._C._enter_dual_level()
 
-        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+        _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions()
 
         _make_dual = torch._make_dual(primal_1, t, level = 0);  t = None
 
@@ -4243,7 +4243,7 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
         _enter_dual_level = torch._C._enter_dual_level()
 
-        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+        _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions()
 
         _make_dual = torch._make_dual(primal_1, t, level = 0);  t = None
 
@@ -4333,7 +4333,7 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
         _enter_dual_level = torch._C._enter_dual_level()
 
-        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+        _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions()
 
         _make_dual = torch._make_dual(primal_1, t, level = 0);  t = None
 
@@ -4428,7 +4428,7 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
         _enter_dual_level = torch._C._enter_dual_level()
 
-        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+        _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions()
 
         dual_1 = torch._make_dual(primal_4, t, level = 0);  t = None
 
