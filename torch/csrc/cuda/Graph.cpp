@@ -59,12 +59,13 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "register_generator_state",
           [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
-            py::gil_scoped_acquire acquire;
             auto generator = THPGenerator_Unwrap(raw_generator.ptr());
+            // We've unwrapped Python object to C++ object,
+            // so we could release GIL before calling into C++
+            py::gil_scoped_release release;
             return self.register_generator_state(generator);
           },
-          py::arg("generator"),
-          py::call_guard<py::gil_scoped_release>())
+          py::arg("generator"))
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))

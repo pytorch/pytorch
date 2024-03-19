@@ -145,8 +145,31 @@ void CUDAGeneratorState::register_to_graph(cuda::CUDAGraph* graph) {
     offset_extragraph_ = at::empty({1}, options);
   }
   is_gpu_tensor_allocated_ = true;
+}
 
-  // Resets graph-related state variables.
+/**
+ * Note [Explicit Registration of Generators to the CUDA Graph]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *
+ * Ideally, it would be more user-friendly if the state could be exchanged and generators
+ * could be registered with the CUDA graph implicitly. However, resetting GPU tensors during
+ * the capture stage causes these reset operations to be recorded within the CUDA graph.
+ * This behavior is undesirable because we do not want these tensors to be reset during
+ * the replay stage of the graph.
+ *
+ * As of now, there is no available method to perform a CUDA operation during the graph's
+ * recording phase without having that operation be included in the CUDA graph.
+ * This limitation necessitates explicit user action to register generators with the graph.
+ * By requiring users to manually register their generators, we can ensure that state resets
+ * (capture_prologue) only occur before the graph capture begins, thus avoiding unintended
+ * resets during the replay of the graph. See https://github.com/pytorch/pytorch/pull/114068.
+ */
+
+/**
+ * Performs the prologue steps for capturing a CUDA graph state.
+ * This method is intended to reset graph-related state variables before capturing begins.
+ */
+void CUDAGeneratorState::capture_prologue() {
   offset_intragraph_ = 0;
   seed_extragraph_.fill_(int64_t(seed_));
   offset_extragraph_.fill_(int64_t(0));
@@ -184,20 +207,19 @@ void CUDAGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
  * But jit kernels don't use curand, they use a custom "Philox" class (see
  * torch/csrc/jit/tensorexpr/cuda_random.h or
  * torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu).
- * The "Philox" constructor computes offset/4 (a uint64_t division) to locate
- * its internal start in its virtual bitstream viewed as 128-bit chunks, then,
- * when called in a thread, returns one 32-bit chunk at a time from that start
- * in the bitstream. In other words, if the incoming offset is not a multiple of
- * 4, each thread might repeat some previously-generated 32-bit values in the
- * bitstream. See https://github.com/pytorch/pytorch/pull/50169.
+ * The "Philox" constructor computes offset/4 (a uint64_t division) to locate its
+ * internal start in its virtual bitstream viewed as 128-bit chunks, then, when called
+ * in a thread, returns one 32-bit chunk at a time from that start in the bitstream.
+ * In other words, if the incoming offset is not a multiple of 4, each thread
+ * might repeat some previously-generated 32-bit values in the bitstream. See
+ * https://github.com/pytorch/pytorch/pull/50169.
  */
 
 /**
  * CUDAGeneratorImpl class implementation
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
-    : c10::GeneratorImpl{
-          Device(DeviceType::CUDA, device_index),
+  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
           DispatchKeySet(c10::DispatchKey::CUDA)} {
   at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
   state_ = make_intrusive<CUDAGeneratorState>();
@@ -209,7 +231,7 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(
     c10::intrusive_ptr<CUDAGeneratorState> state)
     : c10::
           GeneratorImpl{Device(DeviceType::CUDA, device_index), DispatchKeySet(c10::DispatchKey::CUDA)},
-      state_(state) {
+      state_(std::move(state)) {
   no_reset_rnn_state_.clear();
 }
 
@@ -283,18 +305,10 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = seed_size + offset_size;
 
-  auto state_tensor = at::detail::empty_cpu(
-      {(int64_t)total_size},
-      ScalarType::Byte,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt);
+  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
-  auto offset = static_cast<int64_t>(
-      this->philox_offset_per_thread()); // Note that old THCGeneratorState had
-                                         // offset as std::atomic<int64_t>
+  auto offset = static_cast<int64_t>(this->philox_offset_per_thread()); // Note that old THCGeneratorState had offset as std::atomic<int64_t>
   memcpy(rng_state, &current_seed, seed_size);
   memcpy(rng_state + seed_size, &offset, offset_size);
 

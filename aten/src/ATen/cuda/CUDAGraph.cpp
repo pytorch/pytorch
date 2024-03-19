@@ -91,7 +91,7 @@ CUDAGraph::CUDAGraph()
 
 void CUDAGraph::register_generator_state(
     c10::intrusive_ptr<at::CUDAGeneratorState> state) {
-  captured_generator_states_[state] = 0;
+  captured_generator_states_[std::move(state)] = 0;
 }
 
 void CUDAGraph::register_generator_state(const at::Generator& generator) {
@@ -110,10 +110,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-
-  auto gen_ptr =
-      c10::intrusive_ptr<CUDAGeneratorImpl>::unsafe_reclaim_from_nonowning(gen);
   gen->register_to_graph(this);
+
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    generator_state->capture_prologue();
+  }
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
