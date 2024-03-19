@@ -39,8 +39,8 @@ dead_code_elimination = True
 # [@compile_ignored: runtime_behaviour]
 cache_size_limit = 8
 
-# [@compile_ignored: runtime_behaviour] controls the maximum number of entries for a code object.
-accumulated_cache_size_limit = 64
+# [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
+accumulated_cache_size_limit = 256
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -352,11 +352,6 @@ _save_config_ignore = {
     # workaround: "cannot pickle module"
     "skipfiles_inline_module_allowlist",
 }
-
-# for backend="cudagraphs", mutations on input be sent to the cudagraph backend
-# or replayed in aot_autograd epilogue. default is False because mutation on inputs
-# can prevent cudagraphing.
-cudagraph_backend_keep_input_mutation = False
 
 # When True, only ops that have the torch.Tag.pt2_compliant tag
 # will be allowed into the graph; all other ops will be disallowed
