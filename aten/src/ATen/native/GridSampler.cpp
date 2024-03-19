@@ -181,7 +181,7 @@ namespace {
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
 
-                // assign nearest neighor pixel value to output pixel
+                // assign nearest neighbour pixel value to output pixel
                 scalar_t *out_ptr_NCDHW = out_ptr + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
                 scalar_t *inp_ptr_NC = inp_ptr_N;
                 for (int64_t c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
@@ -422,7 +422,7 @@ namespace {
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
 
-                // assign nearest neighor pixel value to output pixel
+                // assign nearest neighbour pixel value to output pixel
                 scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
                 if (input_requires_grad) {
                   scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
@@ -652,7 +652,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
             int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
             int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
 
-            // assign nearest neighor pixel value to output pixel
+            // assign nearest neighbour pixel value to output pixel
             scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
             scalar_t *inp_ptr_NC = inp_ptr_N;
             for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
@@ -682,7 +682,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               scalar_t coefficients[4];
 
-              // Interpolate 4 values in the x directon
+              // Interpolate 4 values in the x direction
               for (const auto i : c10::irange(4)) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
@@ -847,7 +847,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
             int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
 
-            // assign nearest neighor pixel value to output pixel
+            // assign nearest neighbour pixel value to output pixel
             scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
             scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC) {

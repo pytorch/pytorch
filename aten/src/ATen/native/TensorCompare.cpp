@@ -13,6 +13,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <iostream>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,6 +23,7 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
+#include <ATen/ops/_print_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -71,6 +73,7 @@
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
 
+#include <iostream>
 #include <utility>
 #endif
 
@@ -440,6 +443,9 @@ Tensor _functional_assert_async_msg_cpu(
   return dep_token.clone();
 }
 
+void _print(c10::string_view s) {
+  std::cout << s << "\n";
+}
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
@@ -502,17 +508,13 @@ Device out_device(Args&... inps){
 
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  Tensor self_, other_, condition_;
-  if (self.dtype() != other.dtype()) {
-    auto result_type = at::native::result_type(self, other);
-    self_ = self.to(result_type);
-    other_ = other.to(result_type);
-  } else {
-    self_ = self;
-    other_ = other;
-  }
+  const auto result_type = at::native::result_type(self, other);
+  TORCH_CHECK(out.scalar_type() == result_type, "Expected out type to be ", result_type, " but got ", out.scalar_type());
+
+  auto self_ = self.scalar_type() != result_type ? self.to(result_type): self;
+  auto other_ = other.scalar_type() != result_type ? other.to(result_type): other;
+  auto condition_ = condition;
   auto device = out_device(condition, self_, other_);
-  condition_ = condition;
   if (device != at::kCPU) { // allow CPU scalars on non-cpu device
     if (condition.device() != device && condition.ndimension() == 0) {
       condition_ = condition.to(device);
@@ -524,12 +526,11 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
         other_ = other_.to(device);
     }
   }
-  if (condition.scalar_type() == ScalarType::Byte) {
-  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  if (condition_.scalar_type() == ScalarType::Byte) {
+    TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+    condition_ = condition_.to(kBool);
   }
-  condition_ = condition_.scalar_type() == ScalarType::Byte ? condition_.to(ScalarType::Bool) : condition_;
+  TORCH_CHECK(condition_.scalar_type() == kBool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition_.scalar_type());
   // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)

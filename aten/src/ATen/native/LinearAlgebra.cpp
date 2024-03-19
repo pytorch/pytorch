@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -29,12 +30,15 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
+#include <ATen/ops/_convert_weight_to_int4pack_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
 #include <ATen/ops/_linalg_slogdet.h>
 #include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/_weight_int4pack_mm_native.h>
+#include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -1022,7 +1026,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
 
     // If the last and last tensors have shapes (a, b) and (b, c) the
     // output has shape (a, c). If either the first or last tensor is 1D
-    // a and/or c dimensions will be implicitely size 1 and will be ommited
+    // a and/or c dimensions will be implicitly size 1 and will be omitted
     // from the output. e.g. for inputs (a, b) x (b) the output has shape (a,).
     at::native::resize_output(out, out_shape);
 
@@ -1172,9 +1176,9 @@ static TensorIterator build_addr_iter(Tensor& result,
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
-    .add_owned_input(*self_)
-    .add_owned_input(vec1.reshape({vec1_size0, 1}))
-    .add_input(vec2)
+    .add_owned_const_input(*self_)
+    .add_owned_const_input(vec1.reshape({vec1_size0, 1}))
+    .add_const_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -1809,7 +1813,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
      * vs. other threads, leading to undefined behavior.
      * Thus it is recommended to not use at::parallel_for where lambdas do
      * ops that go through dispatcher.
-     * For now we circument this by InferenceMode guard in order to unlock
+     * For now we circumvent this by InferenceMode guard in order to unlock
      * performance.
      * Longer term we probably want a separate API that explicitly calls out
      * the TLS that it propagates.
@@ -1835,6 +1839,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
@@ -1851,6 +1857,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
@@ -1946,7 +1954,7 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   // The output gradient g of this operation would have shape [b, m, k]
   // The backward wrt. t2 of bmm would be given by t1.mH @ g, which has shape [b, n, k]
   // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
-  // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
+  // of shape [b, n, k] unnecessarily, which may cause a large memory footprint, and in the
   // worst case, an OOM
   bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
   if (t2_requires_grad && !has_out) {
@@ -2602,7 +2610,7 @@ Tensor compute_T18_scale_square(
   auto scs = section_values. template data_ptr<int64_t>();
   auto pts = &scs[section_numel];
 
-  // We now will do the matrix muplication in a batch, with above example:
+  // We now will do the matrix multiplication in a batch, with above example:
   // 1. Multiply all matrices by 0 (`mul_times[0]`) times, then do `slice`
   // to get the remain matrices by acc[1:] (`split_counts[0]`),
   // 2. Multiply remain matrices by 1 times and slice to acc[2:]
@@ -2761,7 +2769,7 @@ Tensor backward_analytic_function_of_a_matrix(
 } // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
-// The implementaion is based on:
+// The implementation is based on:
 //
 // Bader, P.; Blanes, S.; Casas, F.
 // Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
@@ -2812,7 +2820,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // Reductions always use `std::abs` to compute the absolute value. In the backward of this
   // function, we need to locate the index that was selected as the largest value. To do so
   // we do self.abs() == result to locate the index of the largest element.
-  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // Now, self.abs() may dispatch to a vectorized implementation which gives slightly different
   // results to the std::abs(std::complex<T>) implementation.
   // As such, to be able to compute the correct index in the backward, we need to use self.abs()
   // both in the forward and in the backward
@@ -3382,6 +3390,120 @@ Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor kron(const Tensor& self, const Tensor& other) {
   return KronImpl(self, other).kron();
+}
+
+// Weight Only Quantization Gemm
+DEFINE_DISPATCH(weight_to_int4pack_stub);
+DEFINE_DISPATCH(int4pack_mm_stub);
+DEFINE_DISPATCH(int8pack_mm_stub);
+
+Tensor _convert_weight_to_int4pack_cpu(
+    const Tensor& in,
+    int64_t innerKTiles) {
+
+  TORCH_CHECK(in.dim() == 2,
+      __func__, " : expect weight to be 2D tensor.");
+  TORCH_CHECK(in.dtype() == at::kInt,
+      __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
+      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
+
+  auto weight = in.contiguous();
+  auto N = weight.size(0);
+  auto K = weight.size(1);
+
+  // Create fake shapes for cpu. The meta registration in dynamo requires
+  // operator has the same output shape for each device. So creating a fake
+  // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
+  constexpr int64_t kNTileSize = 8;
+  constexpr int64_t kKTileSize = 16;
+  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
+
+  TORCH_CHECK(N % 16 == 0,
+      __func__, " : expect N to be dividable by 16");
+  const int64_t kSuperKTileSize = kKTileSize * innerKTiles;
+  TORCH_CHECK( K % kSuperKTileSize == 0,
+      __func__, " : epxect K to be dividable by ", kSuperKTileSize);
+  auto kSuperTiles = (K + kSuperKTileSize - 1) / kSuperKTileSize;
+
+  auto weight_packed = at::empty(
+      {nTiles, kSuperTiles, 32, innerKTiles / 2},
+      at::TensorOptions().dtype(at::kInt));
+
+  weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
+  return weight_packed;
+}
+
+Tensor _weight_int4pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    int64_t qGroupSize,
+    const Tensor& qScaleAndZeros) {
+
+  constexpr int64_t kNTileSize = 8;
+
+  auto M = A.size(0);
+  auto N = B.size(0) * kNTileSize;
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16,
+      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kInt,
+      __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.dim() == 4,
+      __func__, " : expect B to 4d tensor.");
+
+  TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
+      || qGroupSize == 256,
+      __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+
+  TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
+      && qScaleAndZeros.size(2) == 2,
+      __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
+
+  auto C = at::empty({M, N}, A.options());
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
+
+  return C;
+}
+
+Tensor _weight_int8pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16,
+      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kChar,
+      __func__, " : expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K,
+      __func__, " : expect B.size(1) == ", K);
+
+  TORCH_CHECK(scales.dim() == 1 && scales.size(0) == N,
+      __func__, " : expect scales to be 1d tensor with size ", N);
+
+  auto C = at::empty({M, N}, A.options());
+  int8pack_mm_stub(kCPU, C, A, B, scales);
+
+  return C;
 }
 
 } // namespace native

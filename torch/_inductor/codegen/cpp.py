@@ -7,6 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
+from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -16,13 +17,19 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import BaseScheduling, SchedulerNode
+from ..scheduler import (
+    BaseScheduling,
+    ForeachKernelSchedulerNode,
+    FusedSchedulerNode,
+    SchedulerNode,
+)
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
@@ -230,11 +237,32 @@ def reduction_project(reduction_type, acc):
     return acc
 
 
+def is_to_lowp_dtype(expr):
+    to_exprs = ["cvt_fp32_to_lowp_fp", "c10::convert"]
+    if any(to_expr in expr for to_expr in to_exprs):
+        if "half" in expr:
+            return torch.half
+        if "bfloat16" in expr:
+            return torch.bfloat16
+    return None
+
+
+def get_lowp_to_fp32_expr(lowp_var, src_dtype, kernel):
+    if isinstance(kernel, CppVecKernel):
+        return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[src_dtype]}>({lowp_var})"
+    else:
+        assert isinstance(kernel, CppKernel)
+        return f"c10::convert<float>({lowp_var})"
+
+
 index_value_name_counter = 1
 
 
 def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     global index_value_name_counter
+    num_threads = (
+        "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+    )
     struct_name = f"IndexValue_{index_value_name_counter}"
     index_value_name_counter += 1
 
@@ -243,20 +271,14 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
         f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
-
-    if reduction_type in ["argmax", "argmin"]:
-        compare_op = "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
-        prefix.extend(
-            [
-                "#if !defined(__clang_major__) || __clang_major__ > 9",
-                f"#pragma omp declare reduction({reduction_type} : {struct_name} :\\",
-                f"    omp_out = {compare_op}(omp_in.value, omp_out.value, omp_in.index, omp_out.index) ? omp_in : omp_out)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
-                "#endif",
-            ]
-        )
-
-    return prefix
+    local_init = [
+        f"{struct_name} {tmpvar}_local{{0, {reduction_init(reduction_type, src_dtype)}}};",
+    ]
+    tmpvar_per_thd = f"{tmpvar}_arr[{num_threads}]"
+    parallel_prefix = [
+        f"{struct_name} {tmpvar_per_thd};",
+    ]
+    return prefix, parallel_prefix, local_init
 
 
 @functools.lru_cache
@@ -787,6 +809,23 @@ class CppOverrides(OpOverrides):
         return f"std::copysign({x}, {y})"
 
     @staticmethod
+    def frexp(x):
+        cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
+        if all(cache_key in V.kernel.cse.cache for cache_key in cache_keys):
+            return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
+
+        code = BracesBuffer()
+        exponent = V.kernel.cse.newvar()
+        mantissa = V.kernel.cse.newvar()
+        code.writeline(f"int32_t {exponent};")
+        code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
+        V.kernel.compute.splice(code)
+        cse_vars = (mantissa, exponent)
+        for cache_key, cse_var in zip(cache_keys, cse_vars):
+            V.kernel.cse.cache[cache_key] = cse_var
+        return mantissa, exponent
+
+    @staticmethod
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
 
@@ -924,17 +963,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def sign(x):
         code = BracesBuffer()
-        # auto tmp5 = tmp4 < 0 ? -1 : 1;
-        left = V.kernel.cse.newvar()
-        right = V.kernel.cse.newvar()
-        result = V.kernel.cse.newvar()
         scalar_zero = f"decltype({x})(0)"
         scalar_one = f"decltype({x})(1)"
-        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
-        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
-        code.writeline(f"auto {result} = {left} - {right};")
-        V.kernel.compute.splice(code)
-        return result
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f"auto left = {x} > 0 ? {scalar_one} : {scalar_zero};")
+            code.writeline(f"auto right = {x} < 0 ? {scalar_one} : {scalar_zero};")
+            code.writeline("return left - right;")
+        code.writeline("()")
+        return code
 
 
 CppOverrides._initialize_pointwise_overrides("cpp")
@@ -1284,21 +1321,17 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def sign(x):
         code = BracesBuffer()
-        # auto tmp5 = tmp4 < 0 ? -1 : 1;
         vec_zero = f"decltype({x})(0)"
         vec_one = f"decltype({x})(1)"
-        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
-        left = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {blendv};")
-
-        # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
-        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
-        right = V.kernel.cse.newvar()
-        code.writeline(f"auto {right} = {blendv};")
-        result = V.kernel.cse.newvar()
-        code.writeline(f"auto {result} = {left} - {right};")
-        V.kernel.compute.splice(code)
-        return result
+        blendv_l = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
+        blendv_r = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f"auto left = {blendv_l};")
+            code.writeline(f"auto right = {blendv_r};")
+            code.writeline("return left - right;")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
@@ -1393,6 +1426,10 @@ class CppVecOverrides(CppOverrides):
         other_code_vec = f"{V.kernel._get_vec_type(torch.float)}({other_code})"
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec or result.is_vec:
+            if result.dtype != torch.float:
+                raise CppVecUnsupportedError(
+                    "masked with non-float tensor is not supported in vectorized codegen"
+                )
             type = f"decltype({body_code_vec})"
             float_mask = f"to_float_mask({new_mask})"
             code = BracesBuffer()
@@ -1470,12 +1507,72 @@ class CppKernel(Kernel):
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = IndentedBuffer()
-        self.reduction_var_map = {}
+        self.parallel_reduction_prefix = IndentedBuffer()
+        self.parallel_reduction_suffix = IndentedBuffer()
+        self.local_reduction_init = IndentedBuffer()
+        self.local_reduction_stores = IndentedBuffer()
+        self.is_reduction = False
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+
+    def _gen_parallel_reduction_buffers(
+        self,
+        acc,
+        acc_type,
+        reduction_type,
+        dtype,
+        reduction_combine_fn=reduction_combine,
+        reduction_init_fn=reduction_init,
+    ):
+        if config.cpp.dynamic_threads and not self.parallel_reduction_prefix:
+            self.parallel_reduction_prefix.writeline(
+                "int max_threads = omp_get_max_threads();"
+            )
+        acc_local = f"{acc}_local"
+        num_threads = (
+            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+        )
+        acc_per_thread = f"{acc}_arr[{num_threads}]"
+        acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
+        self.local_reduction_init.writeline(
+            f"{acc_type} {acc_local} = {reduction_init_fn(reduction_type, dtype)};"
+        )
+        self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thread};")
+        self.parallel_reduction_prefix.writelines(
+            [
+                f"for (int tid = 0; tid < {num_threads}; tid++)",
+                "{",
+                f"    {acc_local_in_array} = {reduction_init_fn(reduction_type, dtype)};",
+                "}",
+            ],
+        )
+        self.local_reduction_stores.writelines(
+            [
+                f"{acc_local_in_array} = {acc_local};",
+            ]
+        )
+        self.parallel_reduction_suffix.writelines(
+            [
+                f"for (int tid = 0; tid < {num_threads}; tid++)",
+                "{",
+                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array)};",
+                "}",
+            ],
+        )
+
+    def get_reduction_var_pattern(self, line: str):
+        return re.search("tmp_acc[0-9]+", line)
+
+    def update_stores_with_parallel_reduction(self):
+        for i, line in enumerate(self.stores._lines):
+            if isinstance(line, str):
+                m = self.get_reduction_var_pattern(line)
+                if m:
+                    var_name = m.group(0)
+                    self.stores._lines[i] = line.replace(var_name, f"{var_name}_local")
 
     @contextlib.contextmanager
     def masked(self, mask):
@@ -1495,6 +1592,68 @@ class CppKernel(Kernel):
             yield mask
         finally:
             self._load_mask = prior
+
+    def cache_fp32_cse_var_before_lowp_store(self, var_to_store):
+        """
+        https://github.com/pytorch/pytorch/issues/115260
+        For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
+        in low-precision floating point data type. When the output of node1 also serves as the output of the
+        kernel, the result of nodes would be different from the case when output of node1 is not the output
+        of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
+        storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
+        to the cse cache.
+
+        Example (pseudo code):
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = load(buf)
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        Without cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        With cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = node1_output # hit cse cache
+        """
+
+        if var_to_store.dtype not in DTYPE_LOWP_FP:
+            # only need to cache fp32 cse var while var_to_store is lowp data
+            return
+
+        def find_fp32_var(var, cache):
+            fp32_cse_var = None
+            fp32_cse_var_name = None
+            lowp_dtype = None
+            for expr, cse_var in cache.items():
+                if cse_var == var:
+                    lowp_dtype = is_to_lowp_dtype(expr)
+                    if lowp_dtype:
+                        m = re.search(r"tmp\d+", expr)
+                        assert m
+                        fp32_cse_var_name = m.group()
+            if fp32_cse_var_name:
+                for cse_var in cache.values():
+                    if cse_var.name == fp32_cse_var_name:
+                        fp32_cse_var = cse_var
+                        break
+                assert fp32_cse_var is not None
+            return fp32_cse_var, lowp_dtype
+
+        fp32_var, lowp_dtype = find_fp32_var(var_to_store, self.cse.cache)
+        if fp32_var:
+            self.cse.cache[
+                get_lowp_to_fp32_expr(var_to_store, lowp_dtype, self)
+            ] = fp32_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1540,6 +1699,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
+        self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -1547,6 +1707,9 @@ class CppKernel(Kernel):
             if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
+                dtype = V.graph.get_dtype(name)
+                # mirroring static_cast<float>(...) in load:
+                value = f"static_cast<{DTYPE_TO_CPP[dtype]}>({value})"
                 line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
@@ -1562,11 +1725,14 @@ class CppKernel(Kernel):
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
-        self.reduction_var_map[acc] = reduction_type
+        self.is_reduction = True
         if argmax_or_argmin:
-            self.reduction_prefix.writelines(
-                argmax_argmin_prefix(reduction_type, src_dtype, acc)
+            prefix, parallel_prefix, local_init = argmax_argmin_prefix(
+                reduction_type, src_dtype, acc
             )
+            self.local_reduction_init.writelines(local_init)
+            self.reduction_prefix.writelines(prefix)
+            self.parallel_reduction_prefix.writelines(parallel_prefix)
             compare_op = (
                 "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
             )
@@ -1579,25 +1745,29 @@ class CppKernel(Kernel):
                     f"if(!({compare_op}({acc}.value, {value}, {acc}.index, {cexpr_index(index)}))) {{",
                     f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
+                ]
+            )
+            acc_local = f"{acc}_local"
+            num_threads = parallel_num_threads()
+            acc_per_thread = f"{acc}_arr[{num_threads}]"
+            acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
+            self.parallel_reduction_suffix.writelines(
+                [
+                    f"for (int tid = 0; tid < {num_threads}; tid++)",
+                    "{",
+                    f"    if(!({compare_op}({acc}.value, {acc_local_in_array}.value, {acc}.index, {acc_local_in_array}.index))) {{",
+                    f"        {acc}.index = {acc_local_in_array}.index; {acc}.value = {acc_local_in_array}.value;",
+                    "    }",
+                    "}",
                 ],
+            )
+            self.local_reduction_stores.writelines(
+                [
+                    f"{acc_local_in_array} = {acc_local};",
+                ]
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
-
-            if (reduction_type, acc_type) not in self.reduction_omp_dec:
-                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                    # Scalar reduction for other reductions are declared by default
-                    self.reduction_prefix.splice(
-                        f"""\
-    #pragma omp declare reduction(\
-    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-                """
-                    )
-                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
-                    reduction_type
-                ]
 
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
@@ -1605,7 +1775,7 @@ class CppKernel(Kernel):
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
-
+            self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, dtype)
         result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
@@ -1671,42 +1841,63 @@ class CppKernel(Kernel):
                 if hasattr(kernel, "codegen_inner_loops"):
                     code.splice(kernel.poststores)
 
-            def get_reduction_code_buffer(loops, is_suffix=True):
+            def get_reduction_code_buffer(loops, buffer="prefix"):
+                assert buffer in ("prefix", "suffix", "local")
                 for loop in loops:
                     for kernel in loop.get_kernels():
-                        if is_suffix:
-                            return kernel.reduction_suffix
+                        if buffer == "local":
+                            return (
+                                kernel.local_reduction_init,
+                                kernel.local_reduction_stores,
+                            )
+                        elif buffer == "suffix":
+                            suffix = kernel.reduction_suffix
+                            if loop.parallel:
+                                suffix = kernel.parallel_reduction_suffix + suffix
+                            return suffix
                         else:
-                            return kernel.reduction_prefix
-                return None
+                            prefix = kernel.reduction_prefix
+                            if loop.parallel:
+                                prefix = prefix + kernel.parallel_reduction_prefix
+                            return prefix
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
+                    local_reduction_init = local_reduction_stores = None
                     if loops:
                         loop = loops[0]
-                        if loop.is_reduction() and not in_reduction:
-                            reduction_prefix = get_reduction_code_buffer(
-                                loops, is_suffix=False
-                            )
+                        if loop.is_reduction and not in_reduction:
+                            reduction_prefix = get_reduction_code_buffer(loops)
                             if reduction_prefix:
                                 stack_outer.enter_context(code.indent())
                             code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
+                            (
+                                local_reduction_init,
+                                local_reduction_stores,
+                            ) = get_reduction_code_buffer(loops, "local")
                             worksharing.parallel(threads)
+                            if local_reduction_init:
+                                assert local_reduction_stores
+                                code.splice(local_reduction_init)
 
                     for loop in loops:
-                        gen_loop(loop, in_reduction)
+                        gen_loop(loop)
 
                     if loops:
                         loop = loops[0]
                         if loop_nest.is_reduction_only() and loop.parallel:
+                            if local_reduction_stores:
+                                code.splice(local_reduction_stores)
                             worksharing.close()
-                        if loop.is_reduction() and not in_reduction:
-                            code.splice(
-                                get_reduction_code_buffer(loops, is_suffix=True)
-                            )
+                        if loop.is_reduction and not in_reduction:
+                            code.splice(get_reduction_code_buffer(loops, "suffix"))
 
-            def gen_loop(loop: LoopLevel, in_reduction=False):
+            def gen_loop(loop: LoopLevel):
+                def is_parallel_reduction(loop):
+                    root = loop.get_root()
+                    return root.is_reduction and root.parallel
+
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
                     if loop_lines is None:
@@ -1715,10 +1906,12 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
                     if loop.inner:
-                        gen_loops(loop.inner, loop.is_reduction())
+                        gen_loops(loop.inner, loop.is_reduction)
                     else:
                         kernels = loop.get_kernels()
                         assert len(kernels) == 1
+                        if is_parallel_reduction(loop):
+                            kernels[0].update_stores_with_parallel_reduction()
                         gen_kernel(kernels[0])
 
             stack.enter_context(code.indent())
@@ -1808,6 +2001,9 @@ class CppVecKernel(CppKernel):
             return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>"
         else:
             return f"at::vec::VectorizedN<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
+
+    def get_reduction_var_pattern(self, line: str):
+        return re.search("tmp_acc[0-9]+_vec", line)
 
     def _get_vec_load_line(
         self,
@@ -2046,6 +2242,7 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
+        self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         self.stores.writeline(
             DeferredLine(
@@ -2071,47 +2268,20 @@ class CppVecKernel(CppKernel):
         if not value.is_vec:
             value = self.broadcast(value)
 
-        acc_type = reduction_acc_type(reduction_type, dtype)
-        acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
-
-        if (reduction_type, acc_type) not in self.reduction_omp_dec:
-            if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                # Scalar reduction for other reductions are declared by default
-                self.reduction_prefix.splice(
-                    f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-            """
-                )
-            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
-                reduction_type
-            ]
-
-        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
-            self.reduction_prefix.splice(
-                f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
-omp_out = {self.reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
-            """
-            )
-            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
-                reduction_type
-            ]
-
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
+
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+        acc_type = reduction_acc_type(reduction_type, dtype)
+        acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
 
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
         acc_vec = f"{acc}_vec"
-
-        self.reduction_var_map[acc_vec] = reduction_type
+        self.is_reduction = True
         self.reduction_prefix.writeline(
             f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
         )
@@ -2121,7 +2291,20 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
         self.stores.writeline(
             f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
         )
-
+        self._gen_parallel_reduction_buffers(
+            acc,
+            acc_type,
+            reduction_type,
+            dtype,
+        )
+        self._gen_parallel_reduction_buffers(
+            acc_vec,
+            acc_type_vec,
+            reduction_type,
+            dtype,
+            reduction_combine_fn=self.reduction_combine_vec,
+            reduction_init_fn=self.reduction_init_vec,
+        )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2684,6 +2867,8 @@ class CppVecKernelChecker(CppVecKernel):
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
 
+        parent_handler = V.MockHandler()
+
         class VecCheckerProxy:
             bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
 
@@ -2702,7 +2887,9 @@ class CppVecKernelChecker(CppVecKernel):
 
                     if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
-                    return self.simd_vec
+
+                    parent_val = getattr(parent_handler, name)(*args, **kwargs)
+                    return pytree.tree_map(lambda _: self.simd_vec, parent_val)
 
                 return inner
 
@@ -2861,6 +3048,7 @@ class CppVecKernelChecker(CppVecKernel):
                                 torch.float16,
                                 torch.bfloat16,
                                 torch.float,
+                                torch.float64,
                                 torch.uint8,
                                 torch.int8,
                                 torch.int32,
@@ -3346,6 +3534,12 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
+class ReasonFusedNodes(Enum):
+    SAME_VARS_REDUCE = "same_vars_reduce"
+    COMPATIBLE_REDUCTION = "compatible_reduction"
+    COMPATIBLE_RANGES_NO_REDUCTION = "compatible_ranges_no_reduction"
+
+
 class CppScheduling(BaseScheduling):
     # ctypes limits the number of args to 1024, refer to:
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
@@ -3364,23 +3558,122 @@ class CppScheduling(BaseScheduling):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def get_kernel_group(self):
-        from .cpp_wrapper_cpu import CppWrapperCodeGen
+        from .cpp_wrapper_cpu import CppWrapperCpu
 
         self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
-        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
             self.kernel_group = CppWrapperKernelGroup()
         else:
             self.kernel_group = KernelGroup()
 
-    def _can_fuse_horizontal_impl(self, node1, node2):
+    def fuse(self, node1, node2):
+        if node1.is_foreach() or node2.is_foreach():
+            return ForeachKernelSchedulerNode.fuse(node1, node2)
+        else:
+            if (
+                self._why_fuse_nodes(node1, node2)
+                == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
+            ):
+                assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+                assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+
+                _, (vars1, reduce1) = node1.group
+                _, (vars2, reduce2) = node2.group
+                assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
+
+                def get_indexing_ranges_exprs(node):
+                    if isinstance(node, FusedSchedulerNode):
+                        assert len(node.snodes) > 0
+                        return get_indexing_ranges_exprs(node.snodes[0])
+                    else:
+                        assert isinstance(node, SchedulerNode)
+                        comp_buffer = node.node
+                        assert isinstance(comp_buffer, ir.ComputedBuffer)
+                        _, body, _ = comp_buffer.get_default_sizes_body()
+                        return body.var_ranges, list(body.indexing_exprs.values())
+
+                node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+                assert isinstance(node_to_recomp, SchedulerNode)
+
+                ref_node = node2 if len(vars1) < len(vars2) else node1
+
+                extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+
+                node_to_recomp.recompute_size_and_body(
+                    extra_indexing_constraints=extra_indexing_constraints
+                )
+
+                _, (vars1, _) = node1.group
+                _, (vars2, _) = node2.group
+                assert vars1 == vars2, (vars1, vars2)
+
+            return FusedSchedulerNode.fuse(node1, node2)
+
+    def _why_fuse_nodes(self, node1, node2) -> Optional[ReasonFusedNodes]:
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
+
         if vars1 == vars2 and reduce1 == reduce2:
-            return True
+            return ReasonFusedNodes.SAME_VARS_REDUCE
         if reduce1 == () and vars1 == vars2 + reduce2:
-            return True
+            return ReasonFusedNodes.COMPATIBLE_REDUCTION
+        if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
+            return ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
-        return False
+        return None
+
+    def _can_fuse_nodes_with_compatible_ranges(self, node1, node2):
+        # Here we try to fuse SchedulerNode/FusedSchedulerNode with compatible ranges
+        # e.g. (s0, s1, s2) and (s0 * s1 * s2)
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+
+        c1 = reduce1 == () and reduce2 == ()
+        c2 = math.prod(vars1) == math.prod(vars2)
+        c3 = len(vars1) == 1 or len(vars2) == 1
+        if not (c1 and c2 and c3):
+            return False
+
+        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+        ref_node = node2 if len(vars1) < len(vars2) else node1
+
+        # We can not recompute sizes and body for nodes other than SchedulerNode
+        # TODO: we can extend fusion support with compatible ranges for FusedSchedulerNode
+        if isinstance(node_to_recomp, FusedSchedulerNode):
+            return False
+
+        def get_buffer(node):
+            if isinstance(node, FusedSchedulerNode):
+                assert len(node.snodes) > 0
+                # use the last scheduler node from the list as it has the most
+                # relevant indexing expressions
+                return get_buffer(node.snodes[-1])
+            else:
+                assert isinstance(node, SchedulerNode)
+                return node.node
+
+        ref_node_buffer = get_buffer(ref_node)
+        if isinstance(ref_node_buffer, ir.TemplateBuffer):
+            return False
+
+        assert isinstance(ref_node_buffer, ir.ComputedBuffer)
+
+        # It may happen that node1 and node2 compatible number of elements
+        # but different original ranges, for example:
+        # {d0: s0, d1: s1, d2: s2} vs {d0: s0*s1*s2}
+        # See https://github.com/pytorch/pytorch/pull/120077/files#r1500427848 for more details
+        # TODO: we can fix if it allows us to CSE at least one of the variables
+        var_ranges1 = ref_node_buffer.get_read_writes().var_ranges
+        var_ranges2 = node_to_recomp.node.get_read_writes().var_ranges
+        if var_ranges1 != var_ranges2:
+            return False
+
+        return True
+
+    def _can_fuse_horizontal_impl(self, node1, node2):
+        assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
+        assert isinstance(node2, (FusedSchedulerNode, SchedulerNode))
+        return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
         if (
@@ -3528,6 +3821,9 @@ class WorkSharing:
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
             self.stack.enter_context(self.code.indent())
+            self.code.writeline(
+                "int tid = omp_get_thread_num();",
+            )
 
     def single(self):
         if self.in_parallel:
@@ -3556,7 +3852,7 @@ class LoopLevel:
     simd_omp: bool = False
     simd_vec: bool = False
     collapsed: bool = False
-    reduction_var_map: Optional[Dict[str, str]] = None
+    is_reduction: bool = False
     parent: Optional["LoopLevel"] = None
     # the next inner level of the loop, empty if it is inner-most
     # contains >1 LoopLevel if the inner level of loop is split
@@ -3585,6 +3881,13 @@ class LoopLevel:
             kernels += loop.get_kernels()
         return kernels
 
+    def get_root(self):
+        """Get all kernel objects under this loop level"""
+        root = self
+        while root.parent:
+            root = root.parent
+        return root
+
     def set_kernel(self, kernel: CppKernel):
         """
         Set the kernel under this loop level. No split is allowed under
@@ -3594,13 +3897,6 @@ class LoopLevel:
             self.kernel = kernel
             loop: Optional[LoopLevel] = self
             assert loop is not None
-            if loop.is_reduction():
-                loop.reduction_var_map = kernel.reduction_var_map.copy()
-                loop = loop.parent
-                while loop is not None and loop.is_reduction():
-                    assert loop.reduction_var_map is not None
-                    loop.reduction_var_map.update(kernel.reduction_var_map)
-                    loop = loop.parent
             return
         assert len(self.inner) == 1
         self.inner[0].set_kernel(kernel)
@@ -3613,9 +3909,6 @@ class LoopLevel:
             for loop in self.inner:
                 loops += loop.get_loops_at(depth - 1)
             return loops
-
-    def is_reduction(self):
-        return bool(self.reduction_var_map)
 
     def split_with_tiling(self, depth, factor):
         def clone_inner():
@@ -3633,7 +3926,7 @@ class LoopLevel:
             main_loop.steps = sympy_factor
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
-            main_loop.reduction_var_map = self.reduction_var_map
+            main_loop.is_reduction = self.is_reduction
             main_loop.inner = clone_inner()
             if main_loop.inner:
                 for loop in main_loop.inner:
@@ -3643,7 +3936,7 @@ class LoopLevel:
             tail_loop.offset = offset
             tail_loop.parallel = self.parallel
             tail_loop.collapsed = False
-            tail_loop.reduction_var_map = self.reduction_var_map
+            tail_loop.is_reduction = self.is_reduction
             tail_loop.inner = clone_inner()
             if tail_loop.inner:
                 for loop in tail_loop.inner:
@@ -3679,13 +3972,6 @@ class LoopLevel:
         size_expr = cexpr_index(self.size)
         if config.cpp.no_redundant_loops and offset_expr == size_expr:
             return None
-        if self.reduction_var_map:
-            reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
-                for var, rtype in self.reduction_var_map.items()
-            )
-        else:
-            reduction = ""
         simd = (
             f"simd simdlen({self.simd_nelements}) "
             if self.simd_omp and self.simd_nelements > 1
@@ -3693,7 +3979,7 @@ class LoopLevel:
         )
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
-            line1 = f"#pragma omp for{reduction} "
+            line1 = "#pragma omp for"
             if self.parallel > 1:
                 line1 += f" collapse({self.parallel})"
             if self.simd_omp:
@@ -3701,8 +3987,8 @@ class LoopLevel:
         elif self.simd_vec:
             line1 = ""
         elif self.simd_omp:
-            line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_var_map and codecache.is_gcc():
+            line1 = f"#pragma omp {simd}"
+        elif not self.is_reduction and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
@@ -3745,7 +4031,7 @@ class LoopNestWithSplit:
         for loop_idx, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size, parent=loop)
             if loop_idx >= reduction_depth:
-                loop.reduction_var_map = kernel.reduction_var_map.copy()
+                loop.is_reduction = kernel.is_reduction
             levels.append(loop)
             levels = loop.inner
         loop_nest = LoopNestWithSplit(root)
@@ -3779,8 +4065,8 @@ class LoopNestWithSplit:
         loops = self.root
         if len(loops) > 1:
             return 1
-        is_reduction = loops[0].is_reduction() if loops else False
-        while len(loops) == 1 and loops[0].is_reduction() == is_reduction:
+        is_reduction = loops[0].is_reduction if loops else False
+        while len(loops) == 1 and loops[0].is_reduction == is_reduction:
             max_depth += 1
             loops = loops[0].inner
         return max_depth
@@ -3791,7 +4077,7 @@ class LoopNestWithSplit:
         are always the inner most ones.
         """
         return (
-            self.root is not None and len(self.root) > 0 and self.root[0].is_reduction()
+            self.root is not None and len(self.root) > 0 and self.root[0].is_reduction
         )
 
     def mark_parallel(self, par_depth):

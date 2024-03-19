@@ -80,12 +80,8 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
-    RAdam: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
-    Adamax: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
+    RAdam: KernelCounts(multitensor=2, singletensor=8),
+    Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
 
 
@@ -109,15 +105,6 @@ def build_opt_kwarg_db():
                         name += "_" + key
 
                 name += f"_{device}"
-
-                # Eager for-loop impl doesn't support capturable ASGD
-                if name in [
-                    "test_asgd_capturable_cuda",
-                    "test_asgd_maximize_capturable_cuda",
-                    "test_asgd_weight_decay_capturable_cuda",
-                    "test_asgd_weight_decay_maximize_capturable_cuda",
-                ]:
-                    continue
 
                 kwargs["device"] = device
                 if name in KERNEL_COUNT_OVERRIDES:
@@ -344,13 +331,6 @@ class CompiledOptimizerParityTests(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            # RAdam #117836 and Adamax #118230 and ASGD #116052
-            # Single tensor eager needs to be refactored to enable tracing
-            if optim_info.only_supports_capturable_on_foreach and not kwargs.get(
-                "foreach", False
-            ):
-                kwargs["foreach"] = True
-
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
             input = torch.ones([10, 10], device=device)
@@ -481,6 +461,135 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertTrue(p_ref() is None)
         gc.enable()
+
+    def test_guard_on_none_grads(self):
+        def training_loop():
+            input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]).reshape(3, 2)
+
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 3),
+                torch.nn.Sigmoid(),
+                torch.nn.Linear(3, 1),
+                torch.nn.Sigmoid(),
+            )
+
+            params = list(model.parameters())
+            optimizer = torch.optim.Adam(params)
+            step_list = []
+
+            for i in range(6):
+                optimizer.zero_grad()
+                # Test that step behaves as expected (a no-op) when grads are set to None
+                if i != 3:
+                    output = model(input)
+                    loss = output.sum()
+                    loss.backward()
+
+                optimizer.step()
+                step_list.append(optimizer.state[params[0]]["step"])
+
+            return step_list
+
+        compiled_training_loop = torch._dynamo.optimize("eager")(training_loop)
+        actual_steps = compiled_training_loop()
+        expected_steps = training_loop()
+        self.assertEqual(actual_steps, expected_steps)
+
+    # Basic shampoo test to verify we support compiling the various ops without error
+    @requires_cuda
+    def test_basic_shampoo(self):
+        param_buf = torch.rand((1024, 128))
+        param_buf_c = param_buf.clone().detach()
+
+        params_c = [param_buf_c[0:512, :].t(), param_buf_c[512:, :].t()]
+        params = [param_buf[0:512, :].t(), param_buf[512:, :].t()]
+
+        for p, p_c in zip(params, params_c):
+            p.grad = torch.rand_like(p)
+            p_c.grad = p.grad.clone().detach()
+
+        # note this skips the root inverse because this has a lot of internal dependencies
+        # we also don't compile it regardless
+        @torch.no_grad()
+        def shampoo_functional_basic(params):
+            step = 1
+            weight_decay = 0.1
+            grads = [p.grad for p in params]
+            beta1 = 0.9
+            beta2 = 1.0
+            epsilon = 1e-10
+            preconditioners = [torch.zeros_like(p) for p in params]
+            lr = 0.01
+
+            # pt2 region 1
+            # weight decay
+            torch._foreach_add_(grads, params, alpha=weight_decay)
+
+            # update preconditioners
+            torch._foreach_addcmul_(preconditioners, grads, grads, value=1.0)
+
+            torch._foreach_mul_(grads, beta1)
+            torch._foreach_add_(
+                grads,
+                grads,
+                alpha=1 - beta1,
+            )
+            bias_correction1 = 1.0 - beta1**step
+            grad_list = torch._foreach_div(grads, bias_correction1)
+
+            # pt2 region 2
+            # precondition (with shampoo branch), with no grafting
+            bias_correction2 = 1.0 - beta2**step
+            bias_corrected_preconditioner_list = torch._foreach_div(
+                preconditioners, bias_correction2
+            )
+            torch._foreach_sqrt_(bias_corrected_preconditioner_list)
+            torch._foreach_add_(bias_corrected_preconditioner_list, epsilon)
+            search_directions = torch._foreach_div(
+                grad_list, bias_corrected_preconditioner_list
+            )
+
+            torch._foreach_add_(
+                search_directions,
+                params,
+                alpha=weight_decay,
+            )
+
+            torch._foreach_mul_(search_directions, -lr)
+            # pt2 region 3 update params
+            torch._foreach_add_(params, search_directions)
+
+            return params, preconditioners, grads
+
+        compiled_fn = torch.compile(shampoo_functional_basic)
+
+        self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
+
+    @requires_cuda
+    def test_closure_graph_break(self):
+        param = torch.rand(2, 3, dtype=torch.float32, device="cuda", requires_grad=True)
+        param_c = param.clone().detach().requires_grad_(True)
+
+        def closure():
+            param.grad = torch.ones_like(param) * 2
+            return param.grad
+
+        def closure_c():
+            param_c.grad = torch.ones_like(param_c) * 2
+            return param_c.grad
+
+        optimizer = torch.optim.AdamW([param])
+        optimizer_c = torch.optim.AdamW([param_c])
+
+        def loop(opt, c):
+            opt.step(c)
+
+        compiled_loop = torch._dynamo.optimize("eager")(loop)
+
+        compiled_loop(optimizer, closure)
+        loop(optimizer_c, closure_c)
+
+        self.assertEqual(param, param_c)
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:

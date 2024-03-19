@@ -3,8 +3,8 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
-#include <map>
 #include <mutex>
+#include <set>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -50,7 +50,12 @@ struct Block {
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding XPU events
 
-  Block(int device, sycl::queue* queue, size_t size, BlockPool* pool, void* ptr)
+  Block(
+      DeviceIndex device,
+      sycl::queue* queue,
+      size_t size,
+      BlockPool* pool,
+      void* ptr)
       : device(device),
         queue(queue),
         stream_uses(),
@@ -60,7 +65,7 @@ struct Block {
         ptr(ptr) {}
 
   // constructor for search key
-  Block(int device, sycl::queue* queue, size_t size)
+  Block(DeviceIndex device, sycl::queue* queue, size_t size)
       : device(device),
         queue(queue),
         stream_uses(),
@@ -492,13 +497,11 @@ class XPUAllocator : public Allocator {
     device_allocators[block->device]->recordStream(block, stream);
   }
 
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     auto device = c10::xpu::current_device();
     void* r = nullptr;
     if (size != 0) {
-      // Allocator declares allocate const!
-      const_cast<XPUAllocator*>(this)->malloc(
-          &r, device, size, xpu::getCurrentXPUStream(device));
+      this->malloc(&r, device, size, xpu::getCurrentXPUStream(device));
     }
     return {r, r, &local_raw_delete, Device(DeviceType::XPU, device)};
   }

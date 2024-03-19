@@ -8,7 +8,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // convolution_batch_rule translated from jax with modifications:
 // https://github.com/google/jax/blob/master/jax/_src/lax/lax.py#L3143
@@ -536,4 +536,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("convolution_backward", convolution_backward_plumbing);
 }
 
-}} // namespace at;:functorch
+} // namespace at;:functorch

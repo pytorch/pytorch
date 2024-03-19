@@ -62,9 +62,9 @@ class DistAccumulateGradCaptureHook
       autogradContext_->accumulateGrad(
           accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
     }
-    const variable_list kEmptyOuput;
+    const variable_list kEmptyOutput;
     for (const auto& hook : accumulateGrad_->post_hooks()) {
-      (*hook)(kEmptyOuput, inputGrads);
+      (*hook)(kEmptyOutput, inputGrads);
     }
     return inputGrads[0];
   }
