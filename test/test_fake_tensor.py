@@ -21,7 +21,7 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, SymbolicContext
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
@@ -573,7 +573,7 @@ class FakeTensorTest(TestCase):
         mode1 = FakeTensorMode(shape_env=shape_env)
         t1 = mode1.from_tensor(
             torch.randn(10),
-            symbolic_context=StatelessSymbolicContext(
+            symbolic_context=SymbolicContext(
                 dynamic_sizes=[DimDynamic.DYNAMIC],
                 constraint_sizes=[None]
             )

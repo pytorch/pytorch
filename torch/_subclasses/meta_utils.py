@@ -551,15 +551,14 @@ class MetaConverter:
             source=source,
         ):
             from torch._dynamo.source import AttrSource
-            from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
 
             assert t.attrs is not None
             assert t.type is not None
             # NB: t.ctx could be None if the subclass in question has no
             # meaningful context
 
-            assert symbolic_context is None or isinstance(
-                symbolic_context, SubclassSymbolicContext
+            assert (
+                symbolic_context is None or symbolic_context.inner_contexts is not None
             )
 
             # Note: transform_subclass will use __tensor_unflatten__ to generate
@@ -618,8 +617,7 @@ class MetaConverter:
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import (
                 DimDynamic,
-                StatelessSymbolicContext,
-                SubclassSymbolicContext,
+                SymbolicContext,
             )
 
             view_base_context: Optional[SymbolicContext] = None
@@ -639,15 +637,14 @@ class MetaConverter:
                     inner_contexts[attr] = all_dynamic_symbolic_context(
                         inner, AttrSource(source, attr), shape_env, callback
                     )
-                t_symbolic_context = SubclassSymbolicContext(
+                t_symbolic_context = SymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
                     constraint_sizes=[None] * t.ndim,
                     inner_contexts=inner_contexts,
-                    tensor_source=source,
                     view_base_context=view_base_context,
                 )
             else:
-                t_symbolic_context = StatelessSymbolicContext(
+                t_symbolic_context = SymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
                     constraint_sizes=[None] * t.ndim,
                     view_base_context=view_base_context,
@@ -976,10 +973,10 @@ class MetaConverter:
                     base_symbolic_context = None
                     if shape_env and symbolic_context is not None:
                         from torch.fx.experimental.symbolic_shapes import (
-                            StatelessSymbolicContext,
+                            SymbolicContext,
                         )
 
-                        assert isinstance(symbolic_context, StatelessSymbolicContext)
+                        assert isinstance(symbolic_context, SymbolicContext)
                         # NB: This should generally be set when the input is a view,
                         # but the exception right now is for fake-ifying grads, which is
                         # a work in progress.

@@ -27,7 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
-    StatelessSymbolicContext,
+    SymbolicContext,
     statically_known_true,
     _constrain_range_for_size,
 )
@@ -142,7 +142,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=source,
-            symbolic_context=StatelessSymbolicContext(
+            symbolic_context=SymbolicContext(
                 dynamic_sizes=dynamic_dims,
                 constraint_sizes=constraint_dims
             ),

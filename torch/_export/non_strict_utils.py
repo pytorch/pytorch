@@ -21,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     EqualityConstraint,
     ShapeEnv,
-    StatelessSymbolicContext,
+    SymbolicContext,
 )
 from torch.utils._pytree import (
     GetAttrKey,
@@ -67,7 +67,7 @@ def fakify(
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
-    symbolic_context = StatelessSymbolicContext(
+    symbolic_context = SymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
         constraint_sizes=[None] * n_dims,
     )

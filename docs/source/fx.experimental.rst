@@ -21,9 +21,6 @@ torch.fx.experimental.symbolic_shapes
     RelaxedUnspecConstraint
     EqualityConstraint
     SymbolicContext
-    StatelessSymbolicContext
-    StatefulSymbolicContext
-    SubclassSymbolicContext
     DimConstraints
 
     hint_int

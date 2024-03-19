@@ -13,11 +13,7 @@ import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
-from torch.fx.experimental.symbolic_shapes import (
-    DimDynamic,
-    ShapeEnv,
-    StatelessSymbolicContext,
-)
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, SymbolicContext
 from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
@@ -578,13 +574,13 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
                     x,
-                    symbolic_context=StatelessSymbolicContext(
+                    symbolic_context=SymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())]
                     ),
                 )
                 x1_fake = fake_mode.from_tensor(
                     x1,
-                    symbolic_context=StatelessSymbolicContext(
+                    symbolic_context=SymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())]
                     ),
                 )
@@ -614,7 +610,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
                         inp,
-                        symbolic_context=StatelessSymbolicContext(
+                        symbolic_context=SymbolicContext(
                             [dim_dynamic for i in range(x.dim())]
                         ),
                     )
@@ -1068,7 +1064,7 @@ s1 > 3""",
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
                     x,
-                    symbolic_context=StatelessSymbolicContext(
+                    symbolic_context=SymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
                     ),
                 )

@@ -35,8 +35,6 @@ from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     DimDynamic,
     RelaxedUnspecConstraint,
-    StatefulSymbolicContext,
-    SubclassSymbolicContext,
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_list
@@ -1626,9 +1624,6 @@ def _automatic_dynamic(
 
     name = source.name()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
-    shape_env_to_source_to_symbol_cache = (
-        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
-    )
 
     # Get base context if the tensor is a view
     view_base_context: Optional[SymbolicContext] = None
@@ -1653,22 +1648,20 @@ def _automatic_dynamic(
             )
             inner_contexts[attr] = inner_context
 
-        return SubclassSymbolicContext(
+        return SymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,
             constraint_sizes=outer_context.constraint_sizes,
             view_base_context=view_base_context,
             tensor_source=outer_context.tensor_source,
-            shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
             inner_contexts=inner_contexts,
         )
 
     if static_shapes:
-        return StatefulSymbolicContext(
+        return SymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -1676,7 +1669,7 @@ def _automatic_dynamic(
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
-        return StatefulSymbolicContext(
+        return SymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
@@ -1684,7 +1677,6 @@ def _automatic_dynamic(
             constraint_sizes=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
     # Prep for automatic dynamic
@@ -1835,12 +1827,11 @@ def _automatic_dynamic(
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return StatefulSymbolicContext(
+    return SymbolicContext(
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
         view_base_context=view_base_context,
         tensor_source=source,
-        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
     )
 
 

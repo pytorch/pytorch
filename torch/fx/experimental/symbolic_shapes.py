@@ -71,7 +71,7 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch._logging import LazyString
 
 if TYPE_CHECKING:
-    from torch._dynamo.source import TensorPropertySource
+    pass
 
 InputList = List
 DimList = List
@@ -92,8 +92,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
-    "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
+    "has_free_symbols", "sym_eq", "SymbolicContext", "statically_known_true",
     "guard_size_oblivious",
 ]
 
@@ -906,7 +905,6 @@ class EqualityConstraint(Constraint):
 
 def _assert_symbol_context(symbolic_context):
     assert isinstance(symbolic_context, SymbolicContext), "Invalid symbolic_context object"
-    assert type(symbolic_context) is not SymbolicContext, "Illegal usage of symbolic_context ABC"
 
 
 @dataclass(frozen=True)
@@ -916,16 +914,6 @@ class SymbolicContext:
     ``create_symbolic_sizes_strides_storage_offset``; e.g., should
     they be static or dynamic.
 
-    This is an abstract base class because we are probably going to add
-    another version of this that says "use exactly these SymInts, don't
-    allocate fresh symbols."
-    """
-    pass
-
-
-@dataclass(frozen=True)
-class StatelessSymbolicContext(SymbolicContext):
-    """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by ``DimDynamic`` and ``DimConstraint``.
     This will cause fresh symbols to be allocated
@@ -935,82 +923,17 @@ class StatelessSymbolicContext(SymbolicContext):
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
-    view_base_context: Optional[SymbolicContext] = None
+    view_base_context: Optional["SymbolicContext"] = None
     # TODO: add storage offset and stride symbolic_context
+
+    # The correct symbolic context for a given inner tensor of a traceable tensor subclass
+    # may differ from that of the outer symbolic context. This structure allows for this
+    # flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
+    inner_contexts: Optional[Dict[str, "SymbolicContext"]] = None
 
     def __post_init__(self):
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
-
-
-# note [Tensor Fakification and Symbol Caching]
-#
-# As of the time of this note, dynamo creates a fresh fake tensor mode for backends.
-# The reason we do this is because there are certain classes of operations, namely,
-# metadata mutations, that change tensor size, stride, etc. This means that the fake tensor
-# state at the end of a dynamo trace is different than the fake tensor state at the beginning
-# of a trace. Backends like aot_autograd need a fresh fake tensor to correctly track metadata mutation,
-# view relationships, etc.
-#
-# As we create a new fake mode, we also lose the memoization that comes with it. Rather than
-# transfer the memoization cache, we instead transfer the shape env. However, with this
-# comes nuance - as dynamo is selective in how it makes symbolic shapes. Due to strategies in
-# automatic dynamic and constraints, the policy for which dims are dynamic is nuanced and varies across
-# recompilations.
-#
-# In order to preserve the symbolic decisions made during dynamo tensor fakification, we pass
-# a StatefulSymbolicContext at creation time. This object is tracked, per tensor, on the TracingContext.
-# The lifecycle of this object should match the lifecycle of the original dynamo tracked tensor, and it is
-# safe to reuse this object as many times as necessary to create a fake tensor. Fake tensors
-# created with new fake modes should produce the same exact symbols as the original, providing the same shape_env
-# is used.
-# TODO(voz): Shape env validation
-@dataclass(frozen=True)
-class StatefulSymbolicContext(StatelessSymbolicContext):
-    """
-    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
-    a symbolic_context determination as given by a cache of Source:Symbol. A cache hit
-    will reuse a stored symbol, and a cache miss will write to this cache.
-
-    This behaves like StatelessSymbolicContext, except the cache supersedes the
-    other values - dynamic_sizes and constraint_sizes will not be read if we cache
-    hit.
-
-    It is the cache owners responsibility to maintain the lifecycle of the cache
-    w/r/t different shape_envs, clearing, etc.
-    """
-    tensor_source: Source = None
-    # Why is this keyd on int first?
-    # That integer is actually the id of the shape_env. This cache short-circuits symbol
-    # creation, and we must store it per shape env. Now, while tracing invariants are a single
-    # shape env per tracing context, and every new frame gets a new shape_env. So where would we have
-    # multiple shape envs? The answer lies in recording. When we are replaying, replay_shape_env_events
-    # is invoked, and creates a new shape_env. Replaying events against this new shape_env will
-    # cause it to fail with unknown symbols, as the symbols cached here will skip creation, and never
-    # get recorded in var_to_val, etc.
-    # TODO(voz): consider a weakref to the shape_env here
-    shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
-
-    def __post_init__(self):
-        # The None default is annoying, but required because of dataclass limitations
-        assert self.tensor_source is not None
-        if not self.shape_env_to_source_to_symbol_cache:
-            object.__setattr__(self, 'shape_env_to_source_to_symbol_cache', {})
-
-
-@dataclass(frozen=True)
-class SubclassSymbolicContext(StatefulSymbolicContext):
-    """
-    The correct symbolic context for a given inner tensor of a traceable tensor subclass
-    may differ from that of the outer symbolic context. This structure allows for this
-    flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
-    """
-    inner_contexts: Dict[str, SymbolicContext] = None
-
-    def __post_init__(self):
-        super().__post_init__()
-        if self.inner_contexts is None:
-            self.inner_contexts = {}
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
@@ -2374,8 +2297,7 @@ class ShapeEnv:
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
             # symbolic_context is None - set one
-            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
-        # We got a StatelessSymbolicContext
+            symbolic_context = SymbolicContext(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
         _assert_symbol_context(symbolic_context)
         constraint_dims = symbolic_context.constraint_sizes
         dynamic_dims = symbolic_context.dynamic_sizes
@@ -2627,14 +2549,6 @@ class ShapeEnv:
         """
         # see note [Tensor Fakification and Symbol Caching]
         source_name = source.name()
-        if (isinstance(symbolic_context, StatefulSymbolicContext)
-                and id(self) not in symbolic_context.shape_env_to_source_to_symbol_cache):
-            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)] = {}
-
-        if (isinstance(symbolic_context, StatefulSymbolicContext)
-                and source_name
-                and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
-            return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
 
         if do_not_specialize_zero_one:
             specialize_zero_one = False
@@ -2650,10 +2564,7 @@ class ShapeEnv:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
-            out = sympy.Integer(val)
-            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
-            return out
+            return sympy.Integer(val)
 
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
@@ -2746,8 +2657,6 @@ class ShapeEnv:
             # way)
             self.symbol_guard_counter[r] = 0
 
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
         return r
 
     def add_var_to_val(self, expr: sympy.Symbol, val: int):
@@ -2828,7 +2737,7 @@ class ShapeEnv:
         Tensorlike = (torch.Tensor, FakeTensorMeta)
 
         def _create_no_constraints_context(t):
-            return StatelessSymbolicContext(
+            return SymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
                 constraint_sizes=[None] * t.dim()
@@ -3075,7 +2984,7 @@ class ShapeEnv:
             if is_traceable_wrapper_subclass(t):
                 from torch._dynamo.source import AttrSource
 
-                assert isinstance(context, SubclassSymbolicContext)
+                assert context.inner_contexts is not None
 
                 # For subclasses, we need to track symints on BOTH the outer
                 # and inner tensors.
