@@ -7,6 +7,7 @@ namespace at::impl {
 
 enum class TorchFunctionModeKey : int8_t { PROXY, NUM_MODE_KEYS };
 
+// We depend that this enum is ordered from least to most restrictive
 enum TorchFunctionDisabledState {
   ENABLED,
   NON_INFRA_SUBCLASSES_DISABLED,
