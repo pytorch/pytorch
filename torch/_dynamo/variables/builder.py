@@ -1939,13 +1939,13 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
-        if ConstantVariable.is_literal(value):
-            return SourcelessBuilder.wrap_constant_literal(value)
+        elif ConstantVariable.is_literal(value):
+            return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
+                tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
