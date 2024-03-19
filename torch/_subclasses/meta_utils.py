@@ -25,7 +25,6 @@ from torch._C._functorch import (
     _add_batch_dim,
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
-    current_level,
     get_unwrapped,
     is_batchedtensor,
     is_functorch_wrapped_tensor,
@@ -33,7 +32,6 @@ from torch._C._functorch import (
     maybe_get_bdim,
     maybe_get_level,
     peek_interpreter_stack,
-    TransformType,
 )
 from torch._guards import Source
 
@@ -1206,39 +1204,43 @@ class MetaConverter:
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
 
-        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
-            if t.device.type != "xla" and any(
-                [
-                    t.is_quantized,
-                    t._is_view() and t._base is not None and t._base.is_sparse,
-                    torch._is_functional_tensor(t),
-                    t.device.type in ("lazy"),
-                    # We need a way to test if a tensor is batched but there
-                    # is no official APi to do it
-                    # torch._C._is_batched(t),
-                ]
-            ):
-                # TODO: sparse should support meta
-                # NB technically to('meta') does work but our logging
-                # instrumentation will see the meta conversions and the
-                # tests all break so we just exclude this.  In any case
-                # the to conversion isn't really right anyhow.
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        with contextlib.ExitStack() as exit_stack:
+            exit_stack.enter_context(torch._dispatch.python.suspend_functionalization())
+            st = peek_interpreter_stack()
+            if st is not None:
+                exit_stack.enter_context(
+                    torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
+                )
 
-                if torch._is_functional_tensor(t) and t.device.type != "lazy":
-                    if t._is_view():
-                        raise RuntimeError(
-                            "Cannot safely fakify a view because this process drops the view information right now."
-                        )
+            if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
+                if t.device.type != "xla" and any(
+                    [
+                        t.is_quantized,
+                        t._is_view() and t._base is not None and t._base.is_sparse,
+                        torch._is_functional_tensor(t),
+                        t.device.type in ("lazy"),
+                        # We need a way to test if a tensor is batched but there
+                        # is no official APi to do it
+                        # torch._C._is_batched(t),
+                    ]
+                ):
+                    # TODO: sparse should support meta
+                    # NB technically to('meta') does work but our logging
+                    # instrumentation will see the meta conversions and the
+                    # tests all break so we just exclude this.  In any case
+                    # the to conversion isn't really right anyhow.
 
-                    st = peek_interpreter_stack()
-                    assert (
-                        st is None or st.key() == TransformType.Functionalize
-                    ), "Expect st to be either None or have Functionalize transform key."
-                    if st is None:
-                        # the case of AOTAutograd
-                        torch._sync(t)
-                        unwrap_t = torch._from_functional_tensor(t)
-                        with torch._dispatch.python.suspend_functionalization():
+                    if torch._is_functional_tensor(t) and t.device.type != "lazy":
+                        if t._is_view():
+                            raise RuntimeError(
+                                "Cannot safely fakify a view because this process drops the view information right now."
+                            )
+
+                        if not is_functorch_wrapped_tensor(t):
+                            # the case of AOTAutograd
+                            torch._sync(t)
+                            unwrap_t = torch._from_functional_tensor(t)
                             fake_t = self.meta_tensor(
                                 self.describer.describe_tensor(unwrap_t),
                                 shape_env=shape_env,
@@ -1246,17 +1248,12 @@ class MetaConverter:
                                 source=source,
                                 symbolic_context=symbolic_context,
                             )
-                        out = torch._to_functional_tensor(fake_t)
-                        torch._mirror_autograd_meta_to(fake_t, out)
-                        return out
-                    else:
-                        # torch.func.functionalize
-                        reapply_views = torch._C._functionalization_reapply_views_tls()
-                        unwrap_t = _unwrap_functional_tensor(t, reapply_views)
-                        pop_st_ctx = (
-                            torch._functorch.pyfunctorch.temporarily_pop_interpreter_stack()
-                        )
-                        with pop_st_ctx:
+                            out = torch._to_functional_tensor(fake_t)
+                            torch._mirror_autograd_meta_to(fake_t, out)  # type: ignore[attr-defined]
+                            return out
+                        else:
+                            # torch.func.functionalize
+                            unwrap_t = _unwrap_functional_tensor(t, reapply_views)
                             fake_t = self.meta_tensor(
                                 self.describer.describe_tensor(unwrap_t),
                                 shape_env=shape_env,
@@ -1264,32 +1261,32 @@ class MetaConverter:
                                 source=source,
                                 symbolic_context=symbolic_context,
                             )
-                        return _wrap_functional_tensor(fake_t, current_level())
+                            return _wrap_functional_tensor(fake_t, maybe_get_level(t))
+                    self.miss += 1
+                    return NotImplemented
+                else:
+                    self.hit += 1
+
+                    disable_functorch = torch._C._DisableFuncTorch
+                    with disable_functorch():
+                        r = self.meta_tensor(
+                            self.describer.describe_tensor(t),
+                            shape_env=shape_env,
+                            callback=callback,
+                            source=source,
+                            symbolic_context=symbolic_context,
+                        )
+                    if type(t) is torch.nn.Parameter:
+                        # NB: Cannot directly use Parameter constructor
+                        # because that would force a detach, not desirable
+                        r._is_param = True
+                    return r
+            elif torch.overrides.is_tensor_like(t):
                 self.miss += 1
                 return NotImplemented
             else:
-                self.hit += 1
-
-                disable_functorch = torch._C._DisableFuncTorch
-                with disable_functorch():
-                    r = self.meta_tensor(
-                        self.describer.describe_tensor(t),
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        symbolic_context=symbolic_context,
-                    )
-                if type(t) is torch.nn.Parameter:
-                    # NB: Cannot directly use Parameter constructor
-                    # because that would force a detach, not desirable
-                    r._is_param = True
-                return r
-        elif torch.overrides.is_tensor_like(t):
-            self.miss += 1
-            return NotImplemented
-        else:
-            # non-Tensor types don't count as hit or miss
-            return t
+                # non-Tensor types don't count as hit or miss
+                return t
 
 
 import torch._prims_common as utils
