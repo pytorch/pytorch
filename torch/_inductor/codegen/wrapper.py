@@ -1527,7 +1527,7 @@ class WrapperCodeGen(CodeGen):
     def statically_known_int_or_none(x):
         try:
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(val)
+            return int(x)
         except Exception:
             return None
 
