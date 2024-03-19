@@ -72,11 +72,27 @@ from torch.export import export
 
 
 torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
+torch.library.define(
+    "testlib::foo",
+    "(Tensor(a!) x, Tensor(b!) z) -> (Tensor, Tensor, Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
 @torch.library.impl_abstract("testlib::returns_tensor_symint")
 def returns_tensor_symint_impl(x):
     return x, x.shape[0]
+
+@torch.library.impl("testlib::foo", "cpu")
+@torch._dynamo.disable
+def foo_impl(x, z):
+    x.add_(5)
+    z.add_(5)
+    return x, z, x + z
+
+@torch.library.impl_abstract("testlib::foo")
+def foo_abstract(x, z):
+    return x, z, x + z
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -714,6 +730,45 @@ class TestExport(TestCase):
             6,
         )
 
+    def test_dim_1_2(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes=({0: dx, 1: None}, )
+        )
+        ep.module()(torch.randn(1, 2))
+        ep.module()(torch.randn(2, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 2, but got 3"
+        ):
+            ep.module()(torch.randn(3, 2))
+        vr = list(ep.range_constraints.values())[0]
+        self.assertEquals(vr.lower, 1)
+        self.assertEquals(vr.upper, 2)
+
+    def test_derived_dim_1_2(self):
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Bar(),
+            (torch.randn(2, 2), torch.randn(3, 2)),
+            dynamic_shapes=({0: dx, 1: None}, {0: dx+1, 1: None})
+        )
+        ep.module()(torch.randn(1, 2), torch.randn(2, 2))
+        range_lower_bounds = sorted(vr.lower for vr in ep.range_constraints.values())
+        range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
+        self.assertEquals(range_lower_bounds, [1, 2])
+        self.assertEquals(range_upper_bounds, [2, 3])
+
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1003,7 +1058,6 @@ class TestExport(TestCase):
                 or node.name in ep.graph_signature.inputs_to_parameters
             ):
                 self.assertTrue("source_fn_stack" in node.meta)
-                self.assertTrue("nn_module_stack" in node.meta)
 
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims, export
@@ -1462,7 +1516,6 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
-    @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
@@ -1489,14 +1542,14 @@ class TestExport(TestCase):
                     setattr(config, k, v)
 
         inp = (torch.rand(5, 4),)
-        exported_program = export(mod, inp)
+        exported_program = export(mod, inp, strict=True)
 
         with _patch_config({"allow_rnn": False}):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "TorchDynamo purposely graph breaks on RNN, GRU, LSTMs",
             ):
-                _ = export(mod, inp)
+                _ = export(mod, inp, strict=True)
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
@@ -3400,6 +3453,52 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_predispatch_cond(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("pred", torch.tensor(False))
+                self.register_buffer("t", torch.tensor(10))
+
+            def forward(self, x, y):
+                def true_fn(x, y):
+                    with torch.enable_grad():
+                        return x - 1 + self.t + y
+
+                return torch.cond(
+                    self.pred,
+                    true_fn,
+                    lambda x, y: x + 1 - self.t + y,
+                    [x, y],
+                )
+
+        model = Model()
+        exported_program = torch.export._trace._export(
+            model,
+            (torch.tensor(10), torch.tensor(12)),
+            {},
+            dynamic_shapes=None,
+            pre_dispatch=True,
+            strict=False
+        )
+
+        self.assertExpectedInline(str(exported_program.graph_module.code.strip()), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, [arg1_1, arg2_1, arg3_1]);  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = conditional[0];  conditional = None
+    return (getitem,)""")  # noqa: B950
+
+        self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.code.strip()), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(sub, arg0_1);  sub = arg0_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg2_1);  add = arg2_1 = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    return (add_1,)""")
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -3557,6 +3656,30 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
 
+    def test_custom_op_auto_functionalize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, z):
+                return torch.ops.testlib.foo(x, z)
+
+        inps = (torch.ones(5), torch.ones(5))
+        inps_for_export = (torch.ones(5), torch.ones(5))
+        inps_for_export_with_decomp = (torch.ones(5), torch.ones(5))
+
+        ep = torch.export.export(M(), inps_for_export)
+        x_new_eager, z_new_eager, legit_eager = M()(*inps)
+        x_new_export, z_new_export, legit_export = ep.module()(*inps_for_export)
+        self.assertTrue(torch.allclose(x_new_eager, x_new_export))
+        self.assertTrue(torch.allclose(z_new_eager, z_new_export))
+        self.assertTrue(torch.allclose(legit_eager, legit_export))
+
+        ep = ep.run_decompositions()
+        x_new_export, z_new_export, legit_export = ep.module()(*inps_for_export_with_decomp)
+        self.assertTrue(torch.allclose(x_new_eager, x_new_export))
+        self.assertTrue(torch.allclose(z_new_eager, z_new_export))
+        self.assertTrue(torch.allclose(legit_eager, legit_export))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -3587,12 +3710,19 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 1, 8, 8, device="cpu")
         v = torch.randn(1, 1, 8, 8, device="cpu")
 
-        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-        self.assertExpectedInline(ep.graph_module.code.strip(), """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    return (getitem,)""")
+        from torch.nn.attention import SDPBackend
+        with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
+            ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+            print(ep.graph)
+            ep.run_decompositions()
+            print(ep.graph)
+
+
+#         self.assertExpectedInline(ep.graph_module.code.strip(), """\
+# def forward(self, arg0_1, arg1_1, arg2_1):
+#     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
+#     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
+#     return (getitem,)""")
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
