@@ -476,7 +476,12 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
+    first_input_strategy = input_tuple_strategy.childs[0]
+    assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
+    common_input_ndim = first_input_strategy.output_ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    # normalize the dim to be within the common input ndim
+    dim = normalize_dim(dim, common_input_ndim)
 
     follow_placements = _derive_follow_placements_from_tuple_strategy(
         input_tuple_strategy
@@ -504,11 +509,17 @@ def cat_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
+    first_input_strategy = input_tuple_strategy.childs[0]
+    assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
+    common_input_ndim = first_input_strategy.output_ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    # normalize the dim to be within the common input ndim
+    dim = normalize_dim(dim, common_input_ndim)
 
     follow_placements = _derive_follow_placements_from_tuple_strategy(
         input_tuple_strategy
     )
+    # for cat we unshard the cat dim if it is sharded
     follow_placements = unshard_tensor_dim(follow_placements, dim)
 
     # create op strategy base on the follow placements
