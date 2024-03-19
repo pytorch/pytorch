@@ -943,13 +943,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 }
 
-                if config.debug_filter_choice:
-                    timings = {
-                        choice: time
-                        for choice, time in timings.items()
-                        if config.debug_filter_choice(choice)
-                    }
-
                 return timings
 
             return torch._inductor.ir.TensorBox.create(
@@ -1136,7 +1129,7 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds ({precompile_elapse:.4f} precompile)\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f} seconds precompiling\n")
 
     @staticmethod
     def benchmark_example_value(node):

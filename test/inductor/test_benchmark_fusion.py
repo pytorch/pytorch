@@ -36,7 +36,6 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-from torch._inductor.select_algorithm import ExternKernelCaller, TritonTemplateCaller
 
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
@@ -59,10 +58,6 @@ class TestCase(InductorTestCase):
     def tearDownClass(cls):
         cls._stack.close()
         super().tearDownClass()
-
-
-def filter_extern(choice):
-    return isinstance(choice, ExternKernelCaller)
 
 
 class BenchmarkFusionTestTemplate:
@@ -278,33 +273,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def test_changed_layout(self):
             # cat addmm planning will change layout - make sure propagated
+            def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
+                return torch.cat(
+                    [
+                        torch.addmm(a, b, c),
+                        torch.addmm(b, c, a),
+                    ],
+                    1,
+                )
 
-            for allowed_type in [ExternKernelCaller, TritonTemplateCaller]:
+            args = [
+                torch.randn(4, 4, device="cuda"),
+                torch.randn(4, 4, device="cuda"),
+                torch.randn(4, 4, device="cuda"),
+            ]
 
-                def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
-                    return torch.cat(
-                        [
-                            torch.addmm(a, b, c),
-                            torch.addmm(b, c, a),
-                        ],
-                        1,
-                    )
+            expected = fn(*args)
+            actual = torch.compile(fn, mode="max-autotune")(*args)
+            self.assertEqual(expected, actual)
 
-                args = [
-                    torch.randn(4, 4, device="cuda"),
-                    torch.randn(4, 4, device="cuda"),
-                    torch.randn(4, 4, device="cuda"),
-                ]
-
-                def filter_choice(choice):
-                    return isinstance(choice, allowed_type)
-
-                with config.patch("debug_filter_choice", filter_choice):
-                    expected = fn(*args)
-                    actual = torch.compile(fn, mode="max-autotune")(*args)
-                    self.assertEqual(expected, actual)
-
-                torch._dynamo.reset()
+            torch._dynamo.reset()
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
