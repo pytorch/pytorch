@@ -127,7 +127,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
 
-    if use_triton_template(layout):
+    if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -136,7 +136,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if use_cutlass_template(layout, m, n, k):
+    if m * n != 0 and use_cutlass_template(layout):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -235,7 +235,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout, m, n, k):
+    if use_cutlass_template(layout):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
