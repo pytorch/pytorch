@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -29,17 +31,21 @@ from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
+    _disable_infra_mode,
+    _push_mode,
+    _unset_infra_mode,
 )
 
+from ._backward_state import BackwardState
 from .sym_node import SymNode
 from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
-from torch.utils.weak import WeakTensorKeyDictionary
-from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
+from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _WeakHashRef
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
+
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -52,8 +58,15 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
-
+pytree.register_pytree_node(
+    torch.Size,
+    lambda xs: (list(xs), None),
+    lambda xs, _: tuple(xs),
+    flatten_with_keys_fn=lambda xs: (
+        [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
+        None,
+    ),
+)
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
     argnames = ",".join(f"arg{i}" for i in range(nargs))
@@ -74,6 +87,7 @@ proxy_slot = object()
 no_default = object()
 
 py_sym_types = (SymInt, SymFloat, SymBool)
+
 def is_sym_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
@@ -83,6 +97,9 @@ def set_proxy_slot(obj, tracer, proxy):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         tracer.tensor_tracker[obj] = proxy
+    elif isinstance(obj, torch.ScriptObject):
+        # We DO want to clobber proxies, with a similar rationale as for tensors.
+        tracer.script_object_tracker[obj] = proxy
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -90,7 +107,7 @@ def set_proxy_slot(obj, tracer, proxy):
         # This works because primals get their SymInts set first, and
         # THEN later we allocate tangent inputs.  Make sure if a SymInt
         # is derivable from a primal that we use that.
-        assert isinstance(obj, SymNode), type(obj)
+        assert isinstance(obj, py_sym_types), type(obj)
         if obj not in tracer.symnode_tracker:
             tracer.symnode_tracker[obj] = proxy
 
@@ -104,8 +121,10 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
+    elif isinstance(obj, torch.ScriptObject):
+        tracker = tracer.script_object_tracker
     else:
-        assert isinstance(obj, SymNode), type(obj)
+        assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
 
     if obj not in tracker:
@@ -121,6 +140,10 @@ def extract_val(val):
     if is_fake(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
+        return val
+    elif isinstance(val, torch.ScriptObject):
+        return val
+    elif isinstance(val, BackwardState):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -166,22 +189,24 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
-            inner_s = outer_s.node
-            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, outer_s, *args))
-
+            set_proxy_slot(outer_s, tracer, thunkify(proxy_callable, outer_s, *args))
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(
+            tracer.create_proxy('call_function', torch.ops.aten.sym_size.int, (proxy, i), {}), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(
+            tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
-    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(
+        tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(
+        tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
@@ -192,7 +217,10 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
         elif isinstance(e, py_sym_types):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
-            set_proxy_slot(e.node, tracer, lambda: proxy)
+            set_proxy_slot(e, tracer, lambda: proxy)
+        elif isinstance(e, torch.ScriptObject):
+            set_proxy_slot(e, tracer, proxy)
+            set_meta(proxy, e)
         elif isinstance(e, (tuple, list)):
             if isinstance(proxy, fx.Proxy):
                 set_meta(proxy, e)
@@ -214,6 +242,9 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # example use case: triton_kernel_wrapper takes arguments as kwargs
             for key, val in e.items():
                 wrap_with_proxy(val, proxy[key], None)
+        elif isinstance(e, BackwardState):
+            set_meta(proxy, e)
+            e.proxy = proxy
         else:
             # intentionally pass on primitives
             pass
@@ -235,24 +266,6 @@ def maybe_disable_fake_tensor_mode():
     # library
     return unset_fake_temporarily()
 
-def _unset_proxy_mode():
-    pre_dispatch_proxy = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
-    post_dispatch_proxy = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-    if pre_dispatch_proxy and post_dispatch_proxy:
-        raise AssertionError("Can't have active proxy mode on both pre and post dispatch mode stack")
-
-    if pre_dispatch_proxy:
-        mode = unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
-        return mode
-    return torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-
-def _set_proxy_mode(mode):
-    assert isinstance(mode, ProxyTorchDispatchMode)
-    if mode.pre_dispatch:
-        _set_mode_pre_dispatch(mode)
-    else:
-        torch._C._set_dispatch_mode(mode)
-
 
 @dataclass
 class _ProxyTensor:
@@ -265,13 +278,19 @@ def fetch_sym_proxy(tracer):
         n = e.node
         if n.constant is not None:
             return n.constant
+        if e.node.expr.is_number:
+            if isinstance(e, SymBool):
+                return bool(e.node.expr)
+            elif isinstance(e, SymInt):
+                return int(e.node.expr)
+            return float(e.node.expr)
         else:
             # NB: we REQUIRE all symints to be tracked
-            return get_proxy_slot(n, tracer)()
+            return get_proxy_slot(e, tracer)()
     return inner
 
 
-def fetch_tensor_proxy(tracer):
+def fetch_object_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -307,7 +326,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 return r
 
     tracer = proxy_mode.tracer
-    f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
+    f_args, f_kwargs = pytree.tree_map_only((torch.Tensor, torch.ScriptObject), fetch_object_proxy(tracer), (args, kwargs))
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
@@ -379,6 +398,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
+
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -445,12 +465,31 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
+class _SymNodeDict:
+    """
+    Wrapper around a dictionary that will hash SymInts with their nodes
+    """
+    def __init__(self):
+        self.sym_node_dict = {}
+
+    def __setitem__(self, key: py_sym_types, value: Any):
+        self.sym_node_dict[key.node] = value
+
+    def __getitem__(self, key: py_sym_types):
+        return self.sym_node_dict[key.node]
+
+    def __contains__(self, key: py_sym_types):
+        return key.node in self.sym_node_dict
+
+    def get(self, key: py_sym_types, default: Any = None):
+        return self.sym_node_dict.get(key.node, default)
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
-        self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
+        self.symnode_tracker = _SymNodeDict()  # type: ignore[var-annotated]
+        self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -490,9 +529,44 @@ class PythonKeyTracer(Tracer):
         if isinstance(e, torch.Tensor):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
         elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            return get_proxy_slot(e.node, self, e, lambda e: e())
+            return get_proxy_slot(e, self, e, lambda e: e())
+        elif isinstance(e, torch.ScriptObject):
+            return get_proxy_slot(e, self, e)
         else:
             return e
+
+
+@contextmanager
+def _temp_remove_pre_dispatch_torch_function_mode():
+    from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
+    temp_elements = []
+    pre_dispatch_mode = None
+
+    while _len_torch_function_stack() > 0:
+        mode = _pop_mode()
+        if isinstance(mode, PreDispatchTorchFunctionMode):
+            pre_dispatch_mode = mode
+            break
+        else:
+            temp_elements.append(mode)
+
+    for mode in reversed(temp_elements):
+        _push_mode(mode)
+
+    try:
+        yield
+
+    finally:
+        if pre_dispatch_mode is not None:
+            count = len(temp_elements)
+            while count > 0:
+                mode = _pop_mode()
+                count -= 1
+
+            temp_elements.append(pre_dispatch_mode)
+
+            for mode in reversed(temp_elements):
+                _push_mode(mode)
 
 
 @torch._disable_dynamo
@@ -502,17 +576,10 @@ def dispatch_trace(
         concrete_args: Optional[Tuple[Any, ...]] = None,
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)
+    from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
+    dedupe_symints(graph)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
-    return GraphModule(tracer.root, graph, name)
-
-
-@contextlib.contextmanager
-def _pop_proxy_mode_temporarily():
-    old = _unset_proxy_mode()
-    try:
-        yield old
-    finally:
-        _set_proxy_mode(old)
+    return fx._lazy_graph_module._make_graph_module(tracer.root, graph, name)
 
 
 def wrap_key(f, tensors, tracer, pre_dispatch: bool):
@@ -522,7 +589,7 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        with _pop_proxy_mode_temporarily() as m:
+        with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
@@ -534,7 +601,7 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
         )
         out = pytree.tree_map_only(
             (SymInt, SymFloat, SymBool),
-            lambda t: get_proxy_slot(t.node, tracer)(),
+            lambda t: get_proxy_slot(t, tracer)(),
             out
         )
         return out
@@ -570,7 +637,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         kwargs = kwargs or {}
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
-            # TODO(chundian): we should systematically couple it with expoert verifier,
+            # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
             node = self.tracer.create_node("call_function", func, args, {})
             if func is torch._C._set_grad_enabled:
@@ -613,7 +680,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers.append(m)
         m.__enter__()
         # Stash and store the previous proxy mode (there may or may not be one)
-        maybe_prev_proxy_mode = _unset_proxy_mode()
+        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
         self.enter_stack.append(maybe_prev_proxy_mode)
         return super().__enter__()
 
@@ -625,7 +692,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Re-enable the previous proxy mode, if there was one.
         mb_previous_proxy_mode = self.enter_stack.pop()
         if mb_previous_proxy_mode is not None:
-            _set_proxy_mode(mb_previous_proxy_mode)
+            _push_mode(mb_previous_proxy_mode)
 
         if not b:
             return m.__exit__(exc_type, exc_value, traceback)
@@ -663,7 +730,7 @@ class ProxySymDispatchMode(SymDispatchMode):
 
     def _compute_proxy(self, func, args, out: Union[SymInt, SymFloat, SymBool]):
         n_args = tuple(
-            get_proxy_slot(a.node, self.tracer)().node if isinstance(a, py_sym_types) else a
+            get_proxy_slot(a, self.tracer)().node if isinstance(a, py_sym_types) else a
             for a in args
         )
 
@@ -699,7 +766,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         if isinstance(out, py_sym_types):
             # Delays tracing out the proxies on this op until we actually need it
             p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
-            set_proxy_slot(out.node, self.tracer, p_out_thunk)
+            set_proxy_slot(out, self.tracer, p_out_thunk)
 
         return out
 
@@ -924,6 +991,16 @@ class _ModuleStackTracer(PythonKeyTracer):
     def is_leaf_module(self, m, module_qualified_name):
         return False
 
+    def create_node(self, *args, **kwargs):
+        '''
+        Add nn_module_stack metadata here instead of TracerBase,
+        since calls to make_fx() might not want to record module stack metadata
+        '''
+        node = super().create_node(*args, **kwargs)
+        if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
+            node.meta["nn_module_stack"] = self.module_stack
+        return node
+
 
 def make_fx(f,
             decomposition_table=None,
@@ -938,6 +1015,12 @@ def make_fx(f,
 
     if decomposition_table is None:
         decomposition_table = {}
+
+    if torch.ops.aten.sym_numel.default not in decomposition_table:
+        decomposition_table = {
+            **decomposition_table,
+            torch.ops.aten.sym_numel.default: torch._decomp.decompositions.sym_numel
+        }
 
     @functools.wraps(f)
     def wrapped(*args):
@@ -1061,20 +1144,8 @@ def get_innermost_proxy_mode():
 
 
 @contextlib.contextmanager
-def disable_proxy_modes_tracing(enable_current=False):
-    # enable_current=True is now a no-op, since only one proxy mode
-    # can live on the stack at a time.
-    # We should kill this API in a future PR.
-    maybe_old = None
-    if not enable_current:
-        # Only one proxy_mode can be "active" at a time.
-        # So we simply remove our active mode.
-        maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-    try:
-        yield
-    finally:
-        if maybe_old is not None:
-            torch._C._set_dispatch_mode(maybe_old)
+def disable_proxy_modes_tracing():
+    return _disable_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 def maybe_handle_decomp(proxy_mode, op, args, kwargs):

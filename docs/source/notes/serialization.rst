@@ -176,6 +176,44 @@ can use this pattern:
     >>> new_m.load_state_dict(m_state_dict)
     <All keys matched successfully>
 
+.. _serialized-file-format:
+
+Serialized file format for ``torch.save``
+-----------------------------------------
+
+Since PyTorch 1.6.0, ``torch.save`` defaults to returning an uncompressed ZIP64
+archive unless the user sets ``_use_new_zipfile_serialization=False``.
+
+In this archive, the files are ordered as such
+
+.. code-block:: text
+
+    checkpoint.pth
+    ├── data.pkl
+    ├── byteorder  # added in PyTorch 2.1.0
+    ├── data/
+    │   ├── 0
+    │   ├── 1
+    │   ├── 2
+    │   └── …
+    └── version
+
+The entries are as follows:
+  * ``data.pkl`` is the result of pickling the object passed to ``torch.save``
+    excluding ``torch.Storage`` objects that it contains
+  * ``byteorder`` contains a string with the ``sys.byteorder`` when saving (“little” or “big”)
+  * ``data/`` contains all the storages in the object, where each storage is a separate file
+  * ``version`` contains a version number at save time that can be used at load time
+
+When saving, PyTorch will ensure that the local file header of each file is padded
+to an offset that is a multiple of 64 bytes, ensuring that the offset of each file
+is 64-byte aligned.
+
+.. note::
+    Tensors on certain devices such as XLA are serialized as pickled numpy arrays. As
+    such, their storages are not serialized. In these cases ``data/`` might not exist
+    in the checkpoint.
+
 .. _serializing-python-modules:
 
 Serializing torch.nn.Modules and loading them in C++

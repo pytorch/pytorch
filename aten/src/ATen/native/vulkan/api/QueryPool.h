@@ -2,11 +2,13 @@
 
 // @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
 
+#include <functional>
 #ifdef USE_VULKAN_API
+
+#include <ATen/native/vulkan/api/vk_api.h>
 
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 
 namespace at {

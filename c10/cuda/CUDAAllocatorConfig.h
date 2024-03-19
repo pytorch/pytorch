@@ -1,13 +1,13 @@
 #pragma once
 
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/llvmMathExtras.h>
-#include <cuda_runtime_api.h>
 
 #include <atomic>
+#include <cstddef>
+#include <cstdlib>
+#include <mutex>
+#include <string>
 #include <vector>
 
 namespace c10::cuda::CUDACachingAllocator {
@@ -59,6 +59,16 @@ class C10_CUDA_API CUDAAllocatorConfig {
   // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
   static size_t roundup_power2_divisions(size_t size);
 
+  static std::vector<size_t> roundup_power2_divisions() {
+    return instance().m_roundup_power2_divisions;
+  }
+
+  static std::string last_allocator_settings() {
+    std::lock_guard<std::mutex> lock(
+        instance().m_last_allocator_settings_mutex);
+    return instance().m_last_allocator_settings;
+  }
+
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();
@@ -74,8 +84,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
  private:
   CUDAAllocatorConfig();
 
-  void lexArgs(const char* env, std::vector<std::string>& config);
-  void consumeToken(
+  static void lexArgs(const char* env, std::vector<std::string>& config);
+  static void consumeToken(
       const std::vector<std::string>& config,
       size_t i,
       const char c);
@@ -104,6 +114,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_expandable_segments;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
+  std::string m_last_allocator_settings;
+  std::mutex m_last_allocator_settings_mutex;
 };
 
 // General caching allocator utilities

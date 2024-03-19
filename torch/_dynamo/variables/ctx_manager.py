@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import dataclasses
 import inspect
 from typing import Callable, Dict, List, Optional
@@ -76,10 +78,9 @@ class ContextWrappingVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def reconstruct(self, codegen):
-        attr_source = AttrSource(
-            codegen.tx.import_source(self.module_name()), self.fn_name()
+        codegen(
+            AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
         )
-        return attr_source.reconstruct(codegen)
 
     def module_name(self):
         raise NotImplementedError("module_name called on base")
@@ -148,6 +149,125 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
+class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
+    """represents torch grad requries grad"""
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        return GradInplaceRequiresGradCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        [enabled] = self.target_values
+        self.prev_state = torch._C._functorch.get_inplace_requires_grad_allowed()
+        torch._C._functorch.set_inplace_requires_grad_allowed(enabled)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.set_inplace_requires_grad_allowed(
+                self.prev_state
+            ),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (enabled,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch.func.grad increment/decrement nesting"""
+
+    # A guard is needed as the grad level is baked into the torch FX graph
+    # This is fine if grad is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a grad
+    # call from eager that calls the compiled function, as the grad levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = GradIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        grad_level = torch._C._functorch._grad_increment_nesting()
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._grad_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(grad_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch VMap increment/decrement nesting"""
+
+    # A guard is needed as the vmap level is baked into the torch FX graph
+    # generated. This is fine if vmap is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a vmap
+    # call from eager that calls the compiled function, as the vmap levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        var = VmapIncrementNestingCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        batch_size, randomness = self.target_values
+        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._vmap_increment_nesting,
+            (batch_size, randomness),
+            {},
+        )
+        return variables.ConstantVariable.create(vmap_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
@@ -203,9 +323,9 @@ class GradModeVariable(ContextWrappingVariable):
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx, target_value, **kwargs):
         var = InferenceModeVariable(
-            target_values, initial_values=torch.is_inference_mode_enabled(), **kwargs
+            [target_value], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
         return var
 
@@ -233,19 +353,19 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        ctx = torch.autograd.grad_mode._enter_inference_mode(self.target_values)
+        ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
         )
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,
-            (self.target_values,),
+            (*self.target_values,),
             {},
         )
 
     def module_name(self):
-        return "torch.inference_mode"
+        return "torch"
 
     def fn_name(self):
         return "inference_mode"
@@ -521,11 +641,41 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         self.state.cleanup_assert()
 
-    def module_name(self):
-        return "torch." + str(self.device)
 
-    def fn_name(self):
-        return "stream"
+class PreserveVersionContextVariable(ContextWrappingVariable):
+    """
+    Wraps torch.autograd._unsafe_preserve_version_counter
+    """
+
+    @staticmethod
+    def constructor(tx):
+        return variables.LambdaVariable(
+            lambda tensor: PreserveVersionContextVariable(
+                tensor,
+                tensor.var_getattr(tx, "_version"),
+            )
+        )
+
+    def __init__(self, tensor, prev_version, **kwargs):
+        kwargs.setdefault("target_values", None)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.prev_version = prev_version
+
+    def enter(self, tx):
+        pass
+
+    def exit(self, tx, *args):
+        from ..tensor_version_op import _unsafe_set_version_counter
+
+        return variables.TorchInGraphFunctionVariable(
+            _unsafe_set_version_counter
+        ).call_function(tx, [self.tensor, self.prev_version], {})
+
+    def reconstruct(self, codegen):
+        unimplemented(
+            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        )
 
 
 class StreamVariable(VariableTracker):
@@ -533,7 +683,7 @@ class StreamVariable(VariableTracker):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert (
-            value.device.type == device
+            value.device.type == device.type
         ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
@@ -585,6 +735,22 @@ class StreamVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        # If we got here, this stream is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
+        # is fine and sound according to dynamo principles of treating collectives. However,
+        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
+        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
+        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
+        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
+        prefix = f"_stream_{self.device}"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(
+            codegen.create_load_global(name, push_null=False, add=True)
+        )
 
 
 class EventVariable(VariableTracker):
@@ -642,18 +808,18 @@ class WithExitFunctionVariable(VariableTracker):
         # Note here we reconstruct the context manager rather than the
         # exit function.  The handler generated by BlockStackEntry
         # will re-enter the context in the resume function.
-        output = AttrSource(
-            codegen.tx.import_source(self.ctx.module_name()), self.ctx.fn_name()
-        ).reconstruct(codegen)
+        codegen(
+            AttrSource(
+                codegen.tx.import_source(self.ctx.module_name()), self.ctx.fn_name()
+            )
+        )
 
         if codegen.tx.output.partial_convert:
-            loads = [codegen.create_load_const(val) for val in self.ctx.target_values]
-            output.extend(loads)
-            output.extend(
-                [
-                    *create_call_function(len(loads), True),
-                    create_instruction("SETUP_WITH", target=self.target),
-                    create_instruction("POP_TOP"),
-                ]
+            codegen.extend_output(
+                [codegen.create_load_const(val) for val in self.ctx.target_values]
             )
-        return output
+            codegen.extend_output(
+                create_call_function(len(self.ctx.target_values), True)
+            )
+            codegen.append_output(create_instruction("SETUP_WITH", target=self.target))
+            codegen.append_output(create_instruction("POP_TOP"))

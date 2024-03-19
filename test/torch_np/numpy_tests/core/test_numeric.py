@@ -371,36 +371,58 @@ class TestBoolScalar(TestCase):
         assert_((t and s) is s)
         assert_((f and s) is f)
 
-    @xfailIfTorchDynamo
-    def test_bitwise_or(self):
+    def test_bitwise_or_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t | t) is t)
-        assert_((f | t) is t)
-        assert_((t | f) is t)
-        assert_((f | f) is f)
+        assert_((t | t) == t)
+        assert_((f | t) == t)
+        assert_((t | f) == t)
+        assert_((f | f) == f)
 
-    @xfailIfTorchDynamo
-    def test_bitwise_and(self):
+    def test_bitwise_or_is(self):
         f = np.False_
         t = np.True_
-        assert_((t & t) is t)
-        assert_((f & t) is f)
-        assert_((t & f) is f)
-        assert_((f & f) is f)
+        assert_(bool(t | t) is bool(t))
+        assert_(bool(f | t) is bool(t))
+        assert_(bool(t | f) is bool(t))
+        assert_(bool(f | f) is bool(f))
 
-    @xfailIfTorchDynamo
-    def test_bitwise_xor(self):
+    def test_bitwise_and_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t ^ t) is f)
-        assert_((f ^ t) is t)
-        assert_((t ^ f) is t)
-        assert_((f ^ f) is f)
+        assert_((t & t) == t)
+        assert_((f & t) == f)
+        assert_((t & f) == f)
+        assert_((f & f) == f)
+
+    def test_bitwise_and_is(self):
+        f = np.False_
+        t = np.True_
+        assert_(bool(t & t) is bool(t))
+        assert_(bool(f & t) is bool(f))
+        assert_(bool(t & f) is bool(f))
+        assert_(bool(f & f) is bool(f))
+
+    def test_bitwise_xor_eq(self):
+        f = np.False_
+        t = np.True_
+        assert_((t ^ t) == f)
+        assert_((f ^ t) == t)
+        assert_((t ^ f) == t)
+        assert_((f ^ f) == f)
+
+    def test_bitwise_xor_is(self):
+        f = np.False_
+        t = np.True_
+        assert_(bool(t ^ t) is bool(f))
+        assert_(bool(f ^ t) is bool(t))
+        assert_(bool(t ^ f) is bool(t))
+        assert_(bool(f ^ f) is bool(f))
 
 
 class TestBoolArray(TestCase):
     def setUp(self):
+        super().setUp()
         # offset for simd tests
         self.t = np.array([True] * 41, dtype=bool)[1::]
         self.f = np.array([False] * 41, dtype=bool)[1::]
@@ -489,6 +511,7 @@ class TestBoolArray(TestCase):
 @xfailIfTorchDynamo
 class TestBoolCmp(TestCase):
     def setUp(self):
+        super().setUp()
         self.f = np.ones(256, dtype=np.float32)
         self.ef = np.ones(self.f.size, dtype=bool)
         self.d = np.ones(128, dtype=np.float64)
@@ -1292,6 +1315,7 @@ class TestArrayComparisons(TestCase):
 @instantiate_parametrized_tests
 class TestClip(TestCase):
     def setUp(self):
+        super().setUp()
         self.nr = 5
         self.nc = 3
 
@@ -2075,6 +2099,7 @@ class TestIsclose(TestCase):
 
 class TestStdVar(TestCase):
     def setUp(self):
+        super().setUp()
         self.A = np.array([1, -1, 1, -1])
         self.real_var = 1
 
@@ -2132,6 +2157,7 @@ class TestCreationFuncs(TestCase):
     # Test ones, zeros, empty and full.
 
     def setUp(self):
+        super().setUp()
         # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
@@ -2193,6 +2219,7 @@ class TestLikeFuncs(TestCase):
     """Test ones_like, zeros_like, empty_like and full_like"""
 
     def setUp(self):
+        super().setUp()
         self.data = [
             # Array scalars
             (np.array(3.0), None),
