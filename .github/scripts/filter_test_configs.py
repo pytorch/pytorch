@@ -131,7 +131,7 @@ def get_labels(pr_number: int) -> Set[str]:
     }
 
 
-def has_labels(labels: Set[str], label_regex: re.Pattern[str]) -> Set[str]:
+def has_labels(labels: Set[str], label_regex: Any) -> Set[str]:
     """
     Return true if there is at least one label matching the regex
     """
