@@ -1,6 +1,5 @@
 import base64
 import copy
-import copyreg
 import dataclasses
 import heapq
 import inspect
@@ -9,9 +8,8 @@ import json
 import logging
 import math
 import operator
-import re
-import textwrap
 import typing
+import copyreg
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -33,11 +31,7 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
-from torch._export.serde.schema import (
-    CoFileInfo,
-    CoLineInfo,
-    SchemaVersion,
-)
+from torch._export.serde.schema import SchemaVersion
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
@@ -91,6 +85,7 @@ from .schema import (  # type: ignore[attr-defined]
     UserOutputSpec,
 )
 from .union import _Union
+
 
 __all__ = [
     "serialize",
@@ -203,16 +198,6 @@ class _SerializedProgram:
     state_dict: bytes
     constants: bytes
 
-@dataclass
-class Frame:
-    filename: str
-    lineno: int
-    name: str
-    context: str
-
-@dataclass
-class FrameList:
-    items: List[Frame]
 
 def deserialize_device(d: Device) -> torch.device:
     if d.index is None:
@@ -377,20 +362,6 @@ def _output_node_at_index(node, index):
             return user
     return None
 
-def stacktrace_to_framelist(stacktrace: str) -> FrameList:
-    """Creates a frame list from a stacktrace string."""
-    pattern = r'File "(.*?)", line (\d+), in (.*?)\n'
-    matches = re.findall(pattern, stacktrace)
-    mapped_frame_list = [
-        Frame(
-            filename=match[0],
-            lineno=int(match[1]),
-            name=match[2],
-            context=stacktrace.split("\n")[i * 2 + 1].strip(),
-        )
-        for i, match in enumerate(matches)
-    ]
-    return FrameList(mapped_frame_list)
 
 
 @dataclass
@@ -403,8 +374,6 @@ class GraphState:
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
     is_single_tensor_return: bool = False
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
-    co_fileinfo_ordered_list: List[CoFileInfo] = field(default_factory=list)
-    co_filename_to_abbrev_map: Dict[str, int] = field(default_factory=dict)
 
 
 class GraphModuleSerializer:
@@ -532,28 +501,7 @@ class GraphModuleSerializer:
     def serialize_metadata(self, node: torch.fx.Node) -> Dict[str, str]:
         ret = {}
         if stack_trace := node.meta.get("stack_trace"):
-            framelist = stacktrace_to_framelist(stack_trace)
-            msgs = []
-            for frame in framelist.items:
-                if frame.filename in self.graph_state.co_filename_to_abbrev_map:
-                    filename_index = self.graph_state.co_filename_to_abbrev_map[
-                        frame.filename
-                    ]
-                else:
-                    filename_index = len(self.graph_state.co_fileinfo_ordered_list)
-                    self.graph_state.co_filename_to_abbrev_map[frame.filename] = (
-                        filename_index
-                    )
-                    self.graph_state.co_fileinfo_ordered_list.append(
-                        CoFileInfo(file_name=frame.filename, line_info_map={})
-                    )
-                # later on we need to json dump the data, json can't have int keys, thus we
-                # make lino key as str beforehand
-                self.graph_state.co_fileinfo_ordered_list[filename_index].line_info_map[
-                    str(frame.lineno)
-                ] = CoLineInfo(name=frame.name, line=frame.context)
-                msgs.append(f"{filename_index}:{frame.lineno}")
-            ret["stack_trace"] = "|".join(msgs)
+            ret["stack_trace"] = stack_trace
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
 
@@ -1254,6 +1202,7 @@ class GraphModuleSerializer:
                 raise SerializeError(
                     f"Failed serializing node {node} in graph: {node.format_node()}"
                 ) from e
+
         return Graph(
             inputs=self.graph_state.inputs,
             nodes=self.graph_state.nodes,
@@ -1263,7 +1212,6 @@ class GraphModuleSerializer:
             custom_obj_values=self.graph_state.custom_obj_values,
             outputs=self.graph_state.outputs,
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
-            co_fileinfo_ordered_list=self.graph_state.co_fileinfo_ordered_list,
         )
 
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
@@ -1358,7 +1306,6 @@ class GraphModuleDeserializer:
         self.module = torch.nn.Module()
         self.serialized_name_to_node = {}
         self.serialized_name_to_meta = {}
-        self.co_fileinfo_ordered_list = []
         try:
             yield
         finally:
@@ -1368,9 +1315,6 @@ class GraphModuleDeserializer:
                 self.serialized_name_to_node,
                 self.serialized_name_to_meta,
             ) = saved
-
-    def set_co_fileinfo_ordered_list(self, co_fileinfo_ordered_list: List[CoFileInfo]) -> None:
-        self.co_fileinfo_ordered_list = co_fileinfo_ordered_list
 
     def deserialize_operator(self, serialized_target: str):
         if serialized_target.startswith(
@@ -1500,7 +1444,6 @@ class GraphModuleDeserializer:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
-        self.set_co_fileinfo_ordered_list(serialized_graph.co_fileinfo_ordered_list)
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
             meta_val = self.deserialize_tensor_meta(tensor_value)
@@ -1988,18 +1931,7 @@ class GraphModuleDeserializer:
     def deserialize_metadata(self, metadata: Dict[str, str]) -> Dict[str, Any]:
         ret: Dict[str, Any] = {}
         if stack_trace := metadata.get("stack_trace"):
-            frames = stack_trace.split("|")
-            row = []
-            for frame in frames:
-                split_info = frame.split(":")
-                file_index = int(split_info[0])
-                lineno = split_info[1]
-                file_info = self.co_fileinfo_ordered_list[file_index]
-                line_info = file_info.line_info_map[lineno]
-                row.append(
-                    f'  File "{file_info.file_name}", line {lineno}, in {line_info.name}\n{textwrap.indent(line_info.line, "    ")}\n'
-                )
-            ret["stack_trace"] = "".join(row)
+            ret["stack_trace"] = stack_trace
 
         def deserialize_meta_func(serialized_target: str):
             module = None
