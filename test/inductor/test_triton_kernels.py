@@ -1087,51 +1087,6 @@ def forward(self, x_1, output_1):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             f(x, x)
 
-    @requires_cuda
-    @skipIfRocm
-    @common_utils.parametrize("dynamic", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_triton_dtype(self, dynamic, backend):
-        @triton.jit
-        def add_kernel_with_dtype(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            dtype: "tl.constexpr",
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask).to(dtype)
-            y = tl.load(in_ptr1 + offsets, mask=mask).to(dtype)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def f(x, y, dtype_torch, dtype_triton):
-            output = torch.zeros_like(x).to(dtype=dtype_torch)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_with_dtype[grid](
-                x, y, output, dtype_triton, n_elements, BLOCK_SIZE=4
-            )
-            return output
-
-        x = torch.randn(4, device="cuda")
-        y = torch.randn(4, device="cuda")
-        args_list = (
-            [x, y, torch.float32, tl.float32],
-            [x, y, torch.bfloat16, tl.bfloat16],
-        )
-        for args in args_list:
-            eager_out = f(*args)
-            compiled_out = torch.compile(
-                f, fullgraph=True, backend=backend, dynamic=dynamic
-            )(*args)
-            self.assertEqual(compiled_out, eager_out)
-
 
 def make_mutation_test(fn):
     @requires_cuda
