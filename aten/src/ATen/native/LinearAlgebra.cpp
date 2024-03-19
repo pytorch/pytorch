@@ -2814,44 +2814,57 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
+  DimVector dims_ = at::native::make_dim_vector(opt_dim, self.dim());
+  maybe_wrap_dims(dims_, self.dim());
   auto size = self.sizes();
   auto ndim = self.dim();
 
   bool all_reduction_dims_are_one_dimensional = true;
-  if (opt_dim.has_value() && !opt_dim->empty()) {
-    DimVector dims_ = at::native::make_dim_vector(opt_dim, self.dim());
-    maybe_wrap_dims(dims_, self.dim());
-    for (const auto i : c10::irange(dims_.size())) {
-      size_t dim_ = dims_[i];
-      if (size[dim_] != 1){
-        all_reduction_dims_are_one_dimensional = false;
-        break;
-      }
-    }
-  } else {
-    // all dims are 1-dimensional
+  if (result.sizes().empty()){
+    // reduce over all dims and all dims are 1-dimensional
     for (const auto dim_ : c10::irange(ndim)) {
       if (size[dim_] != 1){
         all_reduction_dims_are_one_dimensional = false;
         break;
       }
     }
+  } else {
+    // all reduction dims are 1-dimensional
+    if (opt_dim.has_value() && !opt_dim->empty()) {
+      for (const auto i : c10::irange(dims_.size())) {
+        size_t dim_ = dims_[i];
+        if (size[dim_] != 1){
+          all_reduction_dims_are_one_dimensional = false;
+          break;
+        }
+      }
+    } else {
+      all_reduction_dims_are_one_dimensional = false;
+    }
   }
-  if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
-    Tensor self_ = self.clone();
-    result.copy_(self_.reshape(result.sizes()));
 
-    if (!keepdim) {
-      if (opt_dim.has_value() && !opt_dim->empty()) {
-        result.squeeze_(dim);
+  if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
+    Tensor result_tmp = self.clone();
+
+    if (result.sizes().empty()) {
+      // reduce over all dims and all dims are 1-dimensional
+      result_tmp = result_tmp.squeeze_();
+    } else {
+      // all reduction dims are 1-dimensional
+      if (!keepdim && opt_dim.has_value() && !opt_dim->empty()) {
+        if (opt_dim.has_value()) {
+          result_tmp.squeeze_(dim);
+        }
       }
     }
 
     if (ord != 0.0) {
-      result.abs_();
+      result_tmp.abs_();
     } else {
-      result.ne_(0);
+      result_tmp.ne_(0);
     }
+
+    result.copy_(result_tmp);
     return;
   }
 
