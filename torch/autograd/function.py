@@ -362,7 +362,7 @@ class _SingleLevelFunction(
     _C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta
 ):
     @staticmethod
-    def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+    def forward(*args: Any, **kwargs: Any) -> Any:
         r"""Define the forward of the custom autograd Function.
 
         This function is to be overridden by all subclasses.
