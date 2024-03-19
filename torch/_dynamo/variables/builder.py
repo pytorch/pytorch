@@ -76,7 +76,6 @@ from ..utils import (
     is_utils_checkpoint,
     istype,
     odict_values,
-    preserve_rng_state,
     tensor_always_has_static_shape,
     tuple_iterator,
     tuple_iterator_getitem,
@@ -1416,45 +1415,40 @@ def wrap_fx_proxy_cls(
 
         return value
 
-    with preserve_rng_state():
-        if example_value is None:
-            # only allow_non_graph_fake in this instance because we handle the non-fake
-            # cases properly below.
-            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+    # with preserve_rng_state():
+    if example_value is None:
+        # only allow_non_graph_fake in this instance because we handle the non-fake
+        # cases properly below.
+        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
-        # Handle recursive calls here
-        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
-            pass
+    # Handle recursive calls here
+    elif maybe_get_fake_mode(example_value) is tx.fake_mode:
+        pass
 
-        elif isinstance(example_value, torch.Tensor):
-            if tx.export:
-                # The legacy behavior for real value cache with subclasses was
-                # to perform a clone WITHOUT preserving the subclass.  It's
-                # not entirely clear this is what you actually want though.
-                with torch._C.DisableTorchFunctionSubclass():
-                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
-                        example_value
-                    )
-            # NB: If we're ignoring subclass, then the expectation is you will
-            # take the returned TensorVariable and wrap it into a more
-            # accurate TensorVariable that is able to track subclass-ness;
-            # otherwise this is wrong!
-            kwargs = {
-                "is_tensor": target_cls
-                in (TensorVariable, TensorWithTFOverrideVariable),
-            }
-            assert "source" in options and options["source"] is not None
-            kwargs["source"] = options["source"]
-            example_value = wrap_to_fake_tensor_and_record(
-                example_value, tx=tx, **kwargs
-            )
-        if isinstance(example_value, torch.Tensor) and (
-            maybe_get_fake_mode(example_value) is not tx.fake_mode
-        ):
-            raise InternalTorchDynamoError(
-                "`example_value` needs to be a `FakeTensor`"
-                f"wrapped by this instance of Dynamo. Found: {example_value}"
-            )
+    elif isinstance(example_value, torch.Tensor):
+        if tx.export:
+            # The legacy behavior for real value cache with subclasses was
+            # to perform a clone WITHOUT preserving the subclass.  It's
+            # not entirely clear this is what you actually want though.
+            with torch._C.DisableTorchFunctionSubclass():
+                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+        # NB: If we're ignoring subclass, then the expectation is you will
+        # take the returned TensorVariable and wrap it into a more
+        # accurate TensorVariable that is able to track subclass-ness;
+        # otherwise this is wrong!
+        kwargs = {
+            "is_tensor": target_cls in (TensorVariable, TensorWithTFOverrideVariable),
+        }
+        assert "source" in options and options["source"] is not None
+        kwargs["source"] = options["source"]
+        example_value = wrap_to_fake_tensor_and_record(example_value, tx=tx, **kwargs)
+    if isinstance(example_value, torch.Tensor) and (
+        maybe_get_fake_mode(example_value) is not tx.fake_mode
+    ):
+        raise InternalTorchDynamoError(
+            "`example_value` needs to be a `FakeTensor`"
+            f"wrapped by this instance of Dynamo. Found: {example_value}"
+        )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -1945,13 +1939,13 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
-        if ConstantVariable.is_literal(value):
-            return SourcelessBuilder.wrap_constant_literal(value)
+        elif ConstantVariable.is_literal(value):
+            return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
+                tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
