@@ -2814,14 +2814,13 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
-  DimVector dims_ = at::native::make_dim_vector(opt_dim, self.dim());
-  maybe_wrap_dims(dims_, self.dim());
   auto size = self.sizes();
   auto ndim = self.dim();
 
   bool all_reduction_dims_are_one_dimensional = true;
   if (result.sizes().empty()){
     // reduce over all dims and all dims are 1-dimensional
+    // if ndim == 0, self is scalar
     for (const auto dim_ : c10::irange(ndim)) {
       if (size[dim_] != 1){
         all_reduction_dims_are_one_dimensional = false;
@@ -2831,6 +2830,8 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   } else {
     // all reduction dims are 1-dimensional
     if (opt_dim.has_value() && !opt_dim->empty()) {
+      DimVector dims_ = at::native::make_dim_vector(opt_dim, self.dim());
+      maybe_wrap_dims(dims_, self.dim());
       for (const auto i : c10::irange(dims_.size())) {
         size_t dim_ = dims_[i];
         if (size[dim_] != 1){
@@ -2843,7 +2844,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     }
   }
 
-  if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
+  if (all_reduction_dims_are_one_dimensional && !self.is_complex() && !(self.numel() == 0)) {
     Tensor result_tmp = self.clone();
 
     if (result.sizes().empty()) {
