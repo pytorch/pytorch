@@ -524,11 +524,11 @@ class GraphModuleSerializer:
                 else:
                     normalized_ty = ty.__module__ + "." + ty.__qualname__
 
-                return path + "," + normalized_ty
+                return path + "|" + normalized_ty
 
             # Serialize to "key,orig_path,type_str"
             nn_module_list = [
-                f"{k},{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
+                f"{k}|{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
             ]
             ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
 
@@ -1958,7 +1958,7 @@ class GraphModuleDeserializer:
                 return key, (path, ty)
 
             nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
+                import_nn_module_stack(*item.split("|"))
                 for item in nn_module_stack_str.split(ST_DELIMITER)
             )
             ret["nn_module_stack"] = nn_module_stack
