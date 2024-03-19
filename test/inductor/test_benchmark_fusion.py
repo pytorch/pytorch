@@ -5,7 +5,7 @@ import sys
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ASAN,
 )
+
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 # Make the helper files in test/ importable
@@ -34,6 +35,7 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
+
 
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
@@ -190,6 +192,108 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         device = "cuda"
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCudaTest, "cuda")
+
+    class BenchmarkMultiTemplateFusionCudaTest(InductorTestCase):
+        @classmethod
+        def setUpClass(cls):
+            super().setUpClass()
+            cls._stack = contextlib.ExitStack()
+            cls._stack.enter_context(
+                config.patch(
+                    {
+                        "benchmark_kernel": True,
+                        "benchmark_fusion": True,
+                        "benchmark_multi_templates": True,
+                    }
+                )
+            )
+
+        @classmethod
+        def tearDownClass(cls):
+            cls._stack.close()
+            super().tearDownClass()
+
+        def _equivalent_output_code_impl(self, size, first_dim=None, activation=True):
+            def foo(m, inp):
+                a = m(inp)
+                if activation:
+                    return torch.nn.functional.relu(a)
+                return a
+
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+            first_dim = first_dim if first_dim is not None else size
+
+            m = torch.nn.Linear(size, size, bias=True).half().cuda()
+            inp = torch.rand([first_dim, size]).half().cuda()
+
+            with torch.no_grad():
+                res, code = run_and_get_code(foo_c, m, inp)
+
+            torch._dynamo.reset()
+            with unittest.mock.patch.object(
+                torch._inductor.config, "benchmark_multi_templates", False
+            ):
+                foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+                with torch.no_grad():
+                    res2, code2 = run_and_get_code(foo_c, m, inp)
+
+            self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
+            return code, code2
+
+        @fresh_inductor_cache()
+        @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+        def test_equivalent_template_code(self):
+            code, code2 = self._equivalent_output_code_impl(256)
+            for out_code in [code, code2]:
+                FileCheck().check("def call").check_count(
+                    "empty_strided_cuda", 1, exactly=True
+                ).check("triton_tem_fused_relu_0.run").check_count(
+                    "del", 3, exactly=True
+                ).check(
+                    "return"
+                ).run(
+                    out_code[0]
+                )
+
+        @fresh_inductor_cache()
+        @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
+        def test_equivalent_extern_code(self):
+            torch._dynamo.reset()
+
+            code, code2 = self._equivalent_output_code_impl(512, 1, False)
+
+            for out_code in [code, code2]:
+                FileCheck().check("def call").check_count(
+                    "empty_strided_cuda", 1, exactly=True
+                ).check("extern_kernels.").check_count("del", 3, exactly=True).check(
+                    "return"
+                ).run(
+                    out_code[0]
+                )
+
+        def test_changed_layout(self):
+            # cat addmm planning will change layout - make sure propagated
+            def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
+                return torch.cat(
+                    [
+                        torch.addmm(a, b, c),
+                        torch.addmm(b, c, a),
+                    ],
+                    1,
+                )
+
+            args = [
+                torch.randn(4, 4, device="cuda"),
+                torch.randn(4, 4, device="cuda"),
+                torch.randn(4, 4, device="cuda"),
+            ]
+
+            expected = fn(*args)
+            actual = torch.compile(fn, mode="max-autotune")(*args)
+            self.assertEqual(expected, actual)
+
+            torch._dynamo.reset()
+
 
 if HAS_CPU and not torch.backends.mps.is_available():
 
