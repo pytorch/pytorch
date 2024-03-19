@@ -28,6 +28,7 @@ from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
+    check_unspec_or_constant_args,
     check_unspec_python_args,
     extract_fake_example_value,
     get_fake_value,
@@ -97,6 +98,7 @@ def _polyfill_call_impl(name):
 
 
 class BuiltinVariable(VariableTracker):
+    _has_child_nodes = False
     _SENTINEL = object()
 
     @classmethod
@@ -433,19 +435,29 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
+        for key in op_handlers.keys():
+            # insert a mutable cache into each entry
+            op_handlers[key] = (op_handlers[key], dict())
         return op_handlers
 
     @staticmethod
     def _find_binop_handler(op, a, b):
-        handlers = BuiltinVariable._binop_handlers()
-        if op not in handlers:
+        handlers_and_cache = BuiltinVariable._binop_handlers().get(op)
+        if handlers_and_cache is None:
             return None
 
-        # Return first handler that matches the type checks
-        for (type1, type2), handler in handlers[op]:
-            if isinstance(a, type1) and isinstance(b, type2):
-                return handler
+        handlers, cache = handlers_and_cache
+        cache_key = (type(a), type(b))
+        hit = cache.get(cache_key, False)
+        if hit is not False:
+            return hit
 
+        # Return first handler that matches the type checks
+        for (type1, type2), handler in handlers:
+            if isinstance(a, type1) and isinstance(b, type2):
+                cache[cache_key] = handler
+                return handler
+        cache[cache_key] = None
         return None
 
     def can_insert_in_graph(self):
@@ -488,14 +500,13 @@ class BuiltinVariable(VariableTracker):
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
 
-    def tensor_args(self, *args, **kwargs):
-        return any(
-            isinstance(i, variables.TensorVariable)
-            for i in itertools.chain(args, kwargs.values())
-        ) and not any(
-            isinstance(i, variables.GetAttrVariable)
-            for i in itertools.chain(args, kwargs.values())
-        )
+    def tensor_args(self, *args):
+        any_tensor = False
+        for arg in args:
+            if isinstance(arg, variables.GetAttrVariable):
+                return False
+            any_tensor = any_tensor or isinstance(arg, variables.TensorVariable)
+        return any_tensor
 
     def python_and_tensor_constant_only(self, *args, **kwargs):
         tensor_args = []
@@ -510,9 +521,6 @@ class BuiltinVariable(VariableTracker):
             for t in tensor_args
         ) and self.constant_args(*non_tensor_args)
 
-    def unspec_python_args(self, *args, **kwargs):
-        return check_unspec_python_args(args, kwargs)
-
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
         return [x.as_python_constant() for x in args], {
@@ -520,10 +528,8 @@ class BuiltinVariable(VariableTracker):
         }
 
     def has_constant_handler(self, args, kwargs):
-        constant_args = check_constant_args(args, kwargs)
-        unspec_python_args = self.unspec_python_args(*args, **kwargs)
-        return self.can_constant_fold_through() and (
-            constant_args or unspec_python_args
+        return self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
         )
 
     def call_function(
@@ -532,34 +538,20 @@ class BuiltinVariable(VariableTracker):
         from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        fn = self.fn
         args = [v.realize() for v in args]
         kwargs = {k: v.realize() for k, v in kwargs.items()}
-        assert isinstance(args, (list, tuple))
-        assert isinstance(kwargs, dict)
-        tensor_args = self.tensor_args(*args, **kwargs)
-
-        # args[0] is list and args[1] is unspec
-        if self.fn is operator.getitem and not isinstance(
-            args[0], variables.TensorVariable
-        ):
-            tensor_args = False
-
         if (
             self.can_insert_in_graph()
-            and tensor_args
+            and self.tensor_args(*args, *kwargs.values())
             and not (
-                self.fn is operator.getitem
-                and isinstance(args[0], ConstDictVariable)
-                and isinstance(args[1], variables.TensorVariable)
+                fn is operator.getitem
+                and not isinstance(args[0], variables.TensorVariable)
             )
         ):
             try:
-                fn = self.fn
-
                 # Constant fold for constant tensor and python constants
-                if tensor_args and self.python_and_tensor_constant_only(
-                    *args, **kwargs
-                ):
+                if self.python_and_tensor_constant_only(*args, **kwargs):
                     from ..bytecode_transformation import unique_id
                     from .functions import invoke_and_store_as_constant
 
@@ -567,7 +559,7 @@ class BuiltinVariable(VariableTracker):
                         tx, fn, unique_id(fn.__name__), args, kwargs
                     )
 
-                if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
+                if fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
                 ):
                     # In-place operators like += usually mustate tensor
@@ -576,9 +568,9 @@ class BuiltinVariable(VariableTracker):
                     #
                     # The easiest way to keep the graph consistent in this
                     # scenario is to de-sugar eagerly.
-                    fn, args = IN_PLACE_DESUGARING_MAP[self.fn], [args[0], args[1]]
+                    fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
 
-                if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
                     # __index__.  Rewrite as a regular torch op which will
                     # trace fine
@@ -595,7 +587,7 @@ class BuiltinVariable(VariableTracker):
                 ):
                     proxy = tx.output.create_proxy(
                         "call_function",
-                        numpy_operator_wrapper(self.fn),
+                        numpy_operator_wrapper(fn),
                         *proxy_args_kwargs(args, kwargs),
                     )
 
@@ -612,9 +604,9 @@ class BuiltinVariable(VariableTracker):
                         tx,
                         proxy,
                     )
-                elif self.unspec_python_args(*args, **kwargs):
+                elif check_unspec_python_args(args, kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
+                    raw_value = fn(*_args, **_kwargs)
 
                     need_unwrap = any(
                         x.need_unwrap
@@ -634,7 +626,7 @@ class BuiltinVariable(VariableTracker):
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
-                    if self.fn is operator.truediv and isinstance(
+                    if fn is operator.truediv and isinstance(
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
@@ -645,14 +637,14 @@ class BuiltinVariable(VariableTracker):
 
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if self.fn in (int, float) and isinstance(
+        if fn in (int, float) and isinstance(
             args[0], (SymNodeVariable, variables.TensorVariable)
         ):
             if isinstance(args[0], variables.TensorVariable):
                 item = args[0].call_method(tx, "item", [], {})
             else:
                 item = args[0]
-            fn_ = sym_int if self.fn is int else sym_float
+            fn_ = sym_int if fn is int else sym_float
             out = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -665,23 +657,20 @@ class BuiltinVariable(VariableTracker):
             return out
 
         # Handle `str` on a user defined function
-        if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
+        if fn is str and args and isinstance(args[0], (UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(args[0].fn))
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
-        if len(kwargs) == 0 and len(args) == 2:
+        if len(args) == 2 and len(kwargs) == 0:
             # Try to find a handler for the arg types; otherwise, fall through to constant handler
-            binop_handler = BuiltinVariable._find_binop_handler(
-                self.fn, args[0], args[1]
-            )
+            binop_handler = BuiltinVariable._find_binop_handler(fn, args[0], args[1])
             if binop_handler:
                 res = binop_handler(tx, args[0], args[1], {})
                 if res is not None:
                     return res
 
-        handler = getattr(self, f"call_{self.fn.__name__}", None)
-
+        handler = getattr(self, f"call_{fn.__name__}", None)
         if handler:
             try:
                 result = handler(tx, *args, **kwargs)
@@ -879,7 +868,7 @@ class BuiltinVariable(VariableTracker):
         return round_method.call_function(tx, args, kwargs)
 
     def call_range(self, tx, *args):
-        if self.unspec_python_args(*args) or self.constant_args(*args):
+        if check_unspec_or_constant_args(args, {}):
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
             args = [
