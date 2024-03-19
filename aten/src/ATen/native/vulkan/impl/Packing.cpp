@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/impl/Common.h>
 #include <ATen/native/vulkan/impl/Packing.h>
@@ -12,107 +13,104 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         switch (v_dst.dtype()) {
-          case c10::ScalarType::QUInt8:
+          case api::ScalarType::QUInt8:
             return VK_KERNEL(nchw_to_image_uint8);
-          case c10::ScalarType::QInt8:
+          case api::ScalarType::QInt8:
             return VK_KERNEL(nchw_to_image_int8);
-          case c10::ScalarType::QInt32:
+          case api::ScalarType::QInt32:
             return VK_KERNEL(nchw_to_image_int32);
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Vulkan quantization currently not supported for dtype ",
                 v_dst.dtype());
         }
       case api::StorageType::TEXTURE_2D:
         switch (v_dst.dtype()) {
-          case c10::ScalarType::QUInt8:
+          case api::ScalarType::QUInt8:
             return VK_KERNEL(nchw_to_image2d_uint8);
-          case c10::ScalarType::QInt8:
+          case api::ScalarType::QInt8:
             return VK_KERNEL(nchw_to_image2d_int8);
-          case c10::ScalarType::QInt32:
+          case api::ScalarType::QInt32:
             return VK_KERNEL(nchw_to_image2d_int32);
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Vulkan quantization currently not supported for dtype ",
                 v_dst.dtype());
         }
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
       case api::StorageType::BUFFER:
       case api::StorageType::UNKNOWN:
-        TORCH_CHECK(false, "Requested storage type must be a texture type.");
+        VK_THROW("Requested storage type must be a texture type.");
     }
   }
 
-  if (v_dst.dtype() == at::kFloat) {
+  if (v_dst.dtype() == api::kFloat) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         return VK_KERNEL(nchw_to_image);
       case api::StorageType::TEXTURE_2D:
         return VK_KERNEL(nchw_to_image2d);
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
     }
-  } else if (v_dst.dtype() == at::kBool) {
+  } else if (v_dst.dtype() == api::kBool) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         return VK_KERNEL(nchw_to_image_bool);
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
     }
   } else {
-    TORCH_CHECK(false, "Unsupported dtype!");
+    VK_THROW("Unsupported dtype!");
   }
 }
 
 api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
-  if (v_src.is_quantized() || v_src.dtype() == at::kBool) {
+  if (v_src.is_quantized() || v_src.dtype() == api::kBool) {
     auto plane_size =
         dim_at<Dim4D::Height>(v_src) * dim_at<Dim4D::Width>(v_src);
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         switch (v_src.dtype()) {
-          case c10::ScalarType::QUInt8:
-          case c10::ScalarType::QInt8:
-          case at::kBool:
+          case api::ScalarType::QUInt8:
+          case api::ScalarType::QInt8:
+          case api::kBool:
             return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
                                        : VK_KERNEL(image_to_nchw_uint);
-          case c10::ScalarType::QInt32:
+          case api::ScalarType::QInt32:
             return VK_KERNEL(image_to_nchw_int32);
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Vulkan quantization currently not supported for dtype ",
                 v_src.dtype());
         }
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
       case api::StorageType::BUFFER:
       case api::StorageType::UNKNOWN:
-        TORCH_CHECK(false, "Requested storage type must be a texture type.");
+        VK_THROW("Requested storage type must be a texture type.");
     }
   }
 
-  if (v_src.dtype() == at::kFloat) {
+  if (v_src.dtype() == api::kFloat) {
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         return VK_KERNEL(image_to_nchw);
       case api::StorageType::TEXTURE_2D:
         return VK_KERNEL(image2d_to_nchw);
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
     }
   } else {
-    TORCH_CHECK(false, "Unsupported dtype!");
+    VK_THROW("Unsupported dtype!");
   }
 }
 
 struct ToFromTextureParams final {
   api::utils::ivec3 extents;
-  int32_t plane_size;
-  api::utils::ivec2 c_info;
+  int32_t planeSize;
+  api::utils::ivec2 channelInfo;
 };
 
 void record_nchw_to_image_op(
@@ -121,7 +119,7 @@ void record_nchw_to_image_op(
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   api::utils::uvec3 global_size = v_dst.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
@@ -169,7 +167,7 @@ bool record_image_to_nchw_op(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   api::utils::uvec3 global_size = v_src.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
@@ -189,8 +187,8 @@ bool record_image_to_nchw_op(
       {c_depth, channels},
   };
 
-  if (v_src.dtype() == c10::ScalarType::QUInt8 ||
-      v_src.dtype() == c10::ScalarType::QInt8 || v_src.dtype() == at::kBool) {
+  if (v_src.dtype() == api::ScalarType::QUInt8 ||
+      v_src.dtype() == api::ScalarType::QInt8 || v_src.dtype() == api::kBool) {
     // Special case using optimized shader, image_to_nchw_quantized_mul4
     if (plane_size % 4 == 0) {
       global_size.data[0u] = plane_size / 4;
@@ -233,7 +231,7 @@ void record_nchw_to_buffer_op(
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   uint32_t gpu_buf_len = api::utils::safe_downcast<uint32_t>(v_dst.gpu_numel());
 
   api::utils::uvec3 global_size = {gpu_buf_len, 1u, 1u};
@@ -268,7 +266,7 @@ bool record_buffer_to_nchw_op(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   uint32_t buf_len = api::utils::safe_downcast<uint32_t>(v_src.numel());
 
   api::utils::uvec3 global_size = {buf_len, 1u, 1u};

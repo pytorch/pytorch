@@ -307,6 +307,16 @@ public:
     }
     return loadu(res);
   };
+  bool has_inf_nan() const {
+    __at_align__ float tmp[size()];
+    store(tmp);
+    for (const auto i : c10::irange(size())) {
+      if(_isnan(tmp[i]) || _isinf(tmp[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
@@ -420,6 +430,9 @@ public:
       Vectorized<float>(Sleef_expm1f4_u10(values.val[0]), Sleef_expm1f4_u10(values.val[1])),
       map(std::expm1)
     );
+  }
+  Vectorized<float> exp_u20() const {
+    return exp();
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     USE_SLEEF(

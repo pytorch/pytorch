@@ -15,6 +15,7 @@ import pytest
 IS_WASM = False
 HAS_REFCOUNT = True
 
+import operator
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 from hypothesis import given, strategies as st
@@ -232,14 +233,14 @@ class TestNonarrayArgs(TestCase):
             # pytest.param(
             #    2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
             # ),
-            subtest((2**31 - 1, -1), decorators=[xfail]),
+            subtest((2**31 - 1, -1), decorators=[xpassIfTorchDynamo]),
             subtest(
                 (2**31 - 1, 1 - math.ceil(math.log10(2**31 - 1))),
-                decorators=[xfail],
+                decorators=[xpassIfTorchDynamo],
             ),
             subtest(
                 (2**31 - 1, -math.ceil(math.log10(2**31 - 1))),
-                decorators=[xfail],
+                decorators=[xpassIfTorchDynamo],
             ),
         ],
     )
@@ -370,36 +371,58 @@ class TestBoolScalar(TestCase):
         assert_((t and s) is s)
         assert_((f and s) is f)
 
-    @xfailIfTorchDynamo
-    def test_bitwise_or(self):
+    def test_bitwise_or_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t | t) is t)
-        assert_((f | t) is t)
-        assert_((t | f) is t)
-        assert_((f | f) is f)
+        assert_((t | t) == t)
+        assert_((f | t) == t)
+        assert_((t | f) == t)
+        assert_((f | f) == f)
 
-    @xfailIfTorchDynamo
-    def test_bitwise_and(self):
+    def test_bitwise_or_is(self):
         f = np.False_
         t = np.True_
-        assert_((t & t) is t)
-        assert_((f & t) is f)
-        assert_((t & f) is f)
-        assert_((f & f) is f)
+        assert_(bool(t | t) is bool(t))
+        assert_(bool(f | t) is bool(t))
+        assert_(bool(t | f) is bool(t))
+        assert_(bool(f | f) is bool(f))
 
-    @xfailIfTorchDynamo
-    def test_bitwise_xor(self):
+    def test_bitwise_and_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t ^ t) is f)
-        assert_((f ^ t) is t)
-        assert_((t ^ f) is t)
-        assert_((f ^ f) is f)
+        assert_((t & t) == t)
+        assert_((f & t) == f)
+        assert_((t & f) == f)
+        assert_((f & f) == f)
+
+    def test_bitwise_and_is(self):
+        f = np.False_
+        t = np.True_
+        assert_(bool(t & t) is bool(t))
+        assert_(bool(f & t) is bool(f))
+        assert_(bool(t & f) is bool(f))
+        assert_(bool(f & f) is bool(f))
+
+    def test_bitwise_xor_eq(self):
+        f = np.False_
+        t = np.True_
+        assert_((t ^ t) == f)
+        assert_((f ^ t) == t)
+        assert_((t ^ f) == t)
+        assert_((f ^ f) == f)
+
+    def test_bitwise_xor_is(self):
+        f = np.False_
+        t = np.True_
+        assert_(bool(t ^ t) is bool(f))
+        assert_(bool(f ^ t) is bool(t))
+        assert_(bool(t ^ f) is bool(t))
+        assert_(bool(f ^ f) is bool(f))
 
 
 class TestBoolArray(TestCase):
     def setUp(self):
+        super().setUp()
         # offset for simd tests
         self.t = np.array([True] * 41, dtype=bool)[1::]
         self.f = np.array([False] * 41, dtype=bool)[1::]
@@ -488,6 +511,7 @@ class TestBoolArray(TestCase):
 @xfailIfTorchDynamo
 class TestBoolCmp(TestCase):
     def setUp(self):
+        super().setUp()
         self.f = np.ones(256, dtype=np.float32)
         self.ef = np.ones(self.f.size, dtype=bool)
         self.d = np.ones(128, dtype=np.float64)
@@ -701,25 +725,19 @@ class TestFloatExceptions(TestCase):
         # The value of tiny for double double is NaN, so we need to
         # pass the assert
         if not np.isnan(ft_tiny):
-            self.assert_raises_fpe(underflow, lambda a, b: a / b, ft_tiny, ft_max)
-            self.assert_raises_fpe(underflow, lambda a, b: a * b, ft_tiny, ft_tiny)
-        self.assert_raises_fpe(overflow, lambda a, b: a * b, ft_max, ftype(2))
-        self.assert_raises_fpe(overflow, lambda a, b: a / b, ft_max, ftype(0.5))
-        self.assert_raises_fpe(overflow, lambda a, b: a + b, ft_max, ft_max * ft_eps)
-        self.assert_raises_fpe(overflow, lambda a, b: a - b, -ft_max, ft_max * ft_eps)
+            self.assert_raises_fpe(underflow, operator.truediv, ft_tiny, ft_max)
+            self.assert_raises_fpe(underflow, operator.mul, ft_tiny, ft_tiny)
+        self.assert_raises_fpe(overflow, operator.mul, ft_max, ftype(2))
+        self.assert_raises_fpe(overflow, operator.truediv, ft_max, ftype(0.5))
+        self.assert_raises_fpe(overflow, operator.add, ft_max, ft_max * ft_eps)
+        self.assert_raises_fpe(overflow, operator.sub, -ft_max, ft_max * ft_eps)
         self.assert_raises_fpe(overflow, np.power, ftype(2), ftype(2**fi.nexp))
-        self.assert_raises_fpe(divbyzero, lambda a, b: a / b, ftype(1), ftype(0))
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a / b, ftype(np.inf), ftype(np.inf)
-        )
-        self.assert_raises_fpe(invalid, lambda a, b: a / b, ftype(0), ftype(0))
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a - b, ftype(np.inf), ftype(np.inf)
-        )
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a + b, ftype(np.inf), ftype(-np.inf)
-        )
-        self.assert_raises_fpe(invalid, lambda a, b: a * b, ftype(0), ftype(np.inf))
+        self.assert_raises_fpe(divbyzero, operator.truediv, ftype(1), ftype(0))
+        self.assert_raises_fpe(invalid, operator.truediv, ftype(np.inf), ftype(np.inf))
+        self.assert_raises_fpe(invalid, operator.truediv, ftype(0), ftype(0))
+        self.assert_raises_fpe(invalid, operator.sub, ftype(np.inf), ftype(np.inf))
+        self.assert_raises_fpe(invalid, operator.add, ftype(np.inf), ftype(-np.inf))
+        self.assert_raises_fpe(invalid, operator.mul, ftype(0), ftype(np.inf))
 
     @skipif(IS_WASM, reason="no wasm fp exception support")
     def test_warnings(self):
@@ -1297,6 +1315,7 @@ class TestArrayComparisons(TestCase):
 @instantiate_parametrized_tests
 class TestClip(TestCase):
     def setUp(self):
+        super().setUp()
         self.nr = 5
         self.nc = 3
 
@@ -2080,6 +2099,7 @@ class TestIsclose(TestCase):
 
 class TestStdVar(TestCase):
     def setUp(self):
+        super().setUp()
         self.A = np.array([1, -1, 1, -1])
         self.real_var = 1
 
@@ -2137,7 +2157,8 @@ class TestCreationFuncs(TestCase):
     # Test ones, zeros, empty and full.
 
     def setUp(self):
-        # dtypes = {np.dtype(tp) for tp in itertools.chain(*np.sctypes.values())}
+        super().setUp()
+        # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
         self.orders = {
@@ -2198,6 +2219,7 @@ class TestLikeFuncs(TestCase):
     """Test ones_like, zeros_like, empty_like and full_like"""
 
     def setUp(self):
+        super().setUp()
         self.data = [
             # Array scalars
             (np.array(3.0), None),

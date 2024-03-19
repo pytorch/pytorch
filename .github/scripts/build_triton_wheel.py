@@ -10,6 +10,9 @@ from typing import Optional
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
+# TODO: Remove me once Triton version is again in sync for vanilla and ROCm
+ROCM_TRITION_VERSION = "2.1.0"
+
 
 def read_triton_pin(rocm_hash: bool = False) -> str:
     triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
@@ -29,25 +32,37 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
     return inp.replace(src, dst)
 
 
-def patch_setup_py(path: Path, *, version: str, name: str = "triton") -> None:
+def patch_setup_py(
+    path: Path,
+    *,
+    version: str,
+    name: str = "triton",
+    expected_version: Optional[str] = None,
+) -> None:
     with open(path) as f:
         orig = f.read()
     # Replace name
     orig = check_and_replace(orig, 'name="triton",', f'name="{name}",')
     # Replace version
+    if not expected_version:
+        expected_version = read_triton_version()
     orig = check_and_replace(
-        orig, f'version="{read_triton_version()}",', f'version="{version}",'
+        orig, f'version="{expected_version}",', f'version="{version}",'
     )
     with open(path, "w") as f:
         f.write(orig)
 
 
-def patch_init_py(path: Path, *, version: str) -> None:
+def patch_init_py(
+    path: Path, *, version: str, expected_version: Optional[str] = None
+) -> None:
+    if not expected_version:
+        expected_version = read_triton_version()
     with open(path) as f:
         orig = f.read()
     # Replace version
     orig = check_and_replace(
-        orig, f"__version__ = '{read_triton_version()}'", f'__version__ = "{version}"'
+        orig, f"__version__ = '{expected_version}'", f'__version__ = "{version}"'
     )
     with open(path, "w") as f:
         f.write(orig)
@@ -84,7 +99,14 @@ def build_triton(
             triton_repo = "https://github.com/openai/triton"
             triton_pkg_name = "pytorch-triton"
         check_call(["git", "clone", triton_repo], cwd=tmpdir)
-        check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+        if release:
+            ver, rev, patch = version.split(".")
+            check_call(
+                ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
+            )
+        else:
+            check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(
@@ -94,7 +116,7 @@ def build_triton(
                 print("source:\n  path: .\n", file=meta)
                 print(
                     "build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
-                    "python setup.py install --single-version-externally-managed --record=record.txt\n",
+                    "python setup.py install --record=record.txt\n",
                     " script_env:\n   - MAX_JOBS\n",
                     file=meta,
                 )
@@ -130,7 +152,7 @@ def build_triton(
                 cwd=triton_basedir,
                 env=env,
             )
-            conda_path = list(Path(tmpdir).glob("linux-64/torchtriton*.bz2"))[0]
+            conda_path = next(iter(Path(tmpdir).glob("linux-64/torchtriton*.bz2")))
             shutil.copy(conda_path, Path.cwd())
             return Path.cwd() / conda_path.name
 
@@ -140,6 +162,7 @@ def build_triton(
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
+            expected_version=ROCM_TRITION_VERSION if build_rocm else None,
         )
 
         if build_rocm:
@@ -148,6 +171,7 @@ def build_triton(
                 triton_pythondir / "setup.py",
                 name=triton_pkg_name,
                 version=f"{version}",
+                expected_version=ROCM_TRITION_VERSION,
             )
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
             print("ROCm libraries setup for triton installation...")
@@ -156,7 +180,7 @@ def build_triton(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
         )
 
-        whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
+        whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:

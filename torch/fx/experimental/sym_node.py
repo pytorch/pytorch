@@ -14,8 +14,10 @@ import logging
 import math
 import operator
 import sys
-from functools import lru_cache
+from functools import lru_cache, update_wrapper
 from typing import Optional, Type, TYPE_CHECKING, Union
+
+import torch
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -24,7 +26,6 @@ from torch import (  # noqa: F401
     sym_max,
     sym_min,
     sym_not,
-    sym_sqrt,
     SymBool,
     SymFloat,
     SymInt,
@@ -39,9 +40,10 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 log = logging.getLogger(__name__)
+sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 
-__all__ = ["SymNode", "method_to_operator", "magic_methods", "sym_sqrt"]
+__all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 
 SymTypes = (SymInt, SymFloat, SymBool)
@@ -171,6 +173,14 @@ class SymNode:
     def is_bool(self):
         return self.pytype is bool
 
+    def is_nested_int(self):
+        # Unbacked SymInts cannot be nested int today
+        return (
+            self._hint is not None
+            and isinstance(self._hint, SymInt)
+            and self._hint.node.is_nested_int()
+        )
+
     def wrap_int(self, num):
         assert type(num) is int
         import sympy
@@ -216,6 +226,12 @@ class SymNode:
     # here so we get good stack traces
     def abs(self) -> "SymNode":
         return self._abs()  # type: ignore[attr-defined]
+
+    def pos(self) -> "SymNode":
+        return self._pos()  # type: ignore[attr-defined]
+
+    def round(self, ndigits=None) -> "SymNode":
+        return self._round(ndigits)  # type: ignore[attr-defined]
 
     def add(self, other) -> "SymNode":
         return self._add(other)  # type: ignore[attr-defined]
@@ -274,6 +290,9 @@ class SymNode:
     def floor(self) -> "SymNode":
         return self._floor()  # type: ignore[attr-defined]
 
+    def is_integer(self) -> "SymNode":
+        return self._is_integer()  # type: ignore[attr-defined]
+
     def sym_float(self) -> "SymNode":  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
 
@@ -294,9 +313,6 @@ class SymNode:
 
     def sym_ite(self, then_val, else_val) -> "SymNode":
         return self._sym_ite(then_val, else_val)  # type: ignore[attr-defined]
-
-    def sym_sqrt(self) -> "SymNode":
-        return self._sym_sqrt()  # type: ignore[attr-defined]
 
     def is_contiguous(self, sizes, strides) -> "SymNode":
         return self._is_contiguous(sizes, strides)  # type: ignore[attr-defined]
@@ -363,7 +379,9 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
-        if self.has_hint():
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if self.has_hint() and not free_unbacked_symbols(self.expr):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
@@ -388,13 +406,35 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
+    def guard_size_oblivious(self, file, line):
+        """
+        Like guard_bool, but if we encounter unbacked symbols, if those symbols
+        are size-like, we will treat them as >= 2 for the purposes of the analysis.
+
+        This CHANGES the runtime semantics, but all size-oblivious sites have been
+        audited to ensure that the runtime semantics don't change in a material way.
+        Acceptable runtime semantic changes are, e.g., squeeze() no longer dropping
+        an unbacked one size, or a tensor reporting as non-contiguous even if it's
+        contiguous if it would have been reported contiguous due to being empty.
+        """
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+        )
+        try:
+            return bool(r)
+        except Exception:
+            log.warning("Failed to convert to bool: %s", r)
+            raise
+
     def bool_(self):
         return self.guard_bool("", 0)
 
     def is_symbolic(self):
         return True
 
-    def singleton_int(self):
+    def nested_int(self):
         return None
 
     def is_constant(self):
@@ -403,6 +443,7 @@ class SymNode:
 
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
+    "pos": operator.pos,
     "abs": operator.abs,
     "add": operator.add,
     "and": operator.and_,
@@ -412,6 +453,7 @@ METHOD_TO_OPERATOR = {
     "floordiv": operator.floordiv,
     "ge": operator.ge,
     "gt": operator.gt,
+    "is_integer": lambda x: x.is_integer(),
     "le": operator.le,
     "lshift": operator.lshift,
     "lt": operator.lt,
@@ -421,6 +463,7 @@ METHOD_TO_OPERATOR = {
     "neg": operator.neg,
     "or": operator.or_,
     "pow": operator.pow,
+    "round": builtins.round,
     "rshift": operator.rshift,
     "sub": operator.sub,
     "sym_float": sym_float,
@@ -428,7 +471,6 @@ METHOD_TO_OPERATOR = {
     "sym_max": sym_max,
     "sym_min": sym_min,
     "sym_not": sym_not,
-    "sym_sqrt": sym_sqrt,
     "truediv": operator.truediv,
 }
 
@@ -438,9 +480,46 @@ unary_magic_methods = {
     "ceil",
     "floor",
     "neg",
-    "sym_sqrt",
     "sym_not",
+    "pos",
 }
+
+
+# Adding math ops: sqrt, cos, sin, ...
+def _get_sym_node_fn(name):
+    def fn(self):
+        return getattr(self, f"_sym_{name}")()
+
+    return fn
+
+
+math_op_names = (
+    "sqrt",
+    "cos",
+    "cosh",
+    "sin",
+    "sinh",
+    "tan",
+    "tanh",
+    "asin",
+    "acos",
+    "atan",
+)
+for name in math_op_names:
+    sym_name = f"sym_{name}"
+    priv_sym_name = f"_{sym_name}"
+    setattr(SymNode, sym_name, _get_sym_node_fn(name))
+    METHOD_TO_OPERATOR[sym_name] = getattr(torch, priv_sym_name)
+    unary_magic_methods.add(sym_name)
+    __all__.append(sym_name)
+
+
+# Unary methods that are not magic methods
+unary_nonmagic_methods = {
+    "is_integer",
+}
+
+unary_methods = unary_magic_methods | unary_nonmagic_methods
 
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
@@ -451,11 +530,20 @@ bool_becomes_int_magic_methods = {"add", "sub", "mul"}
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
+# Methods that are only for float
+only_float_magic_methods = {"is_integer"}
+
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 
-always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
+always_float_magic_methods = {"truediv", "sym_float", "pow"}
+
+for name in math_op_names:
+    sym_name = f"sym_{name}"
+    always_float_magic_methods.add(sym_name)
+
+
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {
     "eq",
@@ -468,6 +556,7 @@ always_bool_magic_methods = {
     "or",
     "sym_not",
     "is_non_overlapping_and_dense",
+    "is_integer",
 }
 
 # Methods that have a `__foo__` as well as `__rfoo__`
@@ -522,9 +611,9 @@ def _sympy_rshift(a, b):
 
 
 reflectable_magic_methods = {
-    "add": lambda a, b: a + b,
-    "sub": lambda a, b: a - b,
-    "mul": lambda a, b: a * b,
+    "add": operator.add,
+    "sub": operator.sub,
+    "mul": operator.mul,
     "mod": _sympy_mod,
     "pow": _sympy_pow,
     "and": _sympy_and,
@@ -620,16 +709,40 @@ def _sympy_ite(a, t, f):
     return sympy.Piecewise((t, a), (f, True))
 
 
-def _sympy_sqrt(a):
-    import sympy
+current_module = sys.modules[__name__]
 
-    return sympy.sqrt(a)
+
+def _get_sym_math_fn(name):
+    def fn(a):
+        import sympy
+
+        return getattr(sympy, name)(a)
+
+    return fn
+
+
+for name in math_op_names:
+    priv_sympy_name = f"_sympy_{name}"
+    fn = _get_sym_math_fn(name)
+    fn.__qualname__ = fn.__name__ = priv_sympy_name
+    setattr(current_module, priv_sympy_name, fn)
+
+del fn, name, priv_sympy_name  # type: ignore[possibly-undefined]
 
 
 def _sympy_abs(a):
     import sympy
 
     return sympy.Abs(a)
+
+
+def _sympy_round(number, ndigits=None):
+    from torch.utils._sympy.functions import Round, RoundDecimal
+
+    if ndigits is None:
+        return Round(number)
+    else:
+        return RoundDecimal(number, ndigits)
 
 
 def _sympy_sym_float(a):
@@ -640,9 +753,16 @@ def _sympy_sym_float(a):
     return a * 1.0
 
 
+def _sympy_is_integer(a):
+    import sympy
+
+    return sympy.Eq(sympy.floor(a), a)
+
+
 magic_methods = {
     **reflectable_magic_methods,
-    "sym_not": lambda a: ~a,
+    "sym_not": operator.invert,
+    "pos": operator.pos,
     "eq": _sympy_eq,
     "ne": _sympy_ne,
     "gt": _sympy_gt,
@@ -652,13 +772,21 @@ magic_methods = {
     "floor": _sympy_floor,
     "sym_float": _sympy_sym_float,
     "ceil": _sympy_ceil,
-    "neg": lambda a: -a,
+    "neg": operator.neg,
     "sym_min": _sympy_min,
     "sym_max": _sympy_max,
     "sym_ite": _sympy_ite,
-    "sym_sqrt": _sympy_sqrt,
     "abs": _sympy_abs,
+    "round": _sympy_round,
+    "is_integer": _sympy_is_integer,
 }
+
+
+for name in math_op_names:
+    sym_name = f"sym_{name}"
+    magic_methods[sym_name] = getattr(current_module, f"_sympy_{name}")
+
+del name, sym_name, math_op_names, current_module  # type: ignore[possibly-undefined]
 
 
 def sympy_is_contiguous(sizes, strides):
@@ -833,6 +961,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
+        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -859,7 +988,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node, _ = self.shape_env.create_fx_call_function(
+        fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
@@ -880,7 +1009,7 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning("failed to eval %s(%s)", method, expr)
             raise
-
+        sym_node_log.debug("%s %s -> %s", func, expr, out)
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
@@ -888,15 +1017,17 @@ def _make_node_magic(method, func):
         pytype: Type
         if method in always_int_magic_methods:
             pytype = int
+        elif method in always_bool_magic_methods:
+            pytype = bool
         elif method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype
 
-        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
-    if method in unary_magic_methods:
+    if method in unary_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
     elif method == "sym_ite":
 
@@ -931,7 +1062,7 @@ def _make_node_magic(method, func):
                 raise
 
             out = safe_expand(out)
-            fx_node, _ = pred_node.shape_env.create_fx_call_function(
+            fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
             return SymNode(
@@ -939,6 +1070,44 @@ def _make_node_magic(method, func):
             )
 
         setattr(SymNode, f"_{method_attr}", sym_ite_impl)
+    elif method == "round":
+
+        def round_impl(self, ndigits=None):
+            from torch.fx.experimental.symbolic_shapes import safe_expand
+
+            op = builtins.round
+            if sym_function_mode():
+                return to_node(
+                    self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {})
+                )
+
+            expr = self.expr
+            try:
+                out = func(expr, ndigits)
+            except Exception:
+                log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
+                raise
+            out = safe_expand(out)
+
+            pytype = int if ndigits is None else self.pytype
+
+            out_hint = None
+            if self.hint is not None:
+                out_hint = op(self.hint, ndigits)
+
+            # Internally, None is used as sentinel to indicate that a something is not a node on an FX graph. At the
+            # same time, there is no way to wrap a plain None into an FX node. Thus, there is no way to pass None here
+            # without triggering some asserts that check whether we are mixing FX nodes with untracked arguments. The
+            # hack down below works, because all round function down the line all take ndigits=None as default in their
+            # signature.
+            # TODO: Remove the args construction below if a different sentinel is used by FX.
+            args = [self.fx_node]
+            if ndigits is not None:
+                args.append(ndigits)
+            fx_node, _ = self.shape_env._create_fx_call_function(op, tuple(args))
+            return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+
+        setattr(SymNode, f"_{method_attr}", round_impl)
     else:
         setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
@@ -1037,7 +1206,7 @@ def _make_user_magic(method, user_type):
     # so that our internal logic can assume everything is nodes
 
     if method in magic_methods_on_operator_with_trailing_underscore:
-        method_attr = f"{method}_"
+        method_attr = f"sym_{method}"
     else:
         method_attr = method
 
@@ -1082,6 +1251,7 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
         other = promote(other)
         if is_constant(self):
@@ -1109,6 +1279,9 @@ def _make_user_magic(method, user_type):
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
+    elif method in unary_nonmagic_methods:
+        orig = getattr(user_type, method)
+        setattr(user_type, method, update_wrapper(unary_magic_impl, orig))
     elif method == "sym_ite":
 
         def sym_ite_magic_impl(pred, then_val, else_val):
@@ -1126,6 +1299,15 @@ def _make_user_magic(method, user_type):
             return get_constant(ret) if ret.node.is_constant() else ret
 
         setattr(user_type, f"__{method}__", sym_ite_magic_impl)
+    elif method == "round":
+
+        def round_magic_impl(self, ndigits=None):
+            if is_constant(self):
+                return builtins.round(get_constant(self), ndigits)
+
+            return wrap_node(getattr(self.node, method)(ndigits))
+
+        setattr(user_type, f"__{method}__", round_magic_impl)
     else:
         setattr(user_type, f"__{method}__", binary_magic_impl)
         if method in reflectable_magic_methods:
@@ -1135,6 +1317,9 @@ def _make_user_magic(method, user_type):
 for method, func in magic_methods.items():  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
+        continue
+    if method in only_float_magic_methods:
+        _make_user_magic(method, SymFloat)
         continue
     if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
         _make_user_magic(method, SymBool)

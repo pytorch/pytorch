@@ -14,8 +14,9 @@ from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
     skipIfNoX86,
-    skipIfNoDynamoSupport,
+    skipIfNoInductorSupport,
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
@@ -250,10 +251,13 @@ class TestHelperModules:
             return self.linear(x)
 
     class LinearUnaryModule(torch.nn.Module):
-        def __init__(self, use_bias, postop, inplace_postop) -> None:
+        def __init__(self, use_bias, postop, inplace_postop=False, post_op_algo='none') -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            self.postop = postop(inplace=inplace_postop)
+            if postop == nn.GELU:
+                self.postop = postop(approximate=post_op_algo)
+            else:
+                self.postop = postop(inplace=inplace_postop)
 
         def forward(self, x):
             return self.postop(self.linear(x))
@@ -282,6 +286,24 @@ class TestHelperModules:
                 tmp = self.bn(self.conv(x))
                 return tmp + self.bn2(self.conv2(tmp))
 
+    class SelfAttnLikeModule(torch.nn.Module):
+        def __init__(self, input_dim) -> None:
+            super().__init__()
+            self.input_dim = input_dim
+            self.q_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.k_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.v_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.softmax = nn.Softmax(dim=-1)
+
+        def forward(self, x):
+            q = self.q_proj(x)
+            k = self.k_proj(x)
+            v = self.v_proj(x)
+            scores = torch.bmm(q, k.transpose(1, 2)) / (self.input_dim ** 0.5)
+            attention = self.softmax(scores)
+            weighted = torch.bmm(attention, v)
+            return weighted
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -307,7 +329,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
@@ -321,7 +343,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         )
         return export_model, prepare_model, convert_model
 
-@skipIfNoDynamoSupport
+@skipIfNoInductorSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d(self):
@@ -358,7 +380,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
-        Test pattern of conv2d with unary post ops (such as relu, hardtanh, relu6) with X86InductorQuantizer.
+        Test pattern of conv2d with unary post ops (such as relu, hardtanh, hardswish, relu6) with X86InductorQuantizer.
         """
         unary_map = {
             "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
@@ -366,7 +388,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
@@ -616,7 +640,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, single_op_node.args[0].target
                 )
                 output_obs_of_single_op = getattr(
-                    prepare_model, list(single_op_node.users)[0].target
+                    prepare_model, next(iter(single_op_node.users)).target
                 )
             elif (
                 node.op == "call_function"
@@ -722,7 +746,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.all_input_nodes[1].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
             elif (
                 node.op == "call_function"
@@ -733,7 +757,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, maxpool_node.args[0].target
                 )
                 output_obs_of_maxpool = getattr(
-                    prepare_model, list(maxpool_node.users)[0].target
+                    prepare_model, next(iter(maxpool_node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -794,7 +818,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.args[0][1].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -848,7 +872,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.args[0][0].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_out_obs, ObserverBase))
@@ -900,14 +924,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, avgpool_node.args[0].target
                 )
                 output_obs_of_avgpool = getattr(
-                    prepare_model, list(avgpool_node.users)[0].target
+                    prepare_model, next(iter(avgpool_node.users)).target
                 )
             elif (
                 node.op == "call_function"
                 and node.target is torch.ops.aten.conv2d.default
             ):
                 conv_node = node
-                output_obs_of_conv = getattr(prepare_model, list(conv_node.users)[0].target)
+                output_obs_of_conv = getattr(prepare_model, next(iter(conv_node.users)).target)
         self.assertTrue(isinstance(input_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_conv, ObserverBase))
@@ -990,6 +1014,45 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
+    def test_linear_unary_gelu(self):
+        """
+        Test pattern of linear with unary post ops (e.g. gelu) with X86InductorQuantizer.
+        """
+        use_bias_list = [True, False]
+        postop = nn.GELU
+        post_op_algorithm = ['none', 'tanh']
+        cases = itertools.product(use_bias_list, post_op_algorithm)
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias, post_op_algo in cases:
+                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, post_op_algo=post_op_algo).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the gelu
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.linear.default,
+                    torch.ops.aten.gelu.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
+    @skipIfTorchDynamo("very slow")
+    @skipIfNoX86
     def test_qat_conv2d(self):
         """
         Test QAT pattern of conv2d_bn with X86InductorQuantizer.
@@ -1026,6 +1089,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 is_qat=True,
             )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_unary(self):
         """
@@ -1038,7 +1102,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
         }
 
         with override_quantized_engine("x86"):
@@ -1075,6 +1141,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary(self):
         """
@@ -1117,6 +1184,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary2(self):
         """
@@ -1159,6 +1227,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary_unary(self):
         """
@@ -1190,6 +1259,78 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.aten.add.Tensor,
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+            )
+
+    @skipIfNoX86
+    def test_dynamic_quant_linear(self):
+        """
+        Test pattern of dynamic quantization of linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(is_dynamic=True)
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.linear.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_qat_dynamic_quant_linear(self):
+        """
+        Test pattern of qat dynamic quantization of linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(
+                    is_qat=True,
+                    is_dynamic=True
+                )
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.linear.default,
             ]
             self._test_quantizer(
                 m,

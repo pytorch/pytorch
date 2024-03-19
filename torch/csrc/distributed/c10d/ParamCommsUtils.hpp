@@ -13,6 +13,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
  public:
   ParamCommsDebugInfo() = default;
   ParamCommsDebugInfo(
+      int pgId,
       int rank,
       std::string&& colName,
       int inNelems,
@@ -20,9 +21,15 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       at::ScalarType dType,
       std::vector<int64_t> inSplitSizes,
       std::vector<int64_t> outSplitSizes,
+      int globalRankStart,
+      int globalRankStride,
       int worldSize);
 
   ~ParamCommsDebugInfo() override = default;
+
+  int getProcessGroupId() const {
+    return pgId_;
+  }
 
   int getRank() const {
     return rank_;
@@ -30,6 +37,14 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
 
   int getWorldSize() const {
     return worldSize_;
+  }
+
+  int getGlobalRankStart() const {
+    return globalRankStart_;
+  }
+
+  int getGlobalRankStride() const {
+    return globalRankStride_;
   }
 
   const std::string getColumnName() const {
@@ -56,7 +71,12 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return outputSplitSizes_;
   }
 
+  const std::vector<int64_t>& getGroupRanks() const {
+    return groupRanks_;
+  }
+
  private:
+  int pgId_{};
   int rank_{};
   int worldSize_{};
   std::string columnName_;
@@ -65,11 +85,14 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   at::ScalarType dType_ = at::kByte;
   std::vector<int64_t> inputSplitSizes_;
   std::vector<int64_t> outputSplitSizes_;
+  int globalRankStart_;
+  int globalRankStride_;
+  std::vector<int64_t> groupRanks_{};
 };
 
 #define RECORD_PARAM_COMMS(                                                    \
     seq,                                                                       \
-    pg_ptr,                                                                    \
+    pgId,                                                                      \
     rank,                                                                      \
     colName,                                                                   \
     inNelems,                                                                  \
@@ -77,8 +100,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     dType,                                                                     \
     inSplitSizes,                                                              \
     outSplitSizes,                                                             \
+    globalRankStart,                                                           \
+    globalRankStride,                                                          \
     worldSize)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
+      pgId,                                                                    \
       rank,                                                                    \
       colName,                                                                 \
       inNelems,                                                                \
@@ -86,22 +112,26 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       dType,                                                                   \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(seq),                                                        \
-      c10::IValue(pg_ptr),                                                     \
+      pgId,                                                                    \
       rank,                                                                    \
       colName,                                                                 \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION(at::kParamCommsCallName, paramInputs);
 
 #define RECORD_PARAM_COMMS_DATA(                                               \
     seq,                                                                       \
-    pg_ptr,                                                                    \
+    pgId,                                                                      \
     InputTensors,                                                              \
     OutputTensors,                                                             \
     rank,                                                                      \
@@ -111,8 +141,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     dType,                                                                     \
     inSplitSizes,                                                              \
     outSplitSizes,                                                             \
+    globalRankStart,                                                           \
+    globalRankStride,                                                          \
     worldSize)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
+      pgId,                                                                    \
       rank,                                                                    \
       colName,                                                                 \
       inNelems,                                                                \
@@ -120,16 +153,20 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       dType,                                                                   \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
       c10::IValue(seq),                                                        \
-      c10::IValue(pg_ptr),                                                     \
+      pgId,                                                                    \
       rank,                                                                    \
       colName,                                                                 \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(                                         \

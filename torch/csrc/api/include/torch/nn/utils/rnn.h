@@ -212,8 +212,7 @@ inline PackedSequence pack_padded_sequence(
     input = input.index_select(batch_dim, sorted_indices);
   }
 
-  Tensor data, batch_sizes;
-  std::tie(data, batch_sizes) =
+  auto [data, batch_sizes] =
       torch::_pack_padded_sequence(input, lengths, batch_first);
   return PackedSequence(
       std::move(data), std::move(batch_sizes), std::move(sorted_indices), {});
@@ -262,8 +261,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
         max_seq_length);
     max_seq_length = total_length_val;
   }
-  Tensor padded_output, lengths;
-  std::tie(padded_output, lengths) = torch::_pad_packed_sequence(
+  auto [padded_output, lengths] = torch::_pad_packed_sequence(
       sequence.data(),
       sequence.batch_sizes(),
       batch_first,
@@ -274,7 +272,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
     int64_t batch_dim = batch_first ? 0 : 1;
     return std::make_tuple(
         padded_output.index_select(batch_dim, unsorted_indices),
-        lengths.index({unsorted_indices}));
+        lengths.index({unsorted_indices.cpu()}));
   }
   return std::make_tuple(padded_output, lengths);
 }

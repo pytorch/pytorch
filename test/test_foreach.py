@@ -11,8 +11,9 @@ import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import \
-    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
+    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck, skipIfRocmVersionLessThan
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
@@ -65,13 +66,14 @@ class ForeachFuncWrapper:
             assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
-        # note(mkozuki): inplace foreach functions are void functions.
-        return inputs[0] if self.is_inplace else actual
+        if self.is_inplace:
+            assert id(inputs[0]) == id(actual)
+        return actual
 
 
 class InplaceForeachVersionBumpCheck:
 
-    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:
+    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:  # noqa: F821
         self._testcase = testcase
         self._tensorlist = tensorlist
         self._orig_version_counts = [t._version for t in tensorlist]
@@ -133,7 +135,7 @@ class TestForeach(TestCase):
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
+    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )
@@ -547,7 +549,7 @@ class TestForeach(TestCase):
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
-        tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2]))[0].input
+        tensors = next(iter(op.sample_inputs(device, dtype, num_input_tensors=[2]))).input
         tensors[1] = tensors[1].to("cpu")
         if not op.supports_out:
             try:
@@ -575,8 +577,8 @@ class TestForeach(TestCase):
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
-        _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))[0].input
-        _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))[0].input
+        _cuda_tensors = next(iter(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))).input
+        _cpu_tensors = next(iter(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))).input
         tensors1, tensors2 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
@@ -607,7 +609,7 @@ class TestForeach(TestCase):
         _cuda_tensors = list(
             op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True)
         )[int(dtype == torch.float32)].input
-        _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))[0].input
+        _cpu_tensors = next(iter(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))).input
         tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_, native_op = op.method_variant, op.inplace_variant, op.ref
@@ -628,9 +630,7 @@ class TestForeach(TestCase):
         max_value = torch.finfo(dtype).max
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
         inputs = ([
-            t * scaler for t in list(
-                op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1)
-            )[0].input
+            t * scaler for t in next(iter(op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1))).input
         ],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
@@ -646,6 +646,20 @@ class TestForeach(TestCase):
                 inputs[0][i].numel() == 0 or torch.isinf(e)
                 for i, e in enumerate(expect)))
         self.assertEqual(expect, actual, equal_nan=False)
+
+    @onlyCUDA
+    @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
+    def test_big_num_tensors(self, device, dtype, op):
+        N = 600
+        tensorlist = [make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False) for _ in range(N)]
+        fn, ref_fn, *_ = self._get_funcs(op)
+
+        import math
+        for ord in (1, 2, math.inf):
+            actual = fn(inputs=[tensorlist], is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
+            expect = ref_fn(inputs=[tensorlist], ord=ord)
+
+            self.assertEqual(expect, actual, equal_nan=True)
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)
@@ -672,7 +686,7 @@ class TestForeach(TestCase):
         if inplace_op is None:
             self.skipTest("no in-place op available")
 
-        sample = list(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True))[0]
+        sample = next(iter(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True)))
         sample.input[0].requires_grad_(True)
         with self.assertRaisesRegex(RuntimeError, "a leaf Variable that requires grad"):
             inplace_op(sample.input, *sample.args)
@@ -696,7 +710,7 @@ class TestForeach(TestCase):
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
         func, *_ = self._get_funcs(op)
-        sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
+        sample = next(iter(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True)))
         self.assertTrue(all(t.requires_grad for t in sample.input))
         (out1, out2) = func([sample.input, *sample.args], is_cuda=False, expect_fastpath=False, **sample.kwargs)
         out1.backward(torch.ones_like(out1))
@@ -748,7 +762,7 @@ class TestForeach(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1), "requires multiple GPUs")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensors_grouping(self):
         num_tensors_per_list = 10
         num_devices = torch.cuda.device_count()
@@ -823,6 +837,20 @@ class TestForeach(TestCase):
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
+
+    @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
+        # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
+        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+            for src_dtype in floating_types_and(torch.half, torch.bfloat16):
+                if src_dtype == dtype:
+                    continue
+                self_tensors = [t.clone() for t in sample.input]
+                src_tensors = [t.to(src_dtype) for t in self_tensors]
+                out = foreach_copy_((self_tensors, src_tensors), is_cuda=True, expect_fastpath=True)
+                self.assertEqual(out, [torch.empty_like(t).copy_(s) for t, s in zip(self_tensors, src_tensors)])
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA

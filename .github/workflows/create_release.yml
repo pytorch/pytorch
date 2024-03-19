@@ -15,6 +15,9 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
     runs-on: ubuntu-latest
+    # https://github.com/softprops/action-gh-release?tab=readme-ov-file#permissions
+    permissions:
+      contents: write
     steps:
       - uses: malfet/checkout@silent-checkout
         with:

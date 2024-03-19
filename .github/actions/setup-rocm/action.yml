@@ -9,6 +9,16 @@ runs:
       shell: bash
       run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
 
+    - name: Remove leftover Docker config file
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -ex
+
+        cat ~/.docker/config.json || true
+        # https://stackoverflow.com/questions/64455468/error-when-logging-into-ecr-with-docker-login-error-saving-credentials-not
+        rm -f ~/.docker/config.json
+
     - name: Stop all running docker containers
       if: always()
       shell: bash

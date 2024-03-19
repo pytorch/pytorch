@@ -2,6 +2,7 @@ import logging
 import types
 import weakref
 from dataclasses import dataclass
+from typing import Tuple
 
 from . import config
 
@@ -79,19 +80,20 @@ class CacheSizeRelevantForFrame:
     num_cache_entries: int = 0
 
     # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
-    num_cache_entries_in_bucket: int = 0
+    num_cache_entries_with_same_id_matched_objs: int = 0
 
     def will_compilation_exceed(self, limit: int) -> bool:
+        # Checks if a compilation will exceed the given limit (thats why >=).
         return (
-            self.will_compilation_exceed_bucket(limit)
-            or self.will_compilation_exceed_total()
+            self.will_compilation_exceed_accumulated_limit()
+            or self.will_compilation_exceed_specific_limit(limit)
         )
 
-    def will_compilation_exceed_total(self) -> bool:
+    def will_compilation_exceed_accumulated_limit(self) -> bool:
         return self.num_cache_entries >= config.accumulated_cache_size_limit
 
-    def will_compilation_exceed_bucket(self, limit: int) -> bool:
-        return self.num_cache_entries_in_bucket >= limit
+    def will_compilation_exceed_specific_limit(self, limit: int) -> bool:
+        return self.num_cache_entries_with_same_id_matched_objs >= limit
 
 
 def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
@@ -104,18 +106,12 @@ def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
     return weak_id
 
 
-def _is_same_cache_bucket(frame: types.FrameType, cache_entry) -> bool:
+def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
     """
     Checks if the ID_MATCH'd objects saved on cache_entry are same as the ones
-    in frame.f_locals, and if the config hash used to compile the cache entry's
-    optimized code is the same as the frame's.
+    in frame.f_locals.
     """
-    from .eval_frame import get_saved_else_current_config_hash
-
     if not cache_entry:
-        return False
-
-    if cache_entry.check_fn.config_hash != get_saved_else_current_config_hash():
         return False
 
     for (
@@ -136,20 +132,20 @@ def compute_cache_size(
 ) -> CacheSizeRelevantForFrame:
     # Walk the linked list to calculate the cache size
     num_cache_entries = 0
-    num_cache_entries_in_bucket = 0
+    num_cache_entries_with_same_id_matched_objs = 0
 
     while cache_entry:
         num_cache_entries += 1
-        # Track the number of cache entries in the same bucket:
-        # 1. having same ID_MATCH'd objects as that of frame.f_locals.
-        # 2. having the same config hash as the frame's
-        # This will be used later to compare against the
+        # Track the number of cache entries having same ID_MATCH'd objects as
+        # that of frame.f_locals. This will be used later to compare against the
         # cache_size_limit.
-        if _is_same_cache_bucket(frame, cache_entry):
-            num_cache_entries_in_bucket += 1
+        if _has_same_id_matched_objs(frame, cache_entry):
+            num_cache_entries_with_same_id_matched_objs += 1
         cache_entry = cache_entry.next
 
-    return CacheSizeRelevantForFrame(num_cache_entries, num_cache_entries_in_bucket)
+    return CacheSizeRelevantForFrame(
+        num_cache_entries, num_cache_entries_with_same_id_matched_objs
+    )
 
 
 def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
@@ -165,8 +161,12 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> bool:
+def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
-    return cache_size.will_compilation_exceed(config.cache_size_limit)
+    if cache_size.will_compilation_exceed_accumulated_limit():
+        return True, "accumulated_cache_size_limit"
+    if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
+        return True, "cache_size_limit"
+    return False, ""

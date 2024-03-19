@@ -62,6 +62,42 @@ api::utils::vec4 extract_texel(
     const Tensor& tensor,
     const api::utils::ivec3& pos);
 
+inline api::utils::ivec2 make_ivec2(
+    const IntArrayRef ints,
+    bool reverse = false) {
+  VK_CHECK_COND(ints.size() == 2);
+  if (reverse) {
+    return {
+        api::utils::safe_downcast<int32_t>(ints[1]),
+        api::utils::safe_downcast<int32_t>(ints[0])};
+  } else {
+    return {
+        api::utils::safe_downcast<int32_t>(ints[0]),
+        api::utils::safe_downcast<int32_t>(ints[1])};
+  }
+}
+
+inline api::utils::ivec4 make_ivec4(
+    const IntArrayRef ints,
+    bool reverse = false) {
+  VK_CHECK_COND(ints.size() == 4);
+  if (reverse) {
+    return {
+        api::utils::safe_downcast<int32_t>(ints[3]),
+        api::utils::safe_downcast<int32_t>(ints[2]),
+        api::utils::safe_downcast<int32_t>(ints[1]),
+        api::utils::safe_downcast<int32_t>(ints[0]),
+    };
+  } else {
+    return {
+        api::utils::safe_downcast<int32_t>(ints[0]),
+        api::utils::safe_downcast<int32_t>(ints[1]),
+        api::utils::safe_downcast<int32_t>(ints[2]),
+        api::utils::safe_downcast<int32_t>(ints[3]),
+    };
+  }
+}
+
 } // namespace utils
 } // namespace ops
 } // namespace vulkan

@@ -20,8 +20,7 @@
 #include <ATen/ops/_functional_sym_constrain_range_for_size_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void sym_constrain_range(
     const Scalar& size,
@@ -30,7 +29,7 @@ void sym_constrain_range(
 
     int64_t min_val = min.has_value() ? min.value() : std::numeric_limits<int64_t>::min();
     int64_t max_val = max.has_value() ? max.value() : std::numeric_limits<int64_t>::max();
-    int64_t size_as_int = size.toInt();
+    int64_t size_as_int = size.toLong();
 
     TORCH_CHECK(
       max_val >= min_val,
@@ -88,5 +87,4 @@ Tensor _make_dep_token_cpu(
       {}, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

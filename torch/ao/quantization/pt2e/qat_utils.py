@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING
 
 import torch
 from torch.fx import Graph, GraphModule, Node
@@ -11,6 +11,7 @@ from torch.fx.subgraph_rewriter import (
 )
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
@@ -21,11 +22,13 @@ from .utils import (
     _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
     _is_conv,
-    _is_supported_batch_norm_for_training,
+    _is_bn_node,
     fold_bn_weights_into_conv_node,
-    get_aten_graph_module,
+    _get_aten_graph_module_for_pattern,
 )
 
+if TYPE_CHECKING:
+    from torch.fx.passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -49,6 +52,7 @@ _quantized_conv2d_bn_example_inputs = (
     torch.randn(1),           # bn_running_mean
     torch.randn(1),           # bn_running_var
 )
+
 
 def _get_quantized_conv_bn_example_inputs_kwargs(
     is_per_channel: bool,
@@ -86,7 +90,7 @@ def _get_conv_bn_pattern(conv_fn: Callable) -> Callable:
         x = conv_fn(x, conv_weight, conv_bias)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
         return x
-    return _conv_bn_pattern
+    return _WrapperModule(_conv_bn_pattern)
 
 # TODO: merge this with the `no_conv_bias` case
 def _get_qat_conv_bn_pattern(conv_fn: Callable) -> Callable:
@@ -119,7 +123,7 @@ def _get_qat_conv_bn_pattern(conv_fn: Callable) -> Callable:
         x = x + conv_bias.reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
         return x
-    return _qat_conv_bn_pattern
+    return _WrapperModule(_qat_conv_bn_pattern)
 
 def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
     def _qat_conv_bn_pattern_no_conv_bias(
@@ -148,7 +152,7 @@ def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
         x = x / scale_factor.reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
         return x
-    return _qat_conv_bn_pattern_no_conv_bias
+    return _WrapperModule(_qat_conv_bn_pattern_no_conv_bias)
 
 def _append_qdq(x, is_per_channel, kwargs):
     """
@@ -221,7 +225,7 @@ def _get_quantized_qat_conv_bn_pattern(
             x = x + kwargs["conv_bias"].reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=bn_is_training, eps=bn_eps)
         return x
-    return _quantized_qat_conv_bn_pattern
+    return _WrapperModule(_quantized_qat_conv_bn_pattern)
 
 def _get_folded_quantized_qat_conv_bn_pattern(
     is_per_channel: bool,
@@ -255,10 +259,10 @@ def _get_folded_quantized_qat_conv_bn_pattern(
         x = conv_fn(x, conv_weight, bias)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=bn_is_training, eps=bn_eps)
         return x
-    return _folded_quantized_qat_conv_bn_pattern
+    return _WrapperModule(_folded_quantized_qat_conv_bn_pattern)
 
 def _has_conv_bias_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
+    match: "InternalMatch",
     original_graph: Graph,
     pattern_graph: Graph,
 ) -> bool:
@@ -272,7 +276,7 @@ def _has_conv_bias_filter(
     raise ValueError("Could not find conv node in matched conv + bn pattern")
 
 def _no_conv_bias_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
+    match: "InternalMatch",
     original_graph: Graph,
     pattern_graph: Graph,
 ) -> bool:
@@ -324,7 +328,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
             if _is_conv(n):
                 assert conv_node is None
                 conv_node = n
-            if _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
+            if _is_bn_node(n):
                 assert bn_node is None
                 bn_node = n
             if n.target == operator.getitem:
@@ -515,6 +519,9 @@ def _update_special_qspecs_after_replacement(
     annotation.output_qspec = _get_new_qspec(annotation.output_qspec)
 
 def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
+    if not has_bn:
+        return m
     m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=False)
     m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=False)
     if torch.cuda.is_available():
@@ -539,7 +546,7 @@ def _fuse_conv_bn_qat_helper(
     m.graph.eliminate_dead_code()
     m.recompile()
     conv_bn_pattern = _get_conv_bn_pattern(conv_fn)
-    match_pattern = get_aten_graph_module(conv_bn_pattern, example_inputs, is_cuda)
+    match_pattern = _get_aten_graph_module_for_pattern(conv_bn_pattern, example_inputs, is_cuda)
 
     # Step (1): Replace patterns with conv bias
     #
@@ -548,7 +555,7 @@ def _fuse_conv_bn_qat_helper(
     # TODO: use the public replace_pattern API once it also returns replacement nodes
 
     qat_conv_bn_pattern = _get_qat_conv_bn_pattern(conv_fn)
-    replacement_pattern_with_conv_bias = get_aten_graph_module(
+    replacement_pattern_with_conv_bias = _get_aten_graph_module_for_pattern(
         qat_conv_bn_pattern,
         example_inputs,
         is_cuda,
@@ -565,7 +572,7 @@ def _fuse_conv_bn_qat_helper(
     # Step (2): Replace patterns without conv bias
 
     qat_conv_bn_pattern_no_conv_bias = _get_qat_conv_bn_pattern_no_conv_bias(conv_fn)
-    replacement_pattern_no_conv_bias = get_aten_graph_module(
+    replacement_pattern_no_conv_bias = _get_aten_graph_module_for_pattern(
         qat_conv_bn_pattern_no_conv_bias,
         example_inputs,
         is_cuda,
@@ -691,6 +698,9 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
     )
 
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
+    if not has_bn:
+        return m
     m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=False)
     m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=False)
     if torch.cuda.is_available():
@@ -728,11 +738,11 @@ def _fold_conv_bn_qat_helper(
         match_pattern = _get_quantized_qat_conv_bn_pattern(
             is_per_channel, has_bias, bias_is_quantized, conv_fn, bn_is_training
         )
-        match_pattern = get_aten_graph_module(match_pattern, example_inputs, is_cuda, **kwargs)
+        match_pattern = _get_aten_graph_module_for_pattern(match_pattern, example_inputs, is_cuda, **kwargs)
         replacement_pattern = _get_folded_quantized_qat_conv_bn_pattern(
             is_per_channel, has_bias, bias_is_quantized, conv_fn, bn_is_training
         )
-        replacement_pattern = get_aten_graph_module(replacement_pattern, example_inputs, is_cuda, **kwargs)
+        replacement_pattern = _get_aten_graph_module_for_pattern(replacement_pattern, example_inputs, is_cuda, **kwargs)
         replacements.extend(
             replace_pattern_with_filters(
                 m,

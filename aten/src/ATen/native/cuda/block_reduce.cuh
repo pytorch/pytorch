@@ -16,7 +16,7 @@ constexpr int kCUDABlockReduceNumThreads = 512;
 // NOTE: This is >= the max block size on current hardware anyway (1024).
 constexpr int kCUDABlockReduceMaxThreads = C10_WARP_SIZE * C10_WARP_SIZE;
 
-// Sums `val` accross all threads in a warp.
+// Sums `val` across all threads in a warp.
 //
 // Assumptions:
 //   - The size of each block should be a multiple of `C10_WARP_SIZE`
@@ -25,6 +25,19 @@ __inline__ __device__ T WarpReduceSum(T val) {
 #pragma unroll
   for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
     val += WARP_SHFL_DOWN(val, offset);
+  }
+  return val;
+}
+
+// Picks the maximum `val` across all threads in a warp.
+//
+// Assumptions:
+//   - The size of each block should be a multiple of `C10_WARP_SIZE`
+template <typename T>
+__inline__ __device__ T WarpReduceMax(T val) {
+#pragma unroll
+  for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+    val = max_propagate_nan(val, WARP_SHFL_DOWN(val, offset));
   }
   return val;
 }
@@ -68,6 +81,31 @@ __inline__ __device__ T BlockReduceSum(T val, T* shared) {
   val = (tid < B::Warps()) ? shared[lid] : T(0);
   if (wid == 0) {
     val = WarpReduceSum(val);
+  }
+  return val;
+}
+
+// Picks out the maximum `val` across all threads in a block.
+//
+// Warning: the return value is only valid for thread 0.
+// Assumptions:
+//   - The size of each block should be a multiple of `C10_WARP_SIZE`
+//   - `shared` should be a pointer to shared memory with size of, at least,
+//     `sizeof(T) * number_of_warps`
+template <typename T, typename B = Block1D>
+__inline__ __device__ T BlockReduceMax(T val, T* shared) {
+  const int tid = B::Tid();
+  const int lid = tid % C10_WARP_SIZE;
+  const int wid = tid / C10_WARP_SIZE;
+  val = WarpReduceMax(val);
+  __syncthreads(); // prevent races when BlockReduces are called in a row.
+  if (lid == 0) {
+    shared[wid] = val;
+  }
+  __syncthreads();
+  val = (tid < B::Warps()) ? shared[lid] : T(0);
+  if (wid == 0) {
+    val = WarpReduceMax(val);
   }
   return val;
 }

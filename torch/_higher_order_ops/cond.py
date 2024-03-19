@@ -1,44 +1,36 @@
-from contextlib import contextmanager
-from dataclasses import dataclass
-
 import torch
 import torch._subclasses.functional_tensor
-import torch.fx.traceback as fx_traceback
 
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
+from torch._C._functorch import (
+    _add_batch_dim,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+)
 from torch._functorch.utils import exposed_in
 
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import (
+    _has_potential_branch_input_alias,
+    _has_potential_branch_input_mutation,
+    _set_compilation_env,
+    autograd_not_implemented,
+    reenter_make_fx,
+    UnsupportedAliasMutationException,
+)
+
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-
-
-@contextmanager
-def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
-    try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
-        # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
-        yield
-    finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
-
-
-@dataclass
-class UnsupportedAliasMutationException(RuntimeError):
-    reason: str
 
 
 @exposed_in("torch")
@@ -112,7 +104,7 @@ def cond(pred, true_fn, false_fn, operands):
 
     """
 
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
@@ -142,9 +134,10 @@ def cond(pred, true_fn, false_fn, operands):
 
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(cond_op, backend="eager", fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+            with _temp_remove_pre_dispatch_torch_function_mode():
+                return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                    pred, true_fn, false_fn, operands
+                )
 
 
 """
@@ -152,18 +145,6 @@ We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
 cond_op = HigherOrderOperator("cond")
-
-
-def _maybe_run_with_interpreter(fn):
-    maybe_interpreted_fn = fn
-    if isinstance(fn, torch.fx.GraphModule) and fx_traceback.has_preserved_node_meta():
-        # Running graph with interpreter is needed for propagating the stack_trace
-        def graph_with_interpreter(*args):
-            with fx_traceback.preserve_node_meta():
-                return torch.fx.Interpreter(fn).run(*args)
-
-        maybe_interpreted_fn = graph_with_interpreter
-    return maybe_interpreted_fn
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -177,12 +158,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
 
     with disable_proxy_modes_tracing():
-        true_graph = make_fx(
-            _maybe_run_with_interpreter(true_fn), pre_dispatch=pre_dispatch
-        )(*operands)
-        false_graph = make_fx(
-            _maybe_run_with_interpreter(false_fn), pre_dispatch=pre_dispatch
-        )(*operands)
+        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
+        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
 
     true_outs = []
     false_outs = []
@@ -298,104 +275,25 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     return true_outs
 
 
-def _has_potential_branch_input_mutation(branch, inputs):
-    """
-    Dispatch-trace the branch with inputs and check if
-    producing graph has mutable op on the input. This is
-    bit restrictive as the branch must be traceable.
-    """
-    try:
-        gm = make_fx(branch)(*inputs)
-    except UnsupportedAliasMutationException:
-        # this can happen when nested cond_op is
-        # functionalized
-        return True
-    except Exception as e:
-        raise e
-
-    def _detect_input_mutation(gm):
-        input_nodes = set()
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                input_nodes.add(node)
-            if node.op == "call_function":
-                target = node.target
-                if (
-                    isinstance(target, torch._ops.OpOverload)
-                    and target._schema.is_mutable
-                ):
-                    for arg in node.args:
-                        if arg in input_nodes:
-                            return True
-
-        for _, module in gm.named_children():
-            if isinstance(module, torch.fx.GraphModule):
-                if _detect_input_mutation(module):
-                    return True
-
-        return False
-
-    return _detect_input_mutation(gm)
-
-
-def _has_potential_branch_input_alias(branch, inputs):
-    """
-    Dispatch-trace the branch with inputs and check if
-    producing graph has output aliasing the branch input. This is
-    bit restrictive as the branch must be traceable.
-    """
-    try:
-        gm = make_fx(branch)(*inputs)
-
-    except UnsupportedAliasMutationException:
-        # this can happen when nested cond_op is
-        # functionalized
-        return True
-    except Exception as e:
-        raise e
-
-    def _detect_input_alias(gm):
-        input_storages = set()
-        for node in gm.graph.nodes:
-            # We need to check existence of "val" because we reuse the logic here
-            # for map operator, where num_mapped_args is a scalar
-            # and doesn't have a "val" meta.
-            if node.op == "placeholder" and "val" in node.meta:
-                input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
-            if node.op == "output":
-
-                def check_alias(out):
-                    if out is not None and "val" in out.meta:
-                        out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                        return out_storage in input_storages
-                    return False
-
-                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
-                    return True
-
-        for _, module in gm.named_children():
-            if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
-                return True
-
-        return False
-
-    return _detect_input_alias(gm)
-
-
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
-    with ctx.redispatch_to_next():
+    with ctx.redispatch_to_next() as m:
         functional_true = ctx.functionalize(true_fn)
         functional_false = ctx.functionalize(false_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [functional_true, functional_false]:
-            if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
+            if _has_potential_branch_input_mutation(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
+            if _has_potential_branch_input_alias(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be aliasing the input!"
                 )
@@ -404,3 +302,50 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
         return ctx.wrap_tensors(cond_return)
+
+
+@cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
+    assert isinstance(
+        inputs, (list, tuple)
+    ), "Cond inputs must be a list or tuple of tensors"
+    assert all(
+        isinstance(i, torch.Tensor) for i in inputs
+    ), "Cond inputs must be a list of tensors"
+
+    pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
+
+    # unbatched tensors are not vmapped
+    tensors, in_dims = zip(
+        *[
+            (get_unwrapped(t), maybe_get_bdim(t)) if is_batchedtensor(t) else (t, None)
+            for t in inputs
+        ]
+    )
+
+    if is_batchedtensor(pred):
+        # prepend "pred" and vmap everything
+        tensors = (pred_,) + tensors
+        in_dims = (0,) + in_dims
+
+        def fn(p, *args):
+            t = true_fn(*args)
+            f = false_fn(*args)
+            return torch.where(p, t[0], f[0])
+
+        with interpreter.lower():
+            result = torch.vmap(fn, in_dims=in_dims)(*tensors)
+
+    else:
+        # predicate is known at this stage and it is a boolean expression or a
+        # tensor with one element.
+        true_fn = torch.vmap(true_fn, in_dims=in_dims)
+        false_fn = torch.vmap(false_fn, in_dims=in_dims)
+
+        with interpreter.lower():
+            result = cond_op(pred, true_fn, false_fn, tensors)
+
+    if not isinstance(result, tuple):
+        result = (result,)
+    lvl = interpreter.level()
+    return tuple([_add_batch_dim(r, 0, lvl) for r in result])

@@ -1,11 +1,13 @@
 import functools
 import math
+import operator
 
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
+import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
@@ -20,15 +22,17 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name):
+def _wrap_jagged_dim(
+    ndim, dim, op_name, convert_to_inner_dim=True, allow_batch_dim=False
+):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    if wrapped < 2:
-        raise RuntimeError(
-            f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
-        )
-    return _outer_to_inner_dim(ndim, wrapped)
+    if wrapped == 1:
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=1")
+    elif wrapped == 0 and not allow_batch_dim:
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
+    return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
 def _wrap_jagged_dims(ndim, dims, op_name):
@@ -58,17 +62,22 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     num_optional_args = sum([x.endswith("?") for x in named_arg_types])
     min_args = len(named_arg_types) - num_optional_args
 
-    if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
-        raise ValueError(
-            f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
-            f"arguments and at most {len(named_arg_types)} arguments, but got: "
-            f"{len(args)} arguments"
-        )
+    # special case: ellipses allows for any number of unchecked args at the end
+    if named_arg_types[-1] == "...":
+        named_arg_types = named_arg_types[:-1]
+    else:
+        if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
+            raise ValueError(
+                f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
+                f"arguments and at most {len(named_arg_types)} arguments, but got: "
+                f"{len(args)} arguments"
+            )
 
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
         "jt": lambda x: isinstance(x, NestedTensor)
-        and x._lengths is None,  # ops with "jt" require contiguous JT only
+        and x._lengths is None
+        and x._ragged_idx == 1,  # ops with "jt" require contiguous JT only
         "jt_all": lambda x: isinstance(
             x, NestedTensor
         ),  # ops with "jt_all" can accept all kinds of JT
@@ -90,9 +99,16 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
             continue
 
         if not arg_type_check_fns[normalized_arg_type](args[i]):
+            type_to_desc = {
+                "t": "tensor",
+                "jt": "contiguous jagged layout NestedTensor",
+                "jt_all": "jagged layout NestedTensor",
+                "any": "<any type>",
+            }
+
             raise ValueError(
-                f"NestedTensor {func.__name__}({schema_str}): {name} should be of "
-                f"type {arg_type}, but got: {type(args[i])}"
+                f"NestedTensor {func.__name__}({schema_str}): expected {name} to be a "
+                f"{type_to_desc[arg_type]}"
             )
 
 
@@ -111,7 +127,11 @@ def check_ragged_dim_same(
 # match those of the specified size
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
-    return list(nt._size[:end]) == list(size[:end])
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    return len(nt_ragged) == len(size_ragged) and (
+        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
+    )
 
 
 def squeeze_leading_ones(t):
@@ -174,9 +194,10 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
+            check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
-            check_schema("lhs: any, rhs: any", func, *args, **kwargs)
+            check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
             return functools.partial(jagged_binary_pointwise, func)
 
     return None
@@ -186,6 +207,7 @@ def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
         "_metadata_cache": arg._metadata_cache,
+        "_ragged_idx": arg._ragged_idx,
     }
     return kwargs
 
@@ -201,20 +223,17 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     assert isinstance(a, NestedTensor) or isinstance(b, NestedTensor)
 
     mismatch_error_msg = (
-        f"cannot call binary pointwise function {func.__name__} with inputs of shapes "
-        f"{a.shape} and {b.shape}"
+        "cannot call binary pointwise function {} with inputs of shapes {} and {}"
     )
-
     # a is NT, b is NT
     if isinstance(a, NestedTensor) and isinstance(b, NestedTensor):
         # ex: (B, j0, D) + (B, j0, D)
         # ex: (B, j0, D) + (B, j0, 1)
-        if raggedness_matches(a, b.shape):
+        if raggedness_matches(a, b._size):
             return NestedTensor(
                 func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
             )
-        raise RuntimeError(mismatch_error_msg)
-
+        raise RuntimeError(mismatch_error_msg.format(func.__name__, a._size, b._size))
     # either a is NT or b is NT at this point
     a_is_nt = isinstance(a, NestedTensor)
     extracted_kwargs = extract_kwargs(a) if a_is_nt else extract_kwargs(b)
@@ -241,7 +260,9 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         # ex: (B, j0, D_0, D_1) + (1, 1, D_0, D_1) -> should
         # be (B, j0, D_0, D_1) but not yet supported
         if a.shape[0] != b.shape[0]:
-            raise RuntimeError(mismatch_error_msg)
+            raise RuntimeError(
+                mismatch_error_msg.format(func.__name__, a.shape, b.shape)
+            )
 
         # need to use offsets to broadcast across ragged dim properly
         # NB: inefficient fallback here; Triton codegen can help this
@@ -254,7 +275,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant
     # that ragged dim is wrt left-most batch dim
-    raise RuntimeError(mismatch_error_msg)
+    raise RuntimeError(mismatch_error_msg.format(func.__name__, a.shape, b.shape))
 
 
 def jagged_torch_function(func, *args, **kwargs):
@@ -274,14 +295,22 @@ def jagged_torch_function(func, *args, **kwargs):
         )
 
         inp = new_kwargs.pop("input")
-        new_kwargs["start_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["start_dim"], "flatten"
+
+        # NB: stay in outer dim space because we're going to redispatch on a NT input
+        start_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["start_dim"], "flatten", convert_to_inner_dim=False
         )
-        new_kwargs["end_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["end_dim"], "flatten"
+        end_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["end_dim"], "flatten", convert_to_inner_dim=False
         )
 
-        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+        if start_dim == end_dim:
+            return inp
+
+        product = functools.reduce(operator.mul, inp.shape[start_dim : end_dim + 1])
+        new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
+
+        return inp.reshape(*new_shape)
 
     raise NotImplementedError(func)
 
@@ -349,10 +378,6 @@ def is_contiguous_general(func, *args, **kwargs):
     if inp.lengths() is not None:
         return False
 
-    # If jagged dim is not 1 it's not contiguous
-    if inp._ragged_idx != 1:
-        return False
-
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
@@ -373,8 +398,6 @@ def linear_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    weight = new_kwargs["weight"]
-    bias = new_kwargs["bias"]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -401,7 +424,7 @@ def linear_backward_default(func, *args, **kwargs):
     return (ds, dw, db)
 
 
-@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt")
+@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -418,12 +441,13 @@ def to_copy_default(func, *args, **kwargs):
 
 register_jagged_func(
     [
+        torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
         torch.ops.aten.detach.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )(jagged_unary_pointwise)
 
 
@@ -476,7 +500,7 @@ def prod_dim_int(func, *args, **kwargs):
     if not new_kwargs["keepdim"]:
         raise RuntimeError("prod(): keepdim=True must be set for NestedTensor")
     dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape), dim, "prod")
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "prod")
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
 
@@ -519,6 +543,48 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
+@register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
+def chunk_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "chunk", allow_batch_dim=True
+    )
+
+    if new_kwargs["dim"] == 0:
+        chunks = new_kwargs["chunks"]
+        dim0_size = inp._size[0]
+        chunk_size = math.ceil(dim0_size / chunks)
+
+        # get _offsets of the chunks
+        lengths = inp._offsets.diff()
+        chunked_lengths = lengths.chunk(chunks)
+        chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
+        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
+        nested_kwargs = [
+            {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
+            for per_offsets in chunked_offsets
+        ]
+
+        # get _values of the chunks
+        split_sizes = [x.sum().item() for x in chunked_lengths]
+        chunk_values = inp._values.split(split_sizes)
+
+        return [
+            NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
+            for i in range(0, chunk_size)
+        ]
+    else:
+        return [
+            NestedTensor(values=x, **extract_kwargs(inp))
+            for x in func(inp._values, **new_kwargs)
+        ]
+
+
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):
     # Note that this specializes on the length of the offsets
@@ -547,6 +613,19 @@ def unbind_int(func, *args, **kwargs):
     ]
 
 
+@register_jagged_func(torch.ops.aten.squeeze.dim, "self: jt, dim: any")
+def squeeze_dim(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    values = inp._values
+
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), new_kwargs["dim"], "squeeze")
+    return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
 def unsqueeze_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -555,11 +634,10 @@ def unsqueeze_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     values = inp._values
-    offsets = inp.offsets
 
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape) + 1, dim, "unsqueeze")
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size) + 1, dim, "unsqueeze")
     return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
 
 
@@ -601,11 +679,11 @@ def matmul_default(func, *args, **kwargs):
         )
     elif inp.is_nested and other.is_nested:
         # BMM with equivalent ragged dims between the two inputs
-        if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other.shape):
+        if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
 
     raise RuntimeError(
-        f"matmul(): not supported between inputs of shapes {inp.shape} and {other.shape}"
+        f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"
     )
 
 
@@ -622,7 +700,7 @@ def expand_default(func, *args, **kwargs):
 
     assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
     if not raggedness_matches(inp, size):
-        raise RuntimeError(f"expand(): cannot expand shape {inp.shape} -> {size}")
+        raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
     expand_arg = [-1, *size[2:]]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
@@ -650,7 +728,7 @@ def where_self(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    assert condition.shape == other.shape == inp.shape
+    assert condition._size == other._size == inp._size
 
     return NestedTensor(
         func(condition._values, inp._values, other._values, **new_kwargs),
@@ -680,7 +758,9 @@ def is_pinned_default(func, *args, **kwargs):
     return func(inp._values, **new_kwargs)
 
 
-@register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
+@register_jagged_func(
+    torch.ops.aten.is_same_size.default, "self: jt_all, other: jt_all"
+)
 def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
@@ -710,7 +790,9 @@ def sum_dim_IntList(func, *args, **kwargs):
         return out
 
 
-@register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
+@register_jagged_func(
+    torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any"
+)
 def transpose_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -720,6 +802,11 @@ def transpose_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
+
+    if inp._lengths is not None:
+        raise ValueError(
+            "transpose(): not supported on jagged layout nested tensor with holes"
+        )
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
@@ -733,13 +820,14 @@ def transpose_int(func, *args, **kwargs):
             to_dim = dim1
         else:
             to_dim = dim0
+        inp_kwargs = extract_kwargs(inp)
+        inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(
             inp.values().transpose(
                 _outer_to_inner_dim(len(inp._size), dim0),
                 _outer_to_inner_dim(len(inp._size), dim1),
             ),
-            **extract_kwargs(inp),
-            _ragged_idx=to_dim,
+            **inp_kwargs,
         )
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
@@ -748,7 +836,10 @@ def transpose_int(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.view.default, "self: jt, size: any")
+@register_jagged_func(
+    [torch.ops.aten.view.default, torch.ops.aten._unsafe_view.default],
+    "self: jt_all, size: any",
+)
 def view_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -757,12 +848,40 @@ def view_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs.pop("size")
 
+    if inp._ragged_idx != 1 and tuple(inp._size) != tuple(size):
+        raise RuntimeError(
+            f"view(): does not support ragged_idx != 1 except when inp._size == size. "
+            f"inp._size is ({inp._size}) and size is ({size})."
+        )
+
     # Ensure specified size still includes batch and ragged dims
     if len(size) < 3 or not raggedness_matches(inp, size):
-        raise RuntimeError(f"view(): cannot view shape {inp.shape} as {size}")
+        raise RuntimeError(f"view(): cannot view shape {inp._size} as {size}")
 
-    jagged_size = [inp._values.shape[0]] + size[2:]
-    return NestedTensor(func(inp._values, jagged_size), **extract_kwargs(inp))
+    # outer size: the size of the NT, e.g. [3, j0, 10]
+    # inner size: the size of the values, e.g. [8, 10] (e.g. for offsets = [0, 3, 5, 8])
+    # this function gets inner_size[inner_idx] for a given inner_idx.
+    #
+    # example: for outer size [a, b, c, j0, d, e, f]
+    #                         assume that j0 is ragged, other are concrete integers
+    #                         and ragged_idx=3
+    # inner size will be      [b, c, inp._values.size(ragged_idx), d, e, f]
+    # therefore:
+    #    inner_size[0] = outer_size[1]
+    #    inner_size[1] = outer_size[2]
+    #    inner_size[0] = inp._values.size(ragged_idx - 1)
+    #    inner_size[3] = outer_size[4]
+    #    inner_size[4] = outer_size[5]
+    def get_inner_size(inner_idx):
+        nonlocal inp, size
+        if inner_idx == inp._ragged_idx - 1:
+            return inp._values.size(inner_idx)
+        else:
+            return size[inner_idx + 1]
+
+    inner_size = [get_inner_size(i) for i in range(len(size) - 1)]
+
+    return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
 
 
 @register_jagged_func(
