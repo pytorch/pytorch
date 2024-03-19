@@ -301,7 +301,9 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.nonzero_memo is None:
+    if arg.nonzero_memo is not None:
+        nnz = arg.nonzero_memo
+    else:
         nnz = fake_mode.shape_env.create_unbacked_symint()
 
         # This is unsound, but it works well in practice
@@ -330,10 +332,12 @@ def nonzero(fake_mode, func, arg):
 
         _constrain_range_for_size(nnz, max=maxval)
 
-        arg._nonzero_memo = nnz
-        arg._nonzero_memo_vc = arg._version
+        if not torch.is_inference_mode_enabled():
+            # arg._version N/A in inference mode
+            arg._nonzero_memo = nnz
+            arg._nonzero_memo_vc = arg._version
 
-    return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -666,8 +670,8 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         debug_mask,
     )
 
@@ -716,8 +720,12 @@ def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     res = res.transpose(1, 2)
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
-    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
 
     return res, logsum_exp, seed, offset
 
@@ -787,8 +795,8 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     return (
         attention,
         logsumexp,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         debug_mask,
     )
 
@@ -842,8 +850,12 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     )
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
-    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
 
     return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
 
@@ -939,7 +951,11 @@ def make_fast_binary_impl(slow_ref):
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
-            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+            if (
+                isinstance(op, torch.Tensor)
+                and len(op.shape) == len(final_shape)
+                and op.shape == final_shape
+            ):
                 break
         else:
             return slow("both tensors nontrivially broadcast")
