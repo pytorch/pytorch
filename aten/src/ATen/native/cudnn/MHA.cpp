@@ -73,6 +73,21 @@ using graph_and_tensors = std::tuple<
     std::shared_ptr<fe::graph::Tensor_attributes> // Stats
     >;
 
+using graph_and_tensors_backward = std::tuple<
+    std::shared_ptr<fe::graph::Graph>,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Q,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // K,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // V,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale
+    std::shared_ptr<fe::graph::Tensor_attributes>, // O,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // dO,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // stats,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // dQ,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // dK,,
+    std::shared_ptr<fe::graph::Tensor_attributes> // dV,
+    >;
+
+
 #define MAX_MHA_DIM 4
 
 struct MHAParams {
@@ -202,6 +217,7 @@ struct MHAGraphCache {
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
 thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
+thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache_backward;
 
 auto build_graph_and_tensors(
     int64_t b,
@@ -411,6 +427,44 @@ void run_cudnn_SDP_fprop(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
   mhagraphcache.update(key, graph_and_tensors_values);
 }
+
+void run_cudnn_SDP_bprop(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    Tensor& dropoutseed,
+    Tensor& dropoutoffset) {
+   cudnnHandle_t handle = getCudnnHandle();
+  auto key = MHACacheKeyWrapper(
+      b,
+      h,
+      s_q,
+      s_kv,
+      d,
+      q,
+      k,
+      v,
+      dropout_probability,
+      is_causal,
+      true);
+   auto graph_and_tensors_backward_ptr = mhagraphcache_backward.find(key); 
+
+}
+
 
 } // namespace native
 } // namespace at
