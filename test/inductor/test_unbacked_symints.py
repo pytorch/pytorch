@@ -147,9 +147,7 @@ class TestUnbackedSymints(TorchTestCase):
         def fn(x):
             return torch.nonzero(x)
 
-        example_inputs = (
-            torch.randint(0, 2, (128,), device=device),
-        )
+        example_inputs = (torch.randint(0, 2, (128,), device=device),)
 
         with torch.inference_mode():
             actual = torch.compile(fn, fullgraph=True)(*example_inputs)
