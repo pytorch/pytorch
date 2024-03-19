@@ -18,8 +18,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
-    check_constant_args,
-    check_unspec_python_args,
+    check_unspec_or_constant_args,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -722,11 +721,8 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
-            constant_args = check_constant_args(args, kwargs)
-            unspec_python_args = check_unspec_python_args(args, kwargs)
-
             if self.can_constant_fold_through(func) and (
-                constant_args or unspec_python_args
+                check_unspec_or_constant_args(args, kwargs)
             ):
                 # constant fold
                 return variables.ConstantVariable.create(
