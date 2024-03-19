@@ -205,6 +205,7 @@ class TestPatternMatcherBase(TestCase):
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
                 *clone_inputs,
             )
+            print("source_code: ", source_code)
             for op in include_ops:
                 self.assertIn(op, source_code)
             for op in exclude_ops:
@@ -2152,10 +2153,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 include_ops = []
                 exclude_ops = []
                 if (beta != 1.0 and beta != 0.0) or alpha != 1.0:
-                    exclude_ops = ["mkldnn._linear_pointwise.default"]
+                    exclude_ops = ["torch.ops.mkl._mkl_linear"]
                 else:
-                    exclude_ops = ["mkldnn._linear_pointwise.default"]
-                self._test_code_common(mod, (x,), include_ops, [])
+                    include_ops = ["torch.ops.mkl._mkl_linear"]
+                self._test_code_common(mod, (x,), include_ops, exclude_ops)
 
     @skipIfNoDynamoSupport
     @skipIfRocm
