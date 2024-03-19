@@ -3023,6 +3023,7 @@ coverage_ignore_classes = [
     "GroupNorm",
     "LayerNorm",
     "LocalResponseNorm",
+    "RMSNorm",
     # torch.nn.modules.padding
     "CircularPad1d",
     "CircularPad2d",
