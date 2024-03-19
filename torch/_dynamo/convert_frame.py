@@ -155,7 +155,7 @@ def preserve_global_state(fn):
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._dynamo._PreserveDispatch():
+        with torch._C._PreserveDispatchKeyGuard():
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
