@@ -135,6 +135,10 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -733,6 +737,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+
+    if "cache_lookup_latency" in kwargs:
+        headers.append("cache_lookup_latency")
+        row.append(kwargs["cache_lookup_latency"])
+
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
@@ -2050,6 +2059,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -2670,6 +2683,21 @@ class BenchmarkRunner:
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
 
+            if self.args.profile_dynamo_cache_lookup:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU]
+                ) as prof:
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+
+                events = list(
+                    filter(
+                        lambda event: "TorchDynamo Cache Lookup" in event.key,
+                        prof.key_averages(),
+                    )
+                )
+                dynamo_cache_lookup_latency = events[0].self_cpu_time_total
+
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
@@ -2681,12 +2709,19 @@ class BenchmarkRunner:
                     f"ratio: {compression_ratio:.2f}"
                 )
 
+            if self.args.print_compilation_time:
+                print(f"Compilation time: {compilation_time:.2f}")
+
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                if self.args.profile_dynamo_cache_lookup:
+                    experiment_kwargs[
+                        "cache_lookup_latency"
+                    ] = dynamo_cache_lookup_latency
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -3085,6 +3120,11 @@ def parse_args(args=None):
         help="print extra memory statistics",
     )
     parser.add_argument(
+        "--print-compilation-time",
+        action="store_true",
+        help="print compilation latency",
+    )
+    parser.add_argument(
         "--print-dataframe-summary",
         action="store_true",
         help="print dataframe result used for calculating accuracy",
@@ -3191,6 +3231,13 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+    )
+
+    parser.add_argument(
+        "--profile_dynamo_cache_lookup",
+        "--profile-dynamo-cache-lookup",
+        action="store_true",
+        help="profiles TorchDynamo cache lookup",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3475,6 +3522,9 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "sam_fast",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -3572,6 +3622,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()
