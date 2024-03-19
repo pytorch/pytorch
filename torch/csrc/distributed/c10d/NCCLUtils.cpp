@@ -172,8 +172,7 @@ std::string getNcclErrorDetailStr(
   auto ret = ncclGetLastError(NULL);
   if (ret) {
     err = "\nLast error:\n" + std::string(ret);
-  }
-  else {
+  } else {
     err = "\nLast error: Unknown NCCL Error\n";
   }
 #endif
