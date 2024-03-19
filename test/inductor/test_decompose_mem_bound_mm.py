@@ -5,8 +5,8 @@ import unittest
 
 import torch
 import torch._inductor
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._inductor.test_case import run_tests, TestCase
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

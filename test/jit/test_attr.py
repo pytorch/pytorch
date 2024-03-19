@@ -3,6 +3,7 @@
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
 import torch
+from typing import NamedTuple, Tuple
 
 
 if __name__ == '__main__':
@@ -36,3 +37,26 @@ class TestGetDefaultAttr(JitTestCase):
         FileCheck().check_not("missing").run(graph)
         # instead the getattr call will emit the default value, which is a list with one float element
         FileCheck().check("float[] = prim::ListConstruct").run(graph)
+
+    def test_getattr_named_tuple(self):
+        global MyTuple
+
+        class MyTuple(NamedTuple):
+            x: str
+            y: torch.Tensor
+
+        def fn(x: MyTuple) -> Tuple[str, torch.Tensor, int]:
+            return getattr(x, "x", "fdsa"), getattr(x, "y", torch.ones((3, 3))), getattr(x, "z", 7)
+
+        inp = MyTuple(x="test", y=torch.ones(3, 3) * 2)
+        ref = fn(inp)
+        fn_s = torch.jit.script(fn)
+        res = fn_s(inp)
+        self.assertEqual(res, ref)
+
+    def test_getattr_tuple(self):
+        def fn(x: Tuple[str, int]) -> int:
+            return getattr(x, "x", 2)
+
+        with self.assertRaisesRegex(RuntimeError, "but got a normal Tuple"):
+            torch.jit.script(fn)
