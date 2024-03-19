@@ -107,8 +107,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
       *std::move(new_data_ptr),
       storage.allocator(),
       storage.resizable(),
-      storage.device_type()
-  );
+      storage.device_type());
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
