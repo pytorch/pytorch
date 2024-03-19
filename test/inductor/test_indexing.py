@@ -6,15 +6,15 @@ from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase as TorchTestCase,
 )
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
 
 
-class TestIndexingSimplification(TorchTestCase):
+class TestIndexingSimplification(InductorTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)
@@ -160,7 +160,7 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
-class ExprPrinterTests(TorchTestCase):
+class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
@@ -314,7 +314,7 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
     if HAS_CPU or HAS_CUDA:
