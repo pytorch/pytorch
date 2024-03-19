@@ -1113,7 +1113,7 @@ def _register_woq_mm_int8():
         ),
         KeywordArg("scales"),
     )
-    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm, aten.reshape)
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
 def _register_quantization_lowerings():
