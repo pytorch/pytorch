@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cstddef>
-#include <sstream>
 #include <type_traits>
-#include <typeinfo>
-#include <vector>
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>

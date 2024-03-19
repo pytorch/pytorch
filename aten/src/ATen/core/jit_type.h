@@ -17,7 +17,6 @@
 #include <memory>
 #include <ostream>
 #include <sstream>
-#include <type_traits>
 #include <utility>
 
 

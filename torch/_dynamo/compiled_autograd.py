@@ -1,7 +1,6 @@
 import contextlib
 import functools
-import itertools
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -215,17 +214,12 @@ class AutogradCompilerInstance:
         the graph.  This differs from eager mode, which schedules them as soon as possible. This
         pass attempts to reorder the graph to mimic eager behavior.
         """
-        order: Dict[torch.fx.Node, int] = {}
-        counter = itertools.count()
         target = torch.ops.inductor.accumulate_grad_.default
-        last = None
         for node in [*self.fx_tracer.graph.nodes]:
             if node.op == "call_function" and node.target == target:
-                arg = max(node.args, key=order.get)  # type: ignore[arg-type]
-                if arg is not last:
+                arg = max(node.args)  # last arg
+                if arg is not node.prev and arg.op != "placeholder":
                     arg.append(node)
-            order[node] = next(counter)
-            last = node
 
     def to_proxy(self, t):
         if t is None:
