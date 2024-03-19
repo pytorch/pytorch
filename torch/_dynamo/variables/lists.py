@@ -555,7 +555,7 @@ class SizeVariable(TupleVariable):
 class NamedTupleVariable(TupleVariable):
     _nonvar_fields = {
         "tuple_cls",
-        *VariableTracker._nonvar_fields,
+        *TupleVariable._nonvar_fields,
     }
 
     def __init__(self, items, tuple_cls, **kwargs):
