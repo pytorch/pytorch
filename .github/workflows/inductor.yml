@@ -111,7 +111,7 @@ jobs:
     name: linux-jammy-cpu-py3.8-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3_8-gcc11-build
+      build-environment: linux-jammy-py3.8-gcc11-build
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
@@ -135,7 +135,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_8-gcc11-inductor-build
     with:
-      build-environment: linux-jammy-py3_8-gcc11-build
+      build-environment: linux-jammy-py3.8-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.test-matrix }}
     secrets:
