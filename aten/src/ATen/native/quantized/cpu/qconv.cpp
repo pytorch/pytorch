@@ -1853,7 +1853,7 @@ class QConvoneDNN final {
     } else {
       // Conv2D post op check
       TORCH_CHECK(
-        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish",
+        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish" || attr == "swish",
         "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
         attr,
         ".")
