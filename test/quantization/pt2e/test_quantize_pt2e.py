@@ -1988,3 +1988,49 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(5, 5),)
         _ = dynamic_quantize_pt2e(m, example_inputs)
+
+    def test_conv_transpose_bn_relu(self):
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                int8_qspec = QuantizationSpec(
+                    dtype=torch.int8,
+                    quant_min=-128,
+                    quant_max=127,
+                    qscheme=torch.per_tensor_symmetric,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_weight_observer,
+                )
+                quantization_config = QuantizationConfig(
+                    input_activation=int8_qspec,
+                    weight=int8_qspec,
+                    bias=None,
+                    output_activation=int8_qspec,
+                )
+                # conv_transpose + bn is fused automatically in PTQ (not configurable)
+                # so we just need to annotate conv_transpose + relu for conv_transpose + bn + relu
+                # pattern
+                OP_TO_ANNOTATOR["conv_transpose_relu"](model, quantization_config)
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv_transpose2d.input,
+            torch.ops.aten.relu.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            TestHelperModules.ConvTWithBNRelu(relu=True, bn=True),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
+        )
