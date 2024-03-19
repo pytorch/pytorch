@@ -28,11 +28,11 @@ namespace c10 {
 class Scalar;
 }
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
 namespace at {
 
@@ -594,10 +594,10 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const<T>::value, int> = 0>
+  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
 
-  template <typename T, std::enable_if_t<std::is_const<T>::value, int> = 0>
+  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
   const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
@@ -831,9 +831,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename c10::invoke_result_t<T&, TensorBase>>, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -1026,9 +1026,9 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
 namespace symint {
 
 template <typename T>
-using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+using enable_if_symint = std::enable_if_t<std::is_same_v<T, c10::SymInt>>;
 template <typename T>
-using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+using enable_if_int = std::enable_if_t<std::is_same_v<T, int64_t>>;
 
 template <typename T, typename = enable_if_symint<T>>
 c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }
