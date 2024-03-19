@@ -1175,6 +1175,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         fx_qconfig_mapping=None,
         export_with_dynamic_shape=False,
         is_qat=False,
+        is_debug_mode=False,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1199,6 +1200,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
+        if is_debug_mode:
+            print("quantized model", m)
 
         pt2_quant_output = m(*example_inputs)
         ns = NodeSpec
@@ -2705,6 +2708,27 @@ class TestHelperModules:
 
         def forward(self, x):
             x = self.conv(x)
+            x = self.bn(x)
+            return self.relu(x)
+
+    class ConvTWithBNRelu(torch.nn.Module):
+        def __init__(self, relu, dim=2, bn=True, bias=True):
+            super().__init__()
+            convts = {1: torch.nn.ConvTranspose1d, 2: torch.nn.ConvTranspose2d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
+            self.convt = convts[dim](3, 3, 3, bias=bias)
+
+            if bn:
+                self.bn = bns[dim](3)
+            else:
+                self.bn = torch.nn.Identity()
+            if relu:
+                self.relu = torch.nn.ReLU()
+            else:
+                self.relu = torch.nn.Identity()
+
+        def forward(self, x):
+            x = self.convt(x)
             x = self.bn(x)
             return self.relu(x)
 
