@@ -980,7 +980,7 @@ def sanitize_pytest_xml(xml_file: str):
     import xml.etree.ElementTree as ET
     tree = ET.parse(xml_file)
     for testcase in tree.iter('testcase'):
-        full_classname = testcase.attrib.get('classname')
+        full_classname = testcase.attrib.get("classname")
         if full_classname is None:
             continue
         # The test prefix is optional
