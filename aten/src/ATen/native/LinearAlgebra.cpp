@@ -2844,7 +2844,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     }
   }
 
-  if (all_reduction_dims_are_one_dimensional && !self.is_complex() && !(self.numel() == 0)) {
+  if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
     Tensor result_tmp = self.clone();
 
     if (result.sizes().empty()) {
