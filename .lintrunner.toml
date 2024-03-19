@@ -204,9 +204,7 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    'c10/**/cuda/*pp',
     'aten/**/cuda/*pp',
-    '**/cuda/*pp',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
