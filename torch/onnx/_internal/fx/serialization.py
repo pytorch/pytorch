@@ -22,7 +22,7 @@ def _create_tensor_proto_with_external_data(
     name: str,
     location: str,
     basepath: str,
-    dtype_override: Optional["onnx.TypeProto"] = None,
+    dtype_override: Optional["onnx.TypeProto"] = None,  # type: ignore[name-defined]
 ) -> onnx.TensorProto:  # type: ignore[name-defined]
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
@@ -153,8 +153,6 @@ def save_model_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
-    onnx_model_with_initializers = onnx.ModelProto()  # type: ignore[attr-defined]
-    onnx_model_with_initializers.CopyFrom(onnx_model)
     onnx_input_names = {input.name for input in onnx_model.graph.input}
     for el in torch_state_dicts:
         if isinstance(el, dict):
@@ -215,9 +213,7 @@ def save_model_with_external_data(
             # Create one file per tensor.
             # tensor_proto.raw_data is stored to external file at
             # os.path.join(basepath, relative_tensor_file_path).
-            model_input_types = {
-                k.name: k.type for k in onnx_model_with_initializers.graph.input
-            }
+            model_input_types = {k.name: k.type for k in onnx_model.graph.input}
 
             tensor_proto = _create_tensor_proto_with_external_data(
                 tensor,
@@ -227,7 +223,7 @@ def save_model_with_external_data(
                 model_input_types.pop(name, None),
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
-            onnx_model_with_initializers.graph.initializer.append(tensor_proto)
+            onnx_model.graph.initializer.append(tensor_proto)
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
-    onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))  # type: ignore[attr-defined]
+    onnx.save(onnx_model, os.path.join(basepath, model_location))  # type: ignore[attr-defined]
