@@ -6074,11 +6074,15 @@ def sample_inputs_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs
 
     # The additional sample is to check additional values of min_val and max_val beyond the default
     # value (what is already checked by sample_inputs_elementwise_unary)
-    for max_val, min_val in ((-0.5, 0.5), (0.5, -0.5), (0., 0.)):
+    for max_val, min_val in ((0.5, -0.5), (0., 0.)):
         yield SampleInput(make_arg(S, S), kwargs={"min_val": min_val, "max_val": max_val})
 
     yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
 
+def error_inputs_hardtanh(op_info, device, **kwargs):
+    # Tests that hardtanh errors out when passed min_val > max_val.
+    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device), kwargs={"min_val": 0.5, "max_val": -0.5}),
+                     error_type=ValueError, error_regex="min_val cannot be greater than max_val")
 
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
@@ -15107,6 +15111,7 @@ op_db: List[OpInfo] = [
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
+                   error_inputs_func=error_inputs_hardtanh,
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,

@@ -177,6 +177,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 #include <ATen/native/BinaryOps.h>
                 #include <torch/csrc/inductor/aoti_runtime/utils.h>
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+                #include <torch/csrc/inductor/aoti_torch/utils.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
                 #include <ATen/ops/bernoulli_native.h>
@@ -363,6 +364,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 else:
                     self.prefix.splice(run_impl_proto)
         else:
+            # cpp entry function for JIT with cpp wrapper
             self.prefix.splice(
                 """
                 void inductor_entry_impl(
@@ -385,11 +387,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
-                        self.prefix.splice(
-                            """
-                                pybind11::gil_scoped_release release;
-                            """
-                        )
+                        self.prefix.splice("pybind11::gil_scoped_release release;")
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -896,26 +894,11 @@ class CppWrapperCpu(WrapperCodeGen):
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
+                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
             """
         )
 
-        # unwrap output tensor back to python scalar
-        if all(x for x in self.output_is_tensor.values()):
-            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
-            return_str = "return f(args_tensor)"
-        else:
-            outputs = [
-                f"outputs[{i}]" if self.output_is_tensor[i] else f"outputs[{i}].item()"
-                for i in range(len(V.graph.graph_outputs))
-            ]
-            outputs_str = f"[{', '.join(outputs)}]"
-            return_str = f"""
-                    outputs = f(args_tensor)
-                    return {outputs_str}
-            """
-
-        args_str = "args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -925,35 +908,71 @@ class CppWrapperCpu(WrapperCodeGen):
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
             constants_str = f"[{', '.join(V.graph.constants.keys())}]"
-            args_str += f"""
+            wrapper_body += f"""
                     constants_tensor = {constants_str}
-                    args_tensor.extend(constants_tensor)
+                    input_tensors.extend(constants_tensor)
             """
+        # Convert vector of at::Tensor to vector of AtenTensorHandle.
+        # If we pass at::Tensor, the compilation will be too slow.
+        wrapper_body += """
+                    input_handles = torch._C._aoti.unsafe_alloc_void_ptr_from_tensors(input_tensors)
+        """
+
+        # unwrap output tensor back to python scalar
+        if all(x for x in self.output_is_tensor.values()):
+            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
+            outputs_str = "output_tensors"
+        else:
+            outputs = [
+                f"output_tensors[{i}]"
+                if self.output_is_tensor[i]
+                else f"output_tensors[{i}].item()"
+                for i in range(len(V.graph.graph_outputs))
+            ]
+            outputs_str = f"[{', '.join(outputs)}]"
+        wrapper_body += f"""
+                    output_handles = f(input_handles)
+                    output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptr(output_handles)
+                    return {outputs_str}
+        """
 
         # Wrap the func to support setting result._boxed_call = True
         result.splice(
             f"""
             def _wrap_func(f):
                 def g(args):
-                    {args_str}
-                    {return_str}
+                    {wrapper_body}
                 return g
+
             call = _wrap_func(inductor_entry)
             """
         )
 
-    def generate_c_shim_extern_kernel_call(self, kernel, args):
-        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
-        self.allow_stack_allocation = False
+    def get_c_shim_func_name(self, kernel):
+        if not config.abi_compatible:
+            return kernel
+
+        assert "::" in kernel, "Cpp kernel name: " + kernel + " does not contain '::'"
         kernel_tokens = kernel.split("::")
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
         if config.c_shim_version == "1":
-            shim_fn = f"aoti_torch_{kernel_suffix}"
+            # For sdpa, we need the v2 version since v1 didn't consider optional arg
+            # FIXME: no need to do this after we switch to the torchgen-ed C shim
+            shim_fn = (
+                f"aoti_torch_{kernel_suffix}_v2"
+                if kernel_suffix == "_scaled_dot_product_flash_attention"
+                else f"aoti_torch_{kernel_suffix}"
+            )
         else:
             shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+        return shim_fn
 
+    def generate_c_shim_extern_kernel_call(self, kernel, args):
+        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
+        self.allow_stack_allocation = False
+        shim_fn = self.get_c_shim_func_name(kernel)
         # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
         # ever breaks, it needs to be reworked to be able to return multiple arguments,
         # and the split-on-comma code here needs to be removed.
@@ -1015,12 +1034,7 @@ class CppWrapperCpu(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        assert (
-            fallback_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {fallback_kernel.python_kernel_name=}"
-        self.generate_c_shim_extern_kernel_call(
-            fallback_kernel.abi_compatible_kernel, args
-        )
+        self.generate_c_shim_extern_kernel_call(fallback_kernel.cpp_kernel_name, args)
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
@@ -1074,6 +1088,7 @@ class CppWrapperCpu(WrapperCodeGen):
     def generate_scatter_fallback(
         self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
+        # TODO: needs updates to use C shim v2
         # TODO: support other overload for cpp wrapper and remove the below assertions
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
@@ -1093,7 +1108,8 @@ class CppWrapperCpu(WrapperCodeGen):
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
-        if V.graph.aot_mode and V.graph.cpp_wrapper and config.abi_compatible:
+        # TODO: needs updates to use C shim v2
+        if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
             # tensor prematurely deallocated, thus this std::vector().data() trick here.
@@ -1775,12 +1791,8 @@ class CppWrapperCpu(WrapperCodeGen):
     def generate_save_uncompiled_kernels(self):
         pass
 
-    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
-        if (
-            config.abi_compatible
-            and not is_legacy_abi
-            and isinstance(type_, torch.OptionalType)
-        ):
+    def val_to_cpp_arg_str(self, type_, val) -> str:
+        if config.abi_compatible and isinstance(type_, torch.OptionalType):
             if val is None:
                 return "0"  # nullptr is not available in C
             if not isinstance(type_.getElementType(), torch.TensorType):

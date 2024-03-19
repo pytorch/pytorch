@@ -18,6 +18,12 @@ from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as ddp_default_hooks,
 )
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     run_with_native_funcol,
@@ -68,7 +74,7 @@ def compiler_fn(no_inductor=False):
 class ReplicateTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
-        return 2
+        return min(2, torch.cuda.device_count())
 
     def setUp(self) -> None:
         super().setUp()
@@ -314,6 +320,62 @@ class ReplicateTest(MultiProcessTestCase):
         for i in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
+
+
+class DDP_TP_Test(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.cuda.device_count())
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
+    @skip_if_lt_x_gpu(4)
+    def test_ddp_tp(self):
+        torch.cuda.set_device(f"cuda:{self.rank}")
+        dist.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        model = Net().cuda()
+        compiled_model = deepcopy(model)
+        mesh_2d = init_device_mesh(
+            "cuda", (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {
+            "fc1": ColwiseParallel(),
+            "fc2": RowwiseParallel(),
+            "fc3": ColwiseParallel(),
+            "fc4": RowwiseParallel(),
+        }
+        model = parallelize_module(model, tp_mesh, parallelize_plan)
+        model = replicate(model, device_mesh=dp_mesh)
+        compiled_model = parallelize_module(compiled_model, tp_mesh, parallelize_plan)
+        compiled_model = replicate(compiled_model, device_mesh=dp_mesh)
+        compiled_model = torch.compile(compiled_model)
+        data = torch.randn([1, DIM]).cuda()
+        with compiled_autograd.enable(compiler_fn()):
+            loss = compiled_model(data).sum()
+            loss.backward()
+
+        loss = model(data).sum()
+        loss.backward()
+        for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
 
 
 if __name__ == "__main__":

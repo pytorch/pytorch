@@ -565,6 +565,32 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
 
+    @requires_cuda
+    def test_closure_graph_break(self):
+        param = torch.rand(2, 3, dtype=torch.float32, device="cuda", requires_grad=True)
+        param_c = param.clone().detach().requires_grad_(True)
+
+        def closure():
+            param.grad = torch.ones_like(param) * 2
+            return param.grad
+
+        def closure_c():
+            param_c.grad = torch.ones_like(param_c) * 2
+            return param_c.grad
+
+        optimizer = torch.optim.AdamW([param])
+        optimizer_c = torch.optim.AdamW([param_c])
+
+        def loop(opt, c):
+            opt.step(c)
+
+        compiled_loop = torch._dynamo.optimize("eager")(loop)
+
+        compiled_loop(optimizer, closure)
+        loop(optimizer_c, closure_c)
+
+        self.assertEqual(param, param_c)
+
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
