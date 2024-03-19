@@ -1098,6 +1098,33 @@ if(USE_XPU)
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
 
   # ATen XPU implementation
+  set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
+  set(TORCH_XPU_OPS_REPO_URL https://github.com/intel/torch-xpu-ops.git)
+  file(READ "${TORCH_ROOT}/.github/ci_commit_pins/xpu.txt" TORCH_XPU_OPS_COMMIT)
+  string(REGEX REPLACE "\n$" "" TORCH_XPU_OPS_COMMIT "${TORCH_XPU_OPS_COMMIT}")
+  if(NOT EXISTS "${TORCH_XPU_OPS_DIR}/.git")
+    execute_process(
+      COMMAND git clone --quiet ${TORCH_XPU_OPS_REPO_URL} ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to clone ${TORCH_XPU_OPS_REPO_URL}")
+    endif()
+  endif()
+  execute_process(
+    COMMAND git fetch --quiet
+    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+    RESULT_VARIABLE _exitcode)
+  if(NOT _exitcode EQUAL 0)
+    message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+  endif()
+  execute_process(
+    COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
+    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+    RESULT_VARIABLE _exitcode)
+  if(NOT _exitcode EQUAL 0)
+    message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+  endif()
+
   set(TORCH_XPU_OPS_INCLUDE_DIRS
       ${TORCH_SRC_DIR}/csrc/api
       ${TORCH_SRC_DIR}/csrc/api/include
