@@ -99,17 +99,11 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import (
-    supported_const_comparison_ops,
-    supported_tensor_comparison_ops,
-    SymNodeVariable,
-    TensorVariable,
-)
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    UserDefinedVariable,
 )
 
 log = logging.getLogger(__name__)
@@ -117,6 +111,17 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+compare_op_handlers: Dict[str, Any] = {
+    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+}
+handle_contains = BuiltinVariable(operator.contains).call_function
+handle_not = BuiltinVariable(operator.not_).call_function
+compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
+    tx, [*reversed(args)], {}
+)
+compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
+    tx, [handle_contains(tx, [*reversed(args)], {})], {}
+)
 
 
 @dataclasses.dataclass
@@ -132,7 +137,11 @@ class SpeculationEntry:
         Start tracing of the current frame over again, and don't take this branch.
         """
         self.failed = True
-        raise exc.SpeculationRestartAnalysis()
+        if self.reason is not None:
+            restart_reason = self.reason.reason
+        else:
+            restart_reason = "Unknown fail_and_restart_analysis"
+        raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
 
 
 @dataclasses.dataclass
@@ -216,7 +225,6 @@ class InstructionTranslatorGraphState(NamedTuple):
     block_stack: List[BlockStackEntry]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     lineno: int
 
     def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
@@ -626,7 +634,6 @@ class InstructionTranslatorBase(
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
@@ -730,15 +737,11 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        assert isinstance(self.instruction_pointer, int)
-        inst = self.instructions[self.instruction_pointer]
-        self.current_instruction = inst
-        self.instruction_pointer += 1
-        try:
-            self.next_instruction = self.instructions[self.instruction_pointer]
-        except IndexError:
-            self.instruction_pointer = None
-            self.next_instruction = None
+        ip = self.instruction_pointer
+        if ip is None:
+            return False
+        self.current_instruction = inst = self.instructions[ip]
+        self.instruction_pointer = ip + 1
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
@@ -759,7 +762,7 @@ class InstructionTranslatorBase(
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
-            return True
+            return not self.output.should_exit
         except ReturnValueOp:
             return False
         except Unsupported:
@@ -817,6 +820,10 @@ class InstructionTranslatorBase(
         def update_block_stack(self, inst):
             pass
 
+    @property
+    def next_instruction(self):
+        return self.instructions[self.instruction_pointer]  # type: ignore[index]
+
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -840,11 +847,7 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
-                while (
-                    self.instruction_pointer is not None
-                    and not self.output.should_exit
-                    and self.step()
-                ):
+                while self.step():
                     pass
             except BackendCompilerFailed:
                 raise
@@ -876,8 +879,7 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> List[VariableTracker]:
-        assert n >= 0
-        return list(reversed([self.pop() for _ in range(n)]))
+        return [*reversed([self.pop() for _ in range(n)])]
 
     def LOAD_FAST(self, inst):
         name = inst.argval
@@ -886,7 +888,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
-            self.push(self.symbolic_locals[name])
+            self.push(self.symbolic_locals[name].unwrap())
         except KeyError:
             if name.startswith("."):
                 try:
@@ -1161,7 +1163,6 @@ class InstructionTranslatorBase(
         bytecode counter by delta
         """
         # Python 3.8 only
-        assert self.next_instruction is not None
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
         self.instruction_pointer = self.indexof[inst.target]
@@ -1197,61 +1198,7 @@ class InstructionTranslatorBase(
             unimplemented(f"FOR_ITER {typestr(it)}")
 
     def COMPARE_OP(self, inst):
-        left, right = self.popn(2)
-        op = inst.argval
-        supported_any = dict(
-            itertools.chain(
-                supported_tensor_comparison_ops.items(),
-                supported_const_comparison_ops.items(),
-            )
-        )
-        if (
-            isinstance(
-                left,
-                (
-                    TensorVariable,
-                    SymNodeVariable,
-                    NNModuleVariable,
-                    BaseListVariable,
-                    UserDefinedVariable,
-                    BaseUserFunctionVariable,
-                    ConstDictVariable,
-                ),
-            )
-            and isinstance(right, ConstantVariable)
-            and right.value is None
-            and op in supported_const_comparison_ops
-        ):
-            # <non-None> is None
-            self.push(
-                ConstantVariable.create(
-                    supported_const_comparison_ops[op](object(), right.value)
-                )
-            )
-
-        elif (
-            left.is_python_constant()
-            and right.is_python_constant()
-            and op in supported_any
-        ):
-            # constant fold
-            self.push(
-                ConstantVariable.create(
-                    supported_any[op](
-                        left.as_python_constant(), right.as_python_constant()
-                    ),
-                )
-            )
-        elif op in ("in", "not in"):
-            self.push(right.call_method(self, "__contains__", [left], {}))
-            if op == "not in":
-                self.UNARY_NOT(inst)
-        else:
-            self.push(
-                BuiltinVariable(supported_any[op]).call_function(
-                    self, [left, right], {}
-                )
-            )
+        self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
@@ -1880,8 +1827,6 @@ class InstructionTranslatorBase(
         )
         if sys.version_info >= (3, 11):
             # see create_call_resume_at for block stack details
-            assert self.next_instruction
-            assert self.next_instruction.exn_tab_entry
             target = self.next_instruction.exn_tab_entry.target
         else:
             target = inst.target
@@ -1915,7 +1860,6 @@ class InstructionTranslatorBase(
             list(self.block_stack),
             self.instruction_pointer,
             self.current_instruction,
-            self.next_instruction,
             self.lineno,
         )
 
@@ -1928,7 +1872,6 @@ class InstructionTranslatorBase(
             self.block_stack,
             self.instruction_pointer,
             self.current_instruction,
-            self.next_instruction,
             self.lineno,
         ) = state
         self.output.restore_graphstate(output_state)
@@ -2012,7 +1955,6 @@ class InstructionTranslatorBase(
         self.stack = []
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
-        self.next_instruction = None
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.generic_context_manager_depth = 0
