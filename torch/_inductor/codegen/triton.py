@@ -590,7 +590,9 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def truediv(a, b):
-        return f"triton_helpers.precise_div({a}, {b})"
+        if config.triton.precise_div:
+            return f"triton_helpers.precise_div({a}, {b})"
+        return f"{a} / {b}"
 
     @staticmethod
     def sqrt(x):

@@ -343,12 +343,16 @@ def frexp(x):
     mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
     return mantissa, exponent
 
+
 @triton.jit
 def precise_div(a, b):
     # IEEE compliant division
-    dtype = (a + b).dtype
-    if dtype == tl.float32:
+    common_type = (a + b).dtype
+    a = promote_to_tensor(a).to(common_type)
+    b = promote_to_tensor(b).to(common_type)
+    a, b = tl.broadcast(a, b)
+    if common_type == tl.float32:
         return tl.math.div_rn(a, b)
-    if dtype == tl.float64:
+    if common_type == tl.float64:
         return libdevice.div_rn(a, b)
     return a / b
