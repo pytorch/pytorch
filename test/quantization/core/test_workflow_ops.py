@@ -1026,12 +1026,15 @@ class TestFakeQuantizeOps(TestCase):
             axis = 1
             quant_min = 0
             quant_max = 255
-            try:
+            if scale_dtype != torch.float:
+                with self.assertRaises(RuntimeError):
+                    torch.fake_quantize_per_channel_affine(
+                        input, scale, zero_point, axis, quant_min, quant_max
+                    )
+            else:
                 torch.fake_quantize_per_channel_affine(
                     input, scale, zero_point, axis, quant_min, quant_max
                 )
-            except Exception as e:
-                assert "INTERNAL ASSERT FAILED" not in str(e)
 
 
 class TestFusedObsFakeQuant(TestCase):
