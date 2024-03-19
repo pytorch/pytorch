@@ -175,9 +175,8 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def run(self):
         env = {}
-        for n in self.module.graph.nodes:
-            if n.op == "placeholder":
-                env[n] = self.unknown_value
+        for n in self.module.graph.find_nodes(op="placeholder"):
+            env[n] = self.unknown_value
         return super().run(initial_env=env)
 
 
@@ -192,8 +191,8 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
         replace_node_with_constant(gm, node, constant)
 
     erased_params = []
-    for node in gm.graph.nodes:
-        if node.op == "get_attr" and len(node.users) == 0:
+    for node in gm.graph.find_nodes(op="get_attr"):
+        if len(node.users) == 0:
             if hasattr(gm, node.target):
                 delattr(gm, node.target)
             erased_params.append(node)

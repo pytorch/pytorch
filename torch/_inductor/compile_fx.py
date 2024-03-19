@@ -157,7 +157,7 @@ def _unlift_graph(mod, gm, graph_signature):
             attr_kind=_AttrKind.BUFFER,
         )
 
-    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     lifted_inputs = []
     for node in placeholder_nodes:
         node_name = node.name
@@ -192,12 +192,13 @@ def _unlift_graph(mod, gm, graph_signature):
 
 
 def _get_subgraph_names(gm):
-    for node in gm.graph.nodes:
-        if node.target == torch.ops.higher_order.cond:
-            true_subgraph_name = node.args[1].name
-            false_subgraph_name = node.args[2].name
-            yield true_subgraph_name
-            yield false_subgraph_name
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.cond
+    ):
+        true_subgraph_name = node.args[1].name
+        false_subgraph_name = node.args[2].name
+        yield true_subgraph_name
+        yield false_subgraph_name
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
@@ -288,15 +289,14 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
         aten.bmm.default,
         aten.baddbmm.default,
     }
-    for node in gm.graph.nodes:
-        if (
-            node.op == "call_function"
-            and node.target in tf32_ops
-            and isinstance(node.meta.get("val", None), torch.Tensor)
-            and node.meta["val"].dtype == torch.float32
-            and node.meta["val"].device.type == "cuda"
-        ):
-            return True
+    for target in tf32_ops:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            if (
+                isinstance(node.meta.get("val", None), torch.Tensor)
+                and node.meta["val"].dtype == torch.float32
+                and node.meta["val"].device.type == "cuda"
+            ):
+                return True
     return False
 
 
@@ -517,7 +517,7 @@ def compile_fx_inner(
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
             compiled_graph.current_callable = cudagraphify(
-                compiled_graph.get_current_callable(),
+                compiled_graph.current_callable,
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(compiled_graph.device_idxs)),
@@ -535,7 +535,7 @@ def compile_fx_inner(
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index is not None
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_callable = compiled_graph.get_current_callable()
+                compiled_graph_callable = compiled_graph.current_callable
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -562,9 +562,9 @@ def compile_fx_inner(
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
         new_callable = align_inputs(
-            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+            compiled_graph.current_callable, example_inputs, range(num_fixed)
         )
-        if new_callable is not compiled_graph.get_current_callable():
+        if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
 
     _step_logger()(

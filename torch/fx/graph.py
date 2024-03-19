@@ -380,18 +380,10 @@ class CodeGen:
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
-        from torch.utils._triton import has_triton
-
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
-
-        if has_triton():
-            import triton
-            globals_[triton.__name__] = triton
-            from torch.utils._triton import patch_triton_dtype_repr
-            patch_triton_dtype_repr()
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -781,19 +773,18 @@ class _GraphSideTable:
         self.table[self._key(node)].pop(node)
 
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
-        assert op != "placeholder"
         if op == "call_function":
             assert target is not None
-            return dict(self.table[(op, target)]).keys()
+            return sorted(dict(self.table[(op, target)]).keys())
 
-        if op == "output":
+        if op in ("placeholder", "output"):
             assert target is None
 
         if target is None:
-            return dict(self.table[(op, None)]).keys()
+            return sorted(dict(self.table[(op, None)]).keys())
 
         # op is call_method, get_attr, call_module
-        return [node for node in self.table[(op, None)].keys() if node.target == target]
+        return sorted([node for node in self.table[(op, None)].keys() if node.target == target])
 
 @compatibility(is_backward_compatible=True)
 class Graph:
@@ -895,18 +886,8 @@ class Graph:
         Returns:
 
             Iteratable of nodes with the requested op and target.
-            The nodes is only guaranteed to be in order they appear on the
-            graph for placeholder nodes.
+            The nodes are guaranteed to be in order they appear on the graph.
         """
-        if op == "placeholder":
-            l: List[Node] = list()
-            num_placeholders = len(self._side_table.table[("placeholder", None)])
-            _iterator = iter(self.nodes)
-            while len(l) < num_placeholders:
-                node = next(_iterator)
-                if node.op == "placeholder":
-                    l.append(node)
-            return l
         return self._side_table.find_nodes(op=op, target=target)
 
     @compatibility(is_backward_compatible=True)

@@ -38,7 +38,7 @@ def check_for_mutation(
             return None
 
         stack_trace: Optional[str] = ""
-        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        placeholders = gm.graph.find_nodes(op="placeholder")
 
         for idx in mutation_indices:
             placeholder = placeholders[idx]

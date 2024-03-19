@@ -1605,17 +1605,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # This might be a behavior difference
 
         # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
-        for node in fwd_graph.nodes:
-            if node.op == "output":
-                fwd_graph.erase_node(node)
-                break
+        for node in fwd_graph.find_nodes(op="output"):
+            fwd_graph.erase_node(node)
+            break
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), list(bwd_freevars.keys()))
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
 
         # Store fwd_body
-        fwd_nn_modules = tx.copy_graphstate().output.nn_modules
+
+        fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = add_subgraph(
             tx,
             fwd_src,
@@ -1626,7 +1626,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_node = make_attr(tx, fwd_name)
 
         # Store bwd_body
-        bwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         bwd_name = add_subgraph(
             tx,
             bwd_src,
