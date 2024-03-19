@@ -1317,16 +1317,16 @@ void int8_gemm(
   cudaDataType_t abType = CUDA_R_8I;
   cudaDataType_t cType = CUDA_R_32I;
 
-  cublasLtMatmulDesc_t computeDesc(computeType, scaleType);
+  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
 
 
-  cublasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
-  cublasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  cublasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
 
