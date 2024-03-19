@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -195,7 +196,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
       // Copy the data from the host staging buffer to the graph-owned device
       // buffer. The copy won't be captured in the graph.
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      c10::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
 #endif
       C10_CUDA_CHECK(cudaMemcpy(
           graph_owned_buf,
