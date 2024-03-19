@@ -30,6 +30,7 @@ import sympy
 
 import torch
 import torch._logging
+import torch.utils._pytree as pytree
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
@@ -2354,11 +2355,12 @@ class TritonKernel(Kernel):
             )
 
     def _lift_helper(self, fn, num_args) -> str:
-        # Lift IR function into a triton function in the global namespace
+        # Lift IR function for scan operations into a triton function
+        # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        args = [f"arg{n}" for n in range(num_args)]
-        signature = ", ".join(args)
+        args = [tuple(f"arg{i}_{n}" for n in range(num_args)) for i in range(2)]
+        signature = ", ".join(itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
         cse = CSE(prefix="", suffix="")
@@ -2376,17 +2378,20 @@ class TritonKernel(Kernel):
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
+            outputs = ", ".join(str(output) for output in outputs)
             helper.writeline(f"return {outputs}")
 
         return self.helper_functions.add(helper.getvalue())
 
     def scan(
         self,
-        dtype: torch.dtype,
-        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-        value: CSEVariable,
-        init: int,
-    ) -> CSEVariable:
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
+        values: Tuple[CSEVariable, ...],
+        inits: Tuple[int, ...],
+    ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2395,63 +2400,109 @@ class TritonKernel(Kernel):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
 
-        value = self.cse.generate(
-            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
-        )
+        masked_values = []
+        broadcasted_values = []
+        accumulators = []
 
-        default = triton_constant(init)
+        combine_helper_fn = self._lift_helper(combine_fn, len(values))
         dim = self.triton_tensor_ndim() - 1
-        acc_type = triton_acc_type(dtype)
-        cond = " & ".join(masks)
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2)
+        for value, init, dtype in zip(values, inits, dtypes):
+            default = triton_constant(init)
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
-        def where_cond(value):
-            if not cond:
-                return value
+            def where_cond(value):
+                if not cond:
+                    return value
+                default_tensor = self.cse.generate(
+                    self.body,
+                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
+                )
+                return self.cse.generate(
+                    self.compute, f"tl.where({cond}, {value}, {default_tensor})"
+                )
+
+            value_dtype = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_compute_type(dtype)})",
+            )
+            value = self.cse.generate(
+                self.compute,
+                f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
+            )
+            broadcasted_values.append(value)
+
+            default = triton_constant(init)
             default_tensor = self.cse.generate(
                 self.body,
                 f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
             )
-            return self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
-        if self.persistent_reduction:
-            masked_value = where_cond(value)
-            result_var = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-        else:
-            accumulator = self.cse.newvar()
-            reduced_size = self.dense_size_list()
-            reduced_size[-1] = "1"
-            reduced_size = f"[{', '.join(reduced_size)}]"
+            if self.persistent_reduction:
+                masked_value = where_cond(value)
+                masked_values.append(masked_value)
+            else:
+                accumulator = self.cse.newvar()
+                reduced_size = self.dense_size_list()
+                reduced_size[-1] = "1"
+                reduced_size = f"[{', '.join(reduced_size)}]"
 
-            self.body.writeline(
-                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
-            )
+                self.body.writeline(
+                    f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+                )
 
-            masked_value = where_cond(value)
-            partial_reduce = self.cse.generate(
-                self.compute,
-                self.reduction_resize(
-                    f"tl.reduce({value}, {dim}, {combine_helper_fn})"
+                masked_value = where_cond(value)
+
+                masked_values.append(masked_value)
+                accumulators.append(accumulator)
+
+        def csv(values):
+            return " ".join(f"{value}," for value in values)
+
+        def cse_multiple(line, n, masks):
+            cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
+            if all(cache_key in self.cse.cache for cache_key in cache_keys):
+                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            result_vars = [self.cse.newvar() for _ in range(n)]
+            self.compute.writeline(
+                f"{csv(result_vars)} = {line}",
+            )
+            for result_var, cache_key in zip(result_vars, cache_keys):
+                if masks:
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                self.cse.cache[cache_key] = result_var
+            return tuple(result_vars)
+
+        result_vars = cse_multiple(
+            f"tl.associative_scan(({csv(masked_values)}), {dim}, {combine_helper_fn})",
+            len(values),
+            masks,
+        )
+
+        if not self.persistent_reduction:
+            partial_reduce = pytree.tree_map(
+                self.reduction_resize,
+                cse_multiple(
+                    f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
+                    len(values),
+                    None,
                 ),
             )
-            acc_next = combine_fn(accumulator, partial_reduce)
-            partial_scan = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-            result_var = self.cse.generate(
-                self.compute, combine_fn(accumulator, partial_scan)
-            )
-            self.compute.writeline(f"{accumulator} = {acc_next}")
+            accs_next = combine_fn(tuple(accumulators), partial_reduce)
+            new_result_vars = combine_fn(tuple(accumulators), result_vars)
+            result_vars = [
+                self.cse.generate(self.compute, var) for var in new_result_vars
+            ]
+            for acc_next, accumulator in zip(accs_next, accumulators):
+                self.compute.writeline(f"{accumulator} = {acc_next}")
 
-        result_var.mask_vars = masks  # type: ignore[attr-defined]
-        return result_var
+        for result_var in result_vars:
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
+
+        return tuple(result_vars)
 
     def codegen_body(self):
         """

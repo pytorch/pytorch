@@ -33,7 +33,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 
 
-def test_subclass(c):
+def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
 
 
@@ -549,7 +549,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.x + torch.ones(2, 2)
 
-        with test_subclass(AttrSubclass):
+        with traceable_subclass(AttrSubclass):
             input = torch.ones(2, 2).as_subclass(AttrSubclass)
             fn_opt = compile_full_eager(fn)
 
@@ -987,7 +987,7 @@ s1 > 3""",
         # we may expect the torch function to be inlined away during dynamo).
         # If this happens, we should make sure to not run the torch function
         # logic a second time.
-        class SubTensor(torch.Tensor):
+        class TFMul2Tensor(torch.Tensor):
             @staticmethod
             def __new__(cls, t):
                 return torch.Tensor._make_wrapper_subclass(
@@ -1017,10 +1017,10 @@ s1 > 3""",
             @staticmethod
             def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
                 t = inner_tensors["_t"]
-                return SubTensor(t)
+                return TFMul2Tensor(t)
 
             def __repr__(self):
-                return f"SubTensor({self._t})"
+                return f"TFMul2Tensor({self._t})"
 
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1028,24 +1028,34 @@ s1 > 3""",
                     kwargs = {}
 
                 with torch._C.DisableTorchFunctionSubclass():
-                    return func(*args, **kwargs)
+                    if "clone" in func.__name__:
+                        # Make sure that this mul by 2 does not get traced through
+                        # a second time.
+                        return func(*args, **kwargs) * 2
+                    else:
+                        return func(*args, **kwargs)
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 kwargs = {} if kwargs is None else kwargs
-                new_args = pytree.tree_map_only(SubTensor, lambda s: s._t, args)
+                new_args = pytree.tree_map_only(TFMul2Tensor, lambda s: s._t, args)
                 output = func(*new_args, **kwargs)
                 output = pytree.tree_map_only(
-                    torch.Tensor, lambda t: SubTensor(t), output
+                    torch.Tensor, lambda t: TFMul2Tensor(t), output
                 )
                 return output
 
-        @torch.compile(dynamic=True)
-        def f(x):
-            return x.unflatten(-1, [2, 5])
+        def fn(x):
+            return x.clone()
 
-        s = SubTensor(torch.randn(3, 10))
-        f(s)
+        s = TFMul2Tensor(torch.tensor(1.))
+        ref = fn(s)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {TFMul2Tensor}):
+            fn_opt = torch.compile(backend="aot_eager")(fn)
+            out = fn_opt(s)
+
+        self.assertEqual(out, ref)
 
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
