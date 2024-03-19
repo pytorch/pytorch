@@ -7286,16 +7286,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipblasDrotmg_v2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
-            "CuBlasLtMatrixLayout",
-            ("hipblasLtMatrixLayout_t" if rocm_version >= (6, 0, 0) else "hipblasLtMatrixLayout_t",
-                CONV_MATH_FUNC, API_BLAS)
-        ),
-        (
-            "CuBlasLtMatmulDescriptor",
-            ("hipblasLtMatmulDesc_t" if rocm_version >= (6, 0, 0) else "hipblasLtMatmulDesc_t",
-                CONV_MATH_FUNC, API_BLAS)
-        ),
-        (
             "cublasComputeType_t",
             ("hipblasComputeType_t" if rocm_version >= (6, 0, 0) else "hipblasLtComputeType_t",
                 CONV_MATH_FUNC, API_BLAS)
@@ -7321,6 +7311,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUBLASLT_EPILOGUE_GELU_BIAS", ("HIPBLASLT_EPILOGUE_GELU_BIAS", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtHandle_t", ("hipblasLtHandle_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatmulDesc_t", ("hipblasLtMatmulDesc_t", CONV_MATH_FUNC, API_BLAS)),
+        ("cublasLtMatrixLayout", ("hipblasLtMatrixLayout_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatmulDescOpaque_t", ("hipblasLtMatmulDescOpaque_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatmulDescAttributes_t", ("hipblasLtMatmulDescAttributes_t", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_TRANSA", ("HIPBLASLT_MATMUL_DESC_TRANSA", CONV_MATH_FUNC, API_BLAS)),
