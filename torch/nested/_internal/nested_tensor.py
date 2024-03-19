@@ -365,7 +365,8 @@ def jagged_from_tensor_and_lengths(
 # 0/1 because the dummy can be fake-ified and we want to avoid specializing.
 # This arg is otherwise unused.
 _nt_view_dummy = NestedTensor(
-    values=torch.randn(3, 3, device="meta"), offsets=torch.randn(2, device="meta")
+    values=torch.randn(3, 3, device="meta"),
+    offsets=torch.randint(3, (2,), device="meta", dtype=torch.int64),
 ).detach()
 
 
