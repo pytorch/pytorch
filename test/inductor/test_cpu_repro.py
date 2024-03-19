@@ -371,6 +371,33 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_conv_in_channel_1_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(in_channel, out_channel, 3)
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                return res
+
+        # test the case where the channels dim of the input is 1
+        # Reproducer from the maml_omniglot model in Torchbench
+        in_channel = 1
+        out_channel = 3
+        mod = M(in_channel, out_channel).eval()
+        v = torch.randn(5, in_channel, 15, 15)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)
@@ -3553,6 +3580,43 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         # TODO: support vectorized int64 masked load
         assert metrics.generated_cpp_vec_kernel_count == 0
+
+    @config.patch({"cpp.dynamic_threads": True})
+    def test_reduction_with_dynamic_threads(self):
+        def fn(a, b):
+            return a.sum(), b.sum()
+
+        self.common(
+            fn,
+            (torch.randn(1000), torch.rand(1000)),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_float64(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.weight2 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.bias = torch.nn.Parameter(torch.randn(10, dtype=torch.float64))
+
+            def forward(self, x1):
+                v1 = torch.mm(x1, self.weight1)
+                v2 = torch.addmm(self.bias, x1, self.weight2)
+                return (v1, v2)
+
+        mod = M().eval()
+        v = torch.randn(10, 10, dtype=torch.float64)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
 
 
 if __name__ == "__main__":
