@@ -102,8 +102,10 @@ from torch.utils._pytree import tree_map_only
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
-troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
-nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
+troubleshooting_url = (
+    "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
+)
+nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
@@ -654,6 +656,8 @@ class CompilationMetrics:
     fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+    restart_reasons: Set[str]
+    dynamo_time_before_restart_s: float
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -872,12 +876,12 @@ def is_namedtuple(obj):
 
 
 def is_namedtuple_cls(cls):
-    """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
             bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module == "torch.return_types" or (
+            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
                 bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
             )
     except TypeError:
@@ -1021,12 +1025,20 @@ def check_unspec_python_args(args, kwargs):
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
+        elif not isinstance(x, ConstantVariable):
             return False
-        else:
-            pass
-
     return unspec_count > 0
+
+
+def check_unspec_or_constant_args(args, kwargs):
+    # A fused version of:
+    # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    from .variables.tensor import UnspecializedPythonVariable
+
+    for x in itertools.chain(args, kwargs.values()):
+        if not (x.is_python_constant() or isinstance(x, UnspecializedPythonVariable)):
+            return False
+    return True
 
 
 def check_numpy_ndarray_args(args, kwargs):
@@ -1350,10 +1362,13 @@ def same(
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
                         res_error,
                         ref_error,
                         res.size(),
+                        res.dtype,
+                        multiplier,
+                        tol,
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test
@@ -1593,14 +1608,16 @@ def ensure_graph_fake(e, tx):
 def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
         if n.op == "call_function" and "example_value" not in n.meta:
+            # fake tensor validity is checked inside get_fake_value using
+            # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
-        return n.meta["example_value"]
+        out = n.meta["example_value"]
+        if not allow_non_graph_fake and isinstance(out, torch.Tensor):
+            return ensure_graph_fake(out, tx)
+        return out
 
-    args_kwargs = torch.fx.node.map_arg(nodes, visit)
-    return tree_map_only(
-        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
-    )
+    return torch.fx.node.map_arg(nodes, visit)
 
 
 def get_fake_value(node, tx, allow_non_graph_fake=False):
@@ -1671,10 +1688,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
-            unimplemented(
-                f"dynamic shape operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
-            )
+            if not torch._dynamo.config.capture_dynamic_output_shape_ops:
+                unimplemented(
+                    f"dynamic shape operator: {cause.func}; "
+                    "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+                )
+            else:
+                unimplemented(
+                    f"dynamic shape operator: {cause.func}; "
+                    "Operator does not have a meta kernel that supports dynamic output shapes, "
+                    "please report an issue to PyTorch"
+                )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
@@ -1686,7 +1710,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 )
                 if maybe_pystub is not None:
                     module, ctx = maybe_pystub
-                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
+                    import_suggestion = (
+                        f"It's possible that the support was implemented in "
+                        f"module `{module}` and you may need to `import {module}`"
+                        f"({ctx}), otherwise "
+                    )
             unimplemented(
                 f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
@@ -1705,6 +1733,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             )
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
+        elif isinstance(cause, TypeError) and "argument" in str(cause):
+            unimplemented(f"TypeError {node.target}: {cause}")
+
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:

@@ -7,10 +7,13 @@ from .ctx_manager import (
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
+    DualLevelContextManager,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
+    JvpIncrementNestingCtxManagerVariable,
+    SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
     VmapIncrementNestingCtxManagerVariable,
@@ -23,6 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
+from .distributed import BackwardHookVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
@@ -72,6 +76,8 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
+from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
@@ -91,6 +97,7 @@ from .user_defined import (
 __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
+    "BackwardHookVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "ClosureVariable",
@@ -146,4 +153,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "OptimizerVariable",
 ]

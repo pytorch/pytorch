@@ -60,7 +60,33 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _tensor_requires_grad(x):
+def _vjp_treespec_compare(primals_out, cotangents):
+    # Revert this once #116264 gets fixed
+    _, primals_out_spec = tree_flatten(primals_out)
+    _, cotangents_spec = tree_flatten(cotangents)
+    # Dynamo fails to trace operator.ne below. To bypass this limitation, this
+    # function is not inlined.
+    if primals_out_spec != cotangents_spec:
+        raise RuntimeError(
+            f'Expected pytree structure of cotangents to be the same '
+            f'as pytree structure of outputs to the function. '
+            f'cotangents: {treespec_pprint(cotangents_spec)}, '
+            f'primal output: {treespec_pprint(primals_out_spec)}')
+
+
+def _jvp_treespec_compare(primals, tangents):
+    # Revert this once #116264 gets fixed
+    _, primals_spec = tree_flatten(primals)
+    _, tangents_spec = tree_flatten(tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f'{jvp_str}: Expected primals and tangents to have the same python '
+            f'structure. For example, if primals is a tuple of 3 tensors, '
+            f'tangents also must be. Got primals with structure {primals_spec} '
+            f'and tangents with structure {tangents_spec}')
+
+
+def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
     return x.requires_grad_()
@@ -69,7 +95,7 @@ def _create_differentiable(inps, level=None):
     def create_differentiable(x):
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
-                return _tensor_requires_grad(x)
+                return _set_tensor_requires_grad(x)
         raise ValueError(f'Thing passed to transform API must be Tensor, '
                          f'got {type(x)}')
     return tree_map(create_differentiable, inps)
@@ -291,6 +317,27 @@ def grad_increment_nesting():
         _grad_decrement_nesting()
 
 
+def enter_jvp_nesting():
+    global JVP_NESTING
+    jvp_level = _jvp_increment_nesting()
+    JVP_NESTING += 1
+    return jvp_level
+
+
+def exit_jvp_nesting():
+    global JVP_NESTING
+    _jvp_decrement_nesting()
+    JVP_NESTING -= 1
+
+
+@contextlib.contextmanager
+def jvp_increment_nesting():
+    try:
+        yield enter_jvp_nesting()
+    finally:
+        exit_jvp_nesting()
+
+
 @doesnt_support_saved_tensors_hooks
 def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False):
     # This is the same function as vjp but also accepts an argnums argument
@@ -305,12 +352,14 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
-    level = _grad_increment_nesting()
-    try:
+    with grad_increment_nesting() as level:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            if argnums is None:
+            # Note for the reviewer: This is extremely odd but it passes the
+            # assertion "len(self.block_stack) == 1" on symbolic_convert.py
+            # The equivalent "if argnums is None" fails for some reason
+            if not isinstance(argnums, int) and not argnums:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
@@ -343,18 +392,10 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
-            if primals_out_spec != cotangents_spec:
-                raise RuntimeError(
-                    f'Expected pytree structure of cotangents to be the same '
-                    f'as pytree structure of outputs to the function. '
-                    f'cotangents: {treespec_pprint(cotangents_spec)}, '
-                    f'primal output: {treespec_pprint(primals_out_spec)}')
+            _vjp_treespec_compare(primals_out, cotangents)
             result = _autograd_grad(flat_primals_out, flat_diff_primals, flat_cotangents,
                                     retain_graph=retain_graph, create_graph=create_graph)
             return tree_unflatten(result, primals_spec)
-
-    finally:
-        _grad_decrement_nesting()
 
     if has_aux:
         return results, wrapper, aux
@@ -804,11 +845,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
 JVP_NESTING = 0
 
 
-@contextlib.contextmanager
-def noop():
-    yield
-
-
 def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
     if not isinstance(elts, tuple):
         raise RuntimeError(
@@ -825,7 +861,7 @@ def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
 
 
 def assert_non_empty_tensor_output(output: List[Any], api: str) -> None:
-    if output == [None] or len(output) < 1:
+    if (len(output) == 1 and output[0] is None) or len(output) < 1:
         raise RuntimeError(
             f'{api}: Expected f to be a function that has non-empty output (got output = {output})'
         )
@@ -967,26 +1003,23 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f'{jvp_str}: Expected primals and tangents to have the same python '
-            f'structure. For example, if primals is a tuple of 3 tensors, '
-            f'tangents also must be. Got primals with structure {primals_spec} '
-            f'and tangents with structure {tangents_spec}')
+    _jvp_treespec_compare(diff_args, tangents)
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
 
-    level = _jvp_increment_nesting()
-    try:
-        global JVP_NESTING
-        JVP_NESTING += 1
+    global JVP_NESTING
+
+    with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
-            ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
+            ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
-                if argnums is not None:
+                # Note for the reviewer: This is extremely odd but it passes the
+                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
+                # The equivalent "if argnums is not None" fails for some reason
+                if isinstance(argnums, (int, tuple)):
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
@@ -1015,9 +1048,6 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                     return primals_out_unflatten, tangents_out_unflatten, aux
 
                 return primals_out_unflatten, tangents_out_unflatten
-    finally:
-        _jvp_decrement_nesting()
-        JVP_NESTING -= 1
 
 
 def safe_unflatten(tensor, dim, shape):
