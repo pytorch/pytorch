@@ -373,7 +373,45 @@ auto build_graph_and_tensors_backward(
     mha_graph->set_io_data_type(dtype)
         .set_intermediate_data_type(fe::DataType_t::FLOAT)
         .set_compute_data_type(fe::DataType_t::FLOAT);
-
+    auto Q = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("Q")
+            .set_dim(
+                std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
+            .set_stride(std::vector<int64_t>(
+                params.q_stride.begin(), params.q_stride.end())));
+    auto K = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("K")
+            .set_dim(
+                std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
+            .set_stride(std::vector<int64_t>(
+                params.k_stride.begin(), params.k_stride.end())));
+    auto V = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("V")
+            .set_dim(
+                std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
+            .set_stride(std::vector<int64_t>(
+                params.v_stride.begin(), params.v_stride.end())));
+    auto attn_scale =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+                              .set_name("attn_scale")
+                              .set_dim({1, 1, 1, 1})
+                              .set_stride({1, 1, 1, 1})
+                              .set_is_pass_by_value(true)
+                              .set_data_type(fe::DataType_t::FLOAT));
+    auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_name("Seed")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+    auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(fe::DataType_t::INT32));
+  
 }
 
 
