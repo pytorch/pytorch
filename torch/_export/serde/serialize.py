@@ -1265,7 +1265,7 @@ class ExportedProgramSerializer:
                 major=SCHEMA_VERSION[0],
                 minor=SCHEMA_VERSION[1],
             ),
-            dialect=exported_program.dialect,
+            dialect=exported_program.dialect
         )
 
         # Test canonical form is well defined.
@@ -1543,6 +1543,14 @@ class GraphModuleDeserializer:
             self.deserialize_outputs(serialized_node, fx_node)
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
+            # assign nn_module_stack metadata to submodule/subgraph nodes for higher order ops
+            if serialized_node.target.startswith(('torch.ops.higher_order', 'torch._higher_order_ops')):
+                for node in fx_node._args:
+                    if not isinstance(node, torch.fx.Node):
+                        continue
+                    if node.op not in ["placeholder", "output"] and node.meta.get("nn_module_stack") is None:
+                        node.meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
+
         elif isinstance(target, torch._ops.OpOverload):
             # For convenience: if this node returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
@@ -1677,13 +1685,19 @@ class GraphModuleDeserializer:
                 shape_env=self.shape_env,
             )
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
-            self.symbol_name_to_range = (
-                {} if symbol_name_to_range is None else symbol_name_to_range
-            )
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
+            self.signature = self.deserialize_signature(serialized_graph_module.signature)
             self.constants = deserialize_torch_artifact(constants)
+
+            # deserialization does analysis with checks on 0/1, so we create fake range constraints and
+            # restore the original range constraints afterwards
+            self.symbol_name_to_range = {}
+            if symbol_name_to_range:
+                for k, vr in symbol_name_to_range.items():
+                    lower = int(vr.lower)
+                    if vr.upper >= 2:  # no specialization on 0/1
+                        lower = max(2, lower)
+                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
+
             self.deserialize_graph(serialized_graph_module.graph)
 
             module_call_graph = self.deserialize_module_call_graph(
@@ -2076,6 +2090,7 @@ class ExportedProgramDeserializer:
             example_inputs=None,
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
+            from_export=True
         )
         return upgrader.upgrade(exported_program)
 
@@ -2676,5 +2691,5 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         opset_version=opset_version,
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
-        dialect=ep.dialect,
+        dialect=ep.dialect
     )

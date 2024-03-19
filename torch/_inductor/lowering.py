@@ -13,6 +13,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.create_parameter_op import _bind_nn_parameter
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -5924,19 +5925,34 @@ def resize_storage_bytes_(variable, new_size):
     return variable
 
 
+@register_lowering(_bind_nn_parameter)
+def create_nn_parameter(self, placeholder):
+    self.realize()
+    return TensorBox.create(ir.BindNNParameter(self, placeholder))
+
+
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+    from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    ir.UserDefinedTritonKernel(
+        kernel_idx=kernel_idx,
+        grid=grid,
+        kernel_args={**kwargs, **constant_args},
+    )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
 @register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+def triton_kernel_wrap(
+    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+):
     new_kwargs = {}
     for name, value in kwargs.items():
         if isinstance(value, ir.TensorBox):
@@ -5958,7 +5974,12 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
                 value = clone_preserve_reinterpret_view(value)
         new_kwargs[name] = value
 
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
+    return triton_kernel_wrap_(
+        kernel_idx=kernel_idx,
+        constant_args_idx=constant_args_idx,
+        grid=grid,
+        kwargs=new_kwargs,
+    )
 
 
 @register_lowering(torch.ops.higher_order.cond)
