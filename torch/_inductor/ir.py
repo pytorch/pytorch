@@ -7251,7 +7251,6 @@ class LoopBodyBlock:
                     [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
                 ],
                 value_proxy,
-                init_proxy,
             ):
                 def shim(dtypes, values):
                     return V.ops.scan(dtypes, combine_fn, values)
@@ -7260,7 +7259,7 @@ class LoopBodyBlock:
                 result = tracer.create_proxy(
                     "call_module",
                     name,
-                    (dtype_proxy, value_proxy, init_proxy),
+                    (dtype_proxy, value_proxy),
                     {},
                 )
                 # Proxies are iterable, but some methods expect tuples/lists
