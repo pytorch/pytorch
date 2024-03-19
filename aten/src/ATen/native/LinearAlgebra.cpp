@@ -2837,25 +2837,24 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
       }
     }
   }
-
   if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
-    Tensor result_tmp = self.clone();
+    Tensor self_ = self.clone();
+    result.copy_(self_.reshape(result.sizes()));
+
     if (!keepdim) {
-      if (opt_dim.has_value()) {
-        result_tmp.squeeze_(dim);
-      } else {
-        // all dims are 1-dimensional
-        result_tmp.squeeze_();
+      if (opt_dim.has_value() && !opt_dim->empty()) {
+        result.squeeze_(dim);
       }
     }
+
     if (ord != 0.0) {
-      result_tmp.abs_();
+      result.abs_();
     } else {
-      result_tmp.ne_(0);
+      result.ne_(0);
     }
-    result.copy_(result_tmp);
     return;
   }
+
 
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
