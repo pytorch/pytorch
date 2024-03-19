@@ -3,10 +3,10 @@ import itertools
 
 import torch
 
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
@@ -399,6 +399,8 @@ class CondTests(TestCase):
             {
                 "pre_grad_custom_pass": pre_grad_pass_counter,
                 "post_grad_custom_pre_pass": post_grad_pass_counter,
+                # The above patches don't pickle
+                "fx_graph_cache": False,
             }
         ):
             self._run_test(
@@ -421,7 +423,7 @@ instantiate_parametrized_tests(CondTests)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
