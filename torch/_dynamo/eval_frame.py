@@ -528,8 +528,11 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
+    elif sys.version_info >= (3, 12):
+        warnings.warn("Dynamo is not supported on Python 3.12. Expect crashes.")
+
 
 
 def is_dynamo_supported():
