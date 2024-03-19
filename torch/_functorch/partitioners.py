@@ -682,12 +682,13 @@ def min_cut_rematerialization_partition(
         joint_module.graph = cse_graph
 
     # Apply FSDP-specific passes
-    fsdp_fx_passes.if_tensor_is_resized_to_full_then_resize_it_to_0_at_end_of_graph(joint_module)
-    fsdp_fx_passes.if_tensor_is_resized_to_0_immediately_after_inplace_copy_then_delete_the_copy(joint_module)
-    fsdp_fx_passes.replace_primal_clone_at_beginning_of_graph_with_primal(joint_module)
-    fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(joint_module)
-    fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(joint_module)
-    fsdp_fx_passes.replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this_op(joint_module)
+    if config.enable_fsdp_fx_passes:
+        fsdp_fx_passes.if_tensor_is_resized_to_full_then_resize_it_to_0_at_end_of_graph(joint_module)
+        fsdp_fx_passes.if_tensor_is_resized_to_0_immediately_after_inplace_copy_then_delete_the_copy(joint_module)
+        fsdp_fx_passes.replace_primal_clone_at_beginning_of_graph_with_primal(joint_module)
+        fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(joint_module)
+        fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(joint_module)
+        fsdp_fx_passes.replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this_op(joint_module)
 
     # print(lazy_format_graph_code("Joint graph after FSDP-specific passes", joint_module))
 
@@ -968,9 +969,10 @@ def min_cut_rematerialization_partition(
             if is_alias:
                 required_bw_nodes.update(set(view_chain))
 
-    # TODO(yf225): if any saved nodes is an alias of primal input, save the primal input instead of the alias.
-    # We do this by updating `required_bw_nodes` and then redo min-cut algorithm.
-    if_primal_input_alias_is_saved_then_move_the_view_chain_to_bwd_graph(saved_values)
+    if config.enable_fsdp_fx_passes:
+        # TODO(yf225): if any saved nodes is an alias of primal input, save the primal input instead of the alias.
+        # We do this by updating `required_bw_nodes` and then redo min-cut algorithm.
+        if_primal_input_alias_is_saved_then_move_the_view_chain_to_bwd_graph(saved_values)
 
     saved_sym_nodes, saved_values = min_cut()
 

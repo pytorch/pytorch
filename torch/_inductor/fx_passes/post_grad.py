@@ -47,6 +47,7 @@ from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_passes
 from .reinplace import reinplace_inplaceable_ops
 from torch._functorch._aot_autograd import fsdp_fx_passes
+from torch._functorch import config as functorch_config
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -109,19 +110,19 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
-    fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
-    fsdp_fx_passes.remove_clone_if_input_has_no_other_use_in_graph(gm)
-    fsdp_fx_passes.remove_inplace_copy_into_the_same_buffer(gm)
-    fsdp_fx_passes.dedup_temporary_buffers_that_are_eventually_resized_to_0(gm)
-    gm.graph.eliminate_dead_code()
-    fsdp_fx_passes.dedup_resize_to_same_size(gm)
-    fsdp_fx_passes.undo_functionalization_for_slice_split_with_sizes_inplace_copy(gm)
-    gm.graph.eliminate_dead_code()
-    fsdp_fx_passes.replace_resize_to_full_then_inplace_copy_into_then_resize_to_0_pattern(gm)
-    fsdp_fx_passes.remove_buffers_that_only_participate_in_storage_resize(gm)
-    gm.graph.eliminate_dead_code()
+    if functorch_config.enable_fsdp_fx_passes:
+        fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+        fsdp_fx_passes.remove_clone_if_input_has_no_other_use_in_graph(gm)
+        fsdp_fx_passes.remove_inplace_copy_into_the_same_buffer(gm)
+        fsdp_fx_passes.dedup_temporary_buffers_that_are_eventually_resized_to_0(gm)
+        gm.graph.eliminate_dead_code()
+        fsdp_fx_passes.dedup_resize_to_same_size(gm)
+        fsdp_fx_passes.undo_functionalization_for_slice_split_with_sizes_inplace_copy(gm)
+        gm.graph.eliminate_dead_code()
+        fsdp_fx_passes.replace_resize_to_full_then_inplace_copy_into_then_resize_to_0_pattern(gm)
+        fsdp_fx_passes.remove_buffers_that_only_participate_in_storage_resize(gm)
+        gm.graph.eliminate_dead_code()
     decompose_auto_functionalized(gm.graph)
-
     gm.recompile()
     gm.graph.lint()
 

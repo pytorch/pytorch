@@ -229,9 +229,10 @@ def aot_dispatch_autograd(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
 
-            # fsdp_fx_passes.insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(fw_module)
-            fsdp_fx_passes.move_resize_to_0_to_end_of_graph(fw_module)
-            fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(fw_module)
+            if config.enable_fsdp_fx_passes:
+                # fsdp_fx_passes.insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(fw_module)
+                fsdp_fx_passes.move_resize_to_0_to_end_of_graph(fw_module)
+                fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(fw_module)
 
             fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints

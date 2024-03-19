@@ -39,6 +39,8 @@ max_dist_from_bw = 3
 # as recomputable except random ops and compute-intensive ops.
 aggressive_recomputation = False
 
+enable_fsdp_fx_passes = True
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
