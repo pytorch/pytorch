@@ -50,6 +50,7 @@ from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from . import config
+from .virtualized import V
 
 log = logging.getLogger(__name__)
 
@@ -980,9 +981,9 @@ def use_triton_template(layout, *, enable_int32=False):
 def use_cutlass_template(layout, m, n, k):
     gemm_size = -1
     try:
-        # this fails if it's dynamic
-        gemm_size = int(m * n * k)
+        gemm_size = V.graph.sizevars.size_hint(m * n * k)
     except Exception:
+        # already logged within size_hint
         pass
     if gemm_size < config.cuda.cutlass_backend_min_gemm_size:
         return False
