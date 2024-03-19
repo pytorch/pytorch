@@ -75,7 +75,7 @@ def _rand_shape(dim, min_size, max_size):
 # DOES NOT INCLUDE view ops, which are tested in TestViewOps (currently in
 #   test_torch.py) OR numpy interop (which is also still tested in test_torch.py)
 #
-# See https://pytorch.org/docs/master/torch.html#creation-ops
+# See https://pytorch.org/docs/main/torch.html#creation-ops
 
 class TestTensorCreation(TestCase):
     exact_dtype = True
