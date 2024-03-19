@@ -8700,6 +8700,8 @@ C10_MAPPINGS = collections.OrderedDict(
         ("pinned_use_cuda_host_register", ("pinned_use_hip_host_register", API_C10)),
         ("c10::cuda::CUDAAllocator", ("c10::hip::HIPAllocator", API_C10)),
         ("cuda::CUDAAllocator", ("hip::HIPAllocator", API_C10)),
+        ("CUDAStreamCaptureModeGuard", ("HIPStreamCaptureModeGuard", API_C10)),
+        ("cuda::CUDAStreamCaptureModeGuard", ("cuda::HIPStreamCaptureModeGuard", API_C10)),
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]
