@@ -1,4 +1,4 @@
-name: linux-test
+name: linux-test-arc
 
 on:
   workflow_call:
