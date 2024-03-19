@@ -9810,6 +9810,20 @@ fn
             lambda mod: mod,
         )
 
+    def test_raises_importerror(self):
+        @torch.compile
+        def fn(x):
+            try:
+                import some_module_that_surely_does_not_exist
+
+                return
+            except ImportError:
+                pass
+            return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
             def __init__(self):
