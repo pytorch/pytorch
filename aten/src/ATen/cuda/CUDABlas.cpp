@@ -649,7 +649,12 @@ template <>
 void bgemm_internal<double>(CUDABLAS_BGEMM_ARGTYPES(double))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+#ifdef USE_ROCM
+    // hipblaslt does not support double gemm yet
+    bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGS(double));
+#else
     bgemm_internal_cublaslt<double>(CUDABLAS_BGEMM_ARGS(double));
+#endif
   }
   else {
     bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGS(double));
@@ -1047,7 +1052,12 @@ template <>
 void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+#ifdef USE_ROCM
+    // hipblaslt does not support double gemm yet
+    gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGS(double));
+#else
     gemm_internal_cublaslt<double>(CUDABLAS_GEMM_ARGS(double));
+#endif
   }
   else {
     gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGS(double));
