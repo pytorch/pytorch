@@ -20,7 +20,13 @@ from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    guard_size_oblivious,
+    has_free_symbols,
+    ShapeEnv,
+    SymTypes,
+)
+
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -920,6 +926,57 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
+    @staticmethod
+    def match_insignificant_strides(
+        tensor: ir.TensorBox, meta_strides: Tuple[int, ...]
+    ) -> ir.TensorBox:
+        # should have already been realized
+        assert torch._inductor.ir.is_storage_and_layout(tensor)
+
+        def guard_oblivious(expr):
+            # TODO - getting error in guard_size_oblivious because I am passing in sympy.logic.boolalg.BooleanFalse
+            # instead of SymBool or bool
+            if isinstance(expr, torch.SymBool):
+                return guard_size_oblivious(expr)
+
+            return expr
+
+        if all(
+            guard_oblivious(s1 == s2)
+            for s1, s2 in zip(meta_strides, tensor.get_stride())
+        ):
+            return tensor
+
+        def significant_strides_equal(shape, strides1, strides2):
+            for dim, s1, s2 in zip(shape, strides1, strides2):
+                if guard_oblivious(dim <= 1):
+                    continue
+
+                if not guard_oblivious(s1 == s2):
+                    return False
+
+            return True
+
+        if not significant_strides_equal(
+            tensor.get_size(), meta_strides, tensor.get_stride()
+        ):
+            return tensor
+
+        storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
+        new_stride = list(old_layout.stride)
+        for i, s in enumerate(tensor.get_size()):
+            if guard_oblivious(s <= 1):
+                new_stride[i] = meta_strides[i]
+
+        new_layout = torch._inductor.ir.FixedLayout(
+            old_layout.device,
+            old_layout.dtype,
+            old_layout.size,
+            new_stride,
+            old_layout.offset,
+        )
+        return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
+
     def run_node(self, n: torch.fx.Node):
         def debug(msg):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
@@ -997,6 +1054,8 @@ class GraphLowering(torch.fx.Interpreter):
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
+
+                result = self.match_insignificant_strides(result, strides)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
