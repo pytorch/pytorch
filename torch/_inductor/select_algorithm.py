@@ -932,13 +932,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if len(timings) == 1:
                 return next(iter(timings)).output_node()
 
-            if config.debug_filter_choice:
-                timings = {
-                    choice: time
-                    for choice, time in timings.items()
-                    if config.debug_filter_choice(choice)
-                }
-
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
