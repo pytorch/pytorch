@@ -1,6 +1,11 @@
 #pragma once
+#include <ATen/TensorGeometry.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <torch/csrc/autograd/engine.h>
+#include <c10/util/flat_hash_map.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -236,6 +241,47 @@ class CompiledNodeArgs {
     collect(t.first);
     collect(t.second);
   }
+  template <typename V>
+  void collect(const ska::flat_hash_map<std::string, V>& m) {
+    collect_size(m.size());
+
+    std::vector<std::string> keys;
+    keys.reserve(m.size());
+    std::transform(
+        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
+          return entry.first;
+        });
+    std::sort(keys.begin(), keys.end());
+    for (const auto& k : keys) {
+      collect(k);
+      collect(m.at(k));
+    }
+  }
+  void collect(const at::IValue& iv) {
+    if (iv.isList()) {
+      c10::List<at::IValue> list = iv.toList();
+      collect_size(list.size());
+      for (auto it = list.begin(); it != list.end(); it++) {
+        collect(*it);
+      }
+    } else if (iv.isGenericDict()) {
+      c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
+      collect_size(ordered_dict.size());
+      for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
+        collect(it->key());
+        collect(it->value());
+      }
+    } else {
+      try {
+        collect(static_cast<uint64_t>(at::IValue::hash(iv)));
+      } catch (const std::runtime_error& e) {
+        std::string msg =
+            "Compiled autograd can not trace unhashable IValues, error: " +
+            std::string(e.what());
+        TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
+      }
+    }
+  }
   void collect(const c10::Scalar& t) {
     auto type = t.type();
     specialize_on_bytes(type);
@@ -361,7 +407,7 @@ class CompiledNodeArgs {
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
     for (const auto& h : _node_call.tensor_pre_hooks) {
-      collect_size(h.second); // index
+      collect_size(static_cast<size_t>(h.second));
     }
   }
 
@@ -381,29 +427,33 @@ class CompiledNodeArgs {
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.tensor_pre_hooks.emplace_back(std::make_pair(fn_id, index));
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.pre_hooks.emplace_back(fn_id);
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.post_hooks.emplace_back(fn_id);
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
-  void collect_size(size_t s) {
+  // Need to template the size_t to silence internal 32-bit build errors due to
+  // a mix of -Werror, -Wtautological-type-limit-compare and
+  // -Wunknown-pragmas
+  template <typename T>
+  std::enable_if_t<std::is_unsigned_v<T>, void> collect_size(T s) {
     // we expect sizes to be small, so try to cram them into a single byte
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
@@ -524,6 +574,14 @@ class SwapSavedVariables {
     stashed_symints.restore(&t);
   }
 
+  void before(at::IValue& t) {
+    stashed_ivalues.save(&t, at::IValue(t));
+  }
+
+  void after(at::IValue& t) {
+    stashed_ivalues.restore(&t);
+  }
+
   void before(Edge& t) {
     if (t.is_valid()) {
       // need for symints used by validate_outputs
@@ -615,6 +673,27 @@ class SwapSavedVariables {
     }
   }
 
+  template <typename V>
+  void before(ska::flat_hash_map<std::string, V>& m) {
+    std::vector<std::string> keys;
+    keys.reserve(m.size());
+    std::transform(
+        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
+          return entry.first;
+        });
+    std::sort(keys.begin(), keys.end());
+    for (auto& k : keys) {
+      before(m.at(k));
+    }
+  }
+
+  template <typename V>
+  void after(ska::flat_hash_map<std::string, V>& m) {
+    for (auto& [_, v] : m) {
+      after(v);
+    }
+  }
+
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
@@ -701,6 +780,7 @@ class SwapSavedVariables {
   StashedVars<SavedVariable> stashed_variables;
   StashedVars<at::Tensor> stashed_tensors;
   StashedVars<c10::SymInt> stashed_symints;
+  StashedVars<at::IValue> stashed_ivalues;
 };
 
 } // namespace torch::dynamo::autograd

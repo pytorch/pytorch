@@ -121,6 +121,13 @@ def justknobs_check(name: str) -> bool:
     return True
 
 
+def justknobs_getval_int(name: str) -> int:
+    """
+    Read warning on justknobs_check
+    """
+    return 0
+
+
 @functools.lru_cache(None)
 def max_clock_rate():
     from triton.testing import nvsmi

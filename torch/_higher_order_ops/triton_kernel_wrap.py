@@ -238,8 +238,16 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 for fn_op in fn_op_list:
                     for i in range(len(fn_op.args)):
                         arg = fn_op.args[i]
-                        if isinstance(arg, Intermediate) and arg.idx in replacements:
-                            fn_op.args[i] = replacements[arg.idx]
+                        seen = set()  # to break cycles
+                        # there can be transitive replacements, but likely
+                        # no cycles (we keep the `seen` set just in case)
+                        while (
+                            isinstance(arg, Intermediate)
+                            and arg.idx in replacements
+                            and arg.idx not in seen
+                        ):
+                            seen.add(arg.idx)
+                            arg = fn_op.args[i] = replacements[arg.idx]
 
             # next function capture starts
             # with empty replacements
@@ -248,7 +256,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
         elif child_block_ids:
-            if name in ("scf.if", "scf.for", "scf.while", "tt.reduce"):
+            if name in {"scf.if", "scf.for", "scf.while", "tt.reduce", "tt.scan"}:
                 # for blocked ops: inline the enclosed ops into
                 # the parent block + rewire the last op in each
                 # child block to return the block result
@@ -265,16 +273,17 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                             next_fake_intermediate -= 1
                             replacements[idx] = Intermediate(next_fake_intermediate)
                     else:
-                        # for tt.reduce, wire the block arguments to the op arguments
+                        assert name in ("tt.reduce", "tt.scan")
+                        # wire the block arguments to the op arguments
                         num_operands = len(operand_ids)
                         block_arg_ids = block_id_to_block_arg_ids[block_id]
                         assert len(block_arg_ids) == 2 * num_operands, (
-                            "tt.reduce is expected to have twice as "
+                            f"{name} is expected to have twice as "
                             "many block arguments as op arguments: "
                             f"{operand_ids=}, {block_arg_ids=}."
                         )
                         for i, idx in enumerate(block_arg_ids):
-                            # for a tt.reduce op with N arguments, the block
+                            # for a tt.reduce/tt.scan op with N arguments, the block
                             # arguments comprise N reduced values followed by
                             # N current values corresponding to the N op args
                             replacements[idx] = Intermediate(
@@ -287,7 +296,8 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                             continue
                         last_ret, last_ops = block_ops.popitem()
                         if all(
-                            op.name in ("scf.yield", "tt.reduce.return")
+                            op.name
+                            in ("scf.yield", "tt.reduce.return", "tt.scan.return")
                             for op in last_ops
                         ):
                             # if last_ops are all return ops, treat them separately
