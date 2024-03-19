@@ -2399,7 +2399,6 @@ class TritonKernel(Kernel):
         reduction_range_prefix = self.range_trees[-1].prefix
 
         broadcasted_values = []
-        broadcasted_values = []
         accumulators = []
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
@@ -2434,7 +2433,6 @@ class TritonKernel(Kernel):
                     f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
                 )
 
-                masked_values.append(masked_value)
                 accumulators.append(accumulator)
 
         def csv(values):
@@ -2461,7 +2459,7 @@ class TritonKernel(Kernel):
         )
 
         if not self.persistent_reduction:
-            partial_reduce = pytree.tree_map(
+            partial_reduce_vars = pytree.tree_map(
                 self.reduction_resize,
                 cse_multiple(
                     f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
@@ -2469,14 +2467,18 @@ class TritonKernel(Kernel):
                     None,
                 ),
             )
-            accs_next = combine_fn(tuple(accumulators), partial_reduce)
-            full_scan_vars = combine_fn(tuple(accumulators), result_vars)
+            accs_next = combine_fn(tuple(accumulators), partial_reduce_vars)
+            full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)
             result_vars = [
                 cse_compute(f"tl.where(roffset > 0, {full_scan}, {partial_scan})")
                 for full_scan, partial_scan in zip(full_scan_vars, partial_scan_vars)
             ]
-            for acc_next, accumulator in zip(accs_next, accumulators):
-                self.compute.writeline(f"{accumulator} = {acc_next}")
+            for acc_next, accumulator, partial_reduce in zip(
+                accs_next, accumulators, partial_reduce_vars
+            ):
+                self.compute.writeline(
+                    f"{accumulator} = tl.where(roffset > 0, {acc_next}, {partial_reduce})"
+                )
         else:
             result_vars = partial_scan_vars
 
