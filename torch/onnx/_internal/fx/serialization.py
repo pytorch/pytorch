@@ -8,7 +8,6 @@ from typing import Optional, Tuple, TYPE_CHECKING, Union
 import torch
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx.type_utils import _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE
 
 if TYPE_CHECKING:
     import onnx
@@ -22,7 +21,7 @@ def _create_tensor_proto_with_external_data(
     name: str,
     location: str,
     basepath: str,
-    dtype_override: Optional["onnx.TypeProto"] = None,
+    dtype_override: Optional["onnx.TypeProto"] = None,  # type: ignore[name-defined]
 ) -> onnx.TensorProto:  # type: ignore[name-defined]
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
@@ -46,15 +45,18 @@ def _create_tensor_proto_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
-    scalar_type = jit_type_utils.JitScalarType.from_dtype(
-        _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE[dtype_override.tensor_type.elem_type]  # type: ignore[index]
+    scalar_type = (
+        jit_type_utils.JitScalarType.from_onnx_type(
+            dtype_override.tensor_type.elem_type
+        )
         if dtype_override is not None
-        else tensor.dtype
+        else jit_type_utils.JitScalarType.from_dtype(tensor.dtype)
     )
+
     # Checkpoints can be stored with a different dtype as the model expects because
     # the user script can explicitly cast the original type to something or maybe
     # PyTorch's type promotion might do it
-    if dtype_override is not None and dtype_override != tensor.dtype:
+    if dtype_override is not None and scalar_type.dtype() != tensor.dtype:
         tensor = tensor.to(scalar_type.dtype())
 
     tensor_proto = onnx.TensorProto()  # type: ignore[attr-defined]
