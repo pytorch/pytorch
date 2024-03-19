@@ -108,14 +108,14 @@ class OptimizerInfo:
         supports_sparse_on: Tuple[str] = (),
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
+        # the optim supports complex parameters
+        supports_complex: bool = True,
         # whether the optimizer.step() function requires a closure to be passed
         step_requires_closure: bool = False,
         # whether the optimizer supports per-param options with parameter groups
         supports_param_groups: bool = True,
         # whether the optimizer supports parameters on multiple devices
         supports_multiple_devices: bool = True,
-        # whether the optimizer ONLY supports capturable on foreach vs. both foreach and forloop
-        only_supports_capturable_on_foreach: bool = False,
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
@@ -125,10 +125,10 @@ class OptimizerInfo:
         self.supported_impls = supported_impls
         self.supports_sparse_on = supports_sparse_on
         self.only_supports_sparse_grads = only_supports_sparse_grads
+        self.supports_complex = supports_complex
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
         self.supports_multiple_devices = supports_multiple_devices
-        self.only_supports_capturable_on_foreach = only_supports_capturable_on_foreach
         self.decorators = (
             *(decorators if decorators else []),
             *(skips if skips else []),
@@ -469,18 +469,6 @@ def optim_inputs_func_adamax(device):
 
 def optim_error_inputs_func_adamax(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if "cuda" in str(device):
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(foreach=False, capturable=True),
-                    desc="single tensor capturable not supported",
-                ),
-                error_type=ValueError,
-                error_regex="Capturable not supported with single tensor Adamax",
-            )
-        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -541,18 +529,6 @@ def optim_inputs_func_asgd(device):
 
 def optim_error_inputs_func_asgd(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if "cuda" in str(device):
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(foreach=False, capturable=True),
-                    desc="single tensor capturable not supported",
-                ),
-                error_type=ValueError,
-                error_regex="Capturable not supported with single tensor ASGD",
-            )
-        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -698,18 +674,6 @@ def optim_inputs_func_radam(device=None):
 
 def optim_error_inputs_func_radam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if "cuda" in str(device):
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(foreach=False, capturable=True),
-                    desc="single tensor capturable not supported",
-                ),
-                error_type=ValueError,
-                error_regex="Capturable not supported with single tensor RAdam",
-            ),
-        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -1049,6 +1013,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1067,6 +1038,24 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            # Note on tolerances:
+            # test_correctness_Adadelta_cuda_float32
+            # Mismatched elements: 10 / 100 (10.0%)
+            # Greatest absolute difference: 4.838220775127411e-05 at index (7, 4) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.007270356640219688 at index (7, 2) (up to 1e-05 allowed)
+            # This is due to floating point ordering error + usage of sqrt
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(
+                            rtol=5.5e-4,
+                            atol=5e-5,
+                        )
+                    }
+                ),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
             ),
         ),
     ),
@@ -1117,6 +1106,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1183,6 +1179,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1202,7 +1205,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=True,  # Remove this line when #117836 is done!
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1251,6 +1253,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
                 "TestOptimRenewed",
                 "test_foreach_large_tensor",
@@ -1270,60 +1279,31 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "cpu fails due to #115607; both devices fail cuz #117836"
-                ),
+                skipIfTorchDynamo("cpu fails due to #115607"),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
+                device_type="cpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                    "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
+                "test_save_load_equality_with_weights_only",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_when_params_have_no_grad",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                    "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
                 "test_load_nontensor_step",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                    "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
             ),
         ),
     ),
@@ -1376,6 +1356,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1395,7 +1382,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_asgd,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=True,  # Remove this line when #116052 is done!
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1431,6 +1417,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1543,6 +1536,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1584,7 +1584,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=True,  # Remove this line when #118230 is done!
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1613,6 +1612,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1652,72 +1658,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
                 device_type="cpu",
-            ),
-            DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
-                        torch.float32: tol(atol=5e-04, rtol=0.01),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_when_params_have_no_grad",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_load_nontensor_step",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_lr",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
             ),
         ),
     ),
@@ -1767,6 +1707,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1850,6 +1797,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1905,6 +1859,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1977,6 +1938,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
         supported_impls=(),
         only_supports_sparse_grads=True,
+        supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
@@ -2026,11 +1988,46 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
-            DecorateInfo(
-                unittest.skip("Missing complex support, see #118153"),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
         ),
     ),
 ]
+
+
+class TensorTracker:
+    """
+    A utility to track tensor clones in a list, with the expectation of popping them later (in
+    order) to make fair comparisons between two multi-step computation. The intended use case is
+    usually when comparing two supposed equal computations, such as an optimizer step that each
+    individually consists of multiple steps, where numerical deviation could multiply.
+
+    The goal is to be able to compare and align numbers at every milestone so as to minimize
+    numerical discrepancies, and so when the test fails, it is likely a real problem.
+    """
+
+    def __init__(self):
+        self.tensors = []
+
+    def add(self, tensor):
+        """
+        Add a clone().detach()'d version of the tensor
+        """
+        self.tensors.append(tensor.clone().detach())
+
+    # pops from beginning, like a queue and not a stack!
+    def pop_check_set(self, tensor_to_set, testcase):
+        """
+        Pop the first element in the tensor tracker, assert equality between the popped tensor and
+        the input tensor, and then set the input tensor to have the same values as the popped tensor
+        (with copy_).
+        """
+        testcase.assertGreater(len(self.tensors), 0, "no tensors to pop")
+        ref = self.tensors.pop(0)
+
+        testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
+        testcase.assertEqual(tensor_to_set, ref)
+
+        with torch.no_grad():
+            tensor_to_set.copy_(ref)
+
+    def all_popped(self):
+        return len(self.tensors) == 0

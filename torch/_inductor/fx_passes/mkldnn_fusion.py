@@ -340,15 +340,16 @@ if torch._C._has_mkldnn:
         binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
+
+        def get_meta_value(argument: torch.fx.node.Argument):
+            # Only torch.fx.Node is expected to have meta.
+            if isinstance(argument, torch.fx.Node):
+                return argument.meta.get("val", None)
+            return None
+
         if any(
-            not (
-                hasattr(n.args[0], "meta")
-                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
-            )
-            or not (
-                hasattr(n.args[1], "meta")
-                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
-            )
+            not isinstance(get_meta_value(n.args[0]), torch.Tensor)
+            or not isinstance(get_meta_value(n.args[1]), torch.Tensor)
             for n in binary_nodes
         ):
             return False
@@ -360,9 +361,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()  # type: ignore[union-attr]
-            or n.args[0].meta["val"].device != n.args[1].meta["val"].device  # type: ignore[union-attr]
-            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype  # type: ignore[union-attr]
+            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
+            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
         ):
             return False
@@ -743,30 +744,30 @@ if torch._C._has_mkldnn:
             pass_number=1,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            def get_val(val):
+                return val if isinstance(val, int) else val.meta.get("val")
+
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
             assert isinstance(reshape_1, list)
             assert isinstance(reshape_2, list)
             assert len(reshape_1) == 2
-            dynamic_shapes = not all(
-                isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
-            )
 
             graph = match.graph
             reshape_2_node = match.output_node()
             linear_input_node = reshape_2_node.args[0].args[0].args[0]
             # check linear's input's shape[:-1] == reshape_2[:-1]
             # and check product(reshape_2[:-1]) == reshape_1[0]
-            if dynamic_shapes:
-                # TODO: Haozhe investigate how add guard here
-                return
-            else:
-                can_remove_reshape = linear_input_node.meta.get("val").shape[
-                    :-1
-                ] == torch.Size(reshape_2[:-1])
-                can_remove_reshape = can_remove_reshape and (
-                    reduce(operator.mul, reshape_2[:-1]) == reshape_1[0]
+            can_remove_reshape = linear_input_node.meta.get("val").shape[
+                :-1
+            ] == torch.Size([get_val(val) for val in reshape_2[:-1]])
+            can_remove_reshape = can_remove_reshape and (
+                reduce(
+                    operator.mul,
+                    [get_val(val) for val in reshape_2[:-1]],
                 )
+                == get_val(reshape_1[0])
+            )
 
             if can_remove_reshape:
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
@@ -918,6 +919,11 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         batch_size = input_meta_value.shape[0]
+        if (
+            input_meta_value.dtype == torch.float64
+            or weight_meta_value.dtype == torch.float64
+        ):
+            return False
         is_lp_weight = weight_meta_value.dtype in (
             torch.bfloat16,
             torch.float16,

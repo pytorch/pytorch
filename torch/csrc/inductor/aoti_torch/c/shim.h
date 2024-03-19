@@ -387,6 +387,13 @@ aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
 
+// Make a shallow copy of the tensor referred to by src and assign
+// it to the handle in the ret_dst. This is similar to the above
+// aoti_torch_assign_tensors function, but creates and sets the
+// ret_dst from within.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
+
 // This function will create a new tensor object and its pointer is returned
 // through *ret. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
@@ -463,7 +470,25 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
+    AtenTensorHandle self,
+    const char* msg);
+
 #ifdef USE_CUDA
+
+struct CUDAGuardOpaque;
+using CUDAGuardHandle = CUDAGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_guard(
+    int32_t device_index,
+    CUDAGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_guard(CUDAGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_guard_set_index(CUDAGuardHandle guard, int32_t device_index);
 
 struct CUDAStreamGuardOpaque;
 using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
@@ -476,6 +501,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
 #endif
 
 // See `ProxyExecutor Design Note` in ir.py for more details
@@ -486,6 +515,31 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int64_t* flatten_int_args,
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
+
+AOTI_TORCH_EXPORT void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+#ifdef STRIP_ERROR_MESSAGES
+#define AOTI_TORCH_CHECK(cond, ...)    \
+  aoti_torch_check(                    \
+      cond,                            \
+      __func__,                        \
+      __FILE__,                        \
+      static_cast<uint32_t>(__LINE__), \
+      TORCH_CHECK_MSG(cond, "", __VA_ARGS__));
+#else
+#define AOTI_TORCH_CHECK(cond, ...)    \
+  aoti_torch_check(                    \
+      cond,                            \
+      __func__,                        \
+      __FILE__,                        \
+      static_cast<uint32_t>(__LINE__), \
+      TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));
+#endif
 
 #ifdef __cplusplus
 } // extern "C"

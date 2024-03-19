@@ -431,7 +431,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
   });
 
-  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
+  _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
       _C_m, "_InferenceMode");
@@ -663,8 +663,10 @@ static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* clear_autocast_cache(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  at::autocast::clear_cache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::autocast::clear_cache();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

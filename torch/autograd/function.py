@@ -311,6 +311,23 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         return self._forward_cls._compiled_autograd_key(self)  # type: ignore[attr-defined]
 
 
+def _warn_traceable_deprecated():
+    warnings.warn(
+        "The is_traceable field on torch.autograd.Function is deprecated "
+        "and will be removed in PyTorch 2.4.",
+        stacklevel=3,
+    )
+
+
+class _IsTraceableWarning:
+    def __init__(self, value):
+        self.value = value
+
+    def __get__(self, obj, klass=None):
+        _warn_traceable_deprecated()
+        return self.value
+
+
 class FunctionMeta(type):
     """Function metaclass.
 
@@ -330,7 +347,23 @@ class FunctionMeta(type):
         )
         cls._backward_cls = backward_fn
 
+        if "is_traceable" in attrs:
+            if attrs["is_traceable"] is True:
+                _warn_traceable_deprecated()
+                # already emitted warning, no need to install _IsTraceableWarning
+            else:
+                cls.is_traceable = _IsTraceableWarning(attrs.pop("is_traceable"))
+
         super().__init__(name, bases, attrs)
+
+    def __setattr__(cls, name, value):
+        if name == "is_traceable" and value is True:
+            warnings.warn(
+                "The is_traceable field on torch.autograd.Function is deprecated "
+                "and will be removed in PyTorch 2.4.",
+                stacklevel=2,
+            )
+        return super().__setattr__(name, value)
 
 
 class _SingleLevelFunction(
@@ -497,6 +530,7 @@ class Function(_SingleLevelFunction):
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
             DeprecationWarning,
+            stacklevel=2,
         )
 
     def __call__(self, *args, **kwargs):
@@ -576,7 +610,7 @@ class Function(_SingleLevelFunction):
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
                 "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/master/notes/extending.func.html"
+                "https://pytorch.org/docs/main/notes/extending.func.html"
             )
 
         return custom_function_call(cls, *args, **kwargs)
@@ -644,6 +678,11 @@ def traceable(fn_cls):
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).
     """
+    warnings.warn(
+        "torch.autograd.function.traceable is deprecated "
+        "and will be removed in PyTorch 2.4.",
+        stacklevel=2,
+    )
     fn_cls.is_traceable = True
     return fn_cls
 

@@ -8,7 +8,7 @@ from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
-from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
+from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
@@ -294,7 +294,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.storage_memo), 1)
         del x
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
         r = []
@@ -304,7 +303,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
@@ -490,7 +488,9 @@ def verbose_print(e):
             return self.s
 
     def go(t):
-        if isinstance(t, torch.Tensor):
+        if is_sparse_any(t):
+            return t
+        elif isinstance(t, torch.Tensor):
             return Lit(f"{t} stride={t.stride()}")
         else:
             return t
@@ -641,7 +641,6 @@ meta_function_expected_failures = {
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
-    torch.frexp : {f64, f16, bf16, f32},
     torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
     torch.histc : {f64, f16, bf16, f32},
@@ -650,8 +649,6 @@ meta_function_expected_failures = {
     torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
-    torch.linalg.eig : {f64, f32, c128, c64},
-    torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
 }
 
@@ -709,8 +706,11 @@ meta_function_device_expected_failures_only_outplace = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     torch.native_batch_norm: {bf16, f16},
     torch._native_batch_norm_legit: {bf16, f16},
+    torch.ops.aten._batch_norm_with_update: {bf16, f16},
     torch.native_layer_norm: {bf16, f16},
 }
 
@@ -725,8 +725,11 @@ meta_function_device_expected_failures['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     torch.native_batch_norm: {f32, f64},
     torch._native_batch_norm_legit: {f32, f64},
+    torch.ops.aten._batch_norm_with_update: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -799,7 +802,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten.geqrf.default : {c64, c128, f64, f32},
-    aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -815,7 +817,6 @@ meta_dispatch_expected_failures = {
     aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.histc.default : {bf16, f32, f64},
     aten.histc.out : {bf16, f32, f64},
     aten.histogram.bin_ct : {f32, f64},
@@ -853,9 +854,13 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     aten.native_batch_norm.default: {bf16, f16},
     aten._native_batch_norm_legit.default: {bf16, f16},
     aten._native_batch_norm_legit.no_stats: {bf16, f16},
+    aten._batch_norm_with_update.default: {bf16, f16},
+
     aten.native_layer_norm.default: {bf16, f16},
     aten.histc.default: {f16},
     aten.histc.out: {f16},
@@ -880,9 +885,13 @@ meta_dispatch_device_expected_failures['cuda'] = {
 
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
+
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
+    aten._batch_norm_with_update.default: {f32, f64},
 
     # If the computation dtype is different from the input
     # dtype this will fail. CPU execution may also have a
@@ -1327,26 +1336,22 @@ class TestMeta(TestCase):
 
     @onlyCPU
     def test_meta_autograd_no_error(self):
-        lib = torch.library.Library("meta_test", "DEF")
-        impl_cpu = torch.library.Library("meta_test", "IMPL", "CPU")
-        impl_meta = torch.library.Library("meta_test", "IMPL", "Meta")
+        with torch.library._scoped_library("meta_test", "DEF") as lib:
+            with torch.library._scoped_library("meta_test", "IMPL", "CPU") as impl_cpu:
+                with torch.library._scoped_library("meta_test", "IMPL", "Meta") as impl_meta:
+                    def foo_impl(x):
+                        return x + 1
 
-        def foo_impl(x):
-            return x + 1
+                    lib.define("foo(Tensor a) -> Tensor")
+                    impl_meta.impl("foo", foo_impl)
+                    impl_cpu.impl("foo", foo_impl)
 
-        lib.define("foo(Tensor a) -> Tensor")
-        impl_meta.impl("foo", foo_impl)
-        impl_cpu.impl("foo", foo_impl)
-
-        a = torch.ones(2, device='meta')
-        # The point of the test is that this should not error:
-        # We have a fallthrough kernel registered to the AutogradMeta
-        # key for custom ops, so it's fine that `foo()` doesn't have
-        # an autograd kernel.
-        b = torch.ops.meta_test.foo.default(a)
-        del impl_meta
-        del impl_cpu
-        del lib
+                    a = torch.ones(2, device='meta')
+                    # The point of the test is that this should not error:
+                    # We have a fallthrough kernel registered to the AutogradMeta
+                    # key for custom ops, so it's fine that `foo()` doesn't have
+                    # an autograd kernel.
+                    b = torch.ops.meta_test.foo.default(a)
 
     def test_huber_loss_backward(self):
         inps = [torch.rand(2**52, device='meta') for _ in range(3)]

@@ -47,7 +47,7 @@ def is_hashable(x):
                 variables.EnumVariable,
                 variables.user_defined.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
-                variables.misc.SkipFilesVariable,
+                variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
                 variables.MethodWrapperVariable,
@@ -174,13 +174,15 @@ class ConstDictVariable(VariableTracker):
             codegen(value)
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
-            return [
-                create_instruction("BUILD_MAP", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_MAP", arg=len(self.items)),
+                    *create_call_function(1, False),
+                ]
+            )
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", arg=len(self.items))]
+            codegen.append_output(create_instruction("BUILD_MAP", arg=len(self.items)))
 
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
@@ -358,7 +360,7 @@ class SetVariable(ConstDictVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
-        return [create_instruction("BUILD_SET", arg=len(self.set_items))]
+        codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
     def call_method(
         self,
@@ -419,10 +421,12 @@ class DictView(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.dv_dict)
-        return [
-            create_instruction("LOAD_METHOD", argval=self.kv),
-            *create_call_method(0),
-        ]
+        codegen.extend_output(
+            [
+                create_instruction("LOAD_METHOD", argval=self.kv),
+                *create_call_method(0),
+            ]
+        )
 
     def call_method(
         self,
@@ -610,7 +614,7 @@ class DataClassVariable(ConstDictVariable):
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        return codegen.create_call_function_kw(len(keys), keys, True)
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
 
     def call_method(
         self,
@@ -695,9 +699,20 @@ class CustomizedDictVariable(ConstDictVariable):
                         "expect VariableTracker or ConstantVariable.is_literal"
                     )
 
+            bound_args = {}
+            if _is_matching_transformers_cls(user_cls) or _is_matching_diffusers_cls(
+                user_cls
+            ):
+                # Skip none
+                for k, v in bound.arguments.items():
+                    if isinstance(v, ConstantVariable) and v.value is None or v is None:
+                        continue
+                    bound_args[k] = v
+            else:
+                bound_args = bound.arguments
+
             items = {
-                ConstantVariable.create(k): make_var(v)
-                for k, v in bound.arguments.items()
+                ConstantVariable.create(k): make_var(v) for k, v in bound_args.items()
             }
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
@@ -725,12 +740,33 @@ class CustomizedDictVariable(ConstDictVariable):
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
+        is_hf_model_output = _is_matching_transformers_cls(
+            self.user_cls
+        ) or _is_matching_diffusers_cls(self.user_cls)
+
+        # If the user class is a ModelOutput, then wrap the instance creation in
+        # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
+        # in `create` function, this is not enough. TorchDynamo can still get
+        # triggered on the child functions of __post_init__. This upsets export.
+        # Since, we know that ModelOutput __post_init__ is not worth optimizing,
+        # we just wrap the instance creation in torch._dynamo.disable(),
+        # regardless whether its export or not.
+        if is_hf_model_output:
+            # load torch._dynamo.disable
+            codegen.append_output(codegen.create_load_global("torch", True, add=True))
+            codegen.append_output(codegen.create_load_attr("_dynamo"))
+            codegen.append_output(codegen.create_load_attr("disable"))
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
+
+        if is_hf_model_output:
+            # Wrap user_cls with disable
+            codegen.extend_output(create_call_function(1, False))
+
         # All the keys are just wrapped strings
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        return codegen.create_call_function_kw(len(keys), keys, True)
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
 
     def call_method(
         self,
@@ -827,7 +863,6 @@ class PythonSysModulesVariable(VariableTracker):
     def python_type(self):
         return dict
 
-    @staticmethod
     def reconstruct(self, codegen):
         codegen.extend_output(
             [

@@ -5,7 +5,7 @@ import unittest
 import unittest.mock
 
 import torch
-import torch.utils._cuda_trace as cuda_trace
+import torch.cuda._gpu_trace as gpu_trace
 from torch.testing._internal.common_utils import TestCase, run_tests, NoTest, TEST_CUDA
 
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
@@ -19,18 +19,18 @@ if not TEST_CUDA:
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
     def setUp(self):
-        torch._C._activate_cuda_trace()
+        torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
 
     def test_event_creation_callback(self):
-        cuda_trace.register_callback_for_cuda_event_creation(self.mock)
+        gpu_trace.register_callback_for_event_creation(self.mock)
 
         event = torch.cuda.Event()
         event.record()
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
     def test_event_deletion_callback(self):
-        cuda_trace.register_callback_for_cuda_event_deletion(self.mock)
+        gpu_trace.register_callback_for_event_deletion(self.mock)
 
         event = torch.cuda.Event()
         event.record()
@@ -39,7 +39,7 @@ class TestCudaTrace(TestCase):
         self.mock.assert_called_once_with(event_id)
 
     def test_event_record_callback(self):
-        cuda_trace.register_callback_for_cuda_event_record(self.mock)
+        gpu_trace.register_callback_for_event_record(self.mock)
 
         event = torch.cuda.Event()
         event.record()
@@ -48,7 +48,7 @@ class TestCudaTrace(TestCase):
         )
 
     def test_event_wait_callback(self):
-        cuda_trace.register_callback_for_cuda_event_wait(self.mock)
+        gpu_trace.register_callback_for_event_wait(self.mock)
 
         event = torch.cuda.Event()
         event.record()
@@ -58,13 +58,13 @@ class TestCudaTrace(TestCase):
         )
 
     def test_memory_allocation_callback(self):
-        cuda_trace.register_callback_for_cuda_memory_allocation(self.mock)
+        gpu_trace.register_callback_for_memory_allocation(self.mock)
 
         tensor = torch.empty(10, 4, device="cuda")
         self.mock.assert_called_once_with(tensor.data_ptr())
 
     def test_memory_deallocation_callback(self):
-        cuda_trace.register_callback_for_cuda_memory_deallocation(self.mock)
+        gpu_trace.register_callback_for_memory_deallocation(self.mock)
 
         tensor = torch.empty(3, 8, device="cuda")
         data_ptr = tensor.data_ptr()
@@ -72,26 +72,33 @@ class TestCudaTrace(TestCase):
         self.mock.assert_called_once_with(data_ptr)
 
     def test_stream_creation_callback(self):
-        cuda_trace.register_callback_for_cuda_stream_creation(self.mock)
+        gpu_trace.register_callback_for_stream_creation(self.mock)
 
-        torch.cuda.Stream()
+        # see Note [HIP Lazy Streams]
+        if torch.version.hip:
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                tensor = torch.ones(5, device="cuda")
+        else:
+            torch.cuda.Stream()
+
         self.mock.assert_called()
 
     def test_device_synchronization_callback(self):
-        cuda_trace.register_callback_for_cuda_device_synchronization(self.mock)
+        gpu_trace.register_callback_for_device_synchronization(self.mock)
 
         torch.cuda.synchronize()
         self.mock.assert_called()
 
     def test_stream_synchronization_callback(self):
-        cuda_trace.register_callback_for_cuda_stream_synchronization(self.mock)
+        gpu_trace.register_callback_for_stream_synchronization(self.mock)
 
         stream = torch.cuda.Stream()
         stream.synchronize()
         self.mock.assert_called_once_with(stream.cuda_stream)
 
     def test_event_synchronization_callback(self):
-        cuda_trace.register_callback_for_cuda_event_synchronization(self.mock)
+        gpu_trace.register_callback_for_event_synchronization(self.mock)
 
         event = torch.cuda.Event()
         event.record()
@@ -99,7 +106,7 @@ class TestCudaTrace(TestCase):
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
     def test_memcpy_synchronization(self):
-        cuda_trace.register_callback_for_cuda_stream_synchronization(self.mock)
+        gpu_trace.register_callback_for_stream_synchronization(self.mock)
 
         tensor = torch.rand(5, device="cuda")
         tensor.nonzero()
@@ -107,8 +114,8 @@ class TestCudaTrace(TestCase):
 
     def test_all_trace_callbacks_called(self):
         other = unittest.mock.MagicMock()
-        cuda_trace.register_callback_for_cuda_memory_allocation(self.mock)
-        cuda_trace.register_callback_for_cuda_memory_allocation(other)
+        gpu_trace.register_callback_for_memory_allocation(self.mock)
+        gpu_trace.register_callback_for_memory_allocation(other)
 
         tensor = torch.empty(10, 4, device="cuda")
         self.mock.assert_called_once_with(tensor.data_ptr())

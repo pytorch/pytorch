@@ -29,7 +29,7 @@ inline void reduce_all_impl_vec(
     vec_func_t vop) {
   using Vec = Vectorized<opmath_type<scalar_t>>;
   const int64_t input_numel = input.numel();
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t /*ident*/) -> scalar_t {
@@ -50,7 +50,7 @@ inline void reduce_all_impl(
     const scalar_t ident_v,
     func_t op) {
   const int64_t input_numel = input.numel();
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t ident) -> scalar_t {
       scalar_t partial_out = ident;
@@ -123,7 +123,7 @@ inline void reduce_all_impl_two_outputs(
     func_t2 reduce_acc_func) {
   using scalar_t_pair = std::pair<scalar_t, scalar_t>;
   const int64_t input_numel = input.numel();
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   scalar_t_pair result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t_pair& ident) -> scalar_t_pair {
       scalar_t_pair partial_out(ident);
@@ -150,7 +150,7 @@ inline void reduce_all_impl_vec_two_outputs(
   using Vec = Vectorized<opmath_type<scalar_t>>;
   using scalar_t_pair = std::pair<scalar_t, scalar_t>;
   const int64_t input_numel = input.numel();
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   std::pair<scalar_t, scalar_t> result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
     [&](int64_t start, int64_t end, const scalar_t_pair& /* ident */) -> scalar_t_pair {

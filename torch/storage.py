@@ -47,6 +47,8 @@ class _StorageBase:
 
     def data_ptr(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
 
+    def resizable(self) -> bool: ...  # type: ignore[empty-body] # noqa: E704
+
     # Defined in torch/csrc/generic/StorageSharing.cpp
     def _share_filename_cpu_(self, *args, **kwargs): ...  # noqa: E704
     def _share_fd_cpu_(self, *args, **kwargs): ...  # noqa: E704
@@ -259,7 +261,7 @@ class _StorageBase:
         """Create a new storage in shared memory with the same data type."""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
-        if device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        if device.type in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
             return cls(size, device=device)
         elif get_sharing_strategy() == 'file_system':
             return cls._new_using_filename_cpu(size)
@@ -479,7 +481,7 @@ def _reset_warn_typed_storage_removal():
 
 def _get_device_from_module(module: str):
     last_part = module.rsplit(".", 1)[-1]
-    if last_part in ["cuda", torch._C._get_privateuse1_backend_name()]:
+    if last_part in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
         return last_part
     else:
         return "cpu"
@@ -957,6 +959,10 @@ class TypedStorage:
     def _data_ptr(self):
         return self._untyped_storage.data_ptr()
 
+    def resizable(self):
+        _warn_typed_storage_removal()
+        return self._untyped_storage.resizable()
+
     def resize_(self, size):
         _warn_typed_storage_removal()
         self._resize_(size)
@@ -1175,7 +1181,7 @@ class TypedStorage:
 
         storage_name = _dtype_to_storage_type_map()[self.dtype]
 
-        if self.device.type not in ['cpu', 'cuda', torch._C._get_privateuse1_backend_name()]:
+        if self.device.type not in ['cpu', 'cuda', "hpu", torch._C._get_privateuse1_backend_name()]:
             return None
 
         module = torch if self.device.type == 'cpu' else getattr(torch, self.device.type)

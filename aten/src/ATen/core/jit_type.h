@@ -17,14 +17,13 @@
 #include <memory>
 #include <ostream>
 #include <sstream>
-#include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 struct Function;
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
 
 namespace c10 {
 
@@ -546,6 +545,7 @@ struct VaryingShape {
       return c10::nullopt;
     }
     std::vector<T> sizes;
+    sizes.reserve(dims_.value().size());
     for (auto d : *dims_) {
       if (!d) {
         return c10::nullopt;
