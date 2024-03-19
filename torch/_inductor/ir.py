@@ -5196,7 +5196,6 @@ class FallbackKernel(ExternKernelAlloc):
                 non_tensor_args,
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
-        # breakpoint()
 
         if example_output is None:
             packed = cls(

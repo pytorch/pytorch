@@ -866,18 +866,6 @@ class GraphLowering(torch.fx.Interpreter):
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
 
-        # Drop effect token output
-        # assert isinstance(result, (tuple, list)), type(result)
-        # token_outputs = []
-        # def filter_tokens(r):
-        #     if isinstance(r, ir.EffectfulKernel):
-        #         token_outputs.append(r)
-        #         return False
-        #     return True
-        # result = list(filter(filter_tokens, result))
-        # if len(token_outputs) > 0:
-        #     log.debug("Dropping effect token outputs: %s", token_outputs)
-
         assert all(
             isinstance(
                 x,
