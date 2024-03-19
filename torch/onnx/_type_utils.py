@@ -160,7 +160,7 @@ class JitScalarType(enum.IntEnum):
     @classmethod
     @_beartype.beartype
     def from_onnx_type(
-        cls, onnx_type: Optional[_C_onnx.TensorProtoDataType]
+        cls, onnx_type: Optional[Union[int, _C_onnx.TensorProtoDataType]]
     ) -> JitScalarType:
         """Convert a ONNX data type to JitScalarType.
 
