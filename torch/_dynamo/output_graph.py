@@ -1203,8 +1203,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
             self.tracing_context.fake_mode = backend_fake_mode
 
-        # Disable torch function subclasses while calling user compiler becauase
-        # Dynamo is responsible for handling torch function.
+        # Disable user torch function subclasses while calling user compiler because
+        # Dynamo is responsible for handling inlining through __torch_function__.
         with self.restore_global_state(), torch._C._DisableTorchFunctionNonInfraSubclass():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
