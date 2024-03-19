@@ -2918,7 +2918,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(
       Error,
-      "allreduce_sparse is only available in the NCCL experimental branch.");
+      "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
 #endif
 }
 
