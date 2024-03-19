@@ -93,15 +93,16 @@ def associative_scan(
     )
 
     if torch._dynamo.is_compiling():
-        return associative_scan_op(input, dim, combine_fn)
-
-    if not torch._dynamo.is_dynamo_supported():
+        result_flat = associative_scan_op(input, dim, combine_fn)
+    elif not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("associative_scan requires dynamo support.")
+    else:
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            result_flat = torch.compile(associative_scan_op, fullgraph=True)(
+                leaves, dim, combine_fn
+            )
 
-    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        return torch.compile(associative_scan_op, fullgraph=True)(
-            leaves, dim, combine_fn
-        )
+    return pytree.tree_unflatten(result_flat, spec)
 
 
 associative_scan_op = HigherOrderOperator("associative_scan")

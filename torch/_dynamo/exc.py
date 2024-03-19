@@ -2,7 +2,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, NoReturn, Optional
+from typing import cast, Literal, NoReturn, Optional, Union
 
 import torch._guards
 
@@ -185,9 +185,14 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     unimplemented(msg, from_exc=e)
 
 
-def unimplemented(msg: str, *, from_exc: Optional[Exception] = None) -> NoReturn:
+_NOTHING = object()
+
+
+def unimplemented(
+    msg: str, *, from_exc: Union[Optional[Exception], Literal[_NOTHING]] = _NOTHING
+) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
-    if from_exc is not None:
+    if from_exc is not _NOTHING:
         raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
 
