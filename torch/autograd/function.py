@@ -319,6 +319,15 @@ def _warn_traceable_deprecated():
     )
 
 
+class _IsTraceableWarning:
+    def __init__(self, value):
+        self.value = value
+
+    def __get__(self, obj, klass=None):
+        _warn_traceable_deprecated()
+        return self.value
+
+
 class FunctionMeta(type):
     """Function metaclass.
 
@@ -338,15 +347,14 @@ class FunctionMeta(type):
         )
         cls._backward_cls = backward_fn
 
-        if "is_traceable" in attrs and attrs["is_traceable"] is True:
-            _warn_traceable_deprecated()
+        if "is_traceable" in attrs:
+            if attrs["is_traceable"] is True:
+                _warn_traceable_deprecated()
+                # already emitted warning, no need to install _IsTraceableWarning
+            else:
+                cls.is_traceable = _IsTraceableWarning(attrs.pop("is_traceable"))
 
         super().__init__(name, bases, attrs)
-
-    def __getattribute__(cls, name):
-        if name == "is_traceable":
-            _warn_traceable_deprecated()
-        return super().__getattribute__(name)
 
     def __setattr__(cls, name, value):
         if name == "is_traceable" and value is True:
@@ -602,7 +610,7 @@ class Function(_SingleLevelFunction):
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
                 "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/master/notes/extending.func.html"
+                "https://pytorch.org/docs/main/notes/extending.func.html"
             )
 
         return custom_function_call(cls, *args, **kwargs)

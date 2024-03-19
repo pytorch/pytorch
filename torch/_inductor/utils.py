@@ -681,13 +681,6 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-def output_node(gm: torch.fx.GraphModule):
-    """Get the output node from an FX graph"""
-    last_node = next(iter(reversed(gm.graph.nodes)))
-    assert last_node.op == "output"
-    return last_node
-
-
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
@@ -906,6 +899,13 @@ class IndentedBuffer:
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
 
+    def __add__(self, other):
+        assert self._indent == other._indent
+        res = IndentedBuffer(initial_indent=self._indent)
+        res.writelines(self._lines)
+        res.writelines(other._lines)
+        return res
+
 
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
@@ -981,9 +981,9 @@ def use_triton_template(layout, *, enable_int32=False):
 def use_cutlass_template(layout, m, n, k):
     gemm_size = -1
     try:
-        gemm_size = V.graph.sizevars.size_hint(m * n * k)
+        # this fails if it's dynamic
+        gemm_size = V.graph.sizevars.shape_hint(m * n * k)
     except Exception:
-        # already logged within size_hint
         pass
     if gemm_size < config.cuda.cutlass_backend_min_gemm_size:
         return False
@@ -993,7 +993,7 @@ def use_cutlass_template(layout, m, n, k):
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
     )
