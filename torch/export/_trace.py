@@ -430,6 +430,14 @@ def _verify_placeholder_node_names(gm: torch.fx.GraphModule, sig: ExportGraphSig
                 )
 
 
+from torch._subclasses.fake_tensor import FakeTensor
+class NamedFakeTensor:
+    def __init__(self, name, fake_tensor):
+        self.fake_tensor = fake_tensor
+        self.name = name
+    def __torch_function__(self, f, t, a, kw):
+        return self.fake_tensor.__torch_function__(f, t, a, kw)
+
 def _export_non_strict(
     mod: torch.nn.Module,
     fake_args,
@@ -456,6 +464,12 @@ def _export_non_strict(
             yield
         finally:
             torch.compiler._is_compiling_flag = old_value
+
+    # convert to named fake tensors
+    fake_args = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_args, is_leaf=lambda x:isinstance(x, FakeTensor))
+    fake_kwargs = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_kwargs, is_leaf=lambda x:isinstance(x, FakeTensor))
+    fake_params_buffers = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_params_buffers, is_leaf=lambda x:isinstance(x, FakeTensor))
+    breakpoint()
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.

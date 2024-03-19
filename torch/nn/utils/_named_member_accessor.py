@@ -39,7 +39,8 @@ def swap_tensor(
         and not isinstance(tensor, torch.Tensor)
         and tensor is not None
     ):
-        raise TypeError(f"{tensor} is not an instance of torch.Tensor")
+        # raise TypeError(f"{tensor} is not an instance of torch.Tensor")
+        pass
     if "." in name:
         raise KeyError('tensor name can\'t contain "."')
     if name == "":
