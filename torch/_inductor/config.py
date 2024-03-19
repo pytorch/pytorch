@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -329,6 +329,29 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # TODO: fork is not safe in a multithreaded environment, we should evaluate changing
 # the default to spawn.
 worker_start_method = "fork"
+
+# Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
+# on by DDP and should not be set by the users.
+_fuse_ddp_communication = False
+_fuse_ddp_bucket_size = 25
+
+# Flag to control which fusion passes to apply. Functions in the list will
+# be applied in order. There are two different different fusion passes
+# --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
+# one is "fuse_ddp_with_concat_op". Users can also change this to a customized
+# fusion function.
+#
+# The fusion currently does not support multiple DDP with different PG or
+# data type. This feature will be added in the future PRs.
+#
+# "schedule_comm_wait" is used to delay the wait ops to maximize comm/comp
+# overlapping. At this moment, this pass performs better than
+# reorder_for_compute_comm_overlap_passes but we will add the logic of
+# "schedule_comm_wait" in the future and remove the one here.
+_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
+    "fuse_ddp_with_concat_op",
+    "schedule_comm_wait",
+]
 
 
 def decide_compile_threads():
