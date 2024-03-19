@@ -460,6 +460,8 @@ def _export_non_strict(
 
     # Remove nn_module_stack metadata from all placeholders/inputs nodes.
     for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
         for node in mod.graph.nodes:
             if node.op in ["placeholder", "output"]:
                 node.meta.pop("nn_module_stack", None)
