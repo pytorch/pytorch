@@ -1324,9 +1324,9 @@ void int8_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
 
 
-  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
-  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  cublasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
+  cublasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
+  cublasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
 
