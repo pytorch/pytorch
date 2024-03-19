@@ -3967,8 +3967,8 @@ class CppScheduling(BaseScheduling):
                             == getattr(_right_loop_level, _attr_compare)
                             for _attr_compare in _outer_loops_attr_compare_list
                         )
-                        and _left_loop_level.kernel == None
-                        and _right_loop_level.kernel == None
+                        and _left_loop_level.kernel is None
+                        and _right_loop_level.kernel is None
                     ):
                         return False
 
