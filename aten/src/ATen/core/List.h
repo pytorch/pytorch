@@ -44,7 +44,7 @@ template<class T, class Iterator> class ListIterator;
 template<class T, class Iterator> class ListElementReference;
 
 template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) noexcept;
 
 template<class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
@@ -84,7 +84,7 @@ public:
     return *iterator_;
   }
 
-  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
+  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs) noexcept;
 
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;

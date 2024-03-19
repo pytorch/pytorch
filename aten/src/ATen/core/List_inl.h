@@ -146,7 +146,7 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 }
 
 template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) {
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs)  noexcept {
   std::swap(*lhs.iterator_, *rhs.iterator_);
 }
 
