@@ -297,6 +297,7 @@ class MetaTensorDescriber:
             is_nested=is_nested,
             is_functional=is_functional,
             layout=layout,
+            device=t.device,
             size=t.size(),
             stride=stride,
             storage_offset=storage_offset,
@@ -377,6 +378,7 @@ class MetaTensorDesc:
     is_functional: bool
     is_conj: bool
     is_neg: bool
+    device: torch.device
     layout: torch.layout
     # NB: Sometimes, size, stride and storage_offset contain SymInt, in which
     # case this is NOT serializable.  That only happens when you're
