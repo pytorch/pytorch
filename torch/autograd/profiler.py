@@ -469,6 +469,7 @@ class profile:
                 sequence_nr=kineto_event.sequence_nr(),
                 device_type=kineto_event.device_type(),
                 device_index=kineto_event.device_index(),
+                device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
             )
             max_evt_id = max(max_evt_id, fe.id)
@@ -993,7 +994,7 @@ class KinetoStepTracker:
     for now. The result could be incorrect increments of the step count.
     """
 
-    _current_step = -1
+    _current_step = 0
     _step_dict: Dict[str, int] = defaultdict(int)
 
     @classmethod

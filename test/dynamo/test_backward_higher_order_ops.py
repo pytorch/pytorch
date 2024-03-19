@@ -122,19 +122,21 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            expected = """\
+            self.assertExpectedInline(
+                actual,
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor):
-        getitem = L_inputs_0_
+        l_inputs_0_ = L_inputs_0_
 
-        new_grad = torch.clone(getitem)
+        new_grad = torch.clone(l_inputs_0_)
 
-        call_hook = getitem * getitem;  getitem = None
+        result = l_inputs_0_ * l_inputs_0_;  l_inputs_0_ = None
 
-        new_grad_1 = torch.clone(call_hook);  call_hook = None
+        new_grad_1 = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
-"""
-            self.assertExpectedInline(actual, expected)
+""",
+            )
 
             graph = None
 
@@ -189,13 +191,13 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor):
-        getitem = L_inputs_0_
+        l_inputs_0_ = L_inputs_0_
 
-        new_grad = torch.clone(getitem)
+        new_grad = torch.clone(l_inputs_0_)
 
-        call_hook = getitem * getitem;  getitem = None
+        result = l_inputs_0_ * l_inputs_0_;  l_inputs_0_ = None
 
-        new_grad_1 = torch.clone(call_hook);  call_hook = None
+        new_grad_1 = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
             )
