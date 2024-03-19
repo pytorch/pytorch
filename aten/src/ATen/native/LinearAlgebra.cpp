@@ -2815,11 +2815,14 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
   auto size = self.sizes();
+  auto ndim = self.dim();
 
   bool all_reduction_dims_are_one_dimensional = true;
-  if (opt_dim.has_value()) {
-    for (const auto i : c10::irange(dim.size())) {
-      size_t dim_ = maybe_wrap_dim(dim[i], self.dim());
+  if (opt_dim.has_value() && !opt_dim->empty()) {
+    DimVector dims_ = at::native::make_dim_vector(opt_dim, self.dim());
+    maybe_wrap_dims(dims_, self.dim());
+    for (const auto i : c10::irange(dims_.size())) {
+      size_t dim_ = dims_[i];
       if (size[dim_] != 1){
         all_reduction_dims_are_one_dimensional = false;
         break;
@@ -2827,7 +2830,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     }
   } else {
     // all dims are 1-dimensional
-    for (size_t dim_ = 0; dim_ < size.size(); dim_++) {
+    for (const auto dim_ : c10::irange(ndim)) {
       if (size[dim_] != 1){
         all_reduction_dims_are_one_dimensional = false;
         break;
