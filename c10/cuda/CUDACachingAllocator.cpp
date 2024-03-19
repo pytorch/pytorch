@@ -971,9 +971,13 @@ class DeviceCachingAllocator {
     TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
     pool = pool_it->second.get();
 
+    TORCH_INTERNAL_ASSERT(pool != nullptr);
+
     size_t allocated_pool_blocks = 0;
 
     for (Block* b : active_blocks) {
+      TORCH_INTERNAL_ASSERT(b != nullptr);
+      TORCH_INTERNAL_ASSERT(b->pool != nullptr);
       if (b->allocated && b->pool->owner_PrivatePool == pool) {
         if (!expected_live_allocations.count(b->ptr)) {
           return false;
