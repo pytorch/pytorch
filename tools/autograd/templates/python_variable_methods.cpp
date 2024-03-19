@@ -22,6 +22,7 @@
 #include "torch/csrc/cuda/Event.h"
 #endif
 #include "torch/csrc/utils/device_lazy_init.h"
+#include <torch/csrc/utils/numpy_stub.h>
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -1078,6 +1079,41 @@ static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   return THPVariable_is_nonzero(self, args);
 }
 
+static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_available()) {
+    static PythonArgParser parser({
+      "__eq__(PyObject* other)",
+    }, /*traceable=*/true);
+
+    ParsedArgs<1> parsed_args;
+    auto _r = parser.parse(self_, args, kwargs, parsed_args);
+    if(_r.has_torch_function()) {
+      return handle_torch_function(_r, self_, args, kwargs, THPVariableClass, "torch.Tensor");
+    }
+    switch (_r.idx) {
+      case 0: {
+        auto other = _r.pyobject(0);
+        if (PyArray_Check(other)) {
+          auto other_tensor = torch::utils::tensor_from_numpy(other);
+          auto dispatch_eq = [](const at::Tensor & self, const at::Tensor & other) -> at::Tensor {
+            pybind11::gil_scoped_release no_gil;
+            return self.eq(other);
+          };
+          const Tensor& self = THPVariable_Unpack(self_);
+          return wrap(dispatch_eq(self, other_tensor));
+        }
+      }
+    }
+  }
+#endif
+  return THPVariable_eq(self_, args, kwargs);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
 template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
@@ -1209,7 +1245,7 @@ PyMethodDef variable_methods[] = {
   {"__ifloordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__imod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_eq>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable___eq__>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__ne__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__lt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, NULL},
