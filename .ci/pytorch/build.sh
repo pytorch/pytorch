@@ -255,6 +255,11 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
+      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
+        # Install numpy-2.0 release candidate for builds
+        # Which should be backward compatible with Numpy-1.X
+        python -mpip install --pre numpy==2.0.0b1
+      fi
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel
