@@ -800,7 +800,10 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    if config.assume_aligned_inputs:
+        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    else:
+        inputs_to_check = []
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
