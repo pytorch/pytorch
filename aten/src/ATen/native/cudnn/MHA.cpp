@@ -193,7 +193,7 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
 
 template <typename T, typename KeyType>
 struct MHAGraphCache {
-  std::unordered_map<KeyType, graph_and_tensors, ParamsWrapperHash<KeyType>>
+  std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>>
       engine_cache;
 
   // no mutexes here as caches are now thread local for v8, can also return a
@@ -217,7 +217,7 @@ struct MHAGraphCache {
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
 thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
-thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache_backward;
+thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper> mhagraphcache_backward;
 
 auto build_graph_and_tensors(
     int64_t b,
@@ -343,6 +343,40 @@ auto build_graph_and_tensors(
       mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats);
 }
 
+auto build_graph_and_tensors_backward(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    Tensor& dropoutseed,
+    Tensor& dropoutoffset,
+    cudnnHandle_t& handle,
+    MHAParams& params) {
+    auto dtype = fe::DataType_t::HALF;
+    if (q.scalar_type() == kBFloat16) {
+      dtype = fe::DataType_t::BFLOAT16;
+    }
+    auto mha_graph = std::make_shared<fe::graph::Graph>();
+    mha_graph->set_io_data_type(dtype)
+        .set_intermediate_data_type(fe::DataType_t::FLOAT)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+
+}
+
+
 void run_cudnn_SDP_fprop(
     int64_t b,
     int64_t h,
@@ -462,6 +496,12 @@ void run_cudnn_SDP_bprop(
       is_causal,
       true);
    auto graph_and_tensors_backward_ptr = mhagraphcache_backward.find(key); 
+   graph_and_tensors_backward graph_and_tensors_backward_values;
+   if (graph_and_tensors_backward_ptr) {
+     graph_and_tensors_backward_values = *graph_and_tensors_backward_ptr;
+   } else {
+     // graph_and_tensors_backward_values = build_graph_and_tensors_backward(
+   }
 
 }
 
