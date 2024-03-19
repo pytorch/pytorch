@@ -2308,8 +2308,9 @@ class Scheduler:
 
             self.enter_context(node)
 
-            if not isinstance(node, NopKernelSchedulerNode):
-                device = node.get_device()
+            if not isinstance(node, NopKernelSchedulerNode) and (
+                device := node.get_device()
+            ):
                 if (
                     device != self.current_device
                     or node.is_extern()
@@ -2351,7 +2352,7 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if self.get_backend(device).ready_to_flush():
+                if device is not None and self.get_backend(device).ready_to_flush():
                     self.flush()
 
         if self.current_device and self.current_device.type == "cuda":

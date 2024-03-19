@@ -22,6 +22,14 @@ SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
 }
 
 
+def _register_effectful_op(op: torch._ops.OpOverload, effect: _EffectType):
+    assert isinstance(op, torch._ops.OpOverload) and not has_aliasing(op)
+    assert (
+        op not in SIDE_EFFECTS
+    ), f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}"
+    SIDE_EFFECTS[op] = effect
+
+
 class WithEffects(HigherOrderOperator):
     """
     with_effects(token, op, args, kwargs) -> (new_token, op_results)

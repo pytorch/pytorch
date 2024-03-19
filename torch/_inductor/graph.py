@@ -314,6 +314,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.init_backend_registration()
 
+        self.effectful_ops: Dict[Any, ir.Buffer] = {}
+
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
         """
@@ -616,7 +618,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -860,7 +865,19 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
-        assert isinstance(result, (tuple, list)), type(result)
+
+        # Drop effect token output
+        # assert isinstance(result, (tuple, list)), type(result)
+        # token_outputs = []
+        # def filter_tokens(r):
+        #     if isinstance(r, ir.EffectfulKernel):
+        #         token_outputs.append(r)
+        #         return False
+        #     return True
+        # result = list(filter(filter_tokens, result))
+        # if len(token_outputs) > 0:
+        #     log.debug("Dropping effect token outputs: %s", token_outputs)
+
         assert all(
             isinstance(
                 x,
@@ -872,6 +889,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
