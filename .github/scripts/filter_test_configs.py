@@ -131,7 +131,7 @@ def get_labels(pr_number: int) -> Set[str]:
     }
 
 
-def has_labels(labels: Set[str], label_regex: re.Pattern) -> Set[str]:
+def has_labels(labels: Set[str], label_regex: re.Pattern[str]) -> Set[str]:
     """
     Return true if there is at least one label matching the regex
     """
@@ -159,11 +159,12 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
         label = f"{PREFIX}{config_name.strip()}"
         if label in labels:
-            info(
-                f"Select {config_name} because label {label} is presented in the pull request by the time the test starts"
-            )
+            msg = f"Select {config_name} because label {label} is presented in the pull request by the time the test starts"
+            info(msg)
             filtered_test_matrix["include"].append(entry)
 
+    debug = re.compile(f"{PREFIX}.+")
+    print(type(debug))
     test_config_labels = has_labels(labels, re.compile(f"{PREFIX}.+"))
     if not filtered_test_matrix["include"] and not test_config_labels:
         info("Found no test-config label on the PR, so all test configs are included")
@@ -171,7 +172,8 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         # test matrix as before so that all tests can be run normally
         return test_matrix
     else:
-        info(f"Found {test_config_labels} on the PR so only these test configs are run")
+        msg = f"Found {test_config_labels} on the PR so only these test configs are run"
+        info(msg)
         # When the filter test matrix contain matches or if a valid test config label
         # is found in the PR, return the filtered test matrix
         return filtered_test_matrix
@@ -357,30 +359,33 @@ def process_jobs(
         # - If the target record has the job (config) name, only that test config
         #   will be skipped or marked as unstable
         if not target_job_cfg:
-            info(
+            msg = (
                 f"Issue {target_url} created by {author} has {issue_type.value} "
                 + f"all CI jobs for {workflow} / {job_name}"
             )
+            info(msg)
             return _filter_jobs(
                 test_matrix=test_matrix,
                 issue_type=issue_type,
             )
 
         if target_job_cfg == BUILD_JOB_NAME:
-            info(
+            msg = (
                 f"Issue {target_url} created by {author} has {issue_type.value} "
                 + f"the build job for {workflow} / {job_name}"
             )
+            info(msg)
             return _filter_jobs(
                 test_matrix=test_matrix,
                 issue_type=issue_type,
             )
 
         if target_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
-            info(
+            msg = (
                 f"Issue {target_url} created by {author} has {issue_type.value} "
                 + f"all the test jobs for {workflow} / {job_name}"
             )
+            info(msg)
             return _filter_jobs(
                 test_matrix=test_matrix,
                 issue_type=issue_type,
