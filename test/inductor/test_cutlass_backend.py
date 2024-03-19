@@ -8,7 +8,7 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -348,6 +348,89 @@ class TestCutlassBackend(TestCase):
                     compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
             else:
                 compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_int_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if "CUTLASS" in max_autotune_gemm_backends.upper() and torch.version.hip:
+            return
+
+        def mm(a, b):
+            return torch._int_mm(a, b)
+
+        # CUTLASS only supports row-major/column-major combination of
+        # layouts for this operation, thus the transpose of tensor b
+        # (on the other side, Triton at the moment doesn't support
+        # this combination, so it's excluded from the test).  Also,
+        # for CUTLASS alignment requirements, number of columns in
+        # both tensors has to be divisible by 16.
+        a = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda()
+        b = torch.randint(0, 5, (32, 16), dtype=torch.int8).cuda().T
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_mixed_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return torch.mm(a, b.to(torch.half))
+
+        # CUTLASS only supports row-major/column-major combination of
+        # layouts for this operation, thus the transpose of tensor b.
+        # Also, for CUTLASS alignment requirements, number of columns
+        # of the first tensor has to be divisible by 16.
+        a = torch.randn(100, 16).cuda().half()
+        b = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda().T
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "use_mixed_mm": True,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
 
 
 if __name__ == "__main__":
