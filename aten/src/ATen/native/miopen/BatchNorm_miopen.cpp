@@ -117,7 +117,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     save_var = at::empty({ num_features }, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
+      idesc.desc(), input->const_data_ptr(),
       idesc.desc(), output->data_ptr(),
       wdesc.desc(),
       weight->data_ptr(),
@@ -133,7 +133,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     save_var = at::empty({0}, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
+      idesc.desc(), input->const_data_ptr(),
       idesc.desc(), output->data_ptr(),
       wdesc.desc(),
       weight->data_ptr(),
