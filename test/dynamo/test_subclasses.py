@@ -33,6 +33,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 
 
+def traceable_subclass(c):
+    return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
+
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
@@ -51,6 +55,18 @@ class MockSubclass(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        return func(*args, **kwargs)
+
+
+class AttrSubclass(torch.Tensor):
+    x: int = 10
+    size: int = 10
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
         return func(*args, **kwargs)
 
 
@@ -518,6 +534,29 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
+    def test_tensor_subclass_custom_attr(self):
+        class AttrSubclass(torch.Tensor):
+            x: int = 10
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.x + torch.ones(2, 2)
+
+        with traceable_subclass(AttrSubclass):
+            input = torch.ones(2, 2).as_subclass(AttrSubclass)
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(input)
+            res_act = fn_opt(input)
+            self.assertEqual(res_exp, res_act)
+
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
 
@@ -941,6 +980,74 @@ s1 > 3""",
         res = fn_opt(x)
         self.assertEqual(ref, res)
 
+    def test_torch_function_subclass_survives_into_aot_autograd(self):
+        # If you have a tensor subclass that relies on dispatch into the same op
+        # without unwrapping and calling torch._C.DisableTorchFunctionSubclass(),
+        # the torch function-ness will survive into AOTAutograd. Today, NestedTensor
+        # actually relies on this behavior! Because that torch function logic
+        # runs during AOTAutograd, this test tests that there is no logic below
+        # that relies torch function that gets unexpectedly disabled after we
+        # redispatch from the subclass's torch function.
+        class SubTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, t):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    t.shape,
+                    t.stride(),
+                    t.storage_offset(),
+                    torch.contiguous_format,
+                    t.dtype,
+                    torch.strided,
+                    t.device,
+                    False,
+                    t.requires_grad,
+                    "sizes",
+                    False,
+                    False,
+                    None,
+                )
+
+            def __init__(self, t):
+                super().__init__()
+                self._t = t
+
+            def __tensor_flatten__(self):
+                return ["_t"], {}
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                t = inner_tensors["_t"]
+                return SubTensor(t)
+
+            def __repr__(self):
+                return f"SubTensor({self._t})"
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **kwargs)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                new_args = pytree.tree_map_only(SubTensor, lambda s: s._t, args)
+                output = func(*new_args, **kwargs)
+                output = pytree.tree_map_only(
+                    torch.Tensor, lambda t: SubTensor(t), output
+                )
+                return output
+
+        @torch.compile(dynamic=True)
+        def f(x):
+            return x.unflatten(-1, [2, 5])
+
+        s = SubTensor(torch.randn(3, 10))
+        f(s)
+
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
@@ -1068,6 +1175,31 @@ class GraphModule(torch.nn.Module):
             return typ.__bases__
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
+    @parametrize("dynamic", [False, True])
+    def test_subclass_views(self, dynamic):
+        def _get_views(t):
+            # Note that any closed-over SymInts will be symbolicized during fake-ification.
+            yield t.narrow(dim=-1, start=3, length=8)
+            yield t.split(5, -1)
+            yield t.split_with_sizes([9, 6], -1)
+            yield t.unsqueeze(-1).expand(4, 15, 10)
+            yield t.select(-1, 6)
+            yield t[2:3, 5:9]
+
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(
+            f, backend="aot_eager", fullgraph=True, dynamic=dynamic
+        )
+
+        # Take a view of a subclass to pass as input.
+        t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
+        for view in _get_views(t):
+            out_ref = f(view)
+            out_test = compiled_f(view)
+            self.assertEqual(out_ref, out_test)
 
 
 instantiate_parametrized_tests(SubclassTests)
@@ -1297,7 +1429,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 s0: [2, 9223372036854775805]
 s2: [2, 9223372036854775806]
 s3: [3, 9223372036854775806]
-s4: [2, 9223372036854775806]""",
+s5: [2, 9223372036854775806]""",
                 )
                 return gm
 

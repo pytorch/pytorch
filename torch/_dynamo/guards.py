@@ -487,6 +487,10 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # Code object can not be compared against their string representation
+        # I.e `eval(f"{compile('2+2','','exec')!r}")` raises SyntaxError
+        assert not istype(val, types.CodeType)
+
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking
         # and NaN tests
@@ -495,7 +499,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None), types.CodeType)):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
@@ -642,15 +646,6 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(
             guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
         )
-
-    def BACKEND_MATCH(self, guard: Guard):
-        """Guard on backend matching based on id of current_backend"""
-        assert guard.source is GuardSource.GLOBAL
-        backend_id = (
-            f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
-        )
-        code = [f"___check_current_backend({backend_id})"]
-        self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
@@ -999,17 +994,6 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
-
-        # Note: right overrides left
-        def combine_scopes(left, right):
-            if left is None:
-                return right
-
-            if right is None:
-                return left
-
-            return {**left, **right}
-
         w_builder = None
 
         def source_ref(source):
@@ -1210,7 +1194,6 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
-            "___check_current_backend": torch._dynamo.eval_frame.check_current_backend,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
