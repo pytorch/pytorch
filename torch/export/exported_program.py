@@ -98,14 +98,10 @@ def _fx_collection_equivalence_fn(
     if spec1_type is None or spec2_type is None:
         return spec1_type is spec2_type and spec1_context == spec2_context
 
-    if issubclass(spec1_type, (dict, immutable_dict)) and issubclass(
-        spec2_type, (dict, immutable_dict)
-    ):
+    if spec1_type in {dict, immutable_dict} and spec2_type in {dict, immutable_dict}:
         return spec1_context == spec2_context
 
-    if issubclass(spec1_type, (list, immutable_list)) and issubclass(
-        spec2_type, (list, immutable_list)
-    ):
+    if spec1_type in {list, immutable_list} and spec2_type in {list, immutable_list}:
         return spec1_context == spec2_context
 
     return spec1_type is spec2_type and spec1_context == spec2_context

@@ -155,13 +155,13 @@ class OutputAdapter:
 def _replace_tuple_with_list(spec: pytree.TreeSpec) -> pytree.TreeSpec:
     _type = list if spec.type == tuple else spec.type
     return pytree.TreeSpec(
-        _type, spec.context, list(map(_replace_tuple_with_list, spec.children_specs))
+        _type, spec._context, list(map(_replace_tuple_with_list, spec.children()))
     )
 
 
 def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
     if spec.type == list and spec.num_children == 1:
-        return spec.children_specs[0]
+        return spec.child(0)
     return spec
 
 

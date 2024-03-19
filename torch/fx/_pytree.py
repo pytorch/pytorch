@@ -44,14 +44,14 @@ def tree_flatten_spec(
         ):
             raise RuntimeError(f"Cannot flatten pytree {pytree}, given spec: {spec}")
     result = []
-    for child, child_spec in zip(child_pytrees, spec.children_specs):
+    for child, child_spec in zip(child_pytrees, spec.children()):
         flat = tree_flatten_spec(child, child_spec, exact_structural_match)
         result += flat
     return result
 
 
 def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> List[Any]:
-    return [d[k] for k in spec.context]
+    return [d[k] for k in spec.entries()]
 
 
 def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:
