@@ -65,16 +65,18 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Test higher order function with mutation
         output = torch.zeros_like(t1)
         n_elements = output.numel()
+        constant_args_idx = kernel_side_table.add_constant_args(
+            {"n_elements": n_elements, "BLOCK_SIZE": 16}
+        )
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         triton_kernel_wrapper_mutation(
             kernel_idx=add_kernel_id,
+            constant_args_idx=constant_args_idx,
             grid=[grid],
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
                 "out_ptr": output,
-                "n_elements": n_elements,
-                "BLOCK_SIZE": 16,
             },
         )
         self.assertEqual(output, torch_add)
@@ -85,13 +87,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
         output = torch.zeros_like(t1)
         out_dict = triton_kernel_wrapper_functional(
             kernel_idx=add_kernel_id,
+            constant_args_idx=constant_args_idx,
             grid=[grid],
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
                 "out_ptr": output,
-                "n_elements": n_elements,
-                "BLOCK_SIZE": 16,
             },
             tensors_to_clone=["in_ptr0", "in_ptr1", "out_ptr"],
         )
@@ -115,12 +116,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
         def f(x, output):
             out = triton_kernel_wrapper_functional(
                 kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"n_elements": output.numel(), "BLOCK_SIZE": 16}
+                ),
                 grid=[(x.numel(),)],
                 kwargs={
                     "in_ptr0": x,
                     "out_ptr": output,
-                    "n_elements": output.numel(),
-                    "BLOCK_SIZE": 16,
                 },
                 tensors_to_clone=["in_ptr0", "out_ptr"],
             )
@@ -146,7 +148,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -187,11 +189,12 @@ def forward(self, x_1, output_1):
             with FunctionalTensorMode():
                 triton_kernel_wrapper_mutation(
                     kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
+                    constant_args_idx=kernel_side_table.add_constant_args(
+                        {"n_elements": x_func.numel(), "BLOCK_SIZE": 16}
+                    ),
                     grid=[(x_func.numel(),)],
                     kwargs={
                         "ptr": x_func,
-                        "n_elements": x_func.numel(),
-                        "BLOCK_SIZE": 16,
                     },
                 )
 
@@ -207,11 +210,12 @@ def forward(self, x_1, output_1):
                 x_func.mul_(2)
                 triton_kernel_wrapper_mutation(
                     kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
+                    constant_args_idx=kernel_side_table.add_constant_args(
+                        {"n_elements": x_func.numel(), "BLOCK_SIZE": 16}
+                    ),
                     grid=[(x_func.numel(),)],
                     kwargs={
                         "ptr": x_func,
-                        "n_elements": x_func.numel(),
-                        "BLOCK_SIZE": 16,
                     },
                 )
 
@@ -1086,6 +1090,51 @@ def forward(self, x_1, output_1):
         msg = "Only configs and keys are supported for triton.autotune"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             f(x, x)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_triton_dtype(self, dynamic, backend):
+        @triton.jit
+        def add_kernel_with_dtype(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            dtype: "tl.constexpr",
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask).to(dtype)
+            y = tl.load(in_ptr1 + offsets, mask=mask).to(dtype)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x, y, dtype_torch, dtype_triton):
+            output = torch.zeros_like(x).to(dtype=dtype_torch)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_with_dtype[grid](
+                x, y, output, dtype_triton, n_elements, BLOCK_SIZE=4
+            )
+            return output
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        args_list = (
+            [x, y, torch.float32, tl.float32],
+            [x, y, torch.bfloat16, tl.bfloat16],
+        )
+        for args in args_list:
+            eager_out = f(*args)
+            compiled_out = torch.compile(
+                f, fullgraph=True, backend=backend, dynamic=dynamic
+            )(*args)
+            self.assertEqual(compiled_out, eager_out)
 
 
 def make_mutation_test(fn):
