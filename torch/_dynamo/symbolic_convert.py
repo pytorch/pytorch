@@ -42,7 +42,6 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
@@ -67,13 +66,7 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import (
-    _is_top_level_scope,
-    is_side_effect_safe,
-    MutableLocal,
-    typestr,
-    VariableTracker,
-)
+from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -106,17 +99,11 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import (
-    supported_const_comparison_ops,
-    supported_tensor_comparison_ops,
-    SymNodeVariable,
-    TensorVariable,
-)
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    UserDefinedVariable,
 )
 
 log = logging.getLogger(__name__)
@@ -124,6 +111,17 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+compare_op_handlers: Dict[str, Any] = {
+    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+}
+handle_contains = BuiltinVariable(operator.contains).call_function
+handle_not = BuiltinVariable(operator.not_).call_function
+compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
+    tx, [*reversed(args)], {}
+)
+compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
+    tx, [handle_contains(tx, [*reversed(args)], {})], {}
+)
 
 
 @dataclasses.dataclass
@@ -139,7 +137,11 @@ class SpeculationEntry:
         Start tracing of the current frame over again, and don't take this branch.
         """
         self.failed = True
-        raise exc.SpeculationRestartAnalysis()
+        if self.reason is not None:
+            restart_reason = self.reason.reason
+        else:
+            restart_reason = "Unknown fail_and_restart_analysis"
+        raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
 
 
 @dataclasses.dataclass
@@ -223,7 +225,6 @@ class InstructionTranslatorGraphState(NamedTuple):
     block_stack: List[BlockStackEntry]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     lineno: int
 
     def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
@@ -633,7 +634,6 @@ class InstructionTranslatorBase(
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
@@ -643,6 +643,7 @@ class InstructionTranslatorBase(
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
+    exec_recorder: Optional[ExecutionRecorder]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -736,15 +737,11 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        assert isinstance(self.instruction_pointer, int)
-        inst = self.instructions[self.instruction_pointer]
-        self.current_instruction = inst
-        self.instruction_pointer += 1
-        try:
-            self.next_instruction = self.instructions[self.instruction_pointer]
-        except IndexError:
-            self.instruction_pointer = None
-            self.next_instruction = None
+        ip = self.instruction_pointer
+        if ip is None:
+            return False
+        self.current_instruction = inst = self.instructions[ip]
+        self.instruction_pointer = ip + 1
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
@@ -765,7 +762,7 @@ class InstructionTranslatorBase(
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
-            return True
+            return not self.output.should_exit
         except ReturnValueOp:
             return False
         except Unsupported:
@@ -823,6 +820,10 @@ class InstructionTranslatorBase(
         def update_block_stack(self, inst):
             pass
 
+    @property
+    def next_instruction(self):
+        return self.instructions[self.instruction_pointer]  # type: ignore[index]
+
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -846,16 +847,12 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
-                while (
-                    self.instruction_pointer is not None
-                    and not self.output.should_exit
-                    and self.step()
-                ):
+                while self.step():
                     pass
             except BackendCompilerFailed:
                 raise
             except Exception as e:
-                if config.replay_record_enabled:
+                if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
                 raise
             finally:
@@ -882,28 +879,34 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> List[VariableTracker]:
-        assert n >= 0
-        return list(reversed([self.pop() for _ in range(n)]))
+        return [*reversed([self.pop() for _ in range(n)])]
 
     def LOAD_FAST(self, inst):
         name = inst.argval
-        if name in self.f_locals and config.replay_record_enabled:
+
+        if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
-        if name.startswith(".") and name not in self.symbolic_locals:
-            # This happens in dict/list comprehensions
-            name = name.replace(".", "implicit")
-        assert name not in self.cell_and_freevars()
-        if name not in self.symbolic_locals:
-            unimplemented("undefined LOAD_FAST")
-        self.push(self.symbolic_locals[name])
+        try:
+            self.push(self.symbolic_locals[name].unwrap())
+        except KeyError:
+            if name.startswith("."):
+                try:
+                    # This happens in dict/list comprehensions
+                    self.push(self.symbolic_locals[name.replace(".", "implicit")])
+                except KeyError:
+                    unimplemented("undefined LOAD_FAST (implicit)")
+            else:
+                unimplemented("undefined LOAD_FAST")
+
+        # for continuation functions
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
 
-        if inst.argval in self.f_locals and config.replay_record_enabled:
+        if self.exec_recorder and inst.argval in self.f_locals:
             self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
 
         if inst.argval not in self.symbolic_locals:
@@ -913,11 +916,7 @@ class InstructionTranslatorBase(
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        # Only rename at the top-level scope, this is to avoid the confusion between
-        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
-        # where mutation is prohibited and it's difficult to differentiate it with renaming.
-        if _is_top_level_scope(current_scope_id()):
-            loaded_vt = loaded_vt.rename(self, name)
+        loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
@@ -929,11 +928,16 @@ class InstructionTranslatorBase(
         self.push(ClosureVariable(name=inst.argval))
 
     def LOAD_CONST(self, inst):
-        # For empty tuples, create empty TupleVariable
-        if isinstance(inst.argval, tuple) and not inst.argval:
-            self.push(TupleVariable([]))
-        else:
+        i = inst.arg
+        if i is None:
             self.push(ConstantVariable.create(value=inst.argval))
+        else:
+            val = self._constants_cache[i]
+            if not val:
+                self._constants_cache[i] = val = ConstantVariable.create(
+                    value=inst.argval
+                )
+            self.push(val)
 
     def get_global_source(self, name):
         source: Source
@@ -958,7 +962,7 @@ class InstructionTranslatorBase(
 
         name = inst.argval
 
-        if config.replay_record_enabled:
+        if self.exec_recorder:
             if name in self.f_globals:
                 self.exec_recorder.add_global_var(name, self.f_globals[name])
             else:
@@ -1089,7 +1093,7 @@ class InstructionTranslatorBase(
             else:
                 source = self.import_source(module_name)
 
-        if config.replay_record_enabled:
+        if self.exec_recorder:
             self.exec_recorder.add_local_mod(recorded_name, value)
 
         if istype(value, (types.ModuleType, DummyModule)):
@@ -1159,7 +1163,6 @@ class InstructionTranslatorBase(
         bytecode counter by delta
         """
         # Python 3.8 only
-        assert self.next_instruction is not None
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
         self.instruction_pointer = self.indexof[inst.target]
@@ -1195,61 +1198,7 @@ class InstructionTranslatorBase(
             unimplemented(f"FOR_ITER {typestr(it)}")
 
     def COMPARE_OP(self, inst):
-        left, right = self.popn(2)
-        op = inst.argval
-        supported_any = dict(
-            itertools.chain(
-                supported_tensor_comparison_ops.items(),
-                supported_const_comparison_ops.items(),
-            )
-        )
-        if (
-            isinstance(
-                left,
-                (
-                    TensorVariable,
-                    SymNodeVariable,
-                    NNModuleVariable,
-                    BaseListVariable,
-                    UserDefinedVariable,
-                    BaseUserFunctionVariable,
-                    ConstDictVariable,
-                ),
-            )
-            and isinstance(right, ConstantVariable)
-            and right.value is None
-            and op in supported_const_comparison_ops
-        ):
-            # <non-None> is None
-            self.push(
-                ConstantVariable.create(
-                    supported_const_comparison_ops[op](object(), right.value)
-                )
-            )
-
-        elif (
-            left.is_python_constant()
-            and right.is_python_constant()
-            and op in supported_any
-        ):
-            # constant fold
-            self.push(
-                ConstantVariable.create(
-                    supported_any[op](
-                        left.as_python_constant(), right.as_python_constant()
-                    ),
-                )
-            )
-        elif op in ("in", "not in"):
-            self.push(right.call_method(self, "__contains__", [left], {}))
-            if op == "not in":
-                self.UNARY_NOT(inst)
-        else:
-            self.push(
-                BuiltinVariable(supported_any[op]).call_function(
-                    self, [left, right], {}
-                )
-            )
+        self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
@@ -1878,8 +1827,6 @@ class InstructionTranslatorBase(
         )
         if sys.version_info >= (3, 11):
             # see create_call_resume_at for block stack details
-            assert self.next_instruction
-            assert self.next_instruction.exn_tab_entry
             target = self.next_instruction.exn_tab_entry.target
         else:
             target = inst.target
@@ -1913,7 +1860,6 @@ class InstructionTranslatorBase(
             list(self.block_stack),
             self.instruction_pointer,
             self.current_instruction,
-            self.next_instruction,
             self.lineno,
         )
 
@@ -1926,7 +1872,6 @@ class InstructionTranslatorBase(
             self.block_stack,
             self.instruction_pointer,
             self.current_instruction,
-            self.next_instruction,
             self.lineno,
         ) = state
         self.output.restore_graphstate(output_state)
@@ -2010,7 +1955,6 @@ class InstructionTranslatorBase(
         self.stack = []
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
-        self.next_instruction = None
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.generic_context_manager_depth = 0
@@ -2031,7 +1975,12 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
+        if config.replay_record_enabled:
+            self.exec_recorder = ExecutionRecorder(
+                code=f_code, code_options=code_options
+            )
+        else:
+            self.exec_recorder = None
         # Stack of module being parsed, current nn.module is at the end of ordered dict.
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
@@ -2058,6 +2007,9 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
+        self._constants_cache: List[Optional[VariableTracker]] = [None] * len(
+            f_code.co_consts
+        )
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
