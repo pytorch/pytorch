@@ -230,6 +230,7 @@ class MetaTensorDescriber:
         # non-functorch functional tensor
         unwrapped = None
         autograd_meta_from = None
+        current_level = None
         if is_batchedtensor_v or is_gradtrackingtensor_v:
             unwrapped = self.describe_tensor(get_unwrapped(t))
         # xla and lazy tensors present as functional tensors, but we want them
@@ -249,6 +250,10 @@ class MetaTensorDescriber:
                 unwrapped = self.describe_tensor(
                     _unwrap_functional_tensor(t, reapply_views)
                 )
+                # TODO: It's pretty suspicious that functional tensors don't have
+                # valid level and thus we just grab whatever the current level
+                # is
+                current_level = torch._C._functorch.current_level()
 
         functorch_stack = None
         if is_functorch_wrapped:
@@ -343,6 +348,7 @@ class MetaTensorDescriber:
             # it's irrelevant for non-functorch stuff
             functorch_stack=functorch_stack,
             autograd_meta_from=autograd_meta_from,
+            current_level=current_level,
         )
 
 
@@ -417,6 +423,7 @@ class MetaTensorDesc:
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped
+    current_level: Optional[int] = None
     functorch_stack: Optional[List[CInterpreter]] = None
     autograd_meta_from: Optional[torch.Tensor] = None
 
@@ -1011,7 +1018,7 @@ class MetaConverter:
                                     r = r.clone()
                         elif t.is_functional:
                             assert t.unwrapped is not None
-                            assert t.level is not None
+                            assert t.current_level is not None
                             ft = self.meta_tensor(
                                 t.unwrapped,
                                 shape_env=shape_env,
@@ -1023,7 +1030,7 @@ class MetaConverter:
                                 source=source,
                                 symbolic_context=symbolic_context,
                             )
-                            r = _wrap_functional_tensor(ft, t.level)
+                            r = _wrap_functional_tensor(ft, t.current_level)
                             # TODO: is_leaf/requires_grad?
                         else:
                             assert t.stride is not None
