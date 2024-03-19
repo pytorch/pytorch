@@ -4795,7 +4795,6 @@ class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows or on Python 3.12+
     @expectedFailureIf(IS_WINDOWS or (sys.version_info >= (3, 12)))
     @torch._dynamo.config.patch(suppress_errors=False)
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)
