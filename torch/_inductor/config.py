@@ -630,10 +630,10 @@ class triton:
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
     # Use IEEE rounding on division operations
-    precise_div = True
+    precise_div = False
 
     # Allow ptxas to generate fma instructions
-    enable_fp_fusion = True
+    enable_fp_fusion = False
 
 
 class aot_inductor:
