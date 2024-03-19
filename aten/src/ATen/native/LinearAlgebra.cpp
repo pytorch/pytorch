@@ -2848,7 +2848,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
 
     if (result.sizes().empty()) {
       // reduce over all dims and all dims are 1-dimensional
-      result_tmp = result_tmp.squeeze_();
+      result_tmp.squeeze_();
     } else {
       // all reduction dims are 1-dimensional
       if (!keepdim && opt_dim.has_value() && !opt_dim->empty()) {
@@ -2867,7 +2867,6 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     result.copy_(result_tmp);
     return;
   }
-
 
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
