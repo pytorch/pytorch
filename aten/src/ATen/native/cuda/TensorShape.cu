@@ -15,8 +15,6 @@
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #endif
 
-#include <stdio.h>
-
 namespace at::native {
 
 namespace detail {
