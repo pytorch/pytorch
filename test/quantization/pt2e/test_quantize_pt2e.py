@@ -1325,6 +1325,53 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_composable_quantizer_transform_for_annotation(self):
+        class TestQuantizer1(Quantizer):
+            def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in model.graph.nodes:
+                    if n.target == torch.ops.aten.add.Tensor:
+                        n.target = torch.ops.aten.mul.Tensor
+                return model
+
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class TestQuantizer2(Quantizer):
+            def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in model.graph.nodes:
+                    if n.target == torch.ops.aten.sub.Tensor:
+                        n.target = torch.ops.aten.div.Tensor
+                return model
+
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y - z
+
+        m = M().eval()
+        quantizer = ComposableQuantizer(
+            [TestQuantizer1(), TestQuantizer2()]
+        )
+        example_inputs = (torch.randn(1, 2, 3, 3), torch.randn(1, 2, 3, 3), torch.randn(1, 2, 3, 3))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        node_occurrence = {
+            ns.call_function(torch.ops.aten.add.Tensor): 0,
+            ns.call_function(torch.ops.aten.sub.Tensor): 0,
+            ns.call_function(torch.ops.aten.mul.Tensor): 1,
+            ns.call_function(torch.ops.aten.div.Tensor): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
     def test_embedding_quantizer(self):
         m_eager = TestHelperModules.EmbeddingModule().eval()
         indices = torch.tensor(

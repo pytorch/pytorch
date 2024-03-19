@@ -13,6 +13,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import cache_dir
 
 from torch.export import Dim, export
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
-    TestCase,
 )
 
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -205,6 +205,25 @@ class AOTInductorTestsTemplate:
                 w_relu = torch.nn.functional.relu(w_transpose)
                 w = w_relu + self.b
                 return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfRocm
+    @requires_cuda
+    def test_duplicate_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w1 = torch.randn(4, 4, device=device)
+                self.w2 = torch.randn(4, 4, device=device)
+                self.w3 = torch.randn(4, 4, device=device)
+                self.w4 = torch.randn(4, 4, device=device)
+
+            def forward(self, x):
+                w_concat = torch.cat((self.w1, self.w2, self.w3, self.w4))
+                return torch.cat((x, w_concat))
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
@@ -1979,6 +1998,9 @@ CPU_TEST_FAILURES = {
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -2022,8 +2044,6 @@ CUDA_TEST_FAILURES = {
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
-    # no ABI shim fn for torch.sort; remove this when adding one
-    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -2170,6 +2190,9 @@ copy_tests(
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
+        "test_duplicate_constant_folding": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
         "test_dynamic_smem_above_default_limit": TestFailure(
             ("non_abi_compatible_cpu",)
         ),
@@ -2202,7 +2225,7 @@ copy_tests(
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
     if HAS_CUDA or sys.platform == "darwin":

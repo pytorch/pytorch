@@ -10,6 +10,7 @@ from typing import Dict, List
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
 from ..external_utils import call_hook_from_backward_state
 
 try:
@@ -52,7 +53,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
@@ -75,6 +76,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
+    _has_child_nodes = False
     _nonvar_fields = {
         "proxy",
         "dtype",
@@ -882,9 +884,12 @@ class TensorVariable(VariableTracker):
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
-    def rename(self, tx, name):
-        self.proxy.node._rename(name)
-        return super().rename(tx, name)
+    def set_name_hint(self, name: str):
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if _is_top_level_scope(current_scope_id()):
+            self.proxy.node._rename(name)
 
 
 class SymNodeVariable(VariableTracker):
