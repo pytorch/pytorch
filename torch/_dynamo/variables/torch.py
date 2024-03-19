@@ -124,6 +124,8 @@ bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 class BaseTorchVariable(VariableTracker):
     """common base for all torch.* functions, classes, modules and other things"""
 
+    _has_child_nodes = False
+
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))

@@ -98,7 +98,7 @@ from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
-from torch.utils._triton import has_triton, has_triton_package
+
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -656,6 +656,8 @@ class CompilationMetrics:
     fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+    restart_reasons: Set[str]
+    dynamo_time_before_restart_s: float
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -979,10 +981,6 @@ common_constant_types = {
     torch.memory_format,
     torch.layout,
 }
-if has_triton_package():
-    import triton
-
-    common_constant_types.add(triton.language.dtype)
 
 
 def is_safe_constant(v):
@@ -1027,16 +1025,20 @@ def check_unspec_python_args(args, kwargs):
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
+        elif not isinstance(x, ConstantVariable):
             return False
-        else:
-            pass
-
     return unspec_count > 0
 
 
 def check_unspec_or_constant_args(args, kwargs):
-    return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    # A fused version of:
+    # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    from .variables.tensor import UnspecializedPythonVariable
+
+    for x in itertools.chain(args, kwargs.values()):
+        if not (x.is_python_constant() or isinstance(x, UnspecializedPythonVariable)):
+            return False
+    return True
 
 
 def check_numpy_ndarray_args(args, kwargs):
@@ -2213,6 +2215,8 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
+        from torch.utils._triton import has_triton
+
         compile_supported = has_triton()
     else:
         compile_supported = False
