@@ -1049,7 +1049,7 @@ class MetaConverter:
 
                     r = _to_fake_tensor(t)
 
-                elif t.is_functional:
+                elif t.is_functional and t.device.type not in ["xla", "lazy"]:
                     assert t.unwrapped is not None
                     assert not t.is_functorch_wrapped  # handled above
                     unwrapped = self.meta_tensor(
