@@ -514,3 +514,71 @@ def replace_resize_to_full_then_inplace_copy_into_then_resize_to_0_pattern(mod):
                 mod.graph.erase_node(copy_node)
                 mod.graph.lint()
                 mod.recompile()
+
+
+def replace_resize_to_full_then_inplace_copy_into_then_compute_then_resize_to_0_pattern(mod):
+    """
+    resize_storage_bytes__6 = torch.ops.inductor.resize_storage_bytes_.default(arg2_1, 609102400)
+    copy__default_8: "f32[12340, 12340]" = torch.ops.aten.copy_.default(arg2_1, as_strided_4)
+    ... some_op(arg2_1)
+    resize_storage_bytes__default_17 = torch.ops.inductor.resize_storage_bytes_.default(arg2_1, 0)
+
+    ->
+
+    `... some_op(as_strided_4)`
+    """
+    node_list = list(mod.graph.nodes)
+    return_op = None
+    for n in node_list:
+        if n.op == "output":
+            return_op = n
+            break
+    for i, ni in enumerate(node_list):
+        if ni.target is torch.ops.inductor.resize_storage_bytes_.default and ni.args[1] > 0:
+            resize_inp = ni.args[0]
+            resize_to_full_node = ni
+            resize_to_full_node_index = i
+            copy_node = None
+            copy_node_index = None
+            copy_from = None
+            non_resize_node = None
+            non_resize_node_index = None
+            resize_to_0_node = None
+            resize_to_0_node_index = None
+            for j, nj in enumerate(node_list[resize_to_full_node_index+1:]):
+                if nj.target is torch.ops.aten.copy_.default and nj.args[0] == resize_inp:
+                    copy_node = nj
+                    copy_node_index = j
+                    copy_to = nj.args[0]
+                    copy_from = nj.args[1]
+                    break
+            if copy_node_index is not None:
+                for l, nl in enumerate(node_list[copy_node_index+1:]):
+                    if resize_inp in flatten_arg_list(nl.args) and nl.target is not torch.ops.inductor.resize_storage_bytes_.default:
+                        non_resize_node = nl
+                        non_resize_node_index = l
+                        break
+            if non_resize_node_index is not None:
+                for k, nk in enumerate(node_list[non_resize_node_index+1:]):
+                    if nk.target is torch.ops.inductor.resize_storage_bytes_.default and nk.args[0] == resize_inp and nk.args[1] == 0:
+                        resize_to_0_node = nk
+                        resize_to_0_node_index = k
+                        break
+            if (
+                copy_node is not None \
+                and non_resize_node is not None \
+                and resize_to_0_node is not None \
+                and not input_is_used_in_other_ops(
+                    node_list[:i],  # check that `resize_inp` is not used in nodes before resize_to_full_node
+                    resize_inp,
+                )
+            ):
+                mod.graph.erase_node(resize_to_full_node)
+                mod.graph.erase_node(copy_node)
+                mod.graph.erase_node(resize_to_0_node)
+                resize_inp.replace_all_uses_with(
+                    copy_from,
+                    delete_user_cb=lambda n: n != return_op,
+                )
+                mod.graph.lint()
+                mod.recompile()

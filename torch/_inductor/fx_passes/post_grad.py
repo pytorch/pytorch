@@ -122,6 +122,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fsdp_fx_passes.replace_resize_to_full_then_inplace_copy_into_then_resize_to_0_pattern(gm)
         fsdp_fx_passes.remove_buffers_that_only_participate_in_storage_resize(gm)
         gm.graph.eliminate_dead_code()
+        fsdp_fx_passes.replace_resize_to_full_then_inplace_copy_into_then_compute_then_resize_to_0_pattern(gm)
+
     decompose_auto_functionalized(gm.graph)
     gm.recompile()
     gm.graph.lint()
