@@ -17,6 +17,7 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -122,6 +123,8 @@ bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
 class BaseTorchVariable(VariableTracker):
     """common base for all torch.* functions, classes, modules and other things"""
+
+    _has_child_nodes = False
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -840,7 +843,38 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        unimplemented("Parameter() on non-input")
+        try:
+            shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
+            dtype = data.var_getattr(tx, "dtype").as_python_constant()
+            device = data.var_getattr(tx, "device").as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(f"Parameter not python_constant: {e}")
+
+        placeholder = tx.output.synthetic_graph_input(
+            new_parameter_placeholder, [shape, dtype, device, requires_grad]
+        )
+        if data.requires_grad:
+            data = data.call_method(tx, "detach", [], {})
+
+        from .builder import wrap_fx_proxy
+
+        result = wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                tracable_create_parameter,
+                (data.as_proxy(), placeholder.as_proxy()),
+                {},
+            ),
+        )
+        assert isinstance(result, variables.TensorVariable)
+        result.class_type = torch.nn.Parameter
+        # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
+        result.source = placeholder.source
+
+        # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
+        # the end of the graph.  We should fix this.
+        return result
 
     @staticmethod
     def _nn_param_via_prefix_insert(tx, data, requires_grad):

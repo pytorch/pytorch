@@ -42,9 +42,9 @@ cpp_to_dtype_count = 0
 # counters for tracking cpp_wrapper disabled
 disable_cpp_wrapper = 0
 
-# The length counts the number of loops fused at the outer loop.
-# Each element counts the number of inner loops for each fused outer loop.
-cpp_fused_outer_loop_nest: List[int] = []
+# The length counts the number of outer loop fusions.
+# Each element counts the number of inner kernels in each outer loop fusion.
+cpp_outer_loop_fused_inner_counts: List[int] = []
 
 
 # reset all counters
@@ -55,7 +55,7 @@ def reset():
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
     global disable_cpp_wrapper
-    global cpp_fused_outer_loop_nest
+    global cpp_outer_loop_fused_inner_counts
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -65,7 +65,7 @@ def reset():
     ir_nodes_pre_fusion = 0
     cpp_to_dtype_count = 0
     disable_cpp_wrapper = 0
-    cpp_fused_outer_loop_nest.clear()
+    cpp_outer_loop_fused_inner_counts.clear()
 
 
 @dataclass
