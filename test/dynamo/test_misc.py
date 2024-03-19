@@ -9811,7 +9811,7 @@ fn
         )
 
     def test_raises_importerror(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(x):
             try:
                 import some_module_that_surely_does_not_exist
