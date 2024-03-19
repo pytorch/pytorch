@@ -294,7 +294,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.storage_memo), 1)
         del x
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
         r = []
@@ -304,7 +303,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")

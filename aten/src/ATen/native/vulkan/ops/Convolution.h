@@ -170,6 +170,17 @@ Tensor run_qconv2d_context(
     int64_t zero_point,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context);
 
+c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min = c10::nullopt,
+    const c10::optional<Scalar>& output_max = c10::nullopt);
+
 // Backwards compatibility
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
