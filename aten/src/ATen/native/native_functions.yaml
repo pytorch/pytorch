@@ -4084,10 +4084,12 @@
 
 - func: _int_mm(Tensor self, Tensor mat2) -> Tensor
   dispatch:
+    CPU: _int_mm_cpu
     CUDA: _int_mm_cuda
 
 - func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
+    CPU: _int_mm_out_cpu
     CUDA: _int_mm_out_cuda
 
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
