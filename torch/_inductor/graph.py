@@ -934,8 +934,8 @@ class GraphLowering(torch.fx.Interpreter):
         assert torch._inductor.ir.is_storage_and_layout(tensor)
 
         def guard_oblivious(expr):
-            # TODO - getting error in guard_size_oblivious because I am passing in sympy.logic.boolalg.BooleanFalse
-            # instead of SymBool or bool
+            # Getting error in guard_size_oblivious because I am passing in sympy.logic.boolalg.BooleanFalse
+            # instead of SymBool or bool.
             if isinstance(expr, torch.SymBool):
                 return guard_size_oblivious(expr)
 
