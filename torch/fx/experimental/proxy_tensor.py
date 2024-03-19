@@ -1046,6 +1046,7 @@ class _ModuleStackTracer(PythonKeyTracer):
     def is_leaf_module(self, m, module_qualified_name):
         return False
 
+
 def make_fx(f,
             decomposition_table=None,
             tracing_mode="real",
