@@ -133,6 +133,25 @@ def justknobs_getval_int(name: str) -> int:
     return 0
 
 
+def fbdata_set_counter(key: str, value: int) -> None:
+    """
+    This functions allows you to set a counter that will be visible via fb303,
+    FB production infrastructure that lets you report counters that are
+    periodically polled by an agent that then puts them in your observability
+    data store (ODS in our case).  Because PyTorch is typically run inside
+    of MAST jobs, actually the agent is just a thread that runs every 60s
+    and dumps the fbdata object out to disk, to be read by another log tailer.
+
+    Don't go too wild with counters: there is a limitation of 90K counters per
+    host per minute. Everything that's above this limit is silently dropped on
+    the floor.
+
+    PyTorch in OSS is not built with fb303, but you can read more about
+    this at https://github.com/facebook/fb303
+    """
+    pass
+
+
 @functools.lru_cache(None)
 def max_clock_rate():
     from triton.testing import nvsmi
