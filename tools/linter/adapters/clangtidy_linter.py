@@ -13,22 +13,22 @@ from pathlib import Path
 from sysconfig import get_paths as gp
 from typing import Any, List, NamedTuple, Optional, Pattern
 
-# PyTorch directory root
-def scm_root():
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"]
-        )
-    except subprocess.CalledProcessError:
-        pass
-    try:
-        return subprocess.check_output(["hg", "root"])
-    except subprocess.CalledProcessError:
-        pass
-    raise RuntimeError("Unable to find SCM root")
 
-result = scm_root()
-PYTORCH_ROOT = result.decode("utf-8").strip()
+# PyTorch directory root
+def scm_root() -> str:
+    path = os.path.abspath(os.getcwd())
+    while True:
+        if os.path.isdir(os.path.join(path, ".git")):
+            return path
+        if os.path.isdir(os.path.join(path, ".hg")):
+            return path
+        n = len(path)
+        path = os.path.dirname(path)
+        if len(path) == n:
+            raise RuntimeError("Unable to find SCM root")
+
+
+PYTORCH_ROOT = scm_root()
 IS_WINDOWS: bool = os.name == "nt"
 
 
