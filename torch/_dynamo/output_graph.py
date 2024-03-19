@@ -113,6 +113,39 @@ graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
+@dataclass(frozen=True)
+class VariableTrackerCacheKey:
+    vt_id: int
+    # Two different source can point to the same object. However, Dynamo handles
+    # globals and local source differently when it comes to guards and possibly
+    # some other parts as well. So, cache also relies on the source.
+    source: Source
+
+
+class VariableTrackerCache:
+    def __init__(self):
+        self.cache = {}
+
+    def lookup(self, value, source):
+        key = VariableTrackerCacheKey(id(value), source)
+        if key not in self.cache:
+            return None
+        return self.cache[key]
+
+    def add(self, value, source, vt):
+        key = VariableTrackerCacheKey(id(value), source)
+        self.cache[key] = vt
+
+    def clone(self):
+        # Needed for copy and restore graph state
+        new_cache = VariableTrackerCache()
+        new_cache.cache.update(self.cache)
+        return new_cache
+
+    def clear(self):
+        self.cache.clear()
+
+
 class OutputGraphState(NamedTuple):
     input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
@@ -122,6 +155,7 @@ class OutputGraphState(NamedTuple):
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
+    variable_tracker_cache: VariableTrackerCache
     timestamp: int
     non_compliant_ops: Set[torch._ops.OpOverload]
     compliant_custom_ops: Set[torch._ops.OpOverload]
@@ -320,6 +354,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
+        # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
+        # and LOAD_ATTR for same python objects free.
+        self.variable_tracker_cache = VariableTrackerCache()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
         # used to track nodes that are added between calls of copy_graphstate
@@ -396,8 +433,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-    def add_backward_state_hook(self, hook: VariableTracker):
-        name = f"hook{len(self.backward_state)}"
+    def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
+        name = f"{prefix}{len(self.backward_state)}"
         assert name not in self.backward_state
         self.backward_state[name] = hook
         return name, self.get_backward_state_proxy()
@@ -592,6 +629,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
+            self.variable_tracker_cache.clone(),
             self.timestamp,
             set(self.non_compliant_ops),
             set(self.compliant_custom_ops),
@@ -610,6 +648,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             global_state,
             self.param_name_to_source,
             self.side_effects,
+            self.variable_tracker_cache,
             self.timestamp,
             self.non_compliant_ops,
             self.compliant_custom_ops,
@@ -1571,6 +1610,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+        self.variable_tracker_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
