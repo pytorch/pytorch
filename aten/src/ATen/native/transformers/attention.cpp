@@ -614,11 +614,12 @@ at::Tensor post_process_flash_output(
 }
 
 int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor& value,
-    const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+    const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale,
+    c10::optional<int64_t> num_kv_groups){
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   try {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
-        query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+        query_, key, value, attn_mask_, dropout_p, is_causal, scale, num_kv_groups);
   } catch(const ::c10::Error& e){
   }
   return choice_int;
@@ -692,10 +693,10 @@ Tensor scaled_dot_product_attention(
       || query_.device().type() == DeviceType::PrivateUse1){
     if (query_.device().type() == DeviceType::PrivateUse1){
       choice_int = handle_private_use(
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale, num_kv_groups);
     } else {
       choice_int = _fused_sdp_choice_stub(query_.device().type(),
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale, num_kv_groups);
     }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);

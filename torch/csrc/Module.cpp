@@ -1882,7 +1882,13 @@ Call this whenever a new thread is created in order to propagate values from
                        bool is_causal,
                        c10::optional<int64_t> num_kv_groups) {
         return sdp::sdp_params{
-            query, key, value, std::move(attn_mask), dropout, is_causal, num_kv_groups};
+            query,
+            key,
+            value,
+            std::move(attn_mask),
+            dropout,
+            is_causal,
+            num_kv_groups};
       }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)

@@ -342,7 +342,6 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   return true;
 }
 
-inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
 template <bool supports_gqa>
 inline bool check_grouped_query_attention(sdp_params const& params, bool debug) {
   const auto q_num_heads = params.query.sym_size(1);
@@ -395,7 +394,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
 }
 
 template <bool supports_gqa>
-inline bool check_batch_size_and_num_heads(sdp_params const& params, bool debug) {
+inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
 
@@ -466,13 +465,6 @@ inline bool check_batch_size_nested(sdp_params const& params, bool debug) {
         return false;
       }
     }
-
-inline bool check_nonzero_sequence_lengths(sdp_params const& params, bool debug) {
-  if (has_for_nested_inputs(params)){
-    // Currently we do not support any masking with NestedTensors
-    // This is checked in validate_sdpa_input so this filter func
-    // Should have no actually bearing on the kernel selection
-    return true;
   }
   return broadcastable_batch_size;
 }
