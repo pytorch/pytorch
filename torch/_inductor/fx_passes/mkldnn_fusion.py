@@ -913,15 +913,9 @@ if torch._C._has_mkldnn:
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1
         if linear_node.target == aten.addmm.default:
-            alpha = (
-                None
-                if "alpha" not in linear_node.kwargs
-                else linear_node.kwargs["alpha"]
-            )
-            beta = (
-                None if "beta" not in linear_node.kwargs else linear_node.kwargs["beta"]
-            )
-            if (beta and beta != 0.0 and beta != 1.0) or (alpha and alpha != 1.0):
+            alpha = linear_node.kwargs.get("alpha", 1.0)
+            beta = linear_node.kwargs.get("beta", 1.0)
+            if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
@@ -1128,8 +1122,7 @@ if torch._C._has_mkldnn:
                 if linear_node.target == aten.mm.default
                 or (
                     linear_node.target == aten.addmm.default
-                    and "beta" in linear_node.kwargs
-                    and linear_node.kwargs["beta"] == 0.0
+                    and linear_node.kwargs.get("beta", 1.0) == 0.0
                 )
                 else args[0]
             )

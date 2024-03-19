@@ -205,7 +205,6 @@ class TestPatternMatcherBase(TestCase):
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
                 *clone_inputs,
             )
-            print("source_code: ", source_code)
             for op in include_ops:
                 self.assertIn(op, source_code)
             for op in exclude_ops:
@@ -2146,17 +2145,28 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     self.bias, x, self.weight, beta=self.beta, alpha=self.alpha
                 )
 
-        for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
-            mod = Mod(torch.randn(64, 64), torch.randn(64), beta, alpha).eval()
-            with torch.no_grad():
-                x = torch.randn(1, 64)
-                include_ops = []
-                exclude_ops = []
-                if (beta != 1.0 and beta != 0.0) or alpha != 1.0:
-                    exclude_ops = ["torch.ops.mkl._mkl_linear"]
-                else:
-                    include_ops = ["torch.ops.mkl._mkl_linear"]
-                self._test_code_common(mod, (x,), include_ops, exclude_ops)
+        dtypes = [torch.float32]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        for dtype in dtypes:
+            linear_op = (
+                "mkl._mkl_linear"
+                if dtype == torch.float32
+                else "mkldnn._linear_pointwise"
+            )
+            for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
+                weight = torch.randn(64, 64, dtype=dtype)
+                bias = torch.randn(64, dtype=dtype)
+                mod = Mod(weight, bias, beta, alpha).to(dtype).eval()
+                with torch.no_grad():
+                    x = torch.randn(1, 64, dtype=dtype)
+                    include_ops = []
+                    exclude_ops = []
+                    if (beta != 1.0 and beta != 0.0) or alpha != 1.0:
+                        exclude_ops = [linear_op]
+                    else:
+                        include_ops = [linear_op]
+                    self._test_code_common(mod, (x,), include_ops, exclude_ops)
 
     @skipIfNoDynamoSupport
     @skipIfRocm
