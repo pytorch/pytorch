@@ -309,6 +309,76 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
+<<<<<<< HEAD
+=======
+=======
+    needs: manywheel-py3_8-rocm5_7-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.7
+      GPU_ARCH_VERSION: 5.7
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
+      DESIRED_PYTHON: "3.8"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_8-rocm5_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: atalman_numpy_test23
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm5.7-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_8-rocm5_7-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_8-rocm5_7-test
+>>>>>>> 2aec3faa327 (test_onednn)
+>>>>>>> 12affba5e3c (Udate builder branch)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -407,7 +477,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: atalman_onednn_22
+          ref: atalman_numpy_test23
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -958,6 +1028,76 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
+<<<<<<< HEAD
+=======
+=======
+    needs: manywheel-py3_9-rocm5_7-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.7
+      GPU_ARCH_VERSION: 5.7
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
+      DESIRED_PYTHON: "3.9"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_9-rocm5_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: atalman_numpy_test23
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm5.7-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_9-rocm5_7-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_9-rocm5_7-test
+>>>>>>> 2aec3faa327 (test_onednn)
+>>>>>>> 12affba5e3c (Udate builder branch)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1122,7 +1262,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: atalman_onednn_22
+          ref: atalman_numpy_test23
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1849,6 +1989,76 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
+<<<<<<< HEAD
+=======
+=======
+    needs: manywheel-py3_10-rocm5_7-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.7
+      GPU_ARCH_VERSION: 5.7
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
+      DESIRED_PYTHON: "3.10"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_10-rocm5_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: atalman_numpy_test23
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm5.7-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_10-rocm5_7-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-rocm5_7-test
+>>>>>>> 2aec3faa327 (test_onednn)
+>>>>>>> 12affba5e3c (Udate builder branch)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2013,7 +2223,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: atalman_onednn_22
+          ref: atalman_numpy_test23
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2675,6 +2885,76 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_11-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
+<<<<<<< HEAD
+=======
+=======
+    needs: manywheel-py3_11-rocm5_7-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.7
+      GPU_ARCH_VERSION: 5.7
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
+      DESIRED_PYTHON: "3.11"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_11-rocm5_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: atalman_numpy_test23
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm5.7-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_11-rocm5_7-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-rocm5_7-test
+>>>>>>> 2aec3faa327 (test_onednn)
+>>>>>>> 12affba5e3c (Udate builder branch)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2839,7 +3119,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: atalman_onednn_22
+          ref: atalman_numpy_test23
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3501,6 +3781,76 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_12-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
+<<<<<<< HEAD
+=======
+=======
+    needs: manywheel-py3_12-rocm5_7-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.7
+      GPU_ARCH_VERSION: 5.7
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
+      DESIRED_PYTHON: "3.12"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_12-rocm5_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: atalman_numpy_test23
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm5.7-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_12-rocm5_7-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-rocm5_7-test
+>>>>>>> 2aec3faa327 (test_onednn)
+>>>>>>> 12affba5e3c (Udate builder branch)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3540,6 +3890,7 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
+<<<<<<< HEAD
 
   manywheel-py3_12-cuda12_4-split-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3606,6 +3957,10 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> 3851bfd0439 (Udate builder branch)
 
   manywheel-py3_12-rocm6_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3665,7 +4020,11 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
+<<<<<<< HEAD
           ref: main
+=======
+          ref: atalman_numpy_test23
+>>>>>>> 3851bfd0439 (Udate builder branch)
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3812,6 +4171,7 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
+<<<<<<< HEAD
 
   manywheel-py3_12-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4432,3 +4792,6 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
+=======
+>>>>>>> 12affba5e3c (Udate builder branch)
+>>>>>>> 3851bfd0439 (Udate builder branch)
