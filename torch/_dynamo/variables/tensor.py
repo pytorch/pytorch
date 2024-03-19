@@ -10,6 +10,7 @@ from typing import Dict, List
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
 from ..external_utils import call_hook_from_backward_state
 
 try:
@@ -25,6 +26,7 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+from torch._subclasses.meta_utils import is_sparse_any
 
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -51,10 +53,11 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+# Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
     ">": operator.gt,
     "<": operator.lt,
@@ -63,12 +66,23 @@ supported_tensor_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+# Ops that allow tensor <op> None
 supported_const_comparison_ops = {
     "is": operator.is_,
     "is not": operator.is_not,
     "==": operator.eq,
     "!=": operator.ne,
 }
+supported_comparison_ops = {
+    **supported_tensor_comparison_ops,
+    **supported_const_comparison_ops,
+}
+supported_tensor_comparison_op_values = dict.fromkeys(
+    supported_tensor_comparison_ops.values()
+)
+supported_const_comparison_op_values = dict.fromkeys(
+    supported_const_comparison_ops.values()
+)
 
 
 class TensorVariable(VariableTracker):
@@ -115,6 +129,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
+        _is_name_set=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -130,6 +145,10 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        if _is_name_set is None:
+            # no need to rename inputs
+            _is_name_set = self.proxy.node.op == "placeholder"
+        self._is_name_set: bool = _is_name_set
 
     def as_proxy(self):
         return self.proxy
@@ -149,7 +168,11 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not has_free_symbols(value):
+        if is_sparse_any(value) and not has_free_symbols(value):
+            props["size"] = tuple(
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
+        elif not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
             # We have to cast to int here, because these might get accessed as ConstantVariable, which has
             # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
@@ -199,8 +222,9 @@ class TensorVariable(VariableTracker):
             elif not callable(example_value):
                 from .builder import SourcelessBuilder
 
-                return SourcelessBuilder()(tx, example_value)
-        if not self.source:
+                return SourcelessBuilder.create(tx, example_value)
+
+        if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
 
         # For local source, we associate the real value. We use this real value
@@ -286,6 +310,13 @@ class TensorVariable(VariableTracker):
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
+    def method_attr__version(self, tx):
+        from ..tensor_version_op import _tensor_version
+
+        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+            tx, [self], {}
+        )
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
@@ -302,7 +333,14 @@ class TensorVariable(VariableTracker):
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None:
+        if (
+            result is not None
+            and self.source
+            and self.source.subguards_allowed()
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
+        ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
 
@@ -634,7 +672,7 @@ class TensorVariable(VariableTracker):
 
         tensor = self.as_proxy().node.meta["example_value"]
         out = tolist(tensor, self.as_proxy())
-        return SourcelessBuilder()(tx, out)
+        return SourcelessBuilder.create(tx, out)
 
     def method_backward(self, *args, **kwargs):
         unimplemented("Tensor.backward")
@@ -845,7 +883,12 @@ class TensorVariable(VariableTracker):
     def method_new(self, *args, **kwargs):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
-        if len(args) == 1 and isinstance(args[0], SizeVariable):
+        if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
+            len(args) >= 1
+            and all(
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+            )
+        ):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
@@ -857,9 +900,13 @@ class TensorVariable(VariableTracker):
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
-    def rename(self, tx, name):
-        self.proxy.node._rename(name)
-        return super().rename(tx, name)
+    def set_name_hint(self, name: str):
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if not self._is_name_set and _is_top_level_scope(current_scope_id()):
+            self.proxy.node._rename(name)
+            self._is_name_set = True
 
 
 class SymNodeVariable(VariableTracker):

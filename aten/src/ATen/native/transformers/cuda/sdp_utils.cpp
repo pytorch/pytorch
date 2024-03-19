@@ -242,7 +242,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return true;
 }
 
-bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
+bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89(
     sdp_params const& params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
@@ -252,11 +252,19 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>(dprops);
   bool is_head_dim_gt192 = params.query.sym_size(-1) > 192;
-  if (input_requires_grad(params) && is_sm86_or_sm89 && is_head_dim_gt192) {
+  bool is_head_dim_lte224 = params.query.sym_size(-1) <= 224;
+  bool is_dropout = params.dropout > 0.0;
+  //  head_dim size  in (192, 224] is not supported on sm86 and sm89
+  bool cond1 = is_head_dim_gt192 && is_head_dim_lte224;
+  // head_dim size > 224 and is_dropout is not supported on sm86 and sm89
+  bool cond2 = params.query.sym_size(-1) > 224 && is_dropout;
+  if (input_requires_grad(params) && is_sm86_or_sm89 && (cond1 || cond2)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention currently doesn't support training with head_dim greater than 192 on gpu architectures in the range[sm86, sm89].",
-          "Attempting to run with head_dim: ",
+          "Flash attention currently doesn't support training with head_dim ∈ (192, 224] or "
+          "(head_dim ∈ (224, 256] and dropout > 0.0) on gpu architectures in the range[sm86, sm89].",
+          "Attempting to run with dropout set to: ", params.dropout,
+          "and head_dim: ",
           params.query.sym_size(-1), " on a sm ", dprops->major, ".",
           dprops->minor, " gpu.");
     }
@@ -467,7 +475,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size_flash,
       check_flash_attention_hardware_support,
-      check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90,
+      check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89,
       check_flash_causal_non_square_seqlens,
       check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {

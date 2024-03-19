@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (4, 2)
+SCHEMA_VERSION = (5, 3)
 TREESPEC_VERSION = 1
 
 
@@ -51,7 +51,7 @@ class MemoryFormat(IntEnum):
 @dataclass
 class Device:
     type: str
-    index: Optional[int]
+    index: Optional[int] = None
 
 
 @dataclass(repr=False)
@@ -90,7 +90,7 @@ class TensorMeta:
     requires_grad: bool
     device: Device
     strides: List[SymInt]
-    storage_offset: int
+    storage_offset: SymInt
     layout: Layout
 
 
@@ -123,13 +123,18 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class TokenArgument:
+    name: str
+
+
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
 # type List[OptionalTensorArgument], with tensor values seiralized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @dataclass(repr=False)
 class OptionalTensorArgument(_Union):
-    as_tensor: str
+    as_tensor: TensorArgument
     as_none: Tuple[()]
 
 
@@ -187,6 +192,15 @@ class Node:
     outputs: List[Argument]
     metadata: Dict[str, str]
 
+@dataclass
+class CoLineInfo:
+    name: str
+    line: str
+
+@dataclass
+class CoFileInfo:
+    file_name: str
+    line_info_map: Dict[str, CoLineInfo] # lineno is str in traceback.FrameSummary
 
 @dataclass
 class Graph:
@@ -202,7 +216,7 @@ class Graph:
     # list.
     is_single_tensor_return: bool = False
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
-
+    co_fileinfo_ordered_list: List[CoFileInfo] = field(default_factory=list)
 
 @dataclass
 class UserInputSpec:
@@ -236,6 +250,11 @@ class InputToCustomObjSpec:
     custom_obj_name: str
 
 
+@dataclass
+class InputTokenSpec:
+    arg: TokenArgument
+
+
 @dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
@@ -243,6 +262,7 @@ class InputSpec(_Union):
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
+    token: InputTokenSpec
 
 
 @dataclass
@@ -279,6 +299,11 @@ class UserInputMutationSpec:
     user_input_name: str
 
 
+@dataclass
+class OutputTokenSpec:
+    arg: TokenArgument
+
+
 @dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
@@ -287,6 +312,7 @@ class OutputSpec(_Union):
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec
     user_input_mutation: UserInputMutationSpec
+    token: OutputTokenSpec
 
 
 @dataclass
