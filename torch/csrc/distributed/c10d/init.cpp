@@ -21,6 +21,7 @@
 
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupCudaP2P.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #endif
@@ -2510,6 +2511,23 @@ Example::
       .def_readwrite(
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
+
+  auto processGroupCudaP2P =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupCudaP2P>(
+          module, "ProcessGroupCudaP2P", backend)
+          .def(py::init<
+               const c10::intrusive_ptr<::c10d::Store>&,
+               int,
+               int,
+               c10::intrusive_ptr<::c10d::ProcessGroupCudaP2P::Options>>())
+          .def(
+              "is_p2p_available", &::c10d::ProcessGroupCudaP2P::isP2PAvailable);
+
+  intrusive_ptr_class_<::c10d::ProcessGroupCudaP2P::Options>(
+      processGroupCudaP2P, "Options", processGroupOptions)
+      .def(
+          py::init<c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
+          py::arg("nccl_options"));
 
 #endif
 
