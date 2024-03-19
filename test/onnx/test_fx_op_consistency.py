@@ -1563,13 +1563,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "nonzero",
-        matcher=lambda sample: len(sample.input.shape) == 0
-        and sample.kwargs.get("as_tuple", False) is False,
-        reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-    ),
-    xfail(
-        "nonzero",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason=onnx_test_common.reason_onnx_script_does_not_support(
             "aten::_assert_async.msg",
