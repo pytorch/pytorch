@@ -921,7 +921,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
-                self.log_results(name, input_nodes, timings, autotune_elapse, precompile_elapse)
+                self.log_results(
+                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                )
 
             return timings
 
@@ -1093,7 +1095,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: List[ir.IRNode],
         timings: Dict[ChoiceCaller, float],
         elapse: float,
-        precompile_elapse: float
+        precompile_elapse: float,
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
@@ -1130,7 +1132,10 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f} seconds precompiling\n")
+        sys.stderr.write(
+            f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
+            " seconds precompiling\n"
+        )
 
     @staticmethod
     def benchmark_example_value(node, written_to=False):
