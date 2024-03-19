@@ -1,0 +1,92 @@
+ir_version: 5
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "onnx::Reshape_2"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_1"
+    input: "onnx::Reshape_2"
+    output: "onnx::TopK_3"
+    name: "Reshape_2"
+    op_type: "Reshape"
+  }
+  node {
+    input: "onnx::TopK_0"
+    input: "onnx::TopK_3"
+    output: "4"
+    output: "5"
+    name: "TopK_3"
+    op_type: "TopK"
+    attribute {
+      name: "axis"
+      i: -1
+      type: INT
+    }
+  }
+  name: "main_graph"
+  input {
+    name: "onnx::TopK_0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "onnx::Reshape_1"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+        }
+      }
+    }
+  }
+  output {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_param: "TopK4_dim_0"
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_param: "TopK5_dim_0"
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 10
+}
