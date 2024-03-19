@@ -218,15 +218,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             cls._stack.close()
             super().tearDownClass()
 
-        def _equivalent_output_code_impl(self, size):
+        def _equivalent_output_code_impl(self, size, first_dim=None, activation=True):
             def foo(m, inp):
                 a = m(inp)
-                return torch.nn.functional.relu(a)
+                if activation:
+                    return torch.nn.functional.relu(a)
+                return a
 
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+            first_dim = first_dim if first_dim is not None else size
 
             m = torch.nn.Linear(size, size, bias=True).half().cuda()
-            inp = torch.rand([size, size]).half().cuda()
+            inp = torch.rand([first_dim, size]).half().cuda()
 
             with torch.no_grad():
                 res, code = run_and_get_code(foo_c, m, inp)
@@ -258,18 +261,16 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
 
         @fresh_inductor_cache()
-        @torch._inductor.config.patch(debug_filter_choice=filter_extern)
+        @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()
 
-            code, code2 = self._equivalent_output_code_impl(512)
+            code, code2 = self._equivalent_output_code_impl(512, 1, False)
 
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
                     "empty_strided_cuda", 1, exactly=True
-                ).check("extern_kernels.mm").check_count("del", 3, exactly=True).check(
-                    "reuse"
-                ).check(
+                ).check("extern_kernels.").check_count("del", 3, exactly=True).check(
                     "return"
                 ).run(
                     out_code[0]
