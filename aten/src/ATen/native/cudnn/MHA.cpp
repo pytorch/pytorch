@@ -411,7 +411,35 @@ auto build_graph_and_tensors_backward(
                                         .set_dim({1, 1, 1, 1})
                                         .set_stride({1, 1, 1, 1})
                                         .set_data_type(fe::DataType_t::INT32));
-  
+     auto DO = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("dO")
+            .set_dim(
+                std::vector<int64_t>(o.sizes().begin(), o.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                o.strides().begin(), o.strides().end())));
+     auto DQ = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("dQ")
+            .set_dim(
+                std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
+            .set_stride(std::vector<int64_t>(
+                params.q_stride.begin(), params.q_stride.end())));
+     auto DK = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("K")
+            .set_dim(
+                std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
+            .set_stride(std::vector<int64_t>(
+                params.k_stride.begin(), params.k_stride.end())));
+     auto DV = mha_graph->tensor(
+         fe::graph::Tensor_attributes()
+             .set_name("V")
+             .set_dim(
+                 std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
+             .set_stride(std::vector<int64_t>(
+                 params.v_stride.begin(), params.v_stride.end())));
+
 }
 
 
