@@ -342,14 +342,9 @@ that you can track for this.
 
 As a workaround, use ``torch.compile`` outside of the ``torch.func`` function:
 
-.. note::
-    This is an experimental feature and can be used by setting `torch._dynamo.config.capture_func_transforms=True`
-
 .. code-block:: python
 
     import torch
-
-    torch._dynamo.config.capture_func_transforms=True
 
     def f(x):
         return torch.sin(x)
@@ -372,8 +367,6 @@ Compiling ``torch.func.grad`` with ``torch.compile``
 
     import torch
 
-    torch._dynamo.config.capture_func_transforms=True
-
     def wrapper_fn(x):
         return torch.func.grad(lambda x: x.sin().sum())(x)
 
@@ -386,8 +379,6 @@ Compiling ``torch.vmap`` with ``torch.compile``
 .. code-block:: python
 
     import torch
-
-    torch._dynamo.config.capture_func_transforms=True
 
     def my_fn(x):
         return torch.vmap(lambda x: x.sum(1))(x)
@@ -409,8 +400,6 @@ We do not yet support things like tuple of Tensors.
 
     import torch
 
-    torch._dynamo.config.capture_func_transforms=True
-
     def fn(x):
         x1, x2 = x
         return x1 + x2
@@ -429,8 +418,6 @@ We do not yet support things like tuple of Tensors.
 
     import torch
 
-    torch._dynamo.config.capture_func_transforms=True
-
     def fn(x, y):
         return (x + y).sum()
 
@@ -448,8 +435,6 @@ but not OK to mutate a list created outside of the function.
 .. code-block:: python
 
     import torch
-
-    torch._dynamo.config.capture_func_transforms=True
 
     some_list = []
 
@@ -477,8 +462,6 @@ but not OK to mutate a list created outside of the function.
 .. code-block:: python
 
     import torch
-
-    torch._dynamo.config.capture_func_transforms=True
 
     def bad_fn(x):
         x.stride()
