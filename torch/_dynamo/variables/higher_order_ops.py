@@ -802,12 +802,19 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
-            tx, args[0], operands, {}, "while_loop", source_target=self.value, set_subgraph_inputs="manual"
+            tx,
+            args[0],
+            operands,
+            {},
+            "while_loop",
+            source_target=self.value,
+            set_subgraph_inputs="manual",
         )
         if len(cond_lifted_freevars) > 0:
             unimplemented(
-                f"while_loop's cond_fn doesn't support capturing free variables yet. All used inputs must be passed in as arguments explicitly."
-                f"Proxies for the lifted vars:{cond_lifted_freevars}."
+                f"while_loop's cond_fn doesn't support capturing free variables yet."
+                f" All used inputs must be passed in as arguments explicitly."
+                f" Proxies for the lifted vars:{cond_lifted_freevars}."
             )
         cond_nn_modules = dict(tx.output.nn_modules)
         if not isinstance(cond_r, TensorVariable):
@@ -843,8 +850,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         if len(body_lifted_freevars) > 0:
             unimplemented(
-                f"while_loop's body_fn doesn't support capturing free variables yet. All used inputs must be passed in as arguments explicitly."
-                f"Proxies for the lifted vars:{body_lifted_freevars}."
+                f"while_loop's body_fn doesn't support capturing free variables yet."
+                f" All used inputs must be passed in as arguments explicitly."
+                f" Proxies for the lifted vars:{body_lifted_freevars}."
             )
         cond_name = add_subgraph(
             tx,
