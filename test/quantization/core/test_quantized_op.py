@@ -6578,6 +6578,10 @@ class TestQuantizedConv(TestCase):
             assert not use_transpose, "Cannot fuse hardswish with ConvTranspose"
             hardswish = torch.nn.Hardswish()
             result_ref = hardswish(result_ref)
+        elif post_op.unary_attr == "swish":
+            assert not use_transpose, "Cannot fuse silu with ConvTranspose"
+            silu = torch.nn.SiLU()
+            result_ref = silu(result_ref)
 
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
