@@ -13,6 +13,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import cache_dir
 
 from torch.export import Dim, export
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
-    TestCase,
 )
 
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -210,6 +210,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfRocm
     @requires_cuda
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
@@ -2043,8 +2044,6 @@ CUDA_TEST_FAILURES = {
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
-    # no ABI shim fn for torch.sort; remove this when adding one
-    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -2226,7 +2225,7 @@ copy_tests(
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
     if HAS_CUDA or sys.platform == "darwin":
