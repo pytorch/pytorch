@@ -6,7 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace detail {
+namespace at::detail {
 
 template <typename T, int size_>
 struct Array {
@@ -27,7 +27,9 @@ struct Array {
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
 #endif
-  static constexpr int size(){return size_;}
+  static constexpr int size() {
+    return size_;
+  }
   // Fill the array with x.
   C10_HOST_DEVICE Array(T x) {
     for (int i = 0; i < size_; i++) {
@@ -36,4 +38,4 @@ struct Array {
   }
 };
 
-}}
+} // namespace at::detail

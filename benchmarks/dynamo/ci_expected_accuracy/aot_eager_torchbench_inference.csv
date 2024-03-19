@@ -86,7 +86,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,35
+detectron2_fcos_r_50_fpn,pass,94
 
 
 
