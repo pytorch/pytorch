@@ -46,12 +46,18 @@ struct Foo : torch::CustomClassHolder {
   int64_t add(int64_t z) {
     return (x + y) * z;
   }
+  at::Tensor add_tensor(at::Tensor z) {
+    return (x + y) * z;
+  }
   void increment(int64_t z) {
     this->x += z;
     this->y += z;
   }
   int64_t combine(c10::intrusive_ptr<Foo> b) {
     return this->info() + b->info();
+  }
+  bool eq(c10::intrusive_ptr<Foo> other) {
+    return this->x == other->x && this->y == other->y;
   }
 };
 
@@ -274,6 +280,16 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+struct ContainsTensor : public torch::CustomClassHolder {
+  explicit ContainsTensor(at::Tensor t) : t_(t) {}
+
+  at::Tensor get() {
+    return t_;
+  }
+
+  at::Tensor t_;
+};
+
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ScalarTypeClass>("_ScalarTypeClass")
       .def(torch::init<at::ScalarType>())
@@ -314,7 +330,22 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("info", &Foo::info)
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
-      .def("combine", &Foo::combine);
+      .def("add_tensor", &Foo::add_tensor)
+      .def("__eq__", &Foo::eq)
+      .def("combine", &Foo::combine)
+      .def_pickle(
+          [](c10::intrusive_ptr<Foo> self) { // __getstate__
+            return std::vector<int64_t>{self->x, self->y};
+          },
+          [](std::vector<int64_t> state) { // __setstate__
+            return c10::make_intrusive<Foo>(state[0], state[1]);
+          });
+  m.def(
+      "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
+  m.def(
+      "takes_foo_list_return(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor[]");
+  m.def(
+      "takes_foo_tuple_return(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> (Tensor, Tensor)");
 
   m.class_<FooGetterSetter>("_FooGetterSetter")
       .def(torch::init<int64_t, int64_t>())
@@ -430,6 +461,56 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](ElementwiseInterpreter::SerializationType state) {
             return ElementwiseInterpreter::__setstate__(std::move(state));
           });
+
+  m.class_<ContainsTensor>("_ContainsTensor")
+      .def(torch::init<at::Tensor>())
+      .def("get", &ContainsTensor::get)
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {
+            return self->t_;
+          },
+          // __setstate__
+          [](at::Tensor data) -> c10::intrusive_ptr<ContainsTensor> {
+            return c10::make_intrusive<ContainsTensor>(std::move(data));
+          });
+}
+
+at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
+  return foo->add_tensor(x);
+}
+
+std::vector<at::Tensor> takes_foo_list_return(
+    c10::intrusive_ptr<Foo> foo,
+    at::Tensor x) {
+  std::vector<at::Tensor> result;
+  result.reserve(3);
+  auto a = foo->add_tensor(x);
+  auto b = foo->add_tensor(a);
+  auto c = foo->add_tensor(b);
+  result.push_back(a);
+  result.push_back(b);
+  result.push_back(c);
+  return result;
+}
+
+std::tuple<at::Tensor, at::Tensor> takes_foo_tuple_return(
+    c10::intrusive_ptr<Foo> foo,
+    at::Tensor x) {
+  auto a = foo->add_tensor(x);
+  auto b = foo->add_tensor(a);
+  return std::make_tuple(a, b);
+}
+
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
+  m.impl("takes_foo", takes_foo);
+  m.impl("takes_foo_list_return", takes_foo_list_return);
+  m.impl("takes_foo_tuple_return", takes_foo_tuple_return);
+}
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, Meta, m) {
+  m.impl("takes_foo", &takes_foo);
+  m.impl("takes_foo_list_return", takes_foo_list_return);
+  m.impl("takes_foo_tuple_return", takes_foo_tuple_return);
 }
 
 } // namespace

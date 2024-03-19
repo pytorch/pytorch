@@ -75,7 +75,7 @@ For more details on ``torch.export``, you can refer to the :ref:`torch.export do
 
 In this illustrative example, the ``Dim`` parameter is employed to designate the first dimension of
 the input variable "x" as dynamic. Notably, the path and name of the compiled library remain unspecified,
-resulting in the shared library being stored in a temporay directory.
+resulting in the shared library being stored in a temporary directory.
 To access this path from the C++ side, we save it to a file for later retrieval within the C++ code.
 
 
@@ -90,8 +90,8 @@ previous step, enabling us to conduct model predictions directly within a C++ en
     The following code snippet assumes your system has a CUDA-enabled device and your model was
     compiled to run on CUDA as shown previously.
     In the absence of a GPU, it's necessary to make these adjustments in order to run it on a CPU:
-    1. Modify ``aoti_model_container_runner_cuda.h`` to ``aoti_model_container_runner.h``
-    2. Change ``AOTIModelContainerRunnerCuda`` to ``AOTIModelContainerRunner``
+    1. Change ``model_container_runner_cuda.h`` to ``model_container_runner_cpu.h``
+    2. Change ``AOTIModelContainerRunnerCuda`` to ``AOTIModelContainerRunnerCpu``
     3. Change ``at::kCUDA`` to ``at::kCPU``
 
 .. code-block:: cpp
@@ -100,7 +100,7 @@ previous step, enabling us to conduct model predictions directly within a C++ en
     #include <vector>
 
     #include <torch/torch.h>
-    #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
+    #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
     int main() {
         c10::InferenceMode mode;
@@ -114,7 +114,8 @@ previous step, enabling us to conduct model predictions directly within a C++ en
         // The second inference uses a different batch size and it works because we
         // specified that dimension as dynamic when compiling model.so.
         std::cout << "Result from the second inference:"<< std::endl;
-        std::cout << runner.run({torch::randn({2, 10}, at::kCUDA)})[0] << std::endl;
+        std::vector<torch::Tensor> inputs2 = {torch::randn({2, 10}, at::kCUDA)};
+        std::cout << runner.run(inputs2)[0] << std::endl;
 
         return 0;
     }

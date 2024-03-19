@@ -14,8 +14,7 @@
 #include <ATen/ops/adaptive_max_pool3d_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_size) {
   auto ndim = input.ndimension();
   TORCH_CHECK(
@@ -72,7 +71,7 @@ TORCH_META_FUNC(adaptive_max_pool3d_backward)
 }
 } // namespace meta
 
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -83,7 +82,7 @@ namespace {
 
 template <typename scalar_t>
 static void adaptive_max_pool3d_single_out_frame(
-          scalar_t *input_p,
+          const scalar_t *input_p,
           scalar_t *output_p,
           int64_t *ind_p,
           int64_t sizeD,
@@ -122,7 +121,7 @@ static void adaptive_max_pool3d_single_out_frame(
             int64_t kW = iendW - istartW;
 
             /* local pointers */
-            scalar_t *ip = input_p   + d*istrideD + istartT *istrideT + istartH*istrideH + istartW*istrideW;
+            const scalar_t *ip = input_p   + d*istrideD + istartT *istrideT + istartH*istrideH + istartW*istrideW;
             scalar_t *op = output_p  + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
             int64_t *indp = ind_p   + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
 
@@ -160,7 +159,7 @@ static void adaptive_max_pool3d_single_out_frame(
 
 template <typename scalar_t>
 static void adaptive_max_pool3d_out_frame(
-          scalar_t *input_data,
+          const scalar_t *input_data,
           scalar_t *output_data,
           int64_t *indices_data,
           int64_t sizeB,
@@ -300,7 +299,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
   if (input.ndimension() == 4) {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16,
         input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           auto indices_data = indices.data_ptr<int64_t>();
 
@@ -323,7 +322,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cpu)
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16,
         input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           auto indices_data = indices.data_ptr<int64_t>();
 
@@ -433,5 +432,4 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
         });
   }
 }
-} // at::native
-} // at
+} // namespace at::native

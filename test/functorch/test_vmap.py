@@ -25,9 +25,13 @@ from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     subtest,
     skipIfRocm,
-    TEST_WITH_TORCHDYNAMO
+    TEST_WITH_TORCHDYNAMO,
+    xfailIfTorchDynamo,
+    markDynamoStrictTest,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -49,6 +53,7 @@ from common_utils import (
 )
 import types
 import os
+import sys
 from collections import namedtuple
 import contextlib
 
@@ -60,6 +65,7 @@ from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
 from torch.utils import _pytree as pytree
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -73,6 +79,7 @@ class EnableVmapFallbackWarnings:
         torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
 
 
+@markDynamoStrictTest
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
@@ -1365,6 +1372,7 @@ def _make_case(op, input_getter=TensorFactory.randn):
     return (op, input_getter)
 
 
+@markDynamoStrictTest
 class TestVmapOperators(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
@@ -2146,6 +2154,9 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self.assertEqual(vmap(foo)(float_tensor), torch.tensor([1, 1, 1]))
         self.assertEqual(vmap(foo)(long_tensor), torch.tensor([0, 0, 0]))
 
+    @unittest.skipIf(IS_WINDOWS,
+                     reason="Windows not yet supported for torch.compile")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():
@@ -2201,6 +2212,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
             vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
+
+        for mf in (torch.channels_last, torch.channels_last_3d):
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(x):
+                if x.is_contiguous(memory_format=mf):
+                    return x.sin()
+                return x.cos()
+
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(f)(torch.randn(3, 3))
 
     def test_unsqueeze(self):
         op = torch.unsqueeze
@@ -2440,6 +2461,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
 
+    @xfailIfTorchDynamo
     def test_squeeze(self):
         def verify_behavior(op, min_ndim=1):
             test = self._vmap_view_test
@@ -2535,6 +2557,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
         test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
 
+    @skipIfTorchDynamo()
     def test_slogdet(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
         B0 = 7
@@ -2633,6 +2656,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    @skipIfTorchDynamo("really slow")
     def test_split(self):
         test = self._vmap_view_test
         op = torch.split
@@ -3057,6 +3081,7 @@ def _get_rand_no_zeros(*args, **kwargs):
     return result.clamp_min_(0.1).requires_grad_(requires_grad)
 
 
+@markDynamoStrictTest
 class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
@@ -3381,6 +3406,9 @@ def discover_variants(opinfo):
     return aliases, inplace_variants
 
 
+# TODO: enable this when we get a bit closer to getting torch.vmap x torch.compile working.
+# @markDynamoStrictTest
+@unMarkDynamoStrictTest
 class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
@@ -3519,6 +3547,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
+        decorate("frexp", decorator=skipIfTorchDynamo()),
+
         xfail('clamp_min', ''),  # Exception not raised on error input
         xfail('clamp_max', ''),  # Exception not raised on error input
 
@@ -3837,6 +3867,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
 
+    @skipIfTorchDynamo()
     def test_slogdet(self, device):
         # There's no OpInfo for this
         def test():
@@ -4366,6 +4397,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         test()
 
+@markDynamoStrictTest
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
         return generator.set_state(orig_state) if use_generator else torch.manual_seed(seed)
@@ -4418,6 +4450,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['same', 'different', 'error'])
     @parametrize('use_generator', [True, False])
     def test_factory_ops(self, device, randomness, use_generator):
+
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
         kwargs = {'device': device, 'generator': generator} if use_generator else {'device': device}
@@ -4455,6 +4488,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['same', 'different', 'error'])
     @parametrize('use_generator', [True, False])
     def test_randperm(self, device, randomness, use_generator):
+
         # needs a special case because randperm doesn't take a batch size
         B0 = 4
         seed = 1234567
@@ -4494,6 +4528,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_dropout(self, device, randomness, batched_input):
+
         def op(t, ignored):
             return torch.nn.functional.dropout(torch.ones_like(t), training=True)
 
@@ -4525,6 +4560,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_alpha_dropout(self, device, randomness, batched_input):
+
         def op(t, ignored):
             return torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True)
 
@@ -4552,6 +4588,7 @@ class TestRandomness(TestCase):
     @parametrize('batched_input', ["first", "last", "none"])
     @parametrize('dim', [2, 3])
     def test_feature_dropout(self, device, randomness, batched_input, dim):
+
         def op(t, ignored):
             f = torch.nn.functional.dropout2d if dim == 2 else torch.nn.functional.dropout3d
             return f(torch.ones_like(t), training=True)
@@ -4588,6 +4625,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_feature_alpha_dropout(self, device, randomness, batched_input):
+
         def op(t, ignored):
             return torch.nn.functional.feature_alpha_dropout(torch.ones_like(t), training=True)
 
@@ -4626,6 +4664,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_like_functions(self, device, randomness, batched_input):
+
         seed = 1234567
         supported_ops = [
             lambda t, _: torch.randint_like(t, 20),
@@ -4788,6 +4827,7 @@ class TestRandomness(TestCase):
     @parametrize('batched_input', ["first", "last", "none"])
     @parametrize('batched_other', ["first", "last", "none"])
     def test_random_binary_out_of_place(self, device, use_generator, randomness, batched_input, batched_other):
+
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
         kwargs = {'generator': generator} if use_generator else {}
@@ -4838,6 +4878,7 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_random_unary_out_of_place(self, device, use_generator, randomness, batched_input):
+
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
         kwargs = {'generator': generator} if use_generator else {}
@@ -4888,6 +4929,7 @@ class TestRandomness(TestCase):
     @parametrize('batched_call', [True, False])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_multinomial(self, device, use_generator, randomness, batched_call, batched_input):
+
         def flatten_input(input, batch_call, batch_location):
             if batch_call and batch_location != "none":
                 final_size = 3  # [B0, B, N]
@@ -5003,6 +5045,7 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
+    @xfailIfTorchDynamo
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param
@@ -5017,6 +5060,7 @@ class TestRandomness(TestCase):
 
     @parametrize('randomness', ['error', 'same', 'different'])
     def test_dropout_unbatched(self, device, randomness):
+
         x = torch.randn(3, device=device)
         y = torch.randn(1, 3, device=device)
 
@@ -5031,11 +5075,14 @@ class TestRandomness(TestCase):
         with context:
             vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
 
+@markDynamoStrictTest
 class TestTransformFailure(TestCase):
+    @skipIfTorchDynamo()
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
+        failed_build_envs = ('linux-focal-py3.8-clang10', 'linux-focal-py3.11-clang10')
         if (device == 'cpu' and transform in ['grad', 'vmap'] and
-                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10'):
+                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') in failed_build_envs):
             raise unittest.SkipTest("Unexpected successes on focal with dynamo," +
                                     " see https://github.com/pytorch/pytorch/issues/107173")
 
@@ -5069,6 +5116,7 @@ class TestTransformFailure(TestCase):
         with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
             transform(input)
 
+@markDynamoStrictTest
 class TestVmapDeviceType(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
@@ -5165,6 +5213,7 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
         check_vmap_fallback(self, test, torch._test_check_tensor)
 
+@markDynamoStrictTest
 class TestVmapNestedTensor(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
@@ -5295,7 +5344,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
                 RuntimeError, "Nested tensors can only be vmapped over dim=0"):
             vmap(f, out_dims=2)(x)
 
-    @allowVmapFallbackUsage
     def test_fallback_with_nt_and_batched_dense_with_nonzero_bdim_raises(self, device):
         def f(x, y):
             return x @ y

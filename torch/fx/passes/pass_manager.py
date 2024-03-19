@@ -218,12 +218,22 @@ class PassManager:
         self.constraints.append(constraint)
         self._validated = False
 
-    def remove_pass(self, _passes: List[Callable]):
+    def remove_pass(self, _passes: List[str]):
         if _passes is None:
             return
         passes_left = []
         for ps in self.passes:
             if ps.__name__ not in _passes:
+                passes_left.append(ps)
+        self.passes = passes_left
+        self._validated = False
+
+    def replace_pass(self, _target, _replacement):
+        passes_left = []
+        for ps in self.passes:
+            if ps.__name__ == _target.__name__:
+                passes_left.append(_replacement)
+            else:
                 passes_left.append(ps)
         self.passes = passes_left
         self._validated = False

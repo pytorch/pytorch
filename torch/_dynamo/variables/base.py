@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List
@@ -173,7 +175,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ):
         """
         Walk this object and call fn on all the VariableTracker
-        instances to produce a new VariableTracker with the results.
+        instances
         """
         if cache is None:
             cache = dict()
@@ -187,14 +189,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
                 def update_object_dict(v):
                     changed = False
-                    rv = dict(v.__dict__)
+                    rv = v.__dict__
                     for key in rv.keys():
                         if key not in v._nonvar_fields:
                             prior = rv[key]
                             rv[key] = cls.apply(fn, prior, cache, skip_fn)
                             changed = changed or prior is not rv[key]
-                    if changed:
-                        return v.clone(**rv)
+
                     return v
 
                 value = value.unwrap()
@@ -213,7 +214,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         elif istype(value, tuple):
             result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
         elif istype(value, (dict, collections.OrderedDict)):
-            assert "__name__" not in value, "_nonvar_fields should have excluded this"
             result = {
                 k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
             }
@@ -224,18 +224,45 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def __str__(self):
+    def __repr__(self):
         return f"{self.__class__.__name__}()"
 
-    def __repr__(self):
-        return str(self)
-
     def python_type(self):
+        """
+        Abstract method to be implemented by subclasses of VariableTracker.
+
+        This method should return the type represented by the instance of the subclass.
+        The purpose is to provide a standardized way to retrieve the Python type information
+        of the variable being tracked.
+
+        Returns:
+            type: The Python type (such as int, str, list, etc.) of the variable tracked by
+                the subclass. If the type cannot be determined or is not relevant,
+                leaving it undefined or invoking super() is always sound.
+
+        Note:
+            This is an abstract method and may be overridden in subclasses.
+
+        Example:
+            class SetVariable(VariableTracker):
+                def python_type(self):
+                    return set
+
+        Raises:
+            NotImplementedError: If the method is not implemented in a subclass.
+        """
         raise NotImplementedError(f"{self} has no type")
 
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
+
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        try:
+            return self.as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(str(e))
 
     def is_python_constant(self):
         try:
@@ -341,13 +368,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
-        new_name = tx.output.new_var(name)
-        if not self.mutable_local or not isinstance(self.mutable_local, MutableLocal):
-            # This is fine for objects that are not mutable locals
-            self.user_code_variable_name = new_name
-            return self
-        new_vt = self.clone(user_code_variable_name=new_name)
-        return tx.replace_all(self, new_vt)
+        return self
 
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""
@@ -370,13 +391,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-        user_code_variable_name: str = None,
         parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
-        self.user_code_variable_name = user_code_variable_name
         self.parents_tracker = parents_tracker
 
     def __post_init__(self, *args, **kwargs):

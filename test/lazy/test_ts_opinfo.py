@@ -185,7 +185,7 @@ class TestLazyOpInfo(TestCase):
 
         global HAS_SYMINT_SUFFIX, FALLBACK_LIST
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
-        sample = list(samples)[0]
+        sample = next(iter(samples))
         args = [sample.input] + list(sample.args)
         kwargs = sample.kwargs
         torch._lazy.mark_step()

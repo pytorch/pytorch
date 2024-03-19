@@ -11,7 +11,7 @@ from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh, _validate_tp_mesh_dim, _deprecate_warnings
+from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
 )
@@ -26,7 +26,6 @@ def parallelize_module(  # type: ignore[return]
     module: nn.Module,
     device_mesh: DeviceMesh,
     parallelize_plan: Union[ParallelStyle, Dict[str, ParallelStyle]],
-    tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
@@ -36,8 +35,9 @@ def parallelize_module(  # type: ignore[return]
     to be parallelized.
 
     User can also specify different parallel style per module fully qualified name (FQN).
-    The API supports 2D parallelism natively by accepting an n-dimension device_mesh
-    and users just need to specify the dimension where we perform tensor parallelism on.
+
+    Note that ``parallelize_module`` only accepts a 1-D :class:`DeviceMesh`, if you have a 2-D or N-D :class:`DeviceMesh`,
+    slice the DeviceMesh to a 1-D sub DeviceMesh first then pass to this API(i.e. ``device_mesh[\"tp\"]``)
 
     Args:
         module (:class:`nn.Module`):
@@ -50,29 +50,27 @@ def parallelize_module(  # type: ignore[return]
             :class:`ParallelStyle` object which contains how
             we prepare input/output for Tensor Parallelism or it can be a
             dict of module FQN and its corresponding :class:`ParallelStyle` object.
-        tp_mesh_dim (int):
-            The dimension of ``device_mesh`` where we perform
-            Tensor Parallelism on.
-
     Return:
         A :class:`nn.Module` object parallelized.
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
         >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>>
         >>> # Define the module.
         >>> m = Model(...)
-        >>> m = parallelize_module(m, ColwiseParallel())
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>> m = parallelize_module(m, tp_mesh, {"w1": ColwiseParallel(), "w2": RowwiseParallel()})
         >>>
 
-    .. warning::
-        Currently, there are some constraints which makes it hard for complicated modules
-        like ``MultiheadAttention`` to work out of box for Tensor or Sequence Parallelism.
-        We recommend users to try ``ColwiseParallel`` and ``RowwiseParallel`` for each parameter
-        or submodule and there might be some code changes needed now.
+    .. note:: For complex module architecture like Attention, MLP layers, we recommend composing
+        different ParallelStyles together (i.e. ``ColwiseParallel`` and ``RowwiseParallel``) and pass
+        as a parallelize_plan, to achieves the desired sharding computation.
     """
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
+
+    _validate_tp_mesh_dim(device_mesh)
 
     # instantiate a TP RNG state tracker if it's not there
     if is_rng_supported_mesh(device_mesh) and not isinstance(
@@ -80,20 +78,11 @@ def parallelize_module(  # type: ignore[return]
     ):
         random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
         # TODO: we should allow user to pass in the default seed from a config
-        random._rng_tracker._manual_seed(
-            device_mesh, base_seed=1234, tp_dim=tp_mesh_dim
-        )
+        random._rng_tracker._manual_seed(device_mesh, base_seed=1234)
         # By default we execute random ops in non-tensor-parallel region. If users want
         # to execute in tensor-parallel region, they can manually set this field to True
         # after parallelizing the model.
         random._rng_tracker.distribute_region_enabled = False
-
-    if device_mesh.ndim > 1:
-        _deprecate_warnings("tp_mesh_dim", "If you have a 2-D or N-D device_mesh, consider passing in device_mesh[\"tp\"]")
-        device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
-    else:
-        _validate_tp_mesh_dim(device_mesh)
-
 
     if isinstance(parallelize_plan, ParallelStyle):
         return parallelize_plan._apply(module, device_mesh)

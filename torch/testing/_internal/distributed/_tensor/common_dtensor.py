@@ -1,40 +1,39 @@
+# mypy: ignore-errors
+
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
 import sys
+from dataclasses import dataclass
 from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    Iterator,
-    Tuple,
-    Dict,
-    List,
-    Sequence,
-    TypeVar,
-    cast,
-)
+from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
 
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    PrepareModuleInput,
+    RowwiseParallel,
+    SequenceParallel,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
     skip_if_lt_x_gpu,
+    TEST_SKIPS,
 )
 
-from torch.distributed._tensor import (
-    DeviceMesh,
-    Shard,
-    Replicate,
-    distribute_tensor,
-)
-from torch.distributed._tensor.placement_types import Placement
+from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
+DEVICE_TYPE = (
+    "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
+)
 PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
@@ -47,13 +46,28 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
 T = TypeVar("T")
 
 
-class MLPModule(torch.nn.Module):
+# simple RMSNorm layer for testing
+class RMSNormPython(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = torch.nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        output = self._norm(x)
+        return output * self.weight
+
+
+class MLPModule(nn.Module):
     def __init__(self, device):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 10, device=device)
+        self.net1 = nn.Linear(10, 16, device=device)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(16, 10, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -61,6 +75,212 @@ class MLPModule(torch.nn.Module):
     def reset_parameters(self):
         self.net1.reset_parameters()
         self.net2.reset_parameters()
+
+
+@dataclass
+class ModelArgs:
+    n_layers: int = 2
+    vocab_size: int = 16
+    max_seq_len: int = 16
+    dim: int = 8
+    n_heads: int = 4
+    dropout_p: float = 0.1
+    use_attn_mask: bool = True
+    weight_tying: bool = True
+    checkpoint_activations: bool = False
+
+
+class Attention(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        assert args.dim % args.n_heads == 0
+        self.head_dim = args.dim // args.n_heads
+        self.n_heads = args.n_heads
+        self.dropout_p = args.dropout_p
+        self.resid_dropout = nn.Dropout(args.dropout_p)
+        self.use_attn_mask = args.use_attn_mask
+
+        self.wq = nn.Linear(args.dim, args.dim, bias=False)
+        self.wk = nn.Linear(args.dim, args.dim, bias=False)
+        self.wv = nn.Linear(args.dim, args.dim, bias=False)
+        self.wo = nn.Linear(args.dim, args.dim, bias=False)
+
+    def forward(self, x):
+        bsz, seq_len, _ = x.size()
+        queries, keys, values = self.wq(x), self.wk(x), self.wv(x)
+        queries = queries.view(bsz, seq_len, self.n_heads, self.head_dim)
+        keys = keys.view(bsz, seq_len, self.n_heads, self.head_dim)
+        values = values.view(bsz, seq_len, self.n_heads, self.head_dim)
+
+        queries = queries.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+        keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+        values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+
+        output = F.scaled_dot_product_attention(
+            queries,
+            keys,
+            values,
+            None,
+            self.dropout_p if self.training else 0,
+            self.use_attn_mask,
+        )
+        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
+        return self.resid_dropout(self.wo(output))
+
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout_p):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim)
+        self.gelu = nn.GELU()
+        self.w2 = nn.Linear(hidden_dim, dim)
+        self.resid_dropout = nn.Dropout(dropout_p)
+
+    def forward(self, x):
+        return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        self.attention_norm = nn.LayerNorm(args.dim)
+        self.attention = Attention(args)
+        self.ffn_norm = nn.LayerNorm(args.dim)
+        self.feed_forward = FeedForward(
+            args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p
+        )
+
+    def forward(self, x):
+        h = x + self.attention(self.attention_norm(x))
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+
+
+# A toy transformer model, partly inspired by the nanoGPT model:
+# https://github.com/karpathy/nanoGPT.
+class Transformer(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        assert args.vocab_size is not None
+        assert args.max_seq_len is not None
+        self.model_args = args
+        self.max_seq_len = args.max_seq_len
+        self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
+        self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
+        self.dropout = nn.Dropout(args.dropout_p)
+        self.layers = nn.ModuleList()
+        for _ in range(args.n_layers):
+            self.layers.append(TransformerBlock(args))
+        self.norm = nn.LayerNorm(args.dim)
+        self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
+        if args.weight_tying:
+            self.output.weight = self.tok_embeddings.weight
+        self.checkpoint_activations = args.checkpoint_activations
+
+    def forward(self, tokens):
+        _bsz, seq_len = tokens.size()
+        assert seq_len <= self.max_seq_len
+        h = self.tok_embeddings(tokens)
+        pos = torch.arange(0, seq_len, device=tokens.device)
+        p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
+        h = h + p
+        h = self.dropout(h)
+        for layer in self.layers:
+            if self.checkpoint_activations:
+                h = torch.utils.checkpoint.checkpoint(layer, h, use_reentrant=False)
+            else:
+                h = layer(h)
+        h = self.norm(h)
+        output = self.output(h).float()
+        return output
+
+    @staticmethod
+    def parallelize(
+        module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool
+    ) -> nn.Module:
+        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        # Parallelize the root submodules.
+        if use_seq_parallel:
+            root_plan = {
+                "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
+                "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
+                "norm": SequenceParallel(),
+            }
+        else:
+            root_plan = {
+                "tok_embeddings": ColwiseParallel(output_layouts=Replicate()),
+                "pos_embeddings": ColwiseParallel(output_layouts=Replicate()),
+            }
+
+        module_tp = parallelize_module(module, device_mesh, root_plan)
+        # Parallelize the attention and feed forward submodules.
+        for layer in module_tp.layers:
+            layer_parallelize_plan = {}
+            if use_seq_parallel:
+                layer_parallelize_plan["attention"] = PrepareModuleInput(
+                    input_layouts=Shard(1),
+                    desired_input_layouts=Replicate(),
+                )
+                # shard the RMSNorms
+                layer_parallelize_plan["attention_norm"] = SequenceParallel()
+                layer_parallelize_plan["ffn_norm"] = SequenceParallel()
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wo"] = (
+                RowwiseParallel(output_layouts=Shard(1))
+                if use_seq_parallel
+                else RowwiseParallel()
+            )
+
+            layer_parallelize_plan["feed_forward.w1"] = (
+                ColwiseParallel(input_layouts=Shard(1))
+                if use_seq_parallel
+                else ColwiseParallel()
+            )
+            layer_parallelize_plan["feed_forward.w2"] = (
+                RowwiseParallel(output_layouts=Shard(1))
+                if use_seq_parallel
+                else RowwiseParallel()
+            )
+
+            parallelize_module(layer, device_mesh, layer_parallelize_plan)
+
+        # Parallelize the output submodule. If weight tying is enabled, we need to
+        # make sure output.weight is sharded consistently as tok_embeddings.weight,
+        # at the cost of the all_reduce operation using RowwiseParallel.
+        output_parallelize_plan = None
+        if not module_tp.model_args.weight_tying:
+            output_parallelize_plan = (
+                ColwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Replicate(),
+                )
+                if use_seq_parallel
+                else ColwiseParallel(output_layouts=Replicate())
+            )
+        else:
+            output_parallelize_plan = (
+                RowwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Replicate(),
+                )
+                if use_seq_parallel
+                else RowwiseParallel(input_layouts=Replicate())
+            )
+        parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
+
+        # Do manual setup on features that DTensor does not support yet.
+
+        # Manually adjust the number of heads after sharding the attention modules.
+        for layer in module_tp.layers:
+            layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
+
+        # Manually set output.weight so that parameters and gradients are shared.
+        if module_tp.model_args.weight_tying:
+            module_tp.output.weight = module_tp.tok_embeddings.weight
+
+        return module_tp
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -86,7 +306,7 @@ class DTensorTestBase(MultiProcessTestCase):
         return PG_BACKEND
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
+        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -134,6 +354,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
 
 TestFunc = Callable[[object], object]
+
 
 # wrapper to initialize comms (processgroup)
 def with_comms(func: TestFunc) -> TestFunc:
@@ -265,9 +486,7 @@ class DTensorConverter:
             ]
         )
 
-    def gen_sharding_choices_for_arg(
-        self, arg: torch.Tensor
-    ) -> Sequence[Placement]:
+    def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
         mesh_size = self.mesh.size()
         sharding_choices: List[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
@@ -328,7 +547,7 @@ class DTensorConverter:
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
     ) -> torch.Tensor:
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+        if type(t) is torch.Tensor or type(t) is nn.Parameter:
             if self.is_supported_tensor(t):
                 self.hit += 1
                 if t.ndim == 0:
@@ -337,8 +556,8 @@ class DTensorConverter:
                 else:
                     # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
-                if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(  # type: ignore[assignment]
+                if type(t) is nn.Parameter:
+                    r = nn.Parameter(  # type: ignore[assignment]
                         r, requires_grad=r.requires_grad
                     )
                 return r
@@ -353,6 +572,4 @@ class DTensorConverter:
             self.miss += 1
             return t
         else:
-            raise RuntimeError(
-                f"Trying to convert to DTensor, but got {type(t)}"
-            )
+            raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")

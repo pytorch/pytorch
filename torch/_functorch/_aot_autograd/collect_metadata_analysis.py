@@ -8,13 +8,13 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
+import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -24,7 +24,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 from .functional_utils import (
-    _get_mutation_type,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
@@ -46,7 +45,7 @@ from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
 
 zip = strict_zip
 
-aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+log = logging.getLogger(__name__)
 
 
 # This is a version of functionalization that is specifically designed
@@ -74,7 +73,7 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
-    requires_subclass_dispatch: bool = False,
+    pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
@@ -91,12 +90,10 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
-
-        flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -105,8 +102,13 @@ def run_functionalized_fw_and_collect_metadata(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode():
+
+        # It doesn't matter if we run this under predispatch or not because it is
+        # only for figuring out metadata
+        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
+            flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
 
         if prior_autocast_states != _get_autocast_states():
@@ -120,6 +122,21 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
+            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
+            # strides between the functionalized arg inner tensors and non-functionalized arg inner
+            # tensors. This is a problem as the inner tensor stride change may not be reflected
+            # correctly in the outer tensor, so disallow this for now.
+            mutates_data = has_data_mutation(f_arg)
+            if (
+                mutates_data
+                and not arg.is_contiguous()
+                and is_traceable_wrapper_subclass(arg)
+            ):
+                raise RuntimeError(
+                    "Mutations on non-contiguous inputs are currently not allowed on "
+                    "tensor subclasses"
+                )
+
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
@@ -134,7 +151,6 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
-            mutates_data = has_data_mutation(f_arg)
             mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
                 f_arg
             )
@@ -171,14 +187,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     requires_grad=requires_grad,
-                    mutation_type=_get_mutation_type(
-                        keep_input_mutations,
-                        mutates_data,
-                        mutates_metadata,
-                        mutations_hidden_from_autograd,
-                        mutations_under_no_grad_or_inference_mode,
-                        requires_grad,
-                    ),
+                    keep_input_mutations=keep_input_mutations,
                 )
             )
 
@@ -303,7 +312,36 @@ def run_functionalized_fw_and_collect_metadata(
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
+        # Why Do We Care If Storage Changed?
+        # It's important to understand the implications of storage changes in complex scenarios. Take this example:
+        #
+        # def f(x):
+        #     x_storage = x.untyped_storage()
+        #     non_leaf_tensor = torch.ones(4, requires_grad=True).clone()
+        #
+        #     # Using no_grad() and _unsafe_preserve_version_counter to simulate the .data = operation
+        #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
+        #         x.set_(non_leaf_tensor.untyped_storage())
+        #
+        #     out = x.view(-1)
+        #
+        #     # Restoring x to its original storage, again simulating .data = operation
+        #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
+        #         x.set_(x_storage)
+        #
+        #     return out
+        #
+        # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
+        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
+        # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
+        # which could lead to issues later in the code.
         for o in flat_f_outs:
+            functional_tensor_storage_changed = isinstance(
+                o, FunctionalTensor
+            ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
+                o.elem
+            )
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)
@@ -320,25 +358,39 @@ def run_functionalized_fw_and_collect_metadata(
                     and o is not curr
                 ]
             )
-            is_result_of_custom_autograd_fn = False
+
+            # See Note [Accessing .grad_fn on FunctionalTensor]
+            # In-place operations on views will trigger a lazy rebase of the autograd graph;
+            # this runs during access to the .grad_fn. The rebase logic will invoke view ops
+            # on FunctionalTensors, so we must enable a FunctionalTensorMode here to ensure
+            # these op calls succeed.
+            grad_fn = None
             if isinstance(o, Tensor):
-                # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
-                if type(o.grad_fn).__name__ == "CppFunction":
-                    is_result_of_custom_autograd_fn = True
-                if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
-                    is_result_of_custom_autograd_fn = True
+                with FunctionalTensorMode():
+                    grad_fn = o.grad_fn
+
+            is_result_of_custom_autograd_fn = False
+            # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
+            # autograd fns
+            if type(grad_fn).__name__ == "CppFunction":
+                is_result_of_custom_autograd_fn = True
+            if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
+                is_result_of_custom_autograd_fn = True
 
             if not isinstance(o, Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
             elif (
                 curr_storage in inp_storage_refs
-                and o.grad_fn is not None
+                and grad_fn is not None
                 and is_result_of_custom_autograd_fn
             ):
                 output_type = OutputType.custom_function_view
                 base_idx = None
-            elif curr_storage in inp_storage_refs:
+            elif (
+                curr_storage in inp_storage_refs
+                and not functional_tensor_storage_changed
+            ):
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
@@ -349,7 +401,7 @@ def run_functionalized_fw_and_collect_metadata(
                     num_aliased_outs - num_multi_output_view_outs
                 )
                 if (
-                    o.grad_fn is not None
+                    grad_fn is not None
                     and num_aliased_outs_that_are_not_multi_output_views == 0
                 ):
                     # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
@@ -362,7 +414,7 @@ def run_functionalized_fw_and_collect_metadata(
                     # However, autograd does not allow users to mutate multi-output views
                     # in any way that can change the autograd metadata of other aliases.
                     # So we hide this aliasing from autograd here.
-                    aot_graphs_log.info(
+                    log.debug(
                         "Encountered AOTAutograd case: differentiable outputs that \
 alias each other from a multi-output view call"
                     )
@@ -404,7 +456,7 @@ alias each other from a multi-output view call"
                         out_tensor_alias_counts[curr_storage] != 1
                         and num_aliased_outs_that_are_not_multi_output_views <= 1
                     ):
-                        aot_graphs_log.info(
+                        log.debug(
                             "Encountered AOTAutograd case: differentiable outputs that alias each other \
 from a multi-output view call"
                         )
@@ -492,17 +544,7 @@ from a multi-output view call"
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if _get_mutation_type(
-                keep_input_mutations,
-                mutates_data=info.mutates_data,
-                mutates_metadata=info.mutates_metadata,
-                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
-                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
-                requires_grad=info.requires_grad
-                # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
-                # this can also include metadata mutations, and inputs that do not require grad,
-            )
-            == MutationType.MUTATED_OUT_GRAPH
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
             and info.requires_grad
         ]
@@ -529,7 +571,7 @@ from a multi-output view call"
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data or info.mutates_metadata
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
         f_metadata_mutated_inputs = [
             inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata
@@ -558,7 +600,7 @@ from a multi-output view call"
             torch.set_grad_enabled(
                 prior_grad_enabled
             )  # Restore the prior state after tracing it
-            aot_graphs_log.info(
+            log.debug(
                 (
                     "grad_mode mutation encountered in graph. "
                     "Will emit mutation epilogue, to set grad_mode=%s"
@@ -577,7 +619,7 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
-            requires_subclass_dispatch=requires_subclass_dispatch,
+            tokens=mode._tokens,
         )
         return metadata
 

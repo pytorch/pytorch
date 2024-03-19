@@ -21,6 +21,8 @@ from .functions import (
     Mod,
     ModularIndexing,
     Pow,
+    Round,
+    RoundDecimal,
     TrueDiv,
     Where,
 )
@@ -67,7 +69,12 @@ def handlers():
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
+        Round: "round",
+        RoundDecimal: "round",
     }
+    for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
+        HANDLERS[getattr(sympy, name)] = name
+
     return HANDLERS
 
 

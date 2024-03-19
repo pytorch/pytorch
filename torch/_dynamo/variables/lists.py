@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import functools
 import inspect
@@ -212,7 +214,7 @@ class RangeVariable(BaseListVariable):
         assert "range" not in codegen.tx.f_globals
         codegen.append_output(codegen.create_load_python_module(range, True))
         codegen.foreach(self.items)
-        return create_call_function(3, False)
+        codegen.extend_output(create_call_function(3, False))
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -236,12 +238,8 @@ class CommonListMethodsVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
-            tx.replace_all(
-                self,
-                self.modified(
-                    self.items + [arg],
-                ),
-            )
+            tx.output.side_effects.mutation(self)
+            self.items.append(arg)
             return ConstantVariable.create(None)
         elif (
             name == "extend"
@@ -251,36 +249,26 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            return tx.replace_all(
-                self,
-                self.modified(
-                    list(self.items) + list(arg.unpack_var_sequence(tx)),
-                ),
-            )
+            seq = arg.unpack_var_sequence(tx)
+            tx.output.side_effects.mutation(self)
+            self.items.extend(seq)
+            return ConstantVariable.create(None)
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
-            items = list(self.items)
-            items.insert(idx.as_python_constant(), value)
-            return tx.replace_all(
-                self,
-                self.modified(items),
-            )
+            const_idx = idx.as_python_constant()
+            tx.output.side_effects.mutation(self)
+            self.items.insert(const_idx, value)
+            return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
-            items = list(self.items)
-            result = items.pop(*[a.as_python_constant() for a in args])
-            tx.replace_all(
-                self,
-                self.modified(items),
-            )
-            return result
+            tx.output.side_effects.mutation(self)
+            return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
-            return tx.replace_all(
-                self,
-                self.modified([]),
-            )
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            return ConstantVariable.create(None)
         elif (
             name == "__setitem__"
             and self.mutable_local
@@ -289,13 +277,12 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             key, value = args
-            items = list(self.items)
+            tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                items[key.as_python_constant()] = list(value.items)
+                self.items[key.as_python_constant()] = list(value.items)
             else:
-                items[key.as_python_constant()] = value
-            result = self.modified(items)
-            return tx.replace_all(self, result)
+                self.items[key.as_python_constant()] = value
+            return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
             assert not kwargs
@@ -312,7 +299,7 @@ class ListVariable(CommonListMethodsVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
     def call_method(
         self,
@@ -329,17 +316,16 @@ class ListVariable(CommonListMethodsVariable):
         ):
             assert not kwargs
             key, value = args
-            items = list(self.items)
+            tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+                self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
             else:
-                items[key.as_python_constant()] = value
-            result = ListVariable(items)
-            return tx.replace_all(self, result)
+                self.items[key.as_python_constant()] = value
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -359,7 +345,7 @@ class DequeVariable(CommonListMethodsVariable):
             codegen.create_load_python_module(collections.deque, True)
         )
         codegen.foreach(self.items)
-        return create_call_function(len(self.items), False)
+        codegen.extend_output(create_call_function(len(self.items), False))
 
     def call_method(
         self,
@@ -379,37 +365,30 @@ class DequeVariable(CommonListMethodsVariable):
             assert key.is_python_constant() and isinstance(
                 key.as_python_constant(), int
             )
-            items = list(self.items)
-            items[key.as_python_constant()] = value
-            result = DequeVariable(items)
-            return tx.replace_all(self, result)
+            tx.output.side_effects.mutation(self)
+            self.items[key.as_python_constant()] = value
+            return ConstantVariable.create(None)
         elif name == "extendleft" and self.mutable_local:
             assert not kwargs
+
             (arg,) = args
-            return tx.replace_all(
-                self,
-                DequeVariable(
-                    list(arg.unpack_var_sequence(tx)) + list(self.items),
-                ),
-            )
+            prefix = arg.unpack_var_sequence(tx)
+            prefix.reverse()
+            tx.output.side_effects.mutation(self)
+            self.items = prefix + list(self.items)
+            return ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
-            items = collections.deque(self.items)
-            result = items.popleft()
-            tx.replace_all(
-                self,
-                DequeVariable(list(items)),
-            )
-            return result
+            item = self.items[0]
+            tx.output.side_effects.mutation(self)
+            self.items = self.items[1:]
+            return item
         elif name == "appendleft" and self.mutable_local:
             assert not kwargs
-            return tx.replace_all(
-                self,
-                DequeVariable(
-                    [args[0]] + list(self.items),
-                ),
-            )
+            tx.output.side_effects.mutation(self)
+            self.items = [args[0]] + list(self.items)
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -420,7 +399,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
 
     def call_method(
         self,
@@ -430,6 +409,11 @@ class TupleVariable(BaseListVariable):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not tuple:
+            return super().call_hasattr(tx, name)
+        return variables.ConstantVariable.create(hasattr((), name))
 
 
 class SizeVariable(TupleVariable):
@@ -497,7 +481,7 @@ class SizeVariable(TupleVariable):
         build_torch_size = [
             create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
-        return build_torch_size
+        codegen.extend_output(build_torch_size)
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
@@ -572,13 +556,20 @@ class NamedTupleVariable(TupleVariable):
     def as_python_constant(self):
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
+    def as_proxy(self):
+        assert self.python_type() is not SizeVariable
+        return self.python_type()(*self._as_proxy())
+
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
-        return [
-            create_instruction("BUILD_TUPLE", arg=len(self.items)),
-        ] + create_call_function(1, True)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(self.items)),
+            ]
+            + create_call_function(1, True)
+        )
 
     def var_getattr(self, tx, name):
         def check_and_create_method():
@@ -641,7 +632,7 @@ class SliceVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -662,21 +653,16 @@ class ListIteratorVariable(VariableTracker):
         self.index = index
 
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}({repr(self.items)}, index={repr(self.index)})"
-        )
+        return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variables(self, tx):
         assert self.mutable_local
-        if self.index >= len(self.items):
+        old_index = self.index
+        if old_index >= len(self.items):
             raise StopIteration()
-        next_iter = ListIteratorVariable(
-            self.items,
-            self.index + 1,
-            mutable_local=MutableLocal(),
-        )
-        tx.replace_all(self, next_iter)
-        return self.items[self.index], next_iter
+        tx.output.side_effects.mutation(self)
+        self.index += 1
+        return self.items[old_index], self
 
     def call_method(
         self,
@@ -703,10 +689,12 @@ class ListIteratorVariable(VariableTracker):
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
-        return [
-            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
-            create_instruction("GET_ITER"),
-        ]
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                create_instruction("GET_ITER"),
+            ]
+        )
 
 
 class TupleIteratorVariable(ListIteratorVariable):
@@ -794,7 +782,8 @@ class RestrictedListSubclassVariable(ListVariable):
 
     def reconstruct(self, codegen):
         codegen(self.user_cls_source)
-        return super().reconstruct(codegen) + create_call_function(1, True)
+        super().reconstruct(codegen)
+        codegen.extend_output(create_call_function(1, True))
 
     def call_method(
         self,

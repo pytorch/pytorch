@@ -1,4 +1,5 @@
 from .graph_module import GraphModule
+from ._lazy_graph_module import _make_graph_module
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
@@ -63,17 +64,23 @@ class Interpreter:
             torch.testing.assert_close(result, torch.neg(input).sigmoid())
 
     Args:
-        module (GraphModule): The module to be executed
+        module (torch.nn.Module): The module to be executed
         garbage_collect_values (bool): Whether to delete values after their last
             use within the Module's execution. This ensures optimal memory usage during
             execution. This can be disabled to, for example, examine all of the intermediate
             values in the execution by looking at the ``Interpreter.env`` attribute.
+        graph (Optional[Graph]): If passed, the interpreter will execute this
+            graph instead of `module.graph`, using the provided `module`
+            argument to satisfy any requests for state.
     """
     @compatibility(is_backward_compatible=True)
-    def __init__(self, module : GraphModule, garbage_collect_values : bool = True):
-        assert isinstance(module, GraphModule)
+    def __init__(self, module: torch.nn.Module, garbage_collect_values: bool = True, graph: Optional[Graph] = None):
         self.module = module
         self.submodules = dict(self.module.named_modules())
+        if graph is not None:
+            self.graph = graph
+        else:
+            self.graph = self.module.graph
         self.env : Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
@@ -92,7 +99,7 @@ class Interpreter:
                     node_to_last_use[n] = user
                     self.user_to_last_uses.setdefault(user, []).append(n)
 
-            for node in reversed(self.module.graph.nodes):
+            for node in reversed(self.graph.nodes):
                 map_arg(node.args, lambda n: register_last_uses(n, node))
                 map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
@@ -119,13 +126,13 @@ class Interpreter:
         # `placeholder` nodes. Use an iterator to keep track of
         # position and extract those values.
         if enable_io_processing:
-            args = self.module.graph.process_inputs(*args)
+            args = self.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
-        pbar = tqdm(total=len(self.module.graph.nodes),
-                    desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",
+        pbar = tqdm(total=len(self.graph.nodes),
+                    desc=f"{self.name}: {str(list(self.graph.nodes)) if config.verbose_progress else ''}",
                     initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
-        for node in self.module.graph.nodes:
+        for node in self.graph.nodes:
             pbar.update(1)
             if node in self.env:
                 # Short circuit if we have this value. This could
@@ -152,7 +159,7 @@ class Interpreter:
 
             if node.op == 'output':
                 output_val = self.env[node]
-                return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
+                return self.graph.process_outputs(output_val) if enable_io_processing else output_val
 
     @compatibility(is_backward_compatible=True)
     def boxed_run(self, args_list):
@@ -163,7 +170,7 @@ class Interpreter:
         """
         args_iter = iter(args_list)
         env = {}
-        for n in self.module.graph.nodes:
+        for n in self.graph.nodes:
             if n.op == "placeholder":
                 env[n] = next(args_iter)
         args_list.clear()
@@ -205,7 +212,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -235,7 +242,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -253,7 +260,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -273,7 +280,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -295,7 +302,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -319,7 +326,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -452,7 +459,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -470,7 +477,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -502,4 +509,4 @@ class Transformer(Interpreter):
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
             self.new_graph.output(map_aggregate(result, strip_proxy))
-        return GraphModule(self.module, self.new_graph)
+        return _make_graph_module(self.module, self.new_graph)

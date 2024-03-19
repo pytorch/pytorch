@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 import torch
 import torchgen
-from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
+from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at, \
     _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, DispatchKey
 
 
@@ -55,7 +55,7 @@ class TorchDispatchMode:
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self, self.__dict__.get("_dispatch_key", None))
+        _push_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -80,33 +80,71 @@ def _get_current_dispatch_mode():
     return None
 
 
+def _detect_functional_mode():
+    from torch._ops import _get_dispatch_mode_pre_dispatch
+    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    post_dispatch_functional_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+
+    assert (pre_dispatch_functional_mode is None) or (post_dispatch_functional_mode is None)
+
+    if pre_dispatch_functional_mode is None:
+        return post_dispatch_functional_mode
+
+    return pre_dispatch_functional_mode
+
+def _unset_infra_mode(key):
+    from torch._ops import unset_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
+    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(key)
+    post_dispatch_mode = torch._C._get_dispatch_mode(key)
+    if pre_dispatch_mode and post_dispatch_mode:
+        raise AssertionError("Can't have active infra mode on both pre and post dispatch mode stack")
+
+    if pre_dispatch_mode:
+        mode = unset_mode_pre_dispatch(key)
+        return mode
+    if post_dispatch_mode:
+        return torch._C._unset_dispatch_mode(key)
+
+
+def _disable_infra_mode(key):
+    assert key in (torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY)
+    mode_unset = _unset_infra_mode(key)
+    try:
+        yield mode_unset
+    finally:
+        if mode_unset is not None:
+            _push_mode(mode_unset)
+
+
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
-def _push_mode(mode, k: Optional[DispatchKey] = None):
-    if k is not None:
-        from torch._ops import push_mode_for_key, get_cached_ops
-        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-        # Clear the cache of every op that has been used so far, for this particular key.
-        ks = torch._C._functionality_to_backend_keys(k)
-        for op in get_cached_ops():
-            for key in ks:
-                op._uncache_dispatch(key)
-        push_mode_for_key(k, mode)
-    else:
+
+def _push_mode(mode):
+    k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
+    assert k is None or k == torch._C.DispatchKey.PreDispatch
+    if k is None:
         _push_on_torch_dispatch_stack(mode)
+        return
+
+    from torch._ops import get_cached_ops, _set_mode_pre_dispatch
+    # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+    # Clear the cache of every op that has been used so far, for this particular key.
+    ks = torch._C._functionality_to_backend_keys(k)
+    for op in get_cached_ops():
+        for key in ks:
+            op._uncache_dispatch(key)
+    _set_mode_pre_dispatch(mode)
 
 
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
+    if k == torch._C.DispatchKey.PreDispatch:  # type: ignore[attr-defined]
+        from torch._ops import _pop_mode_from_pre_dispatch
+        return _pop_mode_from_pre_dispatch()
+
     if k is None or isinstance(k, torch._C._TorchDispatchModeKey):
         return _pop_torch_dispatch_stack(k)
-    from torch._ops import pop_mode_for_key
-    # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
-    # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode
-    # that we push onto these per-dispatch-key-mode-stacks.
-    return pop_mode_for_key(k)
-
 
 @contextlib.contextmanager
 def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
@@ -114,19 +152,41 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
     try:
         yield old
     finally:
-        _push_mode(old, k)
-
+        _push_mode(old)
 
 @contextlib.contextmanager
 def _disable_current_modes():
+    from torch._ops import _len_torch_dispatch_stack_pre_dispatch, _pop_mode_from_pre_dispatch
+    from torch._subclasses.functional_tensor import FunctionalTensorMode
+    from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+    mode_len_pre_dispatch = _len_torch_dispatch_stack_pre_dispatch()
+    old_pre_dispatch_modes = [_pop_mode_from_pre_dispatch() for _ in range(mode_len_pre_dispatch)]
+
+    has_proxy_mode_in_pre_dispatch = False
+    has_functional_mode_in_pre_dispatch = False
+
+    for i in old_pre_dispatch_modes:
+        if isinstance(i, ProxyTorchDispatchMode):
+            has_proxy_mode_in_pre_dispatch = True
+        if isinstance(i, FunctionalTensorMode):
+            has_functional_mode_in_pre_dispatch = True
+
     mode_len = _len_torch_dispatch_stack()
     old_modes = [_pop_mode() for _ in range(mode_len)]
 
+    for old in old_modes:
+        if isinstance(old, FunctionalTensorMode) and has_functional_mode_in_pre_dispatch:
+            raise AssertionError("Can't have FunctionalMode available both in PreDispatch and Python Key")
+        if isinstance(old, ProxyTorchDispatchMode) and has_proxy_mode_in_pre_dispatch:
+            raise AssertionError("Can't have ProxyTorchDispatchMode available both in PreDispatch and Python Key")
+
     # Manually disable proxy and fake modes, if any are active
     try:
-        yield old_modes
+        yield old_pre_dispatch_modes + old_modes
     finally:
         for mode in reversed(old_modes):
+            _push_mode(mode)
+        for mode in reversed(old_pre_dispatch_modes):
             _push_mode(mode)
 
 
@@ -252,12 +312,16 @@ and output of type {type(ret)}. But expected types to match."""
                 # Example: out = inp.expand(inp.shape[0], inp.shape[0])
                 #     This requires swapping the storage of out to be the same as inp,
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
+
                 if isinstance(ret, list):
                     for r in ret:
-                        torch.ops.aten.set_.source_Storage_storage_offset(r, arg.untyped_storage(), r.storage_offset(), r.shape)
+                        torch.ops.aten.set_.source_Storage_storage_offset(
+                            r, arg.untyped_storage(), r.storage_offset(), r.shape, r.stride())
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
+                    torch.ops.aten.set_.source_Storage_storage_offset(
+                        ret, arg.untyped_storage(), ret.storage_offset(), ret.shape, ret.stride()
+                    )
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 

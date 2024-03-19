@@ -102,12 +102,13 @@ inline void check_foreach_api_restrictions(
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
 inline bool _check_tensors_share_device_and_dtype(
-    ArrayRef<TensorList> tensorLists) {
+    ArrayRef<TensorList> tensorLists,
+    const bool skip_dtype_check = false) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
 
   auto is_tensor_okay = [&](const Tensor& tensor) {
-    return tensor.dtype() == expected_dtype &&
+    return (skip_dtype_check || tensor.dtype() == expected_dtype) &&
         tensor.device() == expected_device && tensor.layout() == at::kStrided &&
         tensor.is_non_overlapping_and_dense();
   };
@@ -248,7 +249,7 @@ inline bool can_use_fast_route(
 }
 
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
-using IndicesT = std::vector<int>;
+using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
     std::vector<std::vector<c10::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
@@ -308,19 +309,21 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 const auto d = tensor->device();
                 // Note: `step` or `state_step` is float32 by default.
                 if (key.first == d) {
-                  return key.second == s || s == at::ScalarType::Float;
+                  return key.second == s || s == at::ScalarType::Float ||
+                      s == at::ScalarType::Double;
                 } else if (d.is_cpu()) {
                   // note(crcrpar): There are some test cases (e.g.
                   // TestOptim::test_adam) where state_steps are on CPU and the
                   // others are on CUDA. Currently a state_step Tensor has the
                   // dtype of float.
-                  return s == at::ScalarType::Float;
+                  return s == at::ScalarType::Float ||
+                      s == at::ScalarType::Double;
                 } else {
                   return false;
                 }
               }
             }),
-        "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32 notwithstanding");
+        "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
     if (!grouped_tensors_with_indices.count(key)) {
       grouped_tensors_with_indices.insert(
           {key,

@@ -60,26 +60,30 @@ class PyCodegen:
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
-        self.skip_cache: bool = False
+        self.value_from_source: bool = True
 
-    def restore_stack(self, stack_values, *, skip_cache=False):
+    def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
         self.mutable_side_effects_from_source = True
-        prev = self.skip_cache
-        self.skip_cache |= skip_cache
+        prev = self.value_from_source
+        self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
         finally:
             self.mutable_side_effects_from_source = prior
-            self.skip_cache = prev
+            self.value_from_source = prev
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
 
+    def call_reconstruct(self, value):
+        res = value.reconstruct(self)
+        assert res is None, f"reconstruct!=None {value}"
+
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
-            self._output.extend(value.reconstruct(self))
+            self.call_reconstruct(value)
             self.clear_tos()
             return
 
@@ -87,7 +91,7 @@ class PyCodegen:
         output = self._output
         graph_outputs = self.graph_outputs
 
-        if self.top_of_stack is value:
+        if self.top_of_stack is value and allow_cache:
             output.append(create_dup_top())
             return
 
@@ -102,8 +106,6 @@ class PyCodegen:
                 self(value.mutable_local.source)
                 return
 
-        allow_cache &= not self.skip_cache
-
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
                 output.append(self.create_load(self.tempvars[value.mutable_local]))
@@ -114,21 +116,23 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache:
-            output.extend(value.source.reconstruct(self))
+        if value.source is not None and allow_cache and self.value_from_source:
+            self.call_reconstruct(value.source)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
+
+            self.load_import_from(utils.__name__, "to_subclass")
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(), True, add=True
+                    value.global_mangled_class_name(self.tx), False, add=True
                 )
             )
-            self.load_graph_output(graph_outputs[graph_outputs_key].index)
-            output.extend(create_call_function(1, True))
+            output.extend(create_call_function(2, True))
         elif isinstance(
             value,
             (
@@ -164,7 +168,7 @@ class PyCodegen:
         else:
             self.uses[value] += 1
             try:
-                output.extend(value.reconstruct(self))
+                self.call_reconstruct(value)
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
@@ -240,7 +244,7 @@ class PyCodegen:
         assert name in self.code_options["co_varnames"]
         return create_instruction("STORE_FAST", argval=name)
 
-    def create_load_global(self, name, push_null, add=False):
+    def create_load_global(self, name, push_null, add=False) -> Instruction:
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
@@ -255,13 +259,28 @@ class PyCodegen:
 
     create_load_output = _create_load_const
 
+    def create_load_method(self, name):
+        self.tx.output.update_co_names(name)
+        return create_instruction("LOAD_METHOD", argval=name)
+
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)
 
+    def load_attr(self, name):
+        self.append_output(self.create_load_attr(name))
+
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
+
+    def create_store_attr(self, name) -> Instruction:
+        if name not in self.code_options["co_names"]:
+            self.code_options["co_names"] += (name,)
+        return create_instruction("STORE_ATTR", argval=name)
+
+    def store_attr(self, name):
+        self.append_output(self.create_store_attr(name))
 
     def load_function_name(self, fn_name, push_null, num_on_stack=0):
         """Load the global fn_name on the stack num_on_stack down"""
@@ -301,6 +320,15 @@ class PyCodegen:
             create_instruction("POP_TOP"),
         ]
 
+    def call_function(self, nargs: int, push_null: bool):
+        self.extend_output(create_call_function(nargs, push_null=push_null))
+
+    def dup_top(self):
+        self.append_output(create_dup_top())
+
+    def store(self, varname):
+        self.append_output(self.create_store(varname))
+
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
     ):
@@ -321,18 +349,18 @@ class PyCodegen:
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
-    def create_load_python_module(self, mod, push_null):
+    def create_load_python_module(self, mod, push_null) -> Instruction:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        global_scope = self.tx.output.global_scope
+        output = self.tx.output
+        global_scope = output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
-        mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in global_scope:
-            self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, push_null, add=True)
+        prefix = f"___module_{name}"
+        global_name = self.tx.output.install_global_by_id(prefix, mod)
+        return self.create_load_global(global_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
@@ -347,19 +375,15 @@ class PyCodegen:
                         self.create_load_attr("as_tensor"),
                     ]
                 )
-                self.extend_output(arg.load(self))
+                self.call_reconstruct(arg)
                 self.extend_output(create_call_function(1, False))
             else:
-                self.extend_output(arg.load(self))
+                self.call_reconstruct(arg)
 
         self.extend_output(create_call_function(len(graphargs), False))
 
     def load_import_from(self, module_name, object_name) -> None:
-        self.extend_output(
-            AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self
-            )
-        )
+        self(AttrSource(self.tx.import_source(module_name), object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):

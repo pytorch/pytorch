@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 
 import copy
 import unittest
@@ -15,9 +15,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    IS_WINDOWS
 )
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
     # TODO Maybe we should make this tests actually show up in a file?
@@ -40,14 +41,14 @@ class ExampleTests(TestCase):
         exported_program.graph_module.print_readable()
 
         self.assertEqual(
-            exported_program(*inputs_export.args, **inputs_export.kwargs),
+            exported_program.module()(*inputs_export.args, **inputs_export.kwargs),
             model(*inputs_model.args, **inputs_model.kwargs),
         )
 
         if case.extra_inputs is not None:
             inputs = normalize_inputs(case.extra_inputs)
             self.assertEqual(
-                exported_program(*inputs.args, **inputs.kwargs),
+                exported_program.module()(*inputs.args, **inputs.kwargs),
                 model(*inputs.args, **inputs.kwargs),
             )
 
