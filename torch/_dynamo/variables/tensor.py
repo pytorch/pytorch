@@ -10,6 +10,8 @@ from typing import Dict, List
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
+from ..external_utils import call_hook_from_backward_state
 
 try:
     import numpy as np
@@ -24,6 +26,7 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+from torch._subclasses.meta_utils import is_sparse_any
 
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -50,7 +53,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
@@ -73,6 +76,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
+    _has_child_nodes = False
     _nonvar_fields = {
         "proxy",
         "dtype",
@@ -148,7 +152,11 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not has_free_symbols(value):
+        if is_sparse_any(value) and not has_free_symbols(value):
+            props["size"] = tuple(
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
+        elif not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
             # We have to cast to int here, because these might get accessed as ConstantVariable, which has
             # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
@@ -199,7 +207,8 @@ class TensorVariable(VariableTracker):
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder()(tx, example_value)
-        if not self.source:
+
+        if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
 
         # For local source, we associate the real value. We use this real value
@@ -285,6 +294,13 @@ class TensorVariable(VariableTracker):
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
+    def method_attr__version(self, tx):
+        from ..tensor_version_op import _tensor_version
+
+        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+            tx, [self], {}
+        )
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
@@ -301,7 +317,14 @@ class TensorVariable(VariableTracker):
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None:
+        if (
+            result is not None
+            and self.source
+            and self.source.subguards_allowed()
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
+        ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
 
@@ -769,7 +792,7 @@ class TensorVariable(VariableTracker):
             "register_post_accumulate_grad_hook", *args, **kwargs
         )
 
-    def _method_register_hook(self, name, hook):
+    def _method_register_hook(self, name: str, hook: VariableTracker):
         # Note - do not arbitrarily add hooks here - make sure they match the same contract
         # see [On tensor.register_hook]
         from ..symbolic_convert import InstructionTranslator
@@ -797,14 +820,22 @@ class TensorVariable(VariableTracker):
                     "Compilation of intermediate hooks requires compiled autograd"
                 )
 
-            # This wraps our user provided fn with a function that intercedes and
-            # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-            fn = functools.partial(trace_wrapped, fn=hook.guard_as_python_constant())
+            hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
 
-            def _register_hook_trampoline(tensor):
-                hook_callable = getattr(tensor, name)
-                hook_callable(fn)
-                return tensor
+            def _register_hook_trampoline(tensor, bw_state):
+                register_hook = getattr(tensor, name)
+                register_hook(
+                    functools.partial(
+                        trace_wrapped,
+                        fn=call_hook_from_backward_state,
+                        bw_state=bw_state,
+                        hook_name=hook_name,
+                    )
+                )
+                # TODO(jansel): returning None here is wrong, it should be
+                # RemovableHandle, but we need some extra work to support
+                # this properly.
+                return None
 
             from .builder import wrap_fx_proxy
 
@@ -813,7 +844,7 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(),),
+                    (self.as_proxy(), bw_state_proxy),
                     {},
                 ),
             )
@@ -836,7 +867,12 @@ class TensorVariable(VariableTracker):
     def method_new(self, *args, **kwargs):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
-        if len(args) == 1 and isinstance(args[0], SizeVariable):
+        if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
+            len(args) >= 1
+            and all(
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+            )
+        ):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
@@ -848,9 +884,12 @@ class TensorVariable(VariableTracker):
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
-    def rename(self, tx, name):
-        self.proxy.node._rename(name)
-        return super().rename(tx, name)
+    def set_name_hint(self, name: str):
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if _is_top_level_scope(current_scope_id()):
+            self.proxy.node._rename(name)
 
 
 class SymNodeVariable(VariableTracker):

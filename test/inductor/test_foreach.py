@@ -7,11 +7,11 @@ import torch
 
 import torch._inductor
 
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    TestCase,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -722,7 +722,7 @@ class ForeachTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
