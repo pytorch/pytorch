@@ -3236,7 +3236,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 #if UINTPTR_MAX == 0xFFFFFFFF
   // This is a 32-bit system
   static constexpr bool check_sizes() {
-    constexpr size_t tsize = 20 * sizeof(int64_t);
+    constexpr size_t tsize = 21 * sizeof(int64_t);
 
     // clang-format off
     are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();

@@ -68,7 +68,7 @@ class TestMkldnn(TestCase):
                 else:
                     self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size() / 2)
                 self.assertRaisesRegex(RuntimeError,
-                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       "Cannot access tensor.data_ptr()",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
             # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
