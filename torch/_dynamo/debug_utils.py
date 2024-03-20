@@ -310,8 +310,6 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     When disable_clone is True, we will use args as-is without cloning.
     This is higher fidelity but we may destroy the args in the process.
     """
-    from torch._functorch.aot_autograd import make_boxed_func
-
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
@@ -321,19 +319,9 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
 
-    # TorchInductor returned callable expects lists. So, boxing the call.
-    orig_named_parameters = getattr(gm, "named_parameters", None)
-    orig_named_buffers = getattr(gm, "named_buffers", None)
-    if not hasattr(gm, "_boxed_call") and (
-        orig_named_parameters is not None or orig_named_buffers is not None
-    ):
-        gm = make_boxed_func(gm)
-        if orig_named_parameters is not None:
-            gm.named_parameters = orig_named_parameters
-        if orig_named_buffers is not None:
-            gm.named_buffers = orig_named_buffers
+    # TorchInductor returned callable expects lists. So, may need a boxed calling convention.
+    out = gm(args) if hasattr(gm, "_boxed_call") else gm(*args)
 
-    out = gm(args)
     if only_fwd:
         return out
     if requires_bwd_pass(out):
@@ -359,20 +347,7 @@ def same_two_models(
         is mostly useful for the minifier (which wants to avoid quantizing floating point
         error into integer/boolean error)
     """
-    from .eval_frame import OptimizedModule
-    from .testing import (
-        named_buffers_for_optimized_module,
-        named_parameters_for_optimized_module,
-    )
     from .utils import same
-
-    if isinstance(gm, OptimizedModule):
-        gm.named_parameters = named_parameters_for_optimized_module(gm)
-        gm.named_buffers = named_buffers_for_optimized_module(gm)
-
-    if isinstance(opt_gm, OptimizedModule):
-        opt_gm.named_parameters = named_parameters_for_optimized_module(opt_gm)
-        opt_gm.named_buffers = named_buffers_for_optimized_module(opt_gm)
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
