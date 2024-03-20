@@ -847,14 +847,55 @@ class VariableBuilder:
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
+        all_tensors = True
         for item in value:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
+            if all_tensors and not isinstance(item, torch.Tensor):
+                all_tensors = False
 
         output = [
             LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
             for i, item in enumerate(value)
         ]
+
+        might_contain_activations = (
+            torch._dynamo.compiled_autograd.compiled_autograd_enabled and all_tensors
+        )
+        if might_contain_activations:
+            # The input tensor list to dynamo from compiled autograd may contain activations
+            # which are freed as they are used in inductor. Dynamo's default behavior is to
+            # lift all tensors to the graph inputs, but this will cause dynamo to hold an
+            # extra reference to the activation tensors and increase peak memory usage.
+            # e.g.
+            #   def compiled_autograd_graph(inputs: List[Tensor], ...):
+            #     getitem = inputs[0]
+            #     activation = inputs[1]; inputs = None
+            #     mm = torch.ops.aten.mm.default(getitem, activation)
+            #     activation = None  # this frees memory if it is not a graph input
+            #     ...
+            source = self.source
+            tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
+            )
+
+            list_variable = wrap_fx_proxy(
+                tx=self.tx,
+                proxy=tensor_list_proxy,
+                example_value=value,
+                subclass_type=None,
+                source=source,
+            )
+
+            # for each unpacked tensor, access it from this list instead of from a lifted arg
+            for i, tensor_variable in enumerate(list_variable.items):
+                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
+                self.tx.output.input_source_to_var[source_i] = tensor_variable
+
+            grapharg = GraphArg(
+                source, value, is_unspecialized=False, fake_tensor=None, is_tensor=False
+            )
+            tensor_list_proxy.node.meta["grapharg"] = grapharg
 
         result = BaseListVariable.cls_for_instance(value)(
             output, mutable_local=MutableLocal()
