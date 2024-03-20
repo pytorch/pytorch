@@ -11,7 +11,7 @@ jobs:
   llm-retrieval:
     runs-on: linux.4xlarge
     continue-on-error: true
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' }}
+    if: false
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
