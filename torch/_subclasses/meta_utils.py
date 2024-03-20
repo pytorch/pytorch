@@ -13,6 +13,7 @@ from torch._C._functorch import (
     is_batchedtensor,
     is_functorch_wrapped_tensor,
     is_gradtrackingtensor,
+    is_legacy_batchedtensor,
     maybe_get_bdim,
     maybe_get_level,
     peek_interpreter_stack,
@@ -782,9 +783,10 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
 
                     # Graph-Break for wrapped tensors
-                    if not (
-                        is_batchedtensor(t) or is_gradtrackingtensor(t)
-                    ) and torch._C._functorch.is_functorch_wrapped_tensor(t):
+                    if (
+                        not (is_batchedtensor(t) or is_gradtrackingtensor(t))
+                        and is_functorch_wrapped_tensor(t)
+                    ) or is_legacy_batchedtensor(t):
                         return NotImplemented
 
                     s = t.untyped_storage()
