@@ -101,12 +101,12 @@ std::tuple<at::Tensor, at::Tensor> sparse24_apply(at::Tensor input, at::Tensor t
 
 TORCH_LIBRARY_IMPL(sparse, CUDA, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_apply"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply"),
       TORCH_FN(sparse24_apply<false>));
 }
 
 TORCH_LIBRARY_IMPL(sparse, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_apply"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply"),
       TORCH_FN(sparse24_apply<true>));
 }

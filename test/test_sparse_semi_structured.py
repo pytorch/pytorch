@@ -71,7 +71,8 @@ atol_rtol_kw = {
 }
 
 def sparse24_largest_mask_2d(original):
-    return to_sparse_semi_structured(original, training=True).to_dense().bool()
+    sparse = SparseSemiStructuredTensorCUTLASS.from_dense_fast(original)
+    return sparse.to_dense().bool()
 
 def sparsify24_dense(original):
     return sparse24_largest_mask_2d(original) * original
@@ -202,7 +203,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
 
         dense_result = model(input)
-        mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight, backend=backend))
+        mod_linear.weight = nn.Parameter(SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].from_dense(mod_linear.weight))
         sparse_result = model(input)
 
         model = torch.compile(model, backend="inductor", fullgraph=True)
@@ -237,7 +238,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_sp24_meta(self) -> None:
         x = torch.randn([1024, 512], device="meta", dtype=torch.float16)
-        x_s = to_sparse_semi_structured(x, training=True, backend="cusparselt")
+        x_s = SparseSemiStructuredTensorCUSPARSELT.from_dense_fast(x)
         assert x_s.shape == x.shape
         x_s_t = x_s.t()
         assert x_s_t.shape == x.t().shape
@@ -249,7 +250,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
 
         def fn(x, e):
-            y = to_sparse_semi_structured(x, backend="cusparselt", training=True)
+            y = SparseSemiStructuredTensorCUSPARSELT.from_dense_fast(x)
             y = y.t()
             return x @ y
 
@@ -269,8 +270,9 @@ class TestSparseSemiStructured(TestCase):
     @inference_dtypes
     @parametrize_backends
     def test_to_sparse_semi_structured(self, dtype, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 256, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
 
         assert A.shape == A_sparse.shape
         assert A.device == A_sparse.device
@@ -286,8 +288,9 @@ class TestSparseSemiStructured(TestCase):
         """
         Ensure torch.mm(A_sparse, B) is correct for float16 and will throw error for int8
         """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
 
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
@@ -310,8 +313,9 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A_sparse, B.t()) is correct for float16/bfloat16
         and will throw an error for int8 + padding
         """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
 
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
@@ -344,8 +348,9 @@ class TestSparseSemiStructured(TestCase):
         """
         Ensure torch.mm(A_sparse.t(), B) throws error
         """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 256, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
 
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
@@ -362,8 +367,9 @@ class TestSparseSemiStructured(TestCase):
         """
         Ensure torch.mm(A, B_sparse.t()) is correct
         """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         B = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        B_sparse = to_sparse_semi_structured(B, backend=backend)
+        B_sparse = to_sparse_semi_structured(B)
 
         A = torch.rand(dense_input_shape, device=B_sparse.device).to(dtype)
 
@@ -384,8 +390,9 @@ class TestSparseSemiStructured(TestCase):
         """
         Ensure torch.mm(A, B_sparse) throws error
         """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         B = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        B_sparse = to_sparse_semi_structured(B, backend=backend)
+        B_sparse = to_sparse_semi_structured(B)
 
         A = torch.rand(dense_input_shape, device=B_sparse.device).to(dtype)
 
@@ -402,6 +409,7 @@ class TestSparseSemiStructured(TestCase):
         """
         Test nn.Linear has the same numerics
         """
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         input = torch.rand((dense_input_shape), device=device).half()
         model = nn.Linear(128, 256).to(device).half()
         m, n = model.weight.shape
@@ -411,7 +419,7 @@ class TestSparseSemiStructured(TestCase):
 
         dense_result = model(input)
 
-        model.weight = nn.Parameter(to_sparse_semi_structured(model.weight, backend=backend))
+        model.weight = nn.Parameter(to_sparse_semi_structured(model.weight))
 
         if inference_mode:
             with torch.inference_mode():
@@ -424,6 +432,7 @@ class TestSparseSemiStructured(TestCase):
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize_backends
     def test_mlp(self, device, dense_input_shape, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         input = torch.rand(dense_input_shape, device=device).half()
         model = (
             nn.Sequential(
@@ -445,7 +454,7 @@ class TestSparseSemiStructured(TestCase):
         dense_result = model(input)
 
         for i in range(2):
-            model[i].weight = nn.Parameter(to_sparse_semi_structured(model[i].weight, backend=backend))
+            model[i].weight = nn.Parameter(to_sparse_semi_structured(model[i].weight))
 
         sparse_result = model(input)
 
@@ -453,23 +462,26 @@ class TestSparseSemiStructured(TestCase):
 
     @parametrize_backends
     def test_values(self, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.values().shape == (128, 64)
         assert (A_sparse.values() == 1).all()
 
     @parametrize_backends
     def test_indices(self, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.indices().shape == (128, 8)
 
     @inference_dtypes
     @parametrize_backends
     def test_min_sparse_shape(self, dtype, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         config = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend]._DTYPE_SHAPE_CONSTRAINTS[dtype]
         A = rand_sparse_semi_structured_mask(config.sparse_min_rows, config.sparse_min_cols, dtype=dtype, device=device)
-        A_sparse = to_sparse_semi_structured(A, backend=backend)
+        A_sparse = to_sparse_semi_structured(A)
         B = torch.rand((config.sparse_min_cols, config.dense_min_cols), device=device).to(dtype)
         if dtype == torch.int8:
             dense_res = torch.mm(A.cpu(), B.cpu()).to(device, dtype=torch.int8)
@@ -484,27 +496,30 @@ class TestSparseSemiStructured(TestCase):
     @inference_dtypes
     @parametrize_backends
     def test_unsupported_shape(self, dtype, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(2, 2, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
-            A_sparse = to_sparse_semi_structured(A, backend=backend)
+            A_sparse = to_sparse_semi_structured(A)
 
     @dtypes(*all_types_and_complex())
     @parametrize_backends
     def test_unsupported_dtype(self, dtype, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
         if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
             with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dtype"):
-                A_sparse = to_sparse_semi_structured(A, backend=backend)
+                A_sparse = to_sparse_semi_structured(A)
         else:
-            A_sparse = to_sparse_semi_structured(A, backend=backend)
+            A_sparse = to_sparse_semi_structured(A)
 
     @parametrize_backends
     def test_unsupported_dim(self, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):
-            A_sparse = to_sparse_semi_structured(A, backend=backend)
+            A_sparse = to_sparse_semi_structured(A)
 
 
 def create_random_mask(shape) -> torch.Tensor:
@@ -531,42 +546,6 @@ class TestSparseSemiStructuredTraining(TestCase):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
 
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
-    def test_autocast(self, dtype, backend) -> None:
-        N = 128
-        inp = torch.randn([N, N], dtype=torch.float32, device="cuda")
-        W = torch.randn([N, N], dtype=torch.float32, device="cuda")
-        sInp = to_sparse_semi_structured(inp.to(dtype=dtype), backend=backend, training=True)
-        y = sInp @ W.to(dtype=dtype)
-        with torch.autocast("cuda", dtype=dtype):
-            sInp_ac = to_sparse_semi_structured(inp, backend=backend, training=True)
-            y_ac = sInp_ac @ W
-
-        assert torch.allclose(
-            sInp.to_dense(),
-            sInp_ac.to_dense(),
-            **atol_rtol_kw[dtype],
-        )
-        assert torch.allclose(y, y_ac, **atol_rtol_kw[dtype])
-
-    @training_dtypes
-    def test_pruning_algo_causal1122(self, dtype) -> None:
-        inp = torch.tensor(
-            [[4, 3, 2, 1], [-1, -3, 0.6, 0.5], [1, 2, 3, 4], [10, 2, -1, 5]],
-            device="cuda",
-            dtype=dtype,
-        )
-        inp = F.pad(inp, (0, 128 - 4, 0, 128 - 4), "constant", 1)
-        sInp = SparseSemiStructuredTensorCUTLASS.from_dense_fast(inp, algo="causal1122")
-
-        mask = sInp.to_dense() / inp
-        assert mask[:4, :4].int().tolist() == [
-            [1, 0, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 1, 1],
-            [1, 0, 0, 1],
-        ]
 
     @training_dtypes
     @parametrize_backends
@@ -577,7 +556,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             dtype=dtype,
         )
         inp = F.pad(inp, (0, 128 - 4, 0, 128 - 4), "constant", 1)
-        sInp = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].from_dense_fast(inp, algo="largest_abs_values_greedy")
+        sInp = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].from_dense_fast(inp, algorithm="largest_abs_values_greedy")
 
         mask = sInp.to_dense() / inp
         assert mask[:4, :4].int().tolist() == [
@@ -586,36 +565,6 @@ class TestSparseSemiStructuredTraining(TestCase):
             [0, 0, 1, 1],
             [1, 0, 0, 1],
         ]
-
-    def test_detach_requires_grad(self) -> None:
-        x = torch.randn([128, 64], device="cuda", dtype=torch.float16, requires_grad=True)
-        xs = to_sparse_semi_structured(x, training=True)
-        assert xs.requires_grad
-
-        # `detach` behavior
-        xs2 = xs.detach()
-        assert not xs2.requires_grad
-        assert not (xs2 * 2).requires_grad
-
-        xs2.requires_grad_(True)
-        assert xs2.requires_grad
-        ys = xs2 * 2
-        assert ys.requires_grad
-        ys.backward(ys)
-
-    def test_detach2(self) -> None:
-        x = torch.randn([128, 64], device="cuda", dtype=torch.float16, requires_grad=False)
-        assert not to_sparse_semi_structured(x, training=True).requires_grad
-        x.requires_grad_(True)
-        xs = to_sparse_semi_structured(x, training=True)
-        assert xs.requires_grad
-        xs2 = xs.detach()
-        xs2.requires_grad_(True)
-        xs3 = xs2 * 2
-        assert xs3.requires_grad
-        xs3.backward(xs3)
-        assert xs2.grad is not None
-        assert x.grad is None
 
     @training_dtypes
     def test_gemm(self, dtype) -> None:
@@ -626,7 +575,7 @@ class TestSparseSemiStructuredTraining(TestCase):
 
         a.masked_fill_(~mask, 0)
 
-        a_sparse = to_sparse_semi_structured(a, backend="cutlass")
+        a_sparse = to_sparse_semi_structured(a)
 
         masked_a = a * mask
         ref_out = masked_a @ b
@@ -644,13 +593,24 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert a.shape == (M, N)
         a = a.cuda().to(dtype)
         b = torch.randn([a.shape[1], 128], device="cuda", dtype=dtype)
-        a_sparse = to_sparse_semi_structured(a, backend=backend, training=True)
+
+        a_sparse = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].from_dense_fast(a)
 
         mask_dense = sparse24_largest_mask_2d(a).to(dtype)
 
         if backend == "cutlass":
             assert isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS)
-            sparse_mask = to_sparse_semi_structured(mask_dense, backend=backend, training=True)
+            (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(
+                mask_dense)
+
+            sparse_mask = SparseSemiStructuredTensorCUTLASS(
+                mask_dense.shape,
+                packed=packed,
+                meta=meta,
+                packed_t=packed_t,
+                meta_t=meta_t,
+                threads_masks=threads_masks,
+            )
             assert torch.allclose(a_sparse.meta.view(torch.short), sparse_mask.meta)
 
         ref_gemm = (mask_dense * a) @ b
@@ -664,7 +624,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         a = torch.randn([N, N], dtype=dtype, device="cuda")
         b = torch.eye(N, dtype=dtype, device="cuda")
 
-        packed, meta, packed_t, meta_t = torch.ops.sparse.sparse24_sparsify_both_ways(a)[
+        packed, meta, packed_t, meta_t = torch.ops.sparse._semi_structured_sparsify_both_ways(a)[
             :4
         ]
         # Heuristic to ensure we pack the same values
@@ -707,7 +667,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         )
         a = torch.randn([32, 64], dtype=dtype, device="cuda")
         a[:4, :4] = quad
-        packed, meta, packed_t, meta_t = torch.ops.sparse.sparse24_sparsify_both_ways(a)[:4]
+        packed, meta, packed_t, meta_t = torch.ops.sparse._semi_structured_sparsify_both_ways(a)[:4]
         # Check first line in A
         assert packed[0, 0].item() == 2
         assert packed[0, 1].item() == 0
@@ -725,82 +685,11 @@ class TestSparseSemiStructuredTraining(TestCase):
             packed_t,
             meta_t,
             threads_masks,
-        ) = torch.ops.sparse.sparse24_sparsify_both_ways(x)
-        packed2, packed_t2 = torch.ops.sparse.sparse24_apply(x, threads_masks)
+        ) = torch.ops.sparse._semi_structured_sparsify_both_ways(x)
+        packed2, packed_t2 = torch.ops.sparse._semi_structured_apply(x, threads_masks)
         assert torch.allclose(packed, packed2)
         assert torch.allclose(packed_t, packed_t2)
 
-    @training_dtypes
-    def test_sp24_api_different_pattern(self, dtype) -> None:
-        M, N = 256, 256
-        x = torch.randn([M, N], dtype=dtype, device="cuda")
-        y = torch.randn([M, N], dtype=dtype, device="cuda")
-        sx = to_sparse_semi_structured(x, training=True)
-        sy = to_sparse_semi_structured(y, training=True)
-        # Can't add with different sparsity pattern
-        with pytest.raises(ValueError):
-            sx + sy
-        # Ok, same sparsity pattern
-        assert isinstance(sx + sx, SparseSemiStructuredTensor)
-        # Ok, sharing sparsity pattern of x
-        sy2 = sx.from_dense_like(y)
-        assert isinstance(sx + sy2, SparseSemiStructuredTensor)
-
-    @training_dtypes
-    def test_sp24_api_different_pattern_transposed(self, dtype) -> None:
-        N = 256
-        x = torch.randn([N, N], dtype=dtype, device="cuda")
-        sx = to_sparse_semi_structured(x, training=True)
-        sxt = sx.t()
-        assert isinstance(sxt, SparseSemiStructuredTensor)
-        # Can't add with different sparsity pattern
-        with pytest.raises(ValueError):
-            sx + sxt
-        # But this should work
-        sx + sxt.t()
-        # And we should be able to sparsify with transposed pattern
-        sxt2 = sxt.from_dense_like(x.t())
-        assert torch.allclose(sxt2.packed, sxt.packed)
-        assert torch.allclose(sxt2.packed_t, sxt.packed_t)
-
-    @training_dtypes
-    @parametrize_backends
-    def test_sp24_transpose_invariant(self, dtype, backend) -> None:
-        M, N = 128, 256
-
-        torch.manual_seed(0)
-        r = random.Random(0)
-
-        def gen4x4():
-            # Create a 4x4 tile that can be 24 sparsified perfectly
-            values = [
-                [1, 1, 0, 0],
-                [0, 1, 1ht 0],
-                [0, 0, 1, 1],
-                [1, 0, 0, 1],
-            ]
-            c1, c2 = r.sample([0, 1, 2, 3], 2)
-            r1, r2 = r.sample([0, 1, 2, 3], 2)
-            values[r1], values[r2] = values[r2], values[r1]
-            for i in range(4):
-                values[i][c1], values[i][c2] = values[i][c2], values[i][c1]
-            return values
-
-        a = torch.zeros([M, N], device="cuda", dtype=torch.float16)
-        assert M % 4 == 0 and N % 4 == 0
-        for m in range(0, M, 4):
-            for n in range(0, N, 4):
-                a[m : m + 4, n : n + 4] = torch.tensor(
-                    gen4x4(), device="cuda", dtype=torch.float16
-                )
-        a = a * torch.randn_like(a).abs()
-
-        # Sparsify `a`` and `a.t()`
-        a_s = to_sparse_semi_structured(a, training=True, backend=backend)
-        a_t_s = to_sparse_semi_structured(a.t().contiguous(), training=True, backend=backend)
-        assert torch.allclose(a_s.to_dense(), a)
-        assert torch.allclose(a_t_s.t().to_dense(), a)  # type: ignore
-        assert torch.allclose(a_t_s.to_dense().t(), a)
 
     @training_dtypes
     def test_sp24_matmuls(self, dtype) -> None:
@@ -809,8 +698,24 @@ class TestSparseSemiStructuredTraining(TestCase):
         b = torch.randn([K, N], device="cuda", dtype=dtype)
         a_m = sparse24_largest_mask_2d(a)
         b_m = sparse24_largest_mask_2d(b)
-        a_s = to_sparse_semi_structured(a, training=True)
-        b_s = to_sparse_semi_structured(b, training=True)
+        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(a)
+        a_s = SparseSemiStructuredTensorCUTLASS(
+            a.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+        )
+        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(b)
+        b_s = SparseSemiStructuredTensorCUTLASS(
+            a.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+        )
 
         assert torch.allclose(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[dtype])
         assert torch.allclose(a @ b_s, a @ (b * b_m), **atol_rtol_kw[dtype])
@@ -825,7 +730,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         a = torch.randn([64, 128], device="cuda", dtype=torch.float16)
         b = torch.randn([128], device="cuda", dtype=torch.float16)
         a_m = sparse24_largest_mask_2d(a)
-        a_s = to_sparse_semi_structured(a, training=True)
+        a_s = to_sparse_semi_structured(a)
 
         with pytest.raises(NotImplementedError):
             assert torch.allclose(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[a.dtype])
@@ -835,164 +740,10 @@ class TestSparseSemiStructuredTraining(TestCase):
         a = torch.randn([64, 128], device="cuda", dtype=torch.float16)
         b = torch.randn([5, 6, 128], device="cuda", dtype=torch.float16)
         a_m = sparse24_largest_mask_2d(a)
-        a_s = to_sparse_semi_structured(a, training=True)
+        a_s = to_sparse_semi_structured(a)
 
         with pytest.raises(NotImplementedError):
             assert torch.allclose(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[a.dtype])
-
-    @training_dtypes
-    @parametrize("act", [F.gelu, F.relu])
-    def test_sp24_api_mlp_act24_correctness(self, dtype, act) -> None:
-        B, in_ft, hid_ft, out_ft = 256, 2048, 6144, 2048
-        torch.manual_seed(0)
-        x = torch.randn([B, in_ft], dtype=dtype, device="cuda", requires_grad=True)
-        w1 = (
-            torch.randn([in_ft, hid_ft], dtype=dtype, device="cuda", requires_grad=False)
-            * 0.01
-        )
-        w2 = (
-            torch.randn([hid_ft, out_ft], dtype=dtype, device="cuda", requires_grad=False)
-            * 0.01
-        )
-        grad = (
-            torch.randn([B, out_ft], dtype=dtype, device="cuda", requires_grad=False) * 0.1
-        )
-        w1.requires_grad_(True)
-        w2.requires_grad_(True)
-
-        params_with_grads = [x, w1, w2]
-
-        # Run baseline
-        x1 = x @ w1
-        x1 = sparsify24_dense(x1)
-        x1 = act(x1)
-        out = x1 @ w2
-        out.backward(grad)
-
-        grads_ref = [t.grad for t in params_with_grads]
-        for t in params_with_grads:
-            t.grad = None
-
-        # Run with sparsity
-        x1 = x @ w1
-        x1 = to_sparse_semi_structured(x1, training=True)
-        x1 = act(x1)
-        out = x1 @ w2
-        out.backward(grad)
-
-        for grad_name, grad_ref, grad_calc in zip(
-            ["x", "w1", "w2"], grads_ref, [t.grad for t in params_with_grads]
-        ):
-            assert grad_calc is not None, grad_name
-            assert grad_ref is not None, grad_name
-            assert torch.allclose(grad_calc, grad_ref, **atol_rtol_kw[dtype])
-
-    @training_dtypes
-    def test_sp24_api_swiglu_correctness(self, dtype) -> None:
-        B, in_ft, hid_ft, out_ft = 256, 2048, 6144 // 2, 2048
-        torch.manual_seed(0)
-        x = torch.randn([B, in_ft], dtype=dtype, device="cuda", requires_grad=True)
-        w1 = (
-            torch.randn([in_ft, hid_ft], dtype=dtype, device="cuda", requires_grad=False)
-            * 0.01
-        )
-        w2 = (
-            torch.randn([in_ft, hid_ft], dtype=dtype, device="cuda", requires_grad=False)
-            * 0.01
-        )
-        w3 = (
-            torch.randn([hid_ft, out_ft], dtype=dtype, device="cuda", requires_grad=False)
-            * 0.01
-        )
-        grad = (
-            torch.randn([B, out_ft], dtype=dtype, device="cuda", requires_grad=False) * 0.1
-        )
-        w1.requires_grad_(True)
-        w2.requires_grad_(True)
-        w3.requires_grad_(True)
-
-        params_with_grads = [x, w1, w2, w3]
-
-        # Run baseline
-        x1 = x @ w1
-        x2 = x @ w2
-        x1s = sparsify24_dense(F.silu(x1))
-        hid = x1s * x2
-        out = hid @ w3
-        out.backward(grad)
-
-        grads_ref = [t.grad for t in params_with_grads]
-        for t in params_with_grads:
-            t.grad = None
-
-        # Run with sparsity
-        x1 = x @ w1
-        x2 = x @ w2
-        x1s = to_sparse_semi_structured(F.silu(x1), training=True)
-        hid = x1s * x2
-        out = hid @ w3
-        out.backward(grad)
-
-        for grad_name, grad_ref, grad_calc in zip(
-            ["x", "w1", "w2", "w3"], grads_ref, [t.grad for t in params_with_grads]
-        ):
-            assert grad_calc is not None, grad_name
-            assert grad_ref is not None, grad_name
-            assert torch.allclose(grad_calc, grad_ref, **atol_rtol_kw[dtype])
-
-
-    @training_dtypes
-    @parametrize("input_rowmajor", [subtest(True), subtest(False)])
-    def test_sparsify24_like_dense(self, dtype, input_rowmajor):
-        M, N = 128, 256
-        if input_rowmajor:
-            x = torch.randn([M, N], dtype=dtype, device="cuda")
-        else:
-            x = torch.randn([N, M], dtype=dtype, device="cuda").t()
-        sx = to_sparse_semi_structured(x.contiguous(), training=True)
-        sx_like = sx.from_dense_like(x, out_dense=True)
-        assert torch.allclose(
-            sx_like, sx.to_dense(), **atol_rtol_kw[dtype]
-        )
-
-
-    @training_dtypes
-    @parametrize_backends
-    def test_sparsify24_weights(self, dtype, backend):
-        x = torch.randn([128, 512], dtype=dtype, device="cuda", requires_grad=True)
-        w = torch.randn([1024, 512], dtype=dtype, device="cuda", requires_grad=True)
-
-        flat_w = w.flatten()  # FSDP-like processing
-        w = flat_w.reshape(w.shape)
-
-        subclass = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend]
-        sw = subclass.from_dense_fast(w, gradient="24dense")
-        y = x @ sw.t()
-
-        y.backward(y)
-
-
-    @parametrize_backends
-    @parametrize("with_bias", [False, True])
-    def test_linear_dispatch_inference_mode(self, backend: str, with_bias: bool) -> None:
-        B, ft_in, ft_out = 128, 256, 512
-        x = torch.randn([B, ft_in], device="cuda", dtype=torch.float16)
-        weight = torch.randn([ft_out, ft_in], device="cuda", dtype=torch.float16)
-        bias = (
-            torch.randn([ft_out], device="cuda", dtype=torch.float16) if with_bias else None
-        )
-
-        w_sparse = to_sparse_semi_structured(
-            weight,
-            backend=backend,
-            training = True
-        )
-        # NOTE: When in `inference_mode`, PyTorch no longer dispatches to `addmm`, but to `linear`
-        # so we need to support that as well
-        with torch.inference_mode():
-            out = F.linear(x, w_sparse, bias)
-        out_ref = F.linear(x, w_sparse.to_dense(), bias)
-        assert torch.allclose(out, out_ref, **atol_rtol_kw[x.dtype])
 
 class TestSparseSemiStructuredCUTLASS(TestCase):
     """
@@ -1194,75 +945,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # when setting using the last one (4)
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
         assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
-
-    @training_dtypes
-    @parametrize("bias", [False, True])
-    @parametrize("aligned", [True, False])
-    @parametrize("amp", [True, False])
-    def test_linearw24(self, dtype, bias: bool, aligned: bool, amp: bool) -> None:
-
-        class LinearW24(torch.nn.Linear):
-            def forward(self, input: torch.Tensor) -> torch.Tensor:
-                sparse_weight = to_sparse_semi_structured(self.weight, training=True, backend="cusparselt")
-                return F.linear(input, sparse_weight, self.bias)
-
-        B, ft_in, ft_out = 64, 128, 256
-        if not aligned:
-            B = 65
-        model_dtype = torch.float32 if amp else dtype
-        x = torch.randn([B, ft_in], device="cuda", dtype=model_dtype, requires_grad=True)
-        grad = torch.randn([B, ft_out], device="cuda", dtype=model_dtype)
-        m = torch.nn.Linear(ft_in, ft_out, bias=bias).cuda().to(model_dtype)
-
-        m24 = LinearW24(ft_in, ft_out, bias=bias).cuda().to(model_dtype)
-
-        with torch.autocast("cuda", dtype=dtype, enabled=amp):
-            # Make weights sparse
-            state_dict = m.state_dict()
-            weight_sp24 = SparseSemiStructuredTensorCUTLASS.from_dense_fast(state_dict["weight"].abs())
-            state_dict["weight"] = weight_sp24.to_dense().to(model_dtype).detach()
-            m.load_state_dict(state_dict)
-            m24.load_state_dict(state_dict)
-
-            # FW with dense weights
-            out = m(x)
-
-            # FW with sparsity
-            x24 = x.detach().requires_grad_()
-            out24 = m24(x24)
-
-        # Backward passes outside autocast
-        out.backward(grad)
-        out24.backward(grad)
-
-        assert out24.is_contiguous()
-        assert x24.grad is not None
-        assert x24.grad.is_contiguous()
-        assert m24.weight.grad is not None
-        assert m24.weight.grad.is_contiguous()
-        if bias:
-            assert m24.bias.grad is not None
-
-        assert torch.allclose(out24, out, **atol_rtol_kw[dtype])
-        assert x.grad is not None and x24.grad is not None
-        assert torch.allclose(x24.grad, x.grad, **atol_rtol_kw[dtype])
-        assert m.weight.grad is not None
-        assert torch.allclose(
-            m24.weight.grad.to(dtype),
-            weight_sp24.from_dense_like(
-                m.weight.grad.to(dtype), out_dense=True
-            ),
-            **atol_rtol_kw[dtype],
-        )
-        if bias:
-            assert m.bias.grad is not None
-            assert m24.bias.grad is not None
-            assert torch.allclose(
-                m24.bias.grad.to(dtype),
-                m.bias.grad.to(dtype),
-                **atol_rtol_kw[dtype],
-            )
-
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")

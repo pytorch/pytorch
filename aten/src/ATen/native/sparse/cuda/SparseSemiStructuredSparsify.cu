@@ -334,18 +334,18 @@ std::
 
 TORCH_LIBRARY_IMPL(sparse, CUDA, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_sparsify_both_ways"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_sparsify_both_ways"),
       TORCH_FN(sparse24_sparsify_both_ways<false>));
 }
 
 TORCH_LIBRARY_IMPL(sparse, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_sparsify_both_ways"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_sparsify_both_ways"),
       TORCH_FN(sparse24_sparsify_both_ways<true>));
 }
 
 TORCH_LIBRARY_IMPL(sparse, Autocast, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_sparsify_both_ways"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_sparsify_both_ways"),
       TORCH_FN(sparse24_sparsify_both_ways_autocast));
 }

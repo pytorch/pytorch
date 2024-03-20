@@ -188,18 +188,18 @@ at::Tensor sparse24_apply_dense_output_autocast(
 
 TORCH_LIBRARY_IMPL(sparse, CUDA, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_apply_dense_output"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
       TORCH_FN(torch::sparse::sparse24_apply_dense_output<false>));
 }
 
 TORCH_LIBRARY_IMPL(sparse, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_apply_dense_output"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
       TORCH_FN(torch::sparse::sparse24_apply_dense_output<true>));
 }
 
 TORCH_LIBRARY_IMPL(sparse, Autocast, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("sparse::sparse24_apply_dense_output"),
+      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
       TORCH_FN(torch::sparse::sparse24_apply_dense_output_autocast));
 }

@@ -18,7 +18,6 @@ from torch.sparse._semi_structured_ops import (
     semi_sparse_mm,
     semi_sparse_addmm,
     semi_sparse_linear,
-    semi_sparse_pointwise_op
 )
 
 __all__ = [
@@ -311,26 +310,26 @@ class SparseSemiStructuredTensor(torch.Tensor):
         raise NotImplementedError
 
     @classmethod
-    def from_dense_fast(cls, original_tensor : torch.Tensor, algo: str="", gradient: str="24dense") -> "SparseSemiStructuredTensor":
-        from torch.sparse.sparsifier import _Sparsify24Func
-        return _Sparsify24Func.apply(original_tensor, algo, gradient, cls.BACKEND)
+    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(
+            original_tensor,
+            backend=cls.BACKEND, algorithm=algorithm)
 
-    def from_dense_like(
-        self,
-        original_tensor: torch.Tensor,
-        out_dense: bool = False,
-    ):
-        from torch.sparse.sparsifier import _Sparsify24LikeFunc
-        # Handle transposed case
-        if not self.threads_masks.is_contiguous():
-            return _Sparsify24LikeFunc.apply(original_tensor.t(), self.t(), out_dense).t()
-        return _Sparsify24LikeFunc.apply(original_tensor, self, out_dense)
+        sInp = cls(
+            original_tensor.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+            requires_grad=False,
+            fuse_transpose_cusparselt=True,
+        )
+        return sInp
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
     transposed: bool = False,
-    training=False,
-    backend: str = None,
 ) -> SparseSemiStructuredTensor:
     """
     This function converts a dense tensor into a sparse semi-structured tensor.
@@ -383,23 +382,14 @@ def to_sparse_semi_structured(
             "SparseSemiStructuredTensor only support contiguous input tensors. "
         )
 
-    if backend == "cutlass":
-        SPARSE_SUBCLASS = torch.sparse.SparseSemiStructuredTensorCUTLASS
-    elif backend == "cusparselt":
-        SPARSE_SUBCLASS = torch.sparse.SparseSemiStructuredTensorCUSPARSELT
-    else:
-        # set from _FORCE_CUTLASS flag
-        SPARSE_SUBCLASS = (
-            torch.sparse.SparseSemiStructuredTensorCUTLASS
-            if SparseSemiStructuredTensor._FORCE_CUTLASS
-            else torch.sparse.SparseSemiStructuredTensorCUSPARSELT
-        )
+    # set from _FORCE_CUTLASS flag
+    SPARSE_SUBCLASS = (
+        torch.sparse.SparseSemiStructuredTensorCUTLASS
+        if SparseSemiStructuredTensor._FORCE_CUTLASS
+        else torch.sparse.SparseSemiStructuredTensorCUSPARSELT
+    )
 
-    if training:
-        return SPARSE_SUBCLASS.from_dense_fast(original_tensor)
-    else:
-        return SPARSE_SUBCLASS.from_dense(original_tensor)
-
+    return SPARSE_SUBCLASS.from_dense(original_tensor)
 
 class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     """
@@ -437,35 +427,6 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             threads_masks=None,
             requires_grad=original_tensor.requires_grad,
         )
-
-    @classmethod
-    def _load_dispatch_table(cls):
-        super()._load_dispatch_table()
-        temp = {
-            torch.ops.aten.relu: semi_sparse_pointwise_op,
-            torch.ops.aten.gelu: semi_sparse_pointwise_op,
-            torch.ops.aten.silu: semi_sparse_pointwise_op,
-            torch.ops.aten.mul: partial(
-                # `mul` BW in swiglu
-                semi_sparse_pointwise_op,
-                allow_sparsify_args_list=(0, 1),
-            ),
-            torch.ops.aten.add: semi_sparse_pointwise_op,
-            # Note: for these ops, we allow the gradient to come in as a `torch.Tensor`
-            # and we will run the sparsification right before calling the BW aten func
-            torch.ops.aten.gelu_backward: partial(
-                semi_sparse_pointwise_op, allow_sparsify_args_list=(0,)
-            ),
-            torch.ops.aten.silu_backward: partial(
-                semi_sparse_pointwise_op, allow_sparsify_args_list=(0, 1)
-            ),
-            torch.ops.aten.threshold_backward: partial(  # relu BW
-                semi_sparse_pointwise_op,
-                allow_sparsify_args_list=(0,),
-            ),
-        }
-        cls.SPARSE_DISPATCH.update(temp)
-
 
     def to_dense(self):
         assert self.meta is not None and self.packed is not None
