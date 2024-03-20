@@ -614,7 +614,7 @@ class TestInductorDynamic(TestCase):
         torch._dynamo.reset()
 
         _x = torch.randn([5, 3, 3])
-        torch._dynamo.mark_dynamic(_x, 0)
+        torch._dynamo.maybe_mark_dynamic(_x, 0)
 
         # Simple functions introducing constraints on x.shape[0]
         def fn_1(x):
@@ -658,12 +658,12 @@ class TestInductorDynamic(TestCase):
                 # testing fn_2
                 assert (
                     WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be limited to exactly 5 on third call due to multiple constraints"
+                ), "Should be limited to exactly 5 on second call due to multiple constraints"
             elif call_count == 2:
                 # testing fn_3
                 assert (
                     WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be exactly 5 on second call"
+                ), "Should be exactly 5 on third call"
 
         class TestWrapperCodegen(WrapperCodeGen):
             def __init__(self, *args, **kwargs):
@@ -685,9 +685,7 @@ class TestInductorDynamic(TestCase):
 
             torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
-
-            # @issue: If the line below is uncommented, an Exception is raised.
-            # torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
+            torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
         finally:
             register_backend_for_device(
                 "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
