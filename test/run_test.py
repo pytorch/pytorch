@@ -1183,7 +1183,7 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and TEST_WITH_CROSSREF
+        and (TEST_WITH_CROSSREF or TEST_WITH_ASAN)
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
     )
