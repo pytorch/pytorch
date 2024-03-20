@@ -831,11 +831,35 @@ class TritonKernelVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from triton.runtime.autotuner import Autotuner
+        from triton.runtime.autotuner import autotune, Autotuner, Config
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
+
+        special_kwargs = {}
+        for name in ("num_warps", "num_stages", "num_ctas"):
+            if name in kwargs:
+                # remove special kwargs from `kwargs`
+                val = kwargs.pop(name)
+                assert isinstance(val, ConstantVariable)
+                special_kwargs[name] = val.value
+
+        if special_kwargs:
+            if isinstance(self.kernel, Autotuner):
+                # if there is Autotuner already, set
+                # special kwargs to each of its configs
+                for config in self.kernel.configs:
+                    config.__dict__.update(special_kwargs)
+            else:
+                # if there is no Autotuner, wrap the kernel into a
+                # new one with a single config with special kwargs
+                config = Config(kwargs={}, **special_kwargs)
+                new_kernel = autotune(configs=[config], key=[])(self.kernel)
+                kernel_side_table.replace_kernel(self.kernel, new_kernel)
+                self.kernel = new_kernel
 
         if self.grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")

@@ -44,6 +44,13 @@ class KernelSideTable:
             self.kernel_to_id[kernel] = idx
             return idx
 
+    def replace_kernel(self, old_kernel, new_kernel):
+        with self.lock:
+            assert old_kernel in self.kernel_to_id
+            idx = self.kernel_to_id.pop(old_kernel)
+            self.kernel_to_id[new_kernel] = idx
+            self.id_to_kernel[idx] = new_kernel
+
     # Returns the triton kernel at the given index
     def get_kernel(self, idx: int):
         # No need to lock here as fetching from dict is atomic
