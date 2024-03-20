@@ -131,9 +131,9 @@ def get_labels(pr_number: int) -> Set[str]:
     }
 
 
-def has_labels(labels: Set[str], label_regex: Any) -> Set[str]:
+def filter_labels(labels: Set[str], label_regex: Any) -> Set[str]:
     """
-    Return true if there is at least one label matching the regex
+    Return the list of matching labels
     """
     return {l for l in labels if re.match(label_regex, l)}
 
@@ -159,13 +159,11 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
         label = f"{PREFIX}{config_name.strip()}"
         if label in labels:
-            msg = f"Select {config_name} because label {label} is presented in the pull request by the time the test starts"
+            msg = f"Select {config_name} because label {label} is present in the pull request by the time the test starts"
             info(msg)
             filtered_test_matrix["include"].append(entry)
 
-    debug = re.compile(f"{PREFIX}.+")
-    print(type(debug))
-    test_config_labels = has_labels(labels, re.compile(f"{PREFIX}.+"))
+    test_config_labels = filter_labels(labels, re.compile(f"{PREFIX}.+"))
     if not filtered_test_matrix["include"] and not test_config_labels:
         info("Found no test-config label on the PR, so all test configs are included")
         # Found no test-config label and the filtered test matrix is empty, return the same
