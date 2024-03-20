@@ -216,9 +216,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = DTensor.from_local(x_inner, mesh, [Shard(1)], run_check=False)
         y = DTensor.from_local(y_inner, mesh, [Shard(1)], run_check=False)
         z = DTensor.from_local(z_inner, mesh, [Replicate()], run_check=False)
-        # Will reenable after next PR lands
-        # out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
-        # out.contiguous().sum().backward()
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
+        out.contiguous().sum().backward()
 
     @run_with_both_funcol_impls
     def test_dynamo_dtensor_from_local(self):
@@ -380,6 +379,23 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
+
+    def test_dtensor_partial_placement_graph_output(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x + x
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [_Partial()], run_check=False)
+
+        y = torch.randn(4, 4, requires_grad=True)
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt)
+        out_dt = torch.matmul(tmp_dt, y_dt)
+        out_dt.sum().backward()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)

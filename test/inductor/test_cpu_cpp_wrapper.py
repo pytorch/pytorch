@@ -5,14 +5,11 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    IS_MACOS,
-    slowTest,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -47,11 +44,11 @@ class CppWrapperTemplate:
     pass
 
 
-class TestCppWrapper(TorchTestCase):
+class TestCppWrapper(InductorTestCase):
     device = "cpu"
 
 
-class DynamicShapesCppWrapperCpuTests(TorchTestCase):
+class DynamicShapesCppWrapperCpuTests(InductorTestCase):
     device = "cpu"
 
 
@@ -71,6 +68,52 @@ test_failures_cpp_wrapper = {
         ("cpp_wrapper",), is_skip=True
     ),
 }
+
+if config.abi_compatible:
+    xfail_list = [
+        "test_bernoulli1_cpu",  # cpp fallback op naming issue
+        "test_conv2d_binary_inplace_fusion_failed_cpu",
+        "test_conv2d_binary_inplace_fusion_pass_cpu",
+        "test_cumsum_cpu",
+        "test_custom_op_cpu",  # needs custom op support
+        "test_dtype_sympy_expr_cpu",
+        "test_dynamic_qlinear_cpu",
+        "test_dynamic_qlinear_qat_cpu",
+        "test_lstm_packed_change_input_sizes_cpu",
+        "test_profiler_mark_wrapper_call_cpu",
+        "test_qconv2d_add_cpu",
+        "test_qconv2d_add_relu_cpu",
+        "test_qconv2d_cpu",
+        "test_qconv2d_dequant_promotion_cpu",
+        "test_qconv2d_maxpool2d_linear_dynamic_cpu",
+        "test_qconv2d_relu_cpu",
+        "test_qlinear_cpu",
+        "test_qlinear_dequant_promotion_cpu",
+        "test_qlinear_relu_cpu",
+        "test_randint_cpu",
+        "test_randn_with_dtype_and_device_cpu",
+        "test_scatter5_cpu",
+        "test_scatter6_cpu",
+        "test_tensor2_cpu",
+    ]
+    for test_name in xfail_list:
+        test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
+            ("cpp_wrapper",), is_skip=False
+        )
+        test_failures_cpp_wrapper[
+            f"{test_name}_dynamic_shapes"
+        ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
+    skip_list = [
+        "test_linear1_cpu",  # segfault from double free
+        "test_multihead_attention_cpu",
+    ]
+    for test_name in skip_list:
+        test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
+            ("cpp_wrapper",), is_skip=True
+        )
+        test_failures_cpp_wrapper[
+            f"{test_name}_dynamic_shapes"
+        ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=True)
 
 
 def make_test_case(
@@ -126,7 +169,7 @@ if RUN_CPU:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cpu"
-        tests: TorchTestCase = test_torchinductor.CpuTests()
+        tests: InductorTestCase = test_torchinductor.CpuTests()
         condition: bool = True
         slow: bool = False
         func_inputs: list = None
@@ -257,6 +300,18 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
         ),
+        BaseTest(
+            "test_dynamic_qlinear",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_dynamic_qlinear_qat",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
@@ -294,7 +349,12 @@ if RUN_CPU:
             item.code_string_count,
         )
 
-    test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
+    test_torchinductor.copy_tests(
+        CppWrapperTemplate,
+        TestCppWrapper,
+        "cpp_wrapper",
+        test_failures_cpp_wrapper,
+    )
 
     DynamicShapesCppWrapperTemplate = (
         test_torchinductor_dynamic_shapes.make_dynamic_cls(CppWrapperTemplate)
@@ -310,7 +370,7 @@ if RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if RUN_CPU:
         run_tests(needs="filelock")
