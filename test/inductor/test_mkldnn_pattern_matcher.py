@@ -173,13 +173,17 @@ class TestPatternMatcherBase(TestCase):
                 expected = mod(*inputs)
                 actual = torch.compile(mod)(*clone_inputs)
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_count"], matcher_count
-                )
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    matcher_nodes,
-                )
+                if matcher_count is not None:
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_count"], matcher_count
+                    )
+                if matcher_nodes is not None:
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_nodes"],
+                        matcher_nodes,
+                    )
+                if matcher_check_fn is not None:
+                    matcher_check_fn()
 
     def _test_code_common(
         self,
@@ -2127,6 +2131,34 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    @skipIfNoDynamoSupport
+    @skipIfRocm
+    def test_woq_int8(self):
+        class M(torch.nn.Module):
+            def forward(self, x, weight, scales):
+                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+
+        torch.manual_seed(1234)
+        mod = M().eval()
+        x_shape = (1, 1, 256)
+        w_shape = (12, 256)
+        s_shape = 12
+        x = torch.randn(x_shape, dtype=torch.bfloat16)
+        w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+        s = torch.randn(s_shape, dtype=torch.bfloat16)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+
+        self._test_common(
+            mod,
+            (x, w, s),
+            matcher_check_fn=matcher_check_fn,
+            check_quantization=False,
+            atol=0.001,
+            rtol=0.07,
+        )
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
@@ -2175,9 +2207,11 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
             # 3. view+linear+view to linear(match_count=2, match_nodes=6).
+            # 4. linear to linear+swish(match_count=1, match_nodes=2).
+            # 5. linear to linear+relu(match_count=1, match_nodes=5).
 
-            match_count = 8
-            match_nodes = 12
+            match_count = 10
+            match_nodes = 19
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
     def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
