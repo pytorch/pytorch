@@ -31,6 +31,7 @@ from .utils import (
     conditional_product,
     create_bandwidth_info_str,
     do_bench,
+    get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
@@ -157,6 +158,7 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
+        self.cuda_kernel_saved = False
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -357,7 +359,16 @@ class CachingAutotuner(KernelInterface):
             # need to initialize context
             self.gpu_device.synchronize(self.gpu_device.current_device())
 
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            try:
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            except Exception:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
             binary._init_handles()
 
         call_args = [
@@ -505,7 +516,7 @@ class CachingAutotuner(KernelInterface):
             log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
                 log.debug(
-                    "%s: %f, nreg %d, nspill %d, #shared-mem %d",
+                    "%s: %f, nreg %d, nspill %d, #shared-mem %s",
                     k.config,
                     v,
                     k.n_regs,
@@ -563,6 +574,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.bin.asm["hsaco_path"]
             ).read_bytes()
             CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+
+        self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
@@ -782,6 +795,8 @@ def load_cached_autotuning(
     configs_hash: str,
     configs: List[Config],
 ):
+    if best_config is None:
+        return None
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
 
@@ -803,6 +818,21 @@ def load_cached_autotuning(
         return None
 
     return matching_configs[0]
+
+
+def should_use_remote_autotune_cache():
+    if config.use_autotune_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+
+    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+
+    return torch._utils_internal.justknobs_check(
+        "pytorch/autotune_remote_cache:enable"
+    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/autotune_remote_cache:memcache_version"
+    )
 
 
 def cached_autotune(
@@ -832,18 +862,24 @@ def cached_autotune(
         remote_cache_key = None
         if config.use_autotune_local_cache:
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        if config.use_autotune_remote_cache:
+        if should_use_remote_autotune_cache():
             backend_hash = inductor_meta.get("backend_hash", None)
             if backend_hash is not None:
-                key = backend_hash + "autotune-best-config"
-                if config.is_fbcode():
-                    remote_cache = (
-                        triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
-                            key, is_autotune=True
+                key = backend_hash + configs_hash + "autotune-best-config"
+                key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+                try:
+                    if config.is_fbcode():
+                        remote_cache = (
+                            triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
+                                key, is_autotune=True
+                            )
                         )
-                    )
-                else:
-                    remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
                 # we already sha256 hash the source contents
                 remote_cache_key = os.path.basename(filename)
             else:
@@ -856,12 +892,13 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get([remote_cache_key])
+            cache_outs = remote_cache.get([remote_cache_key])
+            cache_out = cache_outs.get(remote_cache_key, None)
+            best_config = json.loads(cache_out) if cache_out else None
 
+        best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
-            best_config = load_cached_autotuning(best_config, configs_hash, configs)
-            if best_config:
-                configs = [best_config]
+            configs = [best_config]
 
         def save_cache_hook(cfg, found_by_coordesc=False):
             data = json.dumps(
@@ -1465,11 +1502,28 @@ def grid(*numels):
             return numel
         return ceildiv(numel, block)
 
+    max_grid_dims = config.triton.max_tiles
+
     def grid_fn(meta):
+        x_grid = get_grid_dim(xnumel, meta.get("XBLOCK", 1))
+        y_grid = get_grid_dim(ynumel, meta.get("YBLOCK", None))
+
+        MAX_Y_GRID = get_max_y_grid()
+        if znumel is None and max_grid_dims <= 2:
+            div = ceildiv(y_grid, MAX_Y_GRID)
+            y_grid = y_grid // div
+            z_grid = div
+        else:
+            z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
+            torch._check(
+                y_grid <= MAX_Y_GRID,
+                lambda: f"Generated y grid beyond 2^16 ({y_grid}) not supported with z dimension present. File issue",
+            )
+
         return (
-            get_grid_dim(xnumel, meta.get("XBLOCK", 1)),
-            get_grid_dim(ynumel, meta.get("YBLOCK", None)),
-            get_grid_dim(znumel, meta.get("ZBLOCK", None)),
+            x_grid,
+            y_grid,
+            z_grid,
         )
 
     return grid_fn
