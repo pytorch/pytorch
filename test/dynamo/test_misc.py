@@ -9847,6 +9847,31 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
 
+    def test_raises_importerror1(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            try:
+                import some_module_that_surely_does_not_exist
+
+                return
+            except ImportError:
+                pass
+            return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+
+    def test_raises_importerror2(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            import some_module_that_surely_does_not_exist
+
+            return x + 1
+
+        x = torch.randn(8)
+        with self.assertRaises(ImportError):
+            fn(x)
+
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
             def __init__(self):

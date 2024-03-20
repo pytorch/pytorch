@@ -898,6 +898,9 @@ def triplet_margin_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
+
     # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
     # since it's a pure Python implementation.  Use this helper instead.
     return _triplet_margin_with_distance_loss(
