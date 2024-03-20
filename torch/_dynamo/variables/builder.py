@@ -40,7 +40,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, trace_rules
@@ -1068,7 +1067,7 @@ class VariableBuilder:
         if (
             isinstance(value, torch.Tensor)
             and value.is_nested
-            and not isinstance(value, NestedTensor)
+            and not isinstance(value, torch.nested._internal.nested_tensor.NestedTensor)
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 

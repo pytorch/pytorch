@@ -437,6 +437,13 @@ aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_get_jagged_dummy
+aten::_nested_get_lengths
+aten::_nested_get_offsets
+aten::_nested_get_ragged_idx
+aten::_nested_get_values
+aten::_nested_get_values_copy
+aten::_nested_get_values_copy.out
 aten::_nested_select_backward
 aten::_nested_sum_backward
 aten::_nested_tensor_from_mask
@@ -454,6 +461,9 @@ aten::_nested_tensor_strides.out
 aten::_nested_view_from_buffer
 aten::_nested_view_from_buffer_copy
 aten::_nested_view_from_buffer_copy.out
+aten::_nested_view_from_jagged
+aten::_nested_view_from_jagged_copy
+aten::_nested_view_from_jagged_copy.out
 aten::_new_zeros_with_same_feature_meta
 aten::_new_zeros_with_same_feature_meta.out
 aten::_nnpack_spatial_convolution
