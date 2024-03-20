@@ -3,6 +3,12 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/BatchNorm.h>
+#else
+#include <ATen/native/cudnn/BatchNorm.h>
+#endif
+
 #if !AT_CUDNN_ENABLED()
 
 namespace at {
@@ -35,17 +41,23 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
+  AT_ERROR(
+      "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
+}
+
 } // namespace native
 } // namespace at
 
 #else // AT_CUDNN_ENABLED
 
+#include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-
-#include <ATen/TensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -90,6 +102,21 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
 }
 
 } // namespace
+
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
+  size_t reserve_size;
+  TensorArg input{input_t, "input", 1};
+  TensorDescriptor idesc{*input, 4};
+  auto handle = getCudnnHandle();
+  cudnnBatchNormMode_t mode = getCudnnBatchNormMode(
+      training, input->suggest_memory_format(), input->dim());
+  auto op = CUDNN_BATCHNORM_OPS_BN;
+  AT_CUDNN_CHECK(cudnnGetBatchNormalizationTrainingExReserveSpaceSize(
+      handle, mode, op, nullptr, idesc.desc(), &reserve_size));
+  return reserve_size;
+}
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t,
@@ -179,9 +206,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     Tensor workspace = at::empty(workspace_size, input->options().dtype(kByte));
 
     // get the reserved size and allocate as tensor
-    size_t reserve_size;
-    AT_CUDNN_CHECK(cudnnGetBatchNormalizationTrainingExReserveSpaceSize(
-        handle, mode, op, nullptr, idesc.desc(), &reserve_size));
+    size_t reserve_size =
+        _get_cudnn_batch_norm_reserve_space_size(input_t, true /* training */);
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
 
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTrainingEx(
