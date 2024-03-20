@@ -647,15 +647,6 @@ class GuardBuilder(GuardBuilderBase):
             guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
         )
 
-    def BACKEND_MATCH(self, guard: Guard):
-        """Guard on backend matching based on id of current_backend"""
-        assert guard.source is GuardSource.GLOBAL
-        backend_id = (
-            f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
-        )
-        code = [f"___check_current_backend({backend_id})"]
-        self._produce_guard_code(guard, code)
-
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from tracked_fakes.  This must happen after
@@ -1203,7 +1194,6 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
-            "___check_current_backend": torch._dynamo.eval_frame.check_current_backend,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
@@ -1222,13 +1212,6 @@ class CheckFunctionManager:
         # guard_fn.__globals__ becomes equal to builder.scope. This causes
         # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
         globals_for_guard_fn = {"G": builder.scope["G"]}
-        from torch.utils._triton import has_triton_package
-
-        if has_triton_package():
-            import triton
-
-            globals_for_guard_fn[triton.__name__] = triton
-
         try:
             exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
