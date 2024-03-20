@@ -298,10 +298,8 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if (
-                tx.output.is_root_tracer()
-                and mod.__module__.startswith(("torch.nn.", "torch.ao."))
-                and not config.use_single_step_graph
+            if tx.output.is_root_tracer() and mod.__module__.startswith(
+                ("torch.nn.", "torch.ao.")
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
@@ -311,38 +309,42 @@ class NNModuleVariable(VariableTracker):
 
                 from .builder import wrap_fx_proxy
 
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_module",
-                        self.module_key,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                )
+                if not config.use_single_step_graph:
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_module",
+                            self.module_key,
+                            *proxy_args_kwargs(args, kwargs),
+                        ),
+                    )
+
+            # handle the cases where
+            # 1. module is not a nn module or ao module
+            # 2. modules without forward and backward hooks under use_single_step_graph config
+            assert self.source, (
+                "Must provide a valid source in order to inline, "
+                "since inlined function may have default args which must be guarded."
+            )
+            if isinstance(mod, torch.fx.GraphModule):
+                # TODO: do we want to support __call__ for GM's?
+                # If so at least some changes are needed, we don't allow inlining
+                # the call_wrapped currently, and maybe other issues too
+                fn = mod.forward
             else:
-                assert self.source, (
-                    "Must provide a valid source in order to inline, "
-                    "since inlined function may have default args which must be guarded."
-                )
-                if isinstance(mod, torch.fx.GraphModule):
-                    # TODO: do we want to support __call__ for GM's?
-                    # If so at least some changes are needed, we don't allow inlining
-                    # the call_wrapped currently, and maybe other issues too
-                    fn = mod.forward
-                else:
-                    fn = mod._call_impl
-                fn_source = AttrSource(self.source, "__call__")
-                if istype(fn, types.MethodType):
-                    fn = fn.__func__
-                    fn_source = AttrSource(fn_source, "__func__")
-                    args = [self] + args
-                else:
-                    assert istype(fn, types.FunctionType)
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
-                    args,
-                    kwargs,
-                )
+                fn = mod._call_impl
+            fn_source = AttrSource(self.source, "__call__")
+            if istype(fn, types.MethodType):
+                fn = fn.__func__
+                fn_source = AttrSource(fn_source, "__func__")
+                args = [self] + args
+            else:
+                assert istype(fn, types.FunctionType)
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, source=fn_source),
+                args,
+                kwargs,
+            )
 
     def call_method(
         self,
