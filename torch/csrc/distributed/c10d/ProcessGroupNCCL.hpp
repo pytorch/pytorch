@@ -106,7 +106,7 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
 
-constexpr const int kWorkStatusUpdatePeriodMs = 10 * 1000; // 10 seconds
+constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
@@ -464,6 +464,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   ~ProcessGroupNCCL() override;
+
+  uint64_t getUid() {
+    return static_cast<uint64_t>(uid_);
+  }
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
@@ -1059,11 +1063,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // the sequential number of the last colletive enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
-  uint64_t lastEnqueuedSeq_;
+  // initialized to be -1 to indicate no collective has been enqueued
+  int64_t lastEnqueuedSeq_{-1};
 
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
-  uint64_t lastCompletedSeq_;
+  // initialized to be -1 to indicate no collective has been completed
+  int64_t lastCompletedSeq_{-1};
 
   std::exception_ptr watchDogException_ = nullptr;
 

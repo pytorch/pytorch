@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch.distributed.c10d_logger as c10d_logger
-from torch.distributed.checkpoint.logging_handler import DCP_LOGGER_NAME
+from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
 
 
 global _dcp_logger
@@ -29,7 +29,7 @@ def _parse_dcp_method_args(*args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         args = args[:0]
 
     storage_writer = kwargs.pop("storage_writer", None)
-    storage_reader = kwargs.pop("storage_writer", None)
+    storage_reader = kwargs.pop("storage_reader", None)
 
     # handled in the c10d logger
     kwargs["group"] = kwargs.pop("process_group", None)
@@ -49,34 +49,39 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
 
 
 def _dcp_method_logger(
-    func: Callable[_P, _T], log_exceptions: bool = False, **wrapper_kwargs: _P.kwargs
+    log_exceptions: bool = False, **wrapper_kwargs: _P.kwargs
 ) -> Callable[_P, _T]:
-    @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        msg_dict = _get_msg_dict(func.__name__, *args, **{**log_kwargs, **kwargs})
+    """This method decorator logs the start, end, and exception of wrapped events.
+    """
+    def decorator(func: Callable[_P, _T]):
+        @functools.wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            msg_dict = _get_msg_dict(func.__name__, *args, **{**wrapper_kwargs, **kwargs})
 
-        # log start event
-        msg_dict["event"] = "start"
-        t0 = time.time_ns()
-        msg_dict["time"] = t0
-        _dcp_logger.debug(msg_dict)
+            # log start event
+            msg_dict["event"] = "start"
+            t0 = time.time_ns()
+            msg_dict["time"] = t0
+            _dcp_logger.debug(msg_dict)
 
-        # exceptions
-        try:
-            func(*args, **kwargs)
-        except Exception as error:
-            if log_exceptions:
-                msg_dict["event"] = "exception"
-                msg_dict["error"] = f"{error}"
-                msg_dict["time"] = time.time_ns()
-                _dcp_logger.debug(msg_dict)
-            raise
+            # exceptions
+            try:
+                result = func(*args, **kwargs)
+            except Exception as error:
+                if log_exceptions:
+                    msg_dict["event"] = "exception"
+                    msg_dict["error"] = f"{error}"
+                    msg_dict["time"] = time.time_ns()
+                    _dcp_logger.error(msg_dict)
+                raise
 
-        # end event
-        msg_dict["event"] = "end"
-        t1 = time.time_ns()
-        msg_dict["time"] = time.time_ns()
-        msg_dict["times_spent"] = t1 - t0
-        _dcp_logger.debug(msg_dict)
+            # end event
+            msg_dict["event"] = "end"
+            t1 = time.time_ns()
+            msg_dict["time"] = time.time_ns()
+            msg_dict["times_spent"] = t1 - t0
+            _dcp_logger.debug(msg_dict)
 
-    return wrapper
+            return result
+        return wrapper
+    return decorator

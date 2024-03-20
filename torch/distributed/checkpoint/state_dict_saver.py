@@ -18,7 +18,7 @@ from .storage import StorageWriter
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
-__all__ = ["save_state_dict", "save"]
+__all__ = ["save_state_dict", "save", "async_save"]
 
 
 def save_state_dict(
@@ -58,8 +58,6 @@ def save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    coordinator_rank: int = 0,
-    no_dist: Optional[bool] = None,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -84,9 +82,11 @@ def save(
         group needs to be passed in.
 
     .. note::
-        This function can be used to save a state_dict without having a process group
-        initialized by passing ``no_dist=True``.
-        (Default: ``False`` when torch.distributed is available and initialized)
+        If no process group is available, this function assumes the intention is to save the
+         state_dict in the local process.
+
+    .. note:
+        Rank 0 is assumed to be the coordinator rank.
 
 
     Args:
@@ -107,10 +107,6 @@ def save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-        coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default. (Default: ``0``)
-        no_dist (bool): If ``True``, distributed checkpoint will not save
-            in SPMD style. (Default: ``False``)
 
     Returns:
         Metadata: Metadata object for the saved checkpoint.
@@ -119,11 +115,11 @@ def save(
         >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
 
-        >>> model_state_dict = my_model.state_dict()
+        >>> state_dict = {"model": my_model}
 
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
-        >>> torch.distributed.checkpoint.save_state_dict(
-        >>>     state_dict=model_state_dict,
+        >>> torch.distributed.checkpoint.save(
+        >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
         >>> )
 
@@ -137,44 +133,40 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    if no_dist is None:
-        no_dist = not (dist.is_available() and dist.is_initialized())
-        if no_dist:
-            warnings.warn(
-                "Saving with `no_dist` set to True because torch.distributed"
-                " is unavailable or uninitialized."
-            )
+    no_dist = not (dist.is_available() and dist.is_initialized())
+    if no_dist:
+        warnings.warn(
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process."
+        )
 
     with _profile():
         storage_writer = cast(
             StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
         )
+
         return _save_state_dict(
-            _stateful_to_state_dict(state_dict),
-            storage_writer,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
+            state_dict=_stateful_to_state_dict(state_dict),
+            storage_writer=storage_writer,
+            process_group=process_group,
+            no_dist=no_dist,
+            planner=planner,
         )
 
 
 @_dcp_method_logger(log_exceptions=True)
-def _async_save(
+def async_save(
     state_dict: STATE_DICT_TYPE,
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    coordinator_rank: int = 0,
-    no_dist: bool = False,
 ) -> Future:
     """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
     `save` in a separate thread.
 
     .. warning::
-        This feature is experimental and subject to removal/change.
+        This feature is experimental and subject to change.
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
@@ -194,16 +186,28 @@ def _async_save(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-        coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default. (Default: ``0``)
-        no_dist (bool): If ``True``, distributed checkpoint will not save
-            in SPMD style. (Default: ``False``)
 
     Returns:
         Future: A future holding the resultant Metadata object from `save`.
 
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> my_model = MyModule()
+
+        >>> state_dict = {"model": my_model}
+
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
+        >>> checkpoint_future = torch.distributed.checkpoint.async_save(
+        >>>     state_dict=state_dict,
+        >>>     storage_writer=fs_storage_writer,
+        >>> )
+        >>>
+        >>> # ... do some work ...
+        >>>
+        >>> checkpoint_future.result()
+
     """
-    torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.async_save")
 
     pg = process_group or _get_default_group()
     assert (
@@ -220,8 +224,6 @@ def _async_save(
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
-        coordinator_rank=coordinator_rank,
-        no_dist=no_dist,
     )
     f.add_done_callback(lambda f: executor.shutdown(wait=False))
 
