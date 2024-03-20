@@ -665,7 +665,7 @@ def _register_quantization_unary_fusion():
                     2,
                     is_bf16,
                 ),
-                dtype=original_pattern_output_dtype,
+                dtype=torch.float32,
             ),
         }
 
