@@ -291,7 +291,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._assert_async",
         "torch._assert_tensor_metadata",
         "torch._batch_norm_impl_index",
-        "torch._C._activate_cuda_trace",
+        "torch._C._activate_gpu_trace",
         "torch._C._add_cached_tensor",
         "torch._C._add_docstr",
         "torch._C._are_functorch_transforms_active",

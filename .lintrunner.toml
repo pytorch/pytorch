@@ -1906,6 +1906,7 @@ exclude_patterns = [
     'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
+    "torch/cuda/_gpu_trace.py",
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
@@ -2433,7 +2434,6 @@ exclude_patterns = [
     'torch/utils/_contextlib.py',
     'torch/utils/_cpp_extension_versioner.py',
     'torch/utils/_crash_handler.py',
-    'torch/utils/_cuda_trace.py',
     'torch/utils/_device.py',
     'torch/utils/_foreach_utils.py',
     'torch/utils/_freeze.py',
