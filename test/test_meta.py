@@ -294,7 +294,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.storage_memo), 1)
         del x
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
         r = []
@@ -304,7 +303,6 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
@@ -651,8 +649,6 @@ meta_function_expected_failures = {
     torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
-    torch.linalg.eig : {f64, f32, c128, c64},
-    torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
 }
 
@@ -806,7 +802,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten.geqrf.default : {c64, c128, f64, f32},
-    aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},

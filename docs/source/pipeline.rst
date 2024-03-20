@@ -8,7 +8,10 @@ Pipeline parallelism was original introduced in the
 technique to train large models on multiple GPUs.
 
 .. warning ::
-     Pipeline Parallelism is experimental and subject to change.
+     torch.distributed.pipeline is deprecated, so is this document. For
+     up-to-date pipeline parallel implementation, please refer to the
+     `PiPPy <https://github.com/pytorch/PiPPy>`__ library under the PyTorch
+     organization (Pipeline Parallelism for PyTorch).
 
 Model Parallelism using multiple GPUs
 -------------------------------------
