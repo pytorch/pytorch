@@ -59,6 +59,11 @@ def is_hashable(x):
 
 
 class ConstDictVariable(VariableTracker):
+    _nonvar_fields = {
+        "user_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     class _HashableTracker:
         """
         Auxiliary opaque internal class that wraps a VariableTracker and makes it hashable
