@@ -102,6 +102,7 @@ class TensorVariable(VariableTracker):
         "is_sparse",
         "class_type",
         "specialized_value",
+        "_is_name_set",
         *VariableTracker._nonvar_fields,
     }
 
@@ -914,6 +915,12 @@ class SymNodeVariable(VariableTracker):
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
+    _nonvar_fields = {
+        "proxy",
+        "sym_num",
+        *VariableTracker._nonvar_fields,
+    }
+
     @classmethod
     def create(cls, tx, proxy, sym_num, **options):
         if "example_value" in proxy.node.meta:
@@ -1089,6 +1096,12 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
+    _nonvar_fields = {
+        "raw_value",
+        "need_unwrap",
+        *TensorVariable._nonvar_fields,
+    }
+
     def __init__(
         self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
     ):
@@ -1109,6 +1122,11 @@ class UnspecializedPythonVariable(TensorVariable):
 class FakeItemVariable(TensorVariable):
     """An unspecialized python variable which prevents access to the underlying raw value.
     This is needed if item is called on a FakeTensor."""
+
+    _nonvar_fields = {
+        "need_unwrap",
+        *TensorVariable._nonvar_fields,
+    }
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         need_unwrap = kwargs.pop("need_unwrap", False)

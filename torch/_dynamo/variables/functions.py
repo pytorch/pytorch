@@ -111,6 +111,12 @@ class BaseUserFunctionVariable(VariableTracker):
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
+    _nonvar_fields = {
+        "fn",
+        "is_constant",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
@@ -556,6 +562,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 class SkipFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "reason",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value, reason=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value

@@ -29,6 +29,11 @@ from .user_defined import UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
+    _nonvar_fields = {
+        "specialized",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
@@ -239,6 +244,11 @@ class ComptimeVariable(VariableTracker):
 
 
 class ClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -249,6 +259,11 @@ class ClosureVariable(UnknownVariable):
 
 # closure variable created by an inlined function
 class InlinedClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -308,6 +323,11 @@ def produce_trampoline_autograd_apply(fn_cls):
 
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
+
+    _nonvar_fields = {
+        "fn_cls",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
@@ -434,6 +454,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "proxy",
         "inference",
+        "saved_tensors",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -522,6 +543,11 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
+    _nonvar_fields = {
+        "name",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, obj, name, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
@@ -607,6 +633,12 @@ class GetSetDescriptorVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "is_torch",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
