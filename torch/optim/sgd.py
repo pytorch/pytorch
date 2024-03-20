@@ -92,10 +92,11 @@ class SGD(Optimizer):
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None))
 
-            # update momentum_buffers in state
-            for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
-                state = self.state[p]
-                state['momentum_buffer'] = momentum_buffer
+            if group["momentum"] != 0:
+                # update momentum_buffers in state
+                for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
+                    state = self.state[p]
+                    state['momentum_buffer'] = momentum_buffer
 
         return loss
 
