@@ -135,6 +135,7 @@ class FSDPParam:
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self.all_gather_output = torch.empty(0)
+        self.all_gather_output_storage_size = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
     def _init_dtype_attrs(self, param: nn.Parameter, mp_policy: MixedPrecisionPolicy):
@@ -249,6 +250,7 @@ class FSDPParam:
         self.all_gather_output = torch.empty(
             all_gather_output_size, dtype=dtype, device=device
         )
+        self.all_gather_output_storage_size = self.all_gather_output.numel() * self.all_gather_output.itemsize
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
@@ -261,6 +263,7 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
+        assert unsharded_param.numel() == self.all_gather_output.numel()
         if self.is_dtensor:
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 unsharded_param = _from_local_no_grad(
@@ -395,15 +398,15 @@ class FSDPParam:
         return ret
 
     def alloc_all_gather_output(self) -> None:
-        # TODO(yf225): make sure compile resizes to the same numel as eager! use constants for resize-to value
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            unsafe_alloc_storage(self.all_gather_output)
+            unsafe_alloc_storage(self.all_gather_output, self.all_gather_output_storage_size)
         else:
-            unsafe_alloc_storage(self._unsharded_param)
+            unsafe_alloc_storage(self._unsharded_param, self.all_gather_output_storage_size)
 
     def free_all_gather_output(self) -> None:
-        # These two do the exact same thing, because .all_gather_output and ._unsharded_param share the same storage.
-        # Use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
+        # These two branches do the exact same thing underneath,
+        # because .all_gather_output and ._unsharded_param share the same storage.
+        # We use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             unsafe_free_storage(self.all_gather_output)
         else:
@@ -449,10 +452,10 @@ class FSDPParam:
 # NOTE: Unsafe here refers to not checking whether the storage is already
 # allocated or freed, respectively. We should be safe to use them since we
 # explicitly manage the state transition.
-def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
+def unsafe_alloc_storage(tensor: torch.Tensor, new_size: int) -> None:
     # Skip the already-allocated check and assume that `tensor` is the base
     # tensor to save CPU overhead
-    tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
+    tensor.untyped_storage().resize_(new_size)
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:
