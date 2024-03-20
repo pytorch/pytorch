@@ -13,6 +13,7 @@ from torch.export.graph_signature import (
     InputKind,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
@@ -137,11 +138,11 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        self._check_graph_module(ep.graph_module)
+        self._check_graph_module(ep.graph_module, from_export=ep.from_export)
         _verify_exported_program_signature(ep)
 
     @final
-    def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
+    def _check_graph_module(self, gm: torch.fx.GraphModule, from_export: bool = False) -> None:
         def _allowed_getattr_types() -> Tuple[Type[Any], ...]:
             ret = self.allowed_getattr_types()
             assert not any(t is object for t in ret)
@@ -350,6 +351,11 @@ def _verify_exported_program_signature(exported_program) -> None:
                 raise SpecViolationError(
                     f"Custom object {custom_obj} is not in the constants dictionary."
                 )
+        elif input_spec.kind == InputKind.TOKEN:
+            if not isinstance(input_spec.arg, TokenArgument):
+                raise SpecViolationError(
+                    f"Constant tensor {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
+                )
         else:
             raise SpecViolationError(
                 f"Unknown InputKind {input_spec.kind}."
@@ -371,8 +377,9 @@ def _verify_exported_program_signature(exported_program) -> None:
             f"Number of user outputs: {len(gs.user_outputs)}. \n"
         )
 
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate)
-    mutate_nodes: List[str] = output_nodes[:end]
+    num_tokens = len(gs.output_tokens)
+    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
+    mutate_nodes: List[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:

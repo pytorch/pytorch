@@ -1545,6 +1545,8 @@ def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: 
     """
     if has_torch_function_unary(input):
         return handle_torch_function(hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace)
+    if min_val > max_val:
+        raise ValueError("min_val cannot be greater than max_val")
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
@@ -4680,6 +4682,8 @@ def triplet_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap, reduction_enum)
 
 
@@ -4719,6 +4723,10 @@ def triplet_margin_with_distance_loss(
     # Check validity of reduction mode
     if reduction not in ("mean", "sum", "none"):
         raise ValueError(f"{reduction} is not a valid value for reduction")
+
+    # Check validity of margin
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
 
     # Check dimensions
     a_dim = anchor.ndim
@@ -5009,14 +5017,14 @@ Note:
     is used, the following functions are provided for enabling and disabling implementations.
     The context manager is the preferred mechanism:
 
-        - :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
-        - :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
-        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
-        - :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
+        - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
 
     Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
-    disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
-    In the event that a fused implementation is not available, an error will be raised with the
+    disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
+    In the event that a fused implementation is not available, a warning will be raised with the
     reasons why the fused implementation cannot run.
 
     Due to the nature of fusing floating point operations, the output of this function may be different

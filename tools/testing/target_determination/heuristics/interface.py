@@ -118,13 +118,15 @@ class TestPrioritizations:
         tests = [x[1] for x in self._traverse_scores()]
         return tests[: n * len(tests) // 100], tests[n * len(tests) // 100 :]
 
-    def get_info_str(self) -> str:
+    def get_info_str(self, verbose: bool = True) -> str:
         info = ""
 
         for score, test in self._traverse_scores():
-            info += f"{test} ({score})\n"
+            if not verbose and score == 0:
+                continue
+            info += f"  {test} ({score})\n"
 
-        return info.strip()
+        return info.rstrip()
 
     def print_info(self) -> None:
         print(self.get_info_str())

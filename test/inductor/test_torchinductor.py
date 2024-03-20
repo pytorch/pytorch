@@ -37,6 +37,7 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -73,7 +74,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -192,7 +192,7 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -784,7 +784,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
                 " ".join(code).count(
-                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                    "view_dtype" if config.cpp_wrapper else "aten.view"
                 ),
                 3,
             )
@@ -918,6 +918,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @config.patch({"fx_graph_cache": False})
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -927,6 +928,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
+    @config.patch({"fx_graph_cache": False})
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -951,7 +953,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 2)
 
     def test_index_propagation(self):
         def flip(x):
@@ -4526,6 +4528,14 @@ class CommonTemplate:
             ),
         )
 
+    def test_remove_noop_clone(self):
+        def fn(x):
+            y = x.clone().reshape(-1, 4)
+            y[:, [2, 0]] = y[:, [0, 2]]
+            return y + x
+
+        self.common(fn, (torch.randn(2, 4),))
+
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
             def __init__(
@@ -7792,6 +7802,13 @@ class CommonTemplate:
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
 
+    def test_diagonal_copy(self):
+        def fn(x):
+            return torch.diagonal_copy(x)
+
+        for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
+            self.common(fn, (x,))
+
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
@@ -8890,6 +8907,7 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
+    @config.patch({"fx_graph_cache": False})
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
@@ -8919,7 +8937,7 @@ class CommonTemplate:
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
                 )
 
         with add_scheduler_init_hook(hook_fn):
@@ -9171,6 +9189,24 @@ class CommonTemplate:
                 return op(x)
 
         self.common(fn, args, check_lowp=check_lowp)
+
+    # codegen test fails with no dynamic for loop in dynamic shape tests
+    @expectedFailureCodegenDynamic
+    def test_view_uint8_through_differing_bitwidths(self):
+        # https://github.com/pytorch/pytorch/issues/120998
+        def fn(x, view_dtype):
+            return x.view(view_dtype).view(torch.uint8)
+
+        view_dtypes = [torch.int16, torch.int32, torch.int64]
+        for dtype in view_dtypes:
+            x = torch.randint(0, 2**4, [4096, 4096], dtype=torch.uint8)
+            self.common(
+                fn,
+                (
+                    x,
+                    dtype,
+                ),
+            )
 
 
 @dataclasses.dataclass
@@ -9542,7 +9578,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
             r = fn_gpu(x)
             code = run_and_get_triton_code(fn_gpu, x)
-            self.assertIn("tl.sin", code)
+            self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
@@ -10007,7 +10043,7 @@ if HAS_CPU and RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")
