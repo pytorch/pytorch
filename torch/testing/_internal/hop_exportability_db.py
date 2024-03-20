@@ -56,6 +56,7 @@ def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwa
 def simple_auto_functionalize(x, z):
     return torch.ops.testlib.mutating_custom_op(x, z)
 
+
 # Please consult with torch.export team before
 # adding new entry to this list.
 hop_that_doesnt_have_export_test_allowlist = [

@@ -19,11 +19,6 @@ from torch.testing._internal.hop_exportability_db import (
     hop_that_doesnt_have_export_test_allowlist,
 )
 
-try:
-    from . import testing
-except ImportError:
-    import testing
-
 hop_tests = []
 
 for _, val in hop_export_opinfo_db.items():
@@ -59,13 +54,7 @@ class TestHOP(TestCase):
 
         for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
             self.assertEqual(type(orig), type(loaded))
-            if isinstance(orig, torch.Tensor):
-                if orig.is_meta:
-                    self.assertEqual(orig, loaded)
-                else:
-                    self.assertTrue(torch.allclose(orig, loaded))
-            else:
-                self.assertEqual(orig, loaded)
+            self.assertEqual(orig, loaded)
 
     @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
     def test_aot_export(self, device, dtype, op):
