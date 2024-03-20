@@ -44,18 +44,18 @@ __global__ void replication_pad_forward_kernel1d(
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  const int plane = blockIdx.y + y_shift;
-  const int batch = blockIdx.z + z_shift;
+  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= output.size(2)) {
     return;
   }
-  const int outputPointX = outputPointId % output.size(2);
+  const auto outputPointX = outputPointId % output.size(2);
 
   const int iStartX = imax(0, -padL);
   const int oStartX = imax(0, padL);
 
-  const int inputPointX = imin(imax(padL, outputPointX), input.size(2) + padL - 1) - oStartX + iStartX;
+  const auto inputPointX = imin(imax(padL, outputPointX), input.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = input[batch][plane][inputPointX];
   output[batch][plane][outputPointX] = valueToCopy;
@@ -68,18 +68,18 @@ __global__ void replication_pad_backward_kernel(
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  const int plane = blockIdx.y + y_shift;
-  const int batch = blockIdx.z + z_shift;
+  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= gradOutput.size(2)) {
     return;
   }
-  const int outputPointX = outputPointId % gradOutput.size(2);
+  const auto outputPointX = outputPointId % gradOutput.size(2);
 
   const int iStartX = imax(0, -padL);
   const int oStartX = imax(0, padL);
 
-  const int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
+  const auto inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
   gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointX], valueToCopy);
@@ -419,8 +419,8 @@ void replication_pad3d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
+  TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
 
   int64_t padL = paddingSize[0];
   int64_t padR = paddingSize[1];
@@ -480,19 +480,19 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("replication_pad1d_backward_cuda");
 
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
-      "output gradient tensor must fit into 32-bit index math");
+  TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
+  TORCH_CHECK(gradOutput.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports output tensors with less than 2^63 - 1 elements");
 
-  const int padL = paddingSize[0];
-  int dimw = 1;
+  const int64_t padL = paddingSize[0];
+  int64_t dimw = 1;
 
-  int numInputDims = input.ndimension();
+  int64_t numInputDims = input.ndimension();
   if (numInputDims == 3) {
     dimw++;
   }
-  int iwidth = input.size(dimw);
+  int64_t iwidth = input.size(dimw);
 
   if (gradInput.numel() == 0) {
     return;
