@@ -4180,11 +4180,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         event_created_time = datetime.fromtimestamp(last['time_created_ns'] / 1000000000)
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
-        if timing_enabled:
-            # very loose bounds, measured 0.036 ms on devgpu
-            self.assertTrue(0 < last['duration_ms'] < 100)
-        else:
-            self.assertTrue("duration_ms" not in last)
+        self.assertTrue("duration_ms" not in last)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -4428,11 +4424,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
             self.assertEqual(t['entries'][coalesced_op]['input_sizes'], [])
             self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
-            if timing_enabled:
-                duration = t['entries'][coalesced_op]['duration_ms']
-                self.assertTrue(0.001 < duration < 100000, duration)
-            else:
-                self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
+            self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -4483,12 +4475,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['state'], 'completed')
-
-            if timing_enabled:
-                duration = t['entries'][seq]['duration_ms']
-                self.assertTrue(0.001 < duration < 100000, duration)
-            else:
-                self.assertTrue('duration_ms' not in t['entries'][seq])
+            self.assertTrue('duration_ms' not in t['entries'][seq])
 
     # TODO(whc) support and test coalesced collectives that use the c++ start/end group thingy instead of python
     # coalescing manager
@@ -4536,11 +4523,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(t['entries'][0]['input_sizes'], [[2, 2], [2, 2]])
         self.assertEqual(t['entries'][0]['output_sizes'], [[2,], [2,]])
         self.assertEqual(t['entries'][0]['state'], 'completed')
-        if timing_enabled:
-            duration = t['entries'][0]['duration_ms']
-            self.assertTrue(0.001 < duration < 100000, duration)
-        else:
-            self.assertTrue('duration_ms' not in t['entries'][0])
+        self.assertTrue('duration_ms' not in t['entries'][0])
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
