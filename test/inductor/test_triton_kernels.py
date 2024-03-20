@@ -1136,6 +1136,8 @@ def forward(self, x_1, output_1):
             )(*args)
             self.assertEqual(compiled_out, eager_out)
 
+    @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_special_kwargs_with_autotune(self):
         @triton.autotune(
             configs=[
