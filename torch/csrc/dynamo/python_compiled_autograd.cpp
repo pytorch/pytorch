@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <iostream>
+#include <sstream>
 #include <vector>
 
 /*
@@ -236,6 +236,7 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+// NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
