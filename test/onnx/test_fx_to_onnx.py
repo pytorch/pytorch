@@ -426,7 +426,20 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             {*model.state_dict().keys()},
         )
 
-    def test_fake_tensor_mode_simple(self):
+    @common_utils.parametrize(
+        "checkpoint_type",
+        [
+            common_utils.subtest(
+                "state_dict",
+                name="state_dict",
+            ),
+            common_utils.subtest(
+                "state_dict",
+                name="checkpoint_file",
+            ),
+        ],
+    )
+    def test_fake_tensor_mode_simple(self, checkpoint_type):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -455,27 +468,32 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             len(onnx_program.model_proto.graph.initializer) == 0
         ), "Initializers cannot exist when fake mode is enabled"
 
-        # Variant 1: Save ONNX proto using Model's state_dict()
-        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
-            model_state_dict = Model().state_dict()  # Create a state_dict for testing
-            onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
-            assert (
-                len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-            ), "Initializers must be present after loading it from model_state_dict"
-
-        # Variant 2: Save ONNX proto using Model checkpoint file
-        with tempfile.NamedTemporaryFile(
-            suffix=".onnx"
-        ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
-            suffix=".pt"
-        ) as tmp_checkpoint_file:
-            torch.save(
-                Model().state_dict(), tmp_checkpoint_file.name
-            )  # Create checkpoint file for testing
-            onnx_program.save(tmp_onnx_file.name, model_state=tmp_checkpoint_file.name)
-            assert (
-                len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-            ), "Initializers must be present after loading it from model_state_dict"
+        if checkpoint_type == "state_dict":
+            # Variant 1: Save ONNX proto using Model's state_dict()
+            with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+                model_state_dict = (
+                    Model().state_dict()
+                )  # Create a state_dict for testing
+                onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
+        elif checkpoint_type == "checkpoint_file":
+            # Variant 2: Save ONNX proto using Model checkpoint file
+            with tempfile.NamedTemporaryFile(
+                suffix=".onnx"
+            ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
+                suffix=".pt"
+            ) as tmp_checkpoint_file:
+                torch.save(
+                    Model().state_dict(), tmp_checkpoint_file.name
+                )  # Create checkpoint file for testing
+                onnx_program.save(
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
+                )
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
 
     def test_fake_tensor_mode_simple_invalid_input(self):
         class Model(torch.nn.Module):
