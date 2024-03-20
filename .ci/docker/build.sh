@@ -229,6 +229,7 @@ case "$image" in
     BASEKIT_VERSION=2024.0.0-49522
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
     pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
