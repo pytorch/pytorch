@@ -558,6 +558,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self,
         int8_mixed_bf16=False,
         unary_op=torch.nn.ReLU(),
+        qconv2d_unary_matcher_nodes=None,
     ):
         class M(torch.nn.Module):
             def __init__(
@@ -584,6 +585,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 2
             self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
+            if qconv2d_unary_matcher_nodes:
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_unary_matcher_nodes"],
+                    qconv2d_unary_matcher_nodes,
+                )
 
         self._test_common(
             mod,
@@ -638,6 +644,33 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize Conv2d->Hardswish pattern.
         """
         self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardswish())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_silu_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.SiLU())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_silu_int8_mixed_bf16_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern.
+        Match.nodes:
+            [qconv2d_pointwise_default_1, convert_element_type_5, sigmoid, mul_2,
+             mul_3, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_8]
+            [qconv2d_pointwise_default, convert_element_type_13, sigmoid_1, mul_5]
+        """
+        self._qconv2d_unary_cpu_test_helper(
+            unary_op=torch.nn.SiLU(),
+            int8_mixed_bf16=True,
+            qconv2d_unary_matcher_nodes=14,
+        )
 
     def _qconv2d_add_cpu_test_helper(self, use_relu=False, int8_mixed_bf16=False):
         r"""
@@ -1011,6 +1044,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
 
         self._qat_qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_silu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern with qat flow.
+        """
+
+        self._qat_qconv2d_unary_cpu_test_helper(unary_op=torch.nn.SiLU())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
