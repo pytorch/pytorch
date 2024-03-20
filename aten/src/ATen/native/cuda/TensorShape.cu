@@ -320,7 +320,7 @@ __device__ __inline__ void copy_chunk_with_pad(
   // `src`. For actual_chunk_size <= thread_idx < max_chunk_size, the thread set
   // the val=0 for padding.
   if (max_chunk_size < num_threads) {
-    int64_t val = 0;
+    char val = static_cast<char>(0);
     if (thread_idx < actual_chunk_size) {
       val = src[thread_idx];
     }
@@ -428,8 +428,62 @@ bool all_contiguous(TensorList tensors) {
   return contiguous;
 }
 
-// Gets metadata for chunk_cat.
-std::tuple<int64_t, int64_t, int64_t, int64_t, std::vector<int64_t*>>
+// Get leading dimensions before `dim`-th dimension.
+static inline int64_t get_leading_dim(at::IntArrayRef sizes, int64_t dim) {
+  int64_t leading_dim = 1;
+  if (dim > 0) {
+    leading_dim = c10::multiply_integers(sizes.slice(0, dim));
+  }
+  return leading_dim;
+}
+
+// Get trailing dimensions after `dim`-th dimension and padded size along
+// `dim`-th dimension.
+static inline std::pair<int64_t, int64_t> get_pad_size(
+    at::IntArrayRef sizes,
+    int64_t dim,
+    int64_t num_chunks) {
+  int64_t trailing_numel = 1;
+  if (sizes.size() > (uint64_t)dim + 1) {
+    trailing_numel =
+        c10::multiply_integers(sizes.slice(dim + 1, sizes.size() - dim - 1));
+  }
+  int64_t pad_size_along_dim =
+      detail::div_up(sizes[dim], num_chunks) * num_chunks;
+  return std::make_pair(pad_size_along_dim, trailing_numel);
+}
+
+// Get the padded chunk size.
+static inline int64_t get_chunk_size(
+    TensorList tensors,
+    int64_t dim,
+    int64_t num_chunks,
+    int64_t elem_size) {
+  auto num_tensors = tensors.size();
+  int64_t chunk_size = 0;
+  for (const auto i : c10::irange(num_tensors)) {
+    auto [pad_size_along_dim, trailing_numel] =
+        get_pad_size(tensors[i].sizes(), dim, num_chunks);
+    const int64_t pad_tensor_chunk_size =
+        pad_size_along_dim * trailing_numel * elem_size / num_chunks;
+    chunk_size += pad_tensor_chunk_size;
+  }
+  return chunk_size;
+}
+
+// Get metadata for chunk_cat.
+std::tuple<
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>>
 get_chunk_cat_metadata(
     TensorList tensors,
     int64_t dim,
@@ -440,12 +494,7 @@ get_chunk_cat_metadata(
       dst_elem_size % src_elem_size == 0,
       "get_chunk_cat_metadata error: only support dst_elem_size % src_elem_size == 0");
   auto num_tensors = tensors.size();
-  const auto device = tensors[0].device();
-  int64_t leading_dim = 1;
-  auto first_tensor_sizes = tensors[0].sizes();
-  if (dim > 0) {
-    leading_dim = c10::multiply_integers(first_tensor_sizes.slice(0, dim));
-  }
+  int64_t leading_dim = get_leading_dim(tensors[0].sizes(), dim);
   std::vector<int64_t> pad_tensor_chunk_sizes;
   std::vector<int64_t> num_blocks_per_tensor_chunk;
   std::vector<int64_t> start_block_idx_per_tensor_chunk{0};
@@ -458,22 +507,17 @@ get_chunk_cat_metadata(
   actual_tensor_sizes.reserve(num_tensors);
   tensor_idx_to_start_tensor_bytes.reserve(num_tensors + 1);
   srcs.reserve(num_tensors);
-  //  block_idx_to_tensor_idx cannot be reserved since the number of blocks is
-  //  data dependent
+  // block_idx_to_tensor_idx cannot be reserved since the number of blocks is
+  // data dependent
   std::vector<int64_t> block_idx_to_tensor_idx;
+  // Inline computing `chunk_size` to avoid redundant computation
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
     at::Tensor tensor = tensors[i];
     srcs.push_back(reinterpret_cast<int64_t>(tensor.data_ptr()));
     auto sizes = tensor.sizes();
-    const int64_t size_along_dim = sizes[dim];
-    int64_t trailing_numel = 1;
-    if (sizes.size() > (uint64_t)dim + 1) {
-      trailing_numel =
-          c10::multiply_integers(sizes.slice(dim + 1, sizes.size() - dim - 1));
-    }
-    const int64_t pad_size_along_dim =
-        detail::div_up(size_along_dim, num_chunks) * num_chunks;
+    auto [pad_size_along_dim, trailing_numel] =
+        get_pad_size(sizes, dim, num_chunks);
     const int64_t pad_tensor_chunk_size =
         pad_size_along_dim * trailing_numel * dst_elem_size / num_chunks;
     pad_tensor_chunk_sizes.push_back(pad_tensor_chunk_size);
@@ -488,22 +532,22 @@ get_chunk_cat_metadata(
         block_idx_to_tensor_idx.end(), num_blocks, i);
     tensor_idx_to_start_tensor_bytes.push_back(
         tensor_idx_to_start_tensor_bytes.back() + pad_tensor_chunk_size);
-    actual_tensor_sizes.push_back(
-        size_along_dim * trailing_numel * src_elem_size);
+    actual_tensor_sizes.push_back(sizes[dim] * trailing_numel * src_elem_size);
   }
   const int64_t num_blocks_per_chunk = start_block_idx_per_tensor_chunk.back();
   const int64_t slice_size = num_chunks * chunk_size;
-  auto packed = detail::pack_vecs(
-      {&srcs,
-       &block_idx_to_tensor_idx,
-       &tensor_idx_to_start_tensor_bytes,
-       &start_block_idx_per_tensor_chunk,
-       &actual_tensor_sizes,
-       &pad_tensor_chunk_sizes,
-       &num_blocks_per_tensor_chunk},
-      device);
   return std::make_tuple(
-      chunk_size, leading_dim, num_blocks_per_chunk, slice_size, packed.second);
+      chunk_size,
+      leading_dim,
+      num_blocks_per_chunk,
+      slice_size,
+      srcs,
+      block_idx_to_tensor_idx,
+      tensor_idx_to_start_tensor_bytes,
+      start_block_idx_per_tensor_chunk,
+      actual_tensor_sizes,
+      pad_tensor_chunk_sizes,
+      num_blocks_per_tensor_chunk);
 }
 
 // See [CUDA kernel for chunk_cat_cuda]
@@ -515,10 +559,34 @@ void _chunk_cat_out_cuda_contiguous(
     Tensor& out,
     int64_t dst_elem_size,
     int64_t src_elem_size) {
+  const auto device = tensors[0].device();
+  // `get_chunk_cat_metadata` must return vectors and `pack_vecs` cannot be
+  // moved into `get_chunk_cat_metadata`. Otherwise `packed` would point to
+  // vectors allocated inside `get_chunk_cat_metadata` which become out of local
+  // scope.
   auto
-      [chunk_size, leading_dim, num_blocks_per_chunk, slice_size, device_ptrs] =
+      [chunk_size,
+       leading_dim,
+       num_blocks_per_chunk,
+       slice_size,
+       srcs,
+       block_idx_to_tensor_idx,
+       tensor_idx_to_start_tensor_bytes,
+       start_block_idx_per_tensor_chunk,
+       actual_tensor_sizes,
+       pad_tensor_chunk_sizes,
+       num_blocks_per_tensor_chunk] =
           get_chunk_cat_metadata(
               tensors, dim, num_chunks, dst_elem_size, src_elem_size);
+  auto packed = pack_vecs(
+      {&srcs,
+       &block_idx_to_tensor_idx,
+       &tensor_idx_to_start_tensor_bytes,
+       &start_block_idx_per_tensor_chunk,
+       &actual_tensor_sizes,
+       &pad_tensor_chunk_sizes,
+       &num_blocks_per_tensor_chunk},
+      device);
   std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
       tensors[0].sizes(), dim, num_chunks, chunk_size, dst_elem_size);
   at::native::resize_output(out, view_sizes);
@@ -529,14 +597,14 @@ void _chunk_cat_out_cuda_contiguous(
       threads,
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      /*srcs=*/reinterpret_cast<src_t**>(device_ptrs[0]),
+      /*srcs=*/reinterpret_cast<src_t**>(packed.second[0]),
       reinterpret_cast<dst_t*>(out.data_ptr()),
-      /*block_idx_to_tensor_idx=*/device_ptrs[1],
-      /*tensor_idx_to_start_tensor_bytes=*/device_ptrs[2],
-      /*start_block_idx_per_tensor_chunk=*/device_ptrs[3],
-      /*actual_tensor_sizes=*/device_ptrs[4],
-      /*pad_tensor_chunk_sizes=*/device_ptrs[5],
-      /*num_blocks_per_tensor_chunk=*/device_ptrs[6],
+      /*block_idx_to_tensor_idx=*/packed.second[1],
+      /*tensor_idx_to_start_tensor_bytes=*/packed.second[2],
+      /*start_block_idx_per_tensor_chunk=*/packed.second[3],
+      /*actual_tensor_sizes=*/packed.second[4],
+      /*pad_tensor_chunk_sizes=*/packed.second[5],
+      /*num_blocks_per_tensor_chunk=*/packed.second[6],
       slice_size,
       chunk_size,
       dst_elem_size / src_elem_size);
@@ -708,14 +776,9 @@ Tensor _chunk_cat_cuda(TensorList tensors, int64_t dim, int64_t num_chunks) {
   if (detail::all_contiguous(tensors)) {
     // Return a tensor with the same dtype as input tensors
     int64_t elem_size = tensors[0].element_size();
-    auto
-        [chunk_size,
-         leading_dim,
-         num_blocks_per_chunk,
-         slice_size,
-         device_ptrs] =
-            detail::get_chunk_cat_metadata(
-                tensors, dim, num_chunks, elem_size, elem_size);
+    int64_t chunk_size =
+        detail::get_chunk_size(tensors, dim, num_chunks, elem_size);
+    int64_t leading_dim = detail::get_leading_dim(tensors[0].sizes(), dim);
     auto view_sizes = detail::get_chunk_cat_out_sizes(
         tensors[0].sizes(), dim, num_chunks, chunk_size, elem_size);
     Tensor out =
