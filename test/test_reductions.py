@@ -3500,10 +3500,7 @@ as the input tensor excluding its innermost dimension'):
                                  fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
                                  msg=error_msg)
 
-                # logsumexp throws a type error when not specifying dim so test separately.
-                self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
-            else:
-                self.assertRaises(TypeError, lambda: fn(master_input))
+            self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
 
     # Tests to ensure that any() and all() functions work with zero-dim tensors. Kept separate from
     # other tests for checking reduction with zero-dim tensors because these tests have significantly
