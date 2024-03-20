@@ -769,7 +769,16 @@ def validate_function_matches_schema(
     compare(kwargonly, schema.arguments.flat_kwarg_only)
 
 
-def infer_schema(prototype_function: typing.Callable) -> str:
+def infer_schema(prototype_function: typing.Callable, mutated_args=()) -> str:
+    """Given a function with type hints, parses a schema.
+
+    We make some assumptions to make our lives easier that correspond to how people
+    write custom ops in real life:
+    - none of the outputs alias any of the inputs or each other.
+    - only the args listed in mutated_args are being mutated.
+
+    Callers (e.g. the custom ops API) are responsible for checking these assumptions.
+    """
     sig = inspect.signature(prototype_function)
 
     def error_fn(what):
@@ -777,34 +786,34 @@ def infer_schema(prototype_function: typing.Callable) -> str:
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
 
-    params = [
-        parse_param(name, param, error_fn) for name, param in sig.parameters.items()
-    ]
+    params = []
+    for idx, (name, param) in enumerate(sig.parameters.items()):
+        if not supported_param(param):
+            error_fn("We do not support positional-only args, varargs, or varkwargs.")
+
+        if param.annotation is inspect.Parameter.empty:
+            error_fn(f"Parameter {name} must have a type annotation.")
+
+        if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
+            error_fn(
+                f"Parameter {name} has unsupported type {param.annotation}. "
+                f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+            )
+
+        if param.default is not inspect.Parameter.empty:
+            error_fn(
+                f"Parameter {name} has a default value; this is not supported. "
+                f"If you want to use default values then create a function with "
+                f"default values that invokes the custom op."
+            )
+        schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
+        if name in mutated_args:
+            if not schema_type.startswith("Tensor"):
+                error_fn(f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated")
+            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
+        params.append(f"{schema_type} {name}")
     ret = parse_return(sig.return_annotation, error_fn)
     return f"({', '.join(params)}) -> {ret}"
-
-
-def parse_param(name, param, error_fn):
-    if not supported_param(param):
-        error_fn("We do not support positional-only args, varargs, or varkwargs.")
-
-    if param.annotation is inspect.Parameter.empty:
-        error_fn(f"Parameter {name} must have a type annotation.")
-
-    if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
-        error_fn(
-            f"Parameter {name} has unsupported type {param.annotation}. "
-            f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
-        )
-
-    if param.default is not inspect.Parameter.empty:
-        error_fn(
-            f"Parameter {name} has a default value; this is not supported. "
-            f"If you want to use default values then create a function with "
-            f"default values that invokes the custom op."
-        )
-
-    return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
 
 
 def derived_types(
