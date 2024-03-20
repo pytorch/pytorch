@@ -39,7 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SubclassSymbolicContext,
     SymbolicContext,
 )
-from torch.fx.immutable_collections import immutable_list
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
@@ -84,7 +84,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 
-from .base import MutableLocal, typestr, VariableTracker
+from .base import MutableLocal, typestr, VariableTracker, VariableTrackerMeta
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -1103,7 +1103,9 @@ class VariableBuilder:
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 inner_source = AttrSource(self.source, attr)
-                VariableBuilder(self.tx, inner_source)(inner_value).recursive_realize()
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(self.tx, inner_source)(inner_value)
+                )
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
@@ -1151,7 +1153,7 @@ class VariableBuilder:
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
         # that there's not another great way to do this atm.
         # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
-        VariableBuilder(self.tx, source)(tensor_value).recursive_realize()
+        LazyVariableTracker.realize_all(VariableBuilder(self.tx, source)(tensor_value))
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
@@ -1935,7 +1937,15 @@ class SourcelessBuilder:
     if/else type->VariableTracker trees that were cropping up all over dynamo.
     """
 
-    def __call__(self, tx, value) -> VariableTracker:
+    def __init__(self):
+        raise AssertionError("Use SourcelessBuilder.create()")
+
+    @staticmethod
+    def create(tx, value) -> VariableTracker:
+        fast_handler = SourcelessBuilder._type_handlers.get(type(value))
+        if fast_handler:
+            return fast_handler(tx, value)
+
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
@@ -1953,17 +1963,6 @@ class SourcelessBuilder:
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
-        elif isinstance(value, dict):
-            items = {self(tx, k): self(tx, v) for k, v in value.items()}
-            return ConstDictVariable(items, mutable_local=MutableLocal())
-        elif isinstance(value, set):
-            # Nb. value is a set here so the iteration below is non-deterministic!
-            return SetVariable(
-                [self(tx, x) for x in value], mutable_local=MutableLocal()
-            )
-        elif isinstance(value, (tuple, list)):
-            cls = BaseListVariable.cls_for(type(value))
-            return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
         elif PlacementVariable.is_placement(value):
@@ -1976,3 +1975,38 @@ class SourcelessBuilder:
     def wrap_constant_literal(value):
         assert ConstantVariable.is_literal(value)
         return ConstantVariable.create(value=value)
+
+    @staticmethod
+    def make_type_handlers():
+        create = SourcelessBuilder.create
+        handlers = {}
+        for t in common_constant_types:
+            handlers[t] = lambda tx, value: ConstantVariable(value)
+        handlers[set] = lambda tx, value: SetVariable(
+            [create(tx, x) for x in value], mutable_local=MutableLocal()
+        )
+        handlers[dict] = lambda tx, value: ConstDictVariable(
+            {create(tx, k): create(tx, v) for k, v in value.items()},
+            mutable_local=MutableLocal(),
+        )
+        handlers[list] = lambda tx, value: ListVariable(
+            [create(tx, x) for x in value], mutable_local=MutableLocal()
+        )
+        handlers[tuple] = lambda tx, value: TupleVariable(
+            [create(tx, x) for x in value]
+        )
+        handlers[torch.Size] = lambda tx, value: SizeVariable(
+            [create(tx, x) for x in value]
+        )
+        handlers[immutable_dict] = handlers[dict]
+        handlers[immutable_list] = handlers[list]
+
+        def passthrough(tx, value):
+            return value
+
+        for cls in VariableTrackerMeta.all_subclasses:
+            handlers[cls] = passthrough
+        return handlers
+
+
+SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
