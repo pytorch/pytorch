@@ -7,6 +7,8 @@ from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.common import ChoiceCaller
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.wrapper import WrapperCodeGen
+from ..ir import FixedLayout
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -140,7 +142,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         out_layout = FlexibleLayout(
-            device=layout.device, dtype=layout.dtype, size=layout.size
+            device=layout.device,
+            dtype=layout.dtype,
+            size=WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size),
         )
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, out_layout, [mat1, mat2])
 
@@ -178,23 +182,13 @@ def _is_static_problem(inputs_tensors, layout):
     # have a static shape by attempting to convert the dimensions
     # to int
     static_shape = True
-    nonzero = True
-    for dim in layout.size:
-        try:
-            a = int(dim)
-            if a == 0:
-                nonzero = False
-        except TypeError:
-            static_shape = False
-        for mat in inputs_tensors:
-            if mat is not None:
-                for dim in mat.get_size():
-                    try:
-                        a = int(dim)
-                        if a == 0:
-                            nonzero = False
-                    except TypeError:
-                        static_shape = False
+    static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
+    if static_size is None:
+        return False, True
+    numel = 1
+    for dim in static_size:
+        numel *= dim
+    nonzero = numel > 0
     return static_shape, nonzero
 
 
@@ -203,21 +197,22 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
+
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
 
     # TODO: Re-enable eager mode implementation once cuBLAS is fixed
-    if m * n != 0 and (
-        use_cutlass_template(layout) or use_triton_template(layout, enable_int32=True)
-    ):
+    if use_cutlass or use_triton_template(layout, enable_int32=True):
         choices = []
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if use_cutlass:
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
-    if m * n != 0 and use_triton_template(layout, enable_int32=True):
+    if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -291,9 +286,14 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # Note: Do not use FlexibleLayout for the output here, as it will
         # lead to runtime errors if the output layout is made incompatible with
         # the bias layout later.
+        out_layout = FixedLayout(
+            device=layout.device,
+            dtype=layout.dtype,
+            size=WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size),
+        )
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
-            layout,
+            out_layout,
             [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
@@ -360,6 +360,7 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
 
     fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
 
@@ -383,9 +384,14 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
                 **mm_options(config, m, n, k, layout, b_prologue_cast_type),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+        out_layout = FixedLayout(
+            device=layout.device,
+            dtype=layout.dtype,
+            size=WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size),
+        )
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+            choices, out_layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
 
     if skip_triton and not choices:

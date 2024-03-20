@@ -3,6 +3,8 @@ from typing import List
 
 import torch
 from ..codegen.common import ChoiceCaller
+from ..codegen.wrapper import WrapperCodeGen
+from ..ir import FixedLayout
 
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -114,7 +116,12 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        out_layout = FixedLayout(
+            device=layout.device,
+            dtype=layout.dtype,
+            size=WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size),
+        )
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, out_layout, [mat1, mat2])
     use_aten = use_aten_gemm_kernels()
     if len(choices) == 0 and not use_aten:
         log.warning("No choices for GEMM, using ATen backend as fallback")
