@@ -2316,6 +2316,12 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         ),
         (
             [
+                torch.Size([1, 2, 129]),
+                torch.Size([1, 2, 297]),
+            ], -1, 5
+        ),
+        (
+            [
                 torch.Size([1, 2, 3]),
                 torch.Size([1, 2, 3]),
             ], 1, 5
@@ -2339,6 +2345,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         torch.Size([2, 3, 1, 2]),
         torch.Size([2, 3]),
         torch.Size([2, 3, 2]),
+        torch.Size([2, 3, 271]),
     ]
     max_dim, num_chunks = 2, 3
     for dim in range(max_dim):
@@ -8477,6 +8484,11 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
          dict(reduction="abc"),
          ValueError, "abc is not a valid value for reduction"),
+
+        # invalid margin
+        (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
+         dict(margin=-1.0),
+         ValueError, "margin must be greater than 0, got -1.0"),
 
         # shape mismatch
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
