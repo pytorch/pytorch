@@ -861,41 +861,6 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
-Tensor _nested_view_from_jagged(
-    const Tensor& values,
-    const Tensor& offsets,
-    const Tensor& dummy,
-    const c10::optional<Tensor>& lengths,
-    const int64_t ragged_idx) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_view_from_jagged(): expected to be implemented from Python");
-}
-
-Tensor _nested_get_values(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_values(): expected to be implemented from Python");
-}
-
-Tensor _nested_get_offsets(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_offsets(): expected to be implemented from Python");
-}
-
-Tensor _nested_get_lengths(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_lengths(): expected to be implemented from Python");
-}
-
-int64_t _nested_get_ragged_idx(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_ragged_idx(): expected to be implemented from Python");
-}
-
-Tensor _nested_get_jagged_dummy(const Tensor& any) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_jagged_dummy(): expected to be implemented from Python");
-}
-
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
