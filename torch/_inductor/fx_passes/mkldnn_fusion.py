@@ -24,6 +24,7 @@ from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_quantization_lowerings,
     _register_quantization_weight_pack_pass,
+    _register_woq_lowerings,
 )
 
 if torch._C._has_mkldnn:
@@ -1200,6 +1201,7 @@ if torch._C._has_mkldnn:
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
+            _register_woq_lowerings()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():
