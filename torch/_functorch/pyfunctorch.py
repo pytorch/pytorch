@@ -184,6 +184,9 @@ class JvpInterpreter(FuncTorchInterpreter):
     def prev_fwd_grad_mode(self):
         return self._cptr.prevFwdGradMode()
 
+    def get_state(self):
+        return (self.key().name, self.level(), self.prev_fwd_grad_mode())
+
 
 class FunctionalizeInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):

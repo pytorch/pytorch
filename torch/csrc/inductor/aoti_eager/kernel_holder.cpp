@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
@@ -148,9 +150,16 @@ void AOTIPythonKernelHolder::operator()(
   }
 
   // Cache hit
-  torch::jit::pop(*stack, op.schema().arguments().size());
+  auto input_arg_size = op.schema().arguments().size();
+  auto output_arg_size = op.schema().returns().size();
+  torch::jit::pop(*stack, input_arg_size);
   auto aoti_eager_kernel = kernel_handle->second;
-  auto outputs = (*aoti_eager_kernel)(inputs);
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  std::vector<AtenTensorHandle> output_handles(output_arg_size);
+  (*aoti_eager_kernel)(input_handles.data(), output_handles.data());
+  auto outputs = torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+      output_handles.data(), output_arg_size);
   for (auto& output : outputs) {
     stack->push_back(output);
   }
