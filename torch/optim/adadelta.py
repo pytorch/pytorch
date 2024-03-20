@@ -200,6 +200,7 @@ def adadelta(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    capturable: bool = False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
     has_complex: bool = False,
@@ -217,6 +218,11 @@ def adadelta(
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
