@@ -132,7 +132,9 @@ class BaseListVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
+                SourcelessBuilder.create(tx, polyfill.index),
+                [self] + list(args),
+                kwargs,
             )
 
         return super().call_method(tx, name, args, kwargs)
