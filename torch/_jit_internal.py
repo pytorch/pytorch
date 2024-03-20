@@ -46,6 +46,7 @@ import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
+from torch._utils_internal import log_torchscript_usage
 from torch.futures import Future
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
@@ -582,6 +583,7 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
+    log_torchscript_usage("export")
     fn._torchscript_modifier = FunctionModifiers.EXPORT
     return fn
 
@@ -623,6 +625,7 @@ def unused(fn):
             # exception raised
             m(torch.rand(100))
     """
+    log_torchscript_usage("unused")
     if isinstance(fn, property):
         prop = fn
         setattr(  # noqa: B010
@@ -710,6 +713,7 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
+    log_torchscript_usage("ignore")
 
     if callable(drop):
         # used without any args, so drop is actually a function
