@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
+#include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
@@ -275,6 +276,21 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   if (!m)
     throw python_error();
 
+  auto set_module_attr = [&](const char* name, PyObject* v) {
+    if (PyObject_SetAttrString(m, name, v) < 0) {
+      throw python_error();
+    }
+  };
+
+  auto num_gpus = c10::xpu::device_count();
+  THPObjectPtr default_xpu_generators(
+      PyTuple_New(static_cast<Py_ssize_t>(num_gpus)));
+  for (const auto i : c10::irange(num_gpus)) {
+    const auto& gen = at::xpu::detail::getDefaultXPUGenerator(i);
+    auto* cast_gen = THPGenerator_initDefaultGenerator(gen);
+    PyTuple_SetItem(default_xpu_generators.get(), i, cast_gen);
+  }
+  set_module_attr("default_generators", default_xpu_generators.get());
   bindGetDeviceProperties(m);
 
   Py_RETURN_NONE;

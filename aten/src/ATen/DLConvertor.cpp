@@ -88,9 +88,9 @@ DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
+static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
   DLDevice ctx;
-  ctx.device_id = device_id;
+  ctx.device_id = static_cast<int32_t>(device_id);
   switch (tensor.device().type()) {
     case DeviceType::CPU:
       ctx.device_type = DLDeviceType::kDLCPU;
@@ -276,35 +276,30 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
-  int64_t device_id = 0;
+  c10::DeviceIndex device_id = 0;
   if (src.is_cuda()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
-  atDLMTensor->tensor.dl_tensor.shape =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(view.sizes().data());
-  atDLMTensor->tensor.dl_tensor.strides =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(view.strides().data());
+  atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
+  atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }
 
-Tensor fromDLPack(const DLManagedTensor* src) {
+Tensor fromDLPack(DLManagedTensor* src) {
   auto deleter = [src](void* self) {
     if (src->deleter) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      src->deleter(const_cast<DLManagedTensor*>(src));
+      src->deleter(src);
     }
   };
   return fromDLPack(src, std::move(deleter));
 }
 
 Tensor fromDLPack(
-    const DLManagedTensor* src,
+    DLManagedTensor* src,
     std::function<void(void*)> deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
