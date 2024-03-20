@@ -324,9 +324,8 @@ class AutogradFunctionVariable(VariableTracker):
             if isinstance(node, variables.NNModuleVariable):
                 if node.is_training(tx):
                     requires_grad = True
-            return node
 
-        VariableTracker.apply(visit, (args, kwargs))
+        VariableTracker.visit(visit, (args, kwargs))
 
         if (
             requires_grad
