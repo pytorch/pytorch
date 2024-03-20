@@ -1,6 +1,7 @@
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Tuple, List, Callable, Dict
+from functools import partial
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -56,6 +57,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     _FUSE_TRANSPOSE: bool = False
     _PROTOTYPE_WARNING_SHOWN: bool = False
 
+    BACKEND: str
     SPARSE_DISPATCH: Dict[Callable, Callable]
 
     packed: Optional[torch.Tensor]
@@ -123,6 +125,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # We can't define the dispatch table explicitly because of torch.ops import errors, so we do this instead
             # But this is useful since it allows users to overload the dispatch table for debugging / testing.
             cls._load_dispatch_table()
+
+            # we can also register the classes with dynamo when the warning is shown.
+            torch._dynamo.allow_in_graph(cls)
 
         if packed is not None:
             previous_tensor = packed
@@ -216,6 +221,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.matmul: semi_sparse_mm,
                 torch.ops.aten.addmm: semi_sparse_addmm,
                 torch.ops.aten.linear: semi_sparse_linear,
+                torch.ops.aten._to_copy: fallback_dispatcher,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)
@@ -303,6 +309,23 @@ class SparseSemiStructuredTensor(torch.Tensor):
     ) -> torch.Tensor:
         raise NotImplementedError
 
+    @classmethod
+    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(
+            original_tensor,
+            backend=cls.BACKEND, algorithm=algorithm)
+
+        sInp = cls(
+            original_tensor.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+            requires_grad=False,
+            fuse_transpose_cusparselt=True,
+        )
+        return sInp
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
@@ -359,13 +382,14 @@ def to_sparse_semi_structured(
             "SparseSemiStructuredTensor only support contiguous input tensors. "
         )
 
-    sparse_subclass = (
+    # set from _FORCE_CUTLASS flag
+    SPARSE_SUBCLASS = (
         torch.sparse.SparseSemiStructuredTensorCUTLASS
         if SparseSemiStructuredTensor._FORCE_CUTLASS
         else torch.sparse.SparseSemiStructuredTensorCUSPARSELT
     )
-    return sparse_subclass.from_dense(original_tensor)
 
+    return SPARSE_SUBCLASS.from_dense(original_tensor)
 
 class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     """
@@ -377,7 +401,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
     and sparse_semi_structured_from_dense for conversion to the compressed format.
     """
-
+    BACKEND = "cutlass"
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
@@ -453,7 +477,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     cuSPARSELt also supports transposition fusion, which is necessary for performant 2:4 sparse training, as well
     as specifying alg_id, a config that affects the performance of the matmul depending on matmul sizes.
     """
-
+    BACKEND = "cusparselt"
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
@@ -475,6 +499,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             alg_id_cusparselt=SparseSemiStructuredTensor._DEFAULT_ALG_ID,
             requires_grad=original_tensor.requires_grad,
         )
+
 
     def _mm(
         self,
