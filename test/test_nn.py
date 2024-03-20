@@ -9755,6 +9755,15 @@ class TestNNDeviceType(NNTestCase):
         del x
         self.assertTrue(torch.allclose(out, out_ref))
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_replicatepad_64bit_indexing(self, device, dtype):
+        conv = torch.nn.Conv1d(128, 128, 3, 1, 1, padding_mode="replicate", device=device, dtype=dtype)
+        x = torch.randn(size=(256 * 448 * 2, 128, 96), dtype=dtype, device=device)
+        y = conv(x)
+        torch.mean(y).backward()
+
     def _slow_masked_softmax(self, input, mask):
         exp = torch.exp(input)
         exp = exp * mask
