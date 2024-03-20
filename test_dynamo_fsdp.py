@@ -223,11 +223,9 @@ def main_compiled(n_iter):
     run(model, optim, 1)
     print("done eager 1st run!")
 
-    dynamic = False
-
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=dynamic)
+        return torch.compile(gm, backend="inductor", fullgraph=True)
 
     torch._dynamo.config.trace_distributed = True
     torch._inductor.config.triton.unique_kernel_names = True
@@ -236,7 +234,7 @@ def main_compiled(n_iter):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model = torch.compile(model, backend="inductor", fullgraph=True, dynamic=dynamic)
+    model = torch.compile(model, backend="inductor", fullgraph=True)
     with compiled_autograd.enable(compiler_fn):
         res = run(model, optim, n_iter)
     print(f"res: {res}")
