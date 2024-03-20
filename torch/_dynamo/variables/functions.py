@@ -850,8 +850,14 @@ class TritonKernelVariable(VariableTracker):
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
 
+        if "num_ctas" in kwargs:
+            raise Unsupported(
+                "Passing num_ctas directly to the Triton kernel is not supported. "
+                "Please use a Config in @triton.autotune instead."
+            )
+
         special_kwargs = {}
-        for name in ("num_warps", "num_stages", "num_ctas"):
+        for name in ("num_warps", "num_stages"):
             if name in kwargs:
                 # remove special kwargs from `kwargs`
                 val = kwargs.pop(name)

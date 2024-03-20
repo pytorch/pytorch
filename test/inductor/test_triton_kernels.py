@@ -1175,7 +1175,6 @@ def forward(self, x_1, output_1):
                 n_elements,
                 num_warps=8,
                 num_stages=3,
-                num_ctas=2,
             )
             return output
 
@@ -1215,7 +1214,6 @@ def forward(self, x_1, output_1):
                 BLOCK_SIZE=128,
                 num_warps=8,
                 num_stages=3,
-                num_ctas=2,
             )
             return output
 
