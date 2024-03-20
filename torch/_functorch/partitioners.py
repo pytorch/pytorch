@@ -678,7 +678,7 @@ def min_cut_rematerialization_partition(
         fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
         inputs = primal_inputs + fwd_seed_offset_inputs
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-        required_bw_nodes.update(o for o in bwd_outputs if o is not None)
+        required_bw_nodes.update(o for o in bwd_outputs if o is not None and o.op != 'output')
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}

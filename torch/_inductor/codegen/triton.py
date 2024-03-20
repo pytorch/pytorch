@@ -838,6 +838,7 @@ class TritonOverrides(OpOverrides):
     def floor(x):
         return f"libdevice.floor({x})"
 
+    @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
         # Similar to div_floor_kernel_cuda in pytorch core.

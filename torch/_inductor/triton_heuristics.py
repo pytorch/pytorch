@@ -339,6 +339,7 @@ class CachingAutotuner(KernelInterface):
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
+                "enable_fp_fusion": False,
             }
             compile_kwargs = {
                 "target": target,
