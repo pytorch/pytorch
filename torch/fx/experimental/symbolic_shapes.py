@@ -1914,7 +1914,7 @@ class ShapeEnv:
         # for export, where preventing "error checking" sizes from showing up
         # in guards is helpful, since these guards in some sense are overly
         # pedantic.  See also https://github.com/pytorch/pytorch/issues/121749
-        prefer_deferred_runtime_asserts_over_guards=False,
+        prefer_deferred_runtime_asserts_over_guards=True,
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
