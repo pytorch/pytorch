@@ -120,11 +120,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     auto hip_flag = hipEventDefault;
     switch (flag) {
       case EventFlag::PYTORCH_DEFAULT:
-      case EventFlag::HIP_EVENT_DISABLE_TIMING:
         hip_flag = hipEventDisableTiming;
         break;
       case EventFlag::BACKEND_DEFAULT:
-      case EventFlag::HIP_EVENT_DEFAULT:
         hip_flag = hipEventDefault;
         break;
       default:

@@ -80,7 +80,12 @@ tracer_to_used_names = {}
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "module_type",
+        "module_key",
+        "module",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
