@@ -143,14 +143,6 @@ class StorageWriter(abc.ABC):
         """
         pass
 
-    @property
-    @abc.abstractmethod
-    def checkpoint_id(self) -> Union[str, os.PathLike]:
-        """
-        return the checkpoint_id that will be used to save the checkpoint.
-        """
-        ...
-
     @classmethod
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -276,14 +268,6 @@ class StorageReader(abc.ABC):
             A future that completes once all reads are finished.
         """
         pass
-
-    @property
-    @abc.abstractmethod
-    def checkpoint_id(self) -> Union[str, os.PathLike]:
-        """
-        return the checkpoint_id that will be used to save the checkpoint.
-        """
-        ...
 
     @classmethod
     @abc.abstractmethod
