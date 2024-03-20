@@ -3546,8 +3546,8 @@ class ShapeEnv:
                     subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
             for e in itertools.chain(self.guards, self.deferred_runtime_asserts.get(s, ())):
-                # NB: simplify here is load bearing, as it ensures that we
-                # apply replacements from unbacked_replacements
+                # We need to make sure we apply replacements that were
+                # previously impeded by resolve_unbacked=False
                 e = self.simplify(e.expr)
                 if compute_hint:
                     e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
@@ -3634,10 +3634,9 @@ class ShapeEnv:
         replacements = {
             s: self._find(cast(sympy.Symbol, s))
             for s in expr.free_symbols
-            if resolve_unbacked or not (
-                self.is_unbacked_symint(s)
-                and s not in self.eliminated_unbacked
-            )
+            if resolve_unbacked or
+            not self.is_unbacked_symint(s) or
+            s in self.eliminated_unbacked
         }
         # NB: do NOT apply unbacked replacements here yet
         return safe_expand(expr.xreplace(replacements))
@@ -3768,7 +3767,10 @@ class ShapeEnv:
             upper = 2
 
         # Updates the range and the guards corresponding to each bound of the symbol.
-        self.var_to_range[symbol] &= ValueRanges(lower, upper)
+        if symbol not in self.var_to_range:
+            self.var_to_range[symbol] = ValueRanges(lower, upper)
+        else:
+            self.var_to_range[symbol] &= ValueRanges(lower, upper)
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
@@ -4044,7 +4046,10 @@ class ShapeEnv:
             eq_expr = sympy.Eq(mod_expr, 0)
             # add necessary mod guards
             self.evaluate_expr(eq_expr)
-        return self.simplify(expr)
+        # This is called when we do a floordiv in SymNode to avoid expression
+        # blow up, but be sure not to eliminate unbacked SymInts in case this
+        # expression is for a deferred runtime assert
+        return self.simplify(expr, resolve_unbacked=False)
 
     # We're about to add a guard/runtime assert, check if the ShapeEnv is frozen
     # and if so issue a warning
