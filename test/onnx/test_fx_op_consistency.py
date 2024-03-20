@@ -27,7 +27,7 @@ Note:
 
     2. Install pytest-xdist to run tests in parallel if runng all tests is the goal.
 
-    3. When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
+    3. When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES and
     TESTED_OPS lists. See "Modify this section"
 
 """
@@ -133,9 +133,9 @@ def skip_torchlib_forward_compatibility(
 #     2a. If a test is now failing because of xpass, because some previous errors
 #     are now fixed, removed the corresponding xfail.
 #     2b. If a test is not failing consistently, use skip.
-# NOTE: EXPECTED_SKIPS_OR_FAILS only supports dtypes. If a matcher or model_type
-# is needed, use the SKIP_XFAIL_SUBTESTS list further down below.
-EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
+# NOTE: EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES only supports dtypes. If a matcher or model_type
+# is needed, use the SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE list further down below.
+EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "__getitem__",
         reason="io_adaper doesn't support __getitem__ input slice(0, 3, None)",
@@ -1347,8 +1347,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
 # fmt: on
 
 # NOTE: The xfail and skip with a matcher function or model_type should be
-# at under the `SKIP_XFAIL_SUBTESTS` section.
-SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
+# at under the `SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE` section.
+SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
+    onnx_test_common.DecorateMeta, ...
+] = (
     skip(
         "_native_batch_norm_legit",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
@@ -1637,19 +1639,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: IsScalar",
     ),
     xfail(
-        "to",
-        dtypes=(
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.bool,
-            torch.complex64,
-        ),
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-        reason="This op requires torch.dtype as input, which is not supported currently.",
-    ),
-    xfail(
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
@@ -1687,7 +1676,9 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
 )
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
-OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
+OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(
+    meta.op_name for meta in SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE
+)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 
 
@@ -1737,8 +1728,8 @@ def _should_skip_xfail_test_sample(
 
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None
-    for decorator_meta in SKIP_XFAIL_SUBTESTS:
-        # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
+    for decorator_meta in SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE:
+        # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE. That's fine because the list is small.
         # NOTE: If model_type is None, the test is decorator_meta is meant to skip/xfail all model types.
         if (
             decorator_meta.op_name == op_name
@@ -2050,7 +2041,7 @@ for opset in onnx_test_common.FX_TESTED_OPSETS:
             test_class_name,
             "test_output_match",
             opset=opset,
-            skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+            skip_or_xfails=EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES,
         )
 
         common_device_type.instantiate_device_type_tests(
