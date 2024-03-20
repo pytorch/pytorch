@@ -1,5 +1,4 @@
-import dataclasses
-from typing import Dict, Iterable, Optional
+from typing import Dict, Optional
 
 import torch
 from torch._inductor.codecache import CompiledFxGraph
@@ -22,24 +21,6 @@ def format_default_skip_message(reason: str) -> str:
     return f"skipping cudagraphs due to {reason}"
 
 
-def get_mutation_stack_trace(
-    gm: torch.fx.GraphModule, mutation_indices: Iterable[int]
-) -> str:
-    stack_trace: Optional[str] = ""
-    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-
-    for idx in mutation_indices:
-        placeholder = placeholders[idx]
-        if stack_trace := get_mutating_use_stack_trace(placeholder):
-            break
-
-    if stack_trace:
-        msg = f"skipping cudagraphs due to mutation on input. Found from : \n {stack_trace}"
-        return msg
-
-    return format_default_skip_message("mutated inputs")
-
-
 def check_for_mutation(
     gm: torch.fx.GraphModule, compiled_graph: CompiledFxGraph, num_fixed: int
 ) -> Optional[str]:
@@ -52,10 +33,23 @@ def check_for_mutation(
             idx for idx in compiled_graph.mutated_input_idxs if idx >= num_fixed
         ]
         has_mutation = len(mutation_indices) != 0
+
         if not has_mutation:
             return None
 
-        return get_mutation_stack_trace(gm, mutation_indices)
+        stack_trace: Optional[str] = ""
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+
+        for idx in mutation_indices:
+            placeholder = placeholders[idx]
+            if stack_trace := get_mutating_use_stack_trace(placeholder):
+                break
+
+        if stack_trace:
+            msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
+            return msg
+
+        return default_msg
 
     else:
         has_mutation = len(compiled_graph.mutated_inputs) != 0
@@ -94,12 +88,3 @@ def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
-
-
-@dataclasses.dataclass
-class BoxedDeviceIndex:
-    value: Optional[int]
-
-    def set(self, device_idx: Optional[int]):
-        assert device_idx is None or isinstance(device_idx, int)
-        self.value = device_idx
