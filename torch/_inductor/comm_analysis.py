@@ -61,7 +61,6 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
 def get_collective_input_size_bytes(node: ir.IRNode) -> int:
     sz_bytes = 0
     for inp in node.inputs:  # type: ignore[attr-defined]
-        shape = inp.layout.size
         numel = sympy_product(inp.layout.size)
         if isinstance(numel, sympy.Integer):
             # For ease of testing
@@ -239,7 +238,6 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     # =============== latency computation ===============
     intraHw = NCCL_HW.NVLINK
-    hw = intraHw if nNodes == 1 else NCCL_HW.NET
 
     if coll == NCCL_COLL.ALL_REDUCE:
         if nNodes > 1:
