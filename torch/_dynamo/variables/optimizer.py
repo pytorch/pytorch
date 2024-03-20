@@ -147,10 +147,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.tensor_to_source = {}
 
         from .builder import VariableBuilder
+        from .lazy import LazyVariableTracker
 
-        param_groups_vt = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-            self.value.param_groups
-        ).recursive_realize()
+        param_groups_vt = LazyVariableTracker.realize_all(
+            VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+                self.value.param_groups
+            )
+        )
 
         for g_ind, (group, group_vt) in enumerate(
             zip(self.value.param_groups, param_groups_vt.items)

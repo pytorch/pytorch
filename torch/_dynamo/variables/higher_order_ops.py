@@ -30,6 +30,7 @@ from ..exc import (
 from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
+from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
@@ -349,9 +350,8 @@ def speculate_subgraph(
         unimplemented("Use `set_subgraph_inputs=automatic` when passing `sub_kwargs`.")
 
     try:
-        f, sub_args, sub_kwargs = VariableTracker.apply(
-            # ensure guards on args get installed in parent subgraph
-            lambda x: x.realize(),
+        # ensure guards on args get installed in parent subgraph
+        f, sub_args, sub_kwargs = LazyVariableTracker.realize_all(
             (f, sub_args, sub_kwargs),
         )
 
@@ -554,7 +554,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
 
-        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
@@ -751,7 +751,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
 
-        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):

@@ -136,63 +136,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return self.__class__(**args)
 
     @classmethod
-    def apply(
+    def visit(
         cls,
-        fn: Callable[["VariableTracker"], "VariableTracker"],
+        fn: Callable[["VariableTracker"], None],
         value,
         cache=None,
-        skip_fn=lambda _: False,  # Whether we should skip applying to this var
     ):
         """
-        Walk this object and call fn on all the VariableTracker
-        instances
+        Walk value and call fn on all the VariableTracker instances
         """
         if cache is None:
             cache = dict()
 
         idx = id(value)
         if idx in cache:
-            return cache[idx][0]
+            return
+        # save `value` to keep it alive and ensure id() isn't reused
+        cache[idx] = value
 
         if isinstance(value, VariableTracker):
-            if not skip_fn(value):
-
-                def update_object_dict(v):
-                    changed = False
-                    rv = v.__dict__
-                    for key in rv.keys():
-                        if key not in v._nonvar_fields:
-                            prior = rv[key]
-                            rv[key] = cls.apply(fn, prior, cache, skip_fn)
-                            changed = changed or prior is not rv[key]
-
-                    return v
-
-                value = value.unwrap()
-                was_realized = value.is_realized()
-                result = fn(update_object_dict(value))
-                if not was_realized and value.is_realized():
-                    # running fn() resulted in value getting realized,
-                    # which means we missed updating the contents of result
-                    result = update_object_dict(result.unwrap())
-            else:
-                result = fn(value)
-                if result is not None:
-                    result = result.unwrap()
-        elif istype(value, list):
-            result = [cls.apply(fn, v, cache, skip_fn) for v in value]
-        elif istype(value, tuple):
-            result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
+            value = value.unwrap()
+            fn(value)
+            value = value.unwrap()  # calling fn() might have realized it
+            nonvars = value._nonvar_fields
+            for key, subvalue in value.__dict__.items():
+                if key not in nonvars:
+                    cls.visit(fn, subvalue, cache)
+        elif istype(value, (list, tuple)):
+            for subvalue in value:
+                cls.visit(fn, subvalue, cache)
         elif istype(value, (dict, collections.OrderedDict)):
-            result = {
-                k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
-            }
-        else:
-            result = value
-
-        # save `value` to keep it alive and ensure id() isn't reused
-        cache[idx] = (result, value)
-        return result
+            for subvalue in value.values():
+                cls.visit(fn, subvalue, cache)
 
     def __repr__(self):
         return f"{self.__class__.__name__}()"
@@ -343,10 +318,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""
         return self
-
-    def recursive_realize(self):
-        """Realize all objects under this"""
-        return VariableTracker.apply(lambda x: x.realize(), self)
 
     def unwrap(self) -> "VariableTracker":
         """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
