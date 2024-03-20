@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import collections
+import copy
 import functools
 import inspect
 import itertools
@@ -843,11 +844,44 @@ class TritonKernelVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from triton.runtime.autotuner import Autotuner
+        from triton.runtime.autotuner import autotune, Autotuner, Config
 
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
+
+        if "num_ctas" in kwargs:
+            raise Unsupported(
+                "Passing num_ctas directly to the Triton kernel is not supported. "
+                "Please use a Config in @triton.autotune instead."
+            )
+
+        special_kwargs = {}
+        for name in ("num_warps", "num_stages"):
+            if name in kwargs:
+                # remove special kwargs from `kwargs`
+                val = kwargs.pop(name)
+                assert isinstance(val, ConstantVariable)
+                special_kwargs[name] = val.value
+
+        if special_kwargs:
+            if isinstance(self.kernel, Autotuner):
+                # if there is Autotuner already, set
+                # special kwargs to each of its configs
+                new_configs = copy.deepcopy(self.kernel.configs)
+                for config in new_configs:
+                    config.__dict__.update(special_kwargs)
+                new_kernel = autotune(configs=new_configs, key=[])(self.kernel.fn)
+            else:
+                # if there is no Autotuner, wrap the kernel into a
+                # new one with a single config with special kwargs
+                new_config = Config(kwargs={}, **special_kwargs)
+                new_kernel = autotune(configs=[new_config], key=[])(self.kernel)
+
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = TritonKernelVariable(new_kernel, None, self.grid)
+            return new_var.call_function(tx, args, kwargs)
 
         if self.grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")
