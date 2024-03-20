@@ -546,7 +546,7 @@ REDUCTION_COMBINE_FN = {
 }
 
 
-def get_reduction_combine_fn(reduction_type, dtype):
+def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
     if reduction_type in REDUCTION_COMBINE_FN:
         combine_fn = REDUCTION_COMBINE_FN[reduction_type]
     elif reduction_type in {"argmax", "argmin"}:
@@ -567,9 +567,12 @@ def get_reduction_combine_fn(reduction_type, dtype):
                 mask = ops.logical_or(mask, ops.gt(a_isnan, b_isnan))
                 equal = ops.logical_or(equal, ops.logical_and(a_isnan, b_isnan))
 
-            mask = ops.logical_or(
-                mask, ops.logical_and(equal, ops.lt(a_index, b_index))
+            tie = (
+                ops.lt(a_index, b_index)
+                if arg_break_ties_left
+                else ops.gt(a_index, b_index)
             )
+            mask = ops.logical_or(mask, ops.logical_and(equal, tie))
             return (
                 ops.where(mask, a_value, b_value),
                 ops.where(mask, a_index, b_index),
@@ -1581,10 +1584,14 @@ class WelfordReduction(Reduction):
 class Scan(Loops):
     scan_ranges: List[Expr]
     size: List[Expr]
-    combine_fn: Callable[..., Any]
+    combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
-    init: int
+    output_index: int
+    # output_index indexes the following three tuples
+    inits: Tuple[Union[int, float], ...]
+    dtypes: Tuple[torch.dtype, ...]
+    inner_fns: Tuple[Callable[..., Any], ...]
 
     # HACK we mimick reduction
 
@@ -1604,9 +1611,9 @@ class Scan(Loops):
 
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
-        value = self.inner_fn(idx)
-        result = ops.scan(self.dtype, self.combine_fn, value, self.init)
-        return ops.store(output_name, indexer(idx), result)
+        values = [inner_fn(idx) for inner_fn in self.inner_fns]
+        result = ops.scan(self.dtypes, self.combine_fn, values, self.inits)
+        return ops.store(output_name, indexer(idx), result[self.output_index])
 
     def get_reduction_type(self):
         # return self.scan_op
@@ -1640,37 +1647,47 @@ class Scan(Loops):
     def create(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
-        inner_fn: Callable[[List[Expr]], Any],
+        dtypes: Tuple[torch.dtype, ...],
+        inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
         size: List[Expr],
         axis: int,
-        combine_fn: Callable[..., Any],
-        init: Any,
+        combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
+        inits: Tuple[Union[int, float], ...],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ) -> Optional["TensorBox"]:
+        **kwargs,
+    ) -> List[Optional["TensorBox"]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
         if device.type != "cuda":
             # TODO: CPU support
-            return None
+            return [None] * len(dtypes)
+
+        if torch.version.hip is not None and len(dtypes) > 1:
+            # TODO: Remove this when ROCm triton adds support for multiple inputs
+            return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
+        assert len(dtypes) == len(inits) == len(inner_fns)
+
         # Scan with a single element is just a copy
         if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
-            return Pointwise.create(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn,
-                ranges=size,
-            )
+            return [
+                Pointwise.create(
+                    device=device,
+                    dtype=dtypes[output_index],
+                    inner_fn=inner_fns[output_index],
+                    ranges=size,
+                )
+                for output_index in range(len(dtypes))
+            ]
 
         reduction_hint, num_splits = cls.num_splits(
             device=device,
-            dtype=dtype,
-            inner_fn=inner_fn,
+            dtype=dtypes[0],
+            inner_fn=inner_fns[0],
             axis=axis,
             pointwise_ranges=pointwise_ranges,
             scan_ranges=scan_ranges,
@@ -1681,29 +1698,43 @@ class Scan(Loops):
 
         if num_splits > 1 and torch.version.hip is not None:
             # Fallback for split-scan on ROCm
-            return None
+            return [None] * len(dtypes)
+
+        if num_splits > 1 and len(dtypes) > 1:
+            # Fallback for split-scans for multiple inputs
+            return [None] * len(dtypes)
 
         def reindex(index, scan_index):
             assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *scan_index, *index[axis:]]
 
-        result = TensorBox.create(
-            scan_type(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn,
-                size=size,
-                ranges=pointwise_ranges,
-                scan_ranges=scan_ranges,
-                combine_fn=combine_fn,
-                reindex=reindex,
-                init=init,
-                reduction_hint=reduction_hint,
+        results = [
+            TensorBox.create(
+                scan_type(
+                    device=device,
+                    dtype=dtypes[output_index],
+                    dtypes=dtypes,
+                    inner_fn=inner_fns[output_index],
+                    inner_fns=inner_fns,
+                    size=size,
+                    ranges=pointwise_ranges,
+                    scan_ranges=scan_ranges,
+                    combine_fn=combine_fn,
+                    reindex=reindex,
+                    inits=inits,
+                    reduction_hint=reduction_hint,
+                    output_index=output_index,
+                    **kwargs,
+                )
             )
-        )
-        result.realize()
-        return result
+            for output_index in range(len(dtypes))
+        ]
+
+        for result in results:
+            result.realize()
+
+        return results
 
     @classmethod
     def num_splits(
@@ -1714,7 +1745,7 @@ class Scan(Loops):
         axis: int,
         pointwise_ranges: List[Expr],
         scan_ranges: List[Expr],
-        combine_fn: Callable[..., Any],
+        combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         scan_numel: Expr,
     ):
         # TODO: custom splitting heuristic for scan
@@ -3995,7 +4026,7 @@ class ExternKernel(InputsKernel):
                     type_ = self.arg_properties[i].get("type")
                     args.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, x, self.is_legacy_abi_kernel()
+                            type_, x
                         )
                     )
                 else:
@@ -4010,9 +4041,6 @@ class ExternKernel(InputsKernel):
             return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
-
-    def is_legacy_abi_kernel(self):
-        return False
 
     def codegen_kwargs(self):
         if V.graph.cpp_wrapper:
@@ -4029,7 +4057,7 @@ class ExternKernel(InputsKernel):
                     )
                     kwargs.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, v, self.is_legacy_abi_kernel()
+                            type_, v
                         )
                     )
         else:
@@ -4468,6 +4496,29 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         mark_node_as_mutating(self, variable)
 
 
+class BindNNParameter(ExternKernelAlloc):
+    def __init__(self, variable, placeholder):
+        variable.freeze_layout()
+        super().__init__(
+            variable.get_layout(),
+            [variable, placeholder],
+            python_kernel_name="torch.ops.prims._bind_nn_parameter",
+        )
+        V.graph.never_reuse_buffers.add(variable.data.get_name())
+        V.graph.never_reuse_buffers.add(placeholder.get_name())
+        V.graph.never_reuse_buffers.add(self.get_name())
+        mark_node_as_mutating(self, variable, placeholder)
+
+    def get_alias_names(self):
+        return [self.inputs[0].get_name(), self.inputs[1].get_name()]
+
+    def get_mutation_names(self):
+        return [self.inputs[1].get_name()]
+
+    def has_side_effects(self):
+        return True
+
+
 class ScatterFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly.
@@ -4788,7 +4839,6 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
-        self.abi_compatible_kernel = None
 
         assert isinstance(
             kernel,
@@ -4900,12 +4950,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
 
-    def is_legacy_abi_kernel(self):
-        return (
-            config.c_shim_version == "1"
-            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
-        )
-
     def init_args_default_value(self, schema):
         self.args_default_value = [
             {
@@ -4950,22 +4994,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        # Now we setup abi_compatible_kernel after self.python_kernel_name
-        # and kwargs are adjusted appropriately.
-        # For sdpa, we need the v2 version since v1 didn't consider optional arg
-        # FIXME: no need to do this after we switch to the torchgen-ed C shim
-        self.abi_compatible_kernel = (
-            f"{self.cpp_kernel_name}_v2"
-            if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
-            and config.c_shim_version == "1"
-            else self.cpp_kernel_name
-        )
-
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(
-                    param.real_type, x, self.is_legacy_abi_kernel()
-                )
+                V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
@@ -5446,9 +5477,22 @@ def _prepare_convolution_fusion_create(
 
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
-        output_stride = make_channels_last_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
+
+    # We won't do weight prepack for Conv if dynamic_shapes.
+    # In static shape cases, since weight is prepacked, we'll always force output to be channels last in the Conv kernel.
+    # In dynamic shape cases, for input with channels = 1, like tensor of size (s0, 1, 28, 28) and stride (784, 784, 28, 1),
+    # x = cls.require_stride_order(x, req_stride_order) where req_stride_order is in the channels last order
+    # won't change the stride of this tensor since stride for dimensions of size 1 is ignored. While in Conv kernel,
+    # this tensor is considered as channels first and the output will be in contiguous format.
+    # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
+    dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
+    if dynamic_shapes and is_contiguous_storage_and_layout(x):
+        output_stride = make_contiguous_strides_for(output_size)
+    else:
+        output_stride = make_channels_last_strides_for(output_size)
+
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
@@ -7205,15 +7249,25 @@ class LoopBodyBlock:
 
             @staticmethod
             def scan(
-                dtype_proxy, combine_fn: Callable[..., Any], value_proxy, init_proxy
+                dtype_proxy,
+                combine_fn: Callable[
+                    [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
+                ],
+                value_proxy,
+                init_proxy,
             ):
-                def shim(dtype, value, init):
-                    return V.ops.scan(dtype, combine_fn, value, init)
+                def shim(dtypes, values, inits):
+                    return V.ops.scan(dtypes, combine_fn, values, inits)
 
                 name = self.body.add_submodule(shim, "scan")
-                return tracer.create_proxy(
-                    "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
+                result = tracer.create_proxy(
+                    "call_module",
+                    name,
+                    (dtype_proxy, value_proxy, init_proxy),
+                    {},
                 )
+                # Proxies are iterable, but some methods expect tuples/lists
+                return tuple(result[i] for i in range(len(value_proxy)))
 
             def frexp(self, value_proxy):
                 result = self._inner.frexp(value_proxy)
