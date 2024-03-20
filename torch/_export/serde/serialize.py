@@ -1683,13 +1683,19 @@ class GraphModuleDeserializer:
                 shape_env=self.shape_env,
             )
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
-            self.symbol_name_to_range = (
-                {} if symbol_name_to_range is None else symbol_name_to_range
-            )
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
+            self.signature = self.deserialize_signature(serialized_graph_module.signature)
             self.constants = deserialize_torch_artifact(constants)
+
+            # deserialization does analysis with checks on 0/1, so we create fake range constraints and
+            # restore the original range constraints afterwards
+            self.symbol_name_to_range = {}
+            if symbol_name_to_range:
+                for k, vr in symbol_name_to_range.items():
+                    lower = int(vr.lower)
+                    if vr.upper >= 2:  # no specialization on 0/1
+                        lower = max(2, lower)
+                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
+
             self.deserialize_graph(serialized_graph_module.graph)
 
             module_call_graph = self.deserialize_module_call_graph(
