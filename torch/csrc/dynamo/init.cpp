@@ -16,9 +16,8 @@ static struct PyModuleDef _module =
 #if IS_PYTHON_3_11_PLUS
 
 std::vector<uint8_t> _PyOpcode_Caches_vec(
-  THP_PyOpcode_Caches,
-  THP_PyOpcode_Caches + THP_PyOpcode_Caches_size
-);
+    THP_PyOpcode_Caches,
+    THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
 
 #else
 
