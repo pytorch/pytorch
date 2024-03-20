@@ -87,9 +87,6 @@ if TEST_Z3:
 
     # TODO model is somehow not being freed when z3 is available
     unittest.expectedFailure(
-        DynamicShapesMiscTests.test_outside_linear_module_free_dynamic_shapes  # noqa: F821
-    )
-    unittest.expectedFailure(
         DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
     )
 
