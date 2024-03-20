@@ -877,7 +877,23 @@ class GraphLowering(torch.fx.Interpreter):
             )
             for x in result
         ), result
-        self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+
+        fx_node_args = list(V.graph.current_node.args[0])  # type: ignore[arg-type]
+        result = [ir.ExternKernel.realize_input(x) for x in result]
+        result_correct_strides = []
+
+        assert len(fx_node_args) == len(result)
+        for r, fx_node in zip(result, fx_node_args):
+            if not isinstance(r, (ir.TensorBox, ir.BaseView)):
+                result_correct_strides.append(r)
+            else:
+                # AOT Autograd tries to detect stride divergence of inductor from output metadata.
+                # Here, we try to avoid spurious divergence by matching insignificant strides such as
+                result_correct_strides.append(
+                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                )
+
+        self.graph_outputs = result_correct_strides
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(
@@ -923,7 +939,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def match_insignificant_strides(
         self,
-        tensor: ir.TensorBox,
+        tensor,
         meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
     ) -> ir.TensorBox:
         # should have already been realized
@@ -1046,10 +1062,6 @@ class GraphLowering(torch.fx.Interpreter):
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
-
-                if is_output and len(strides):
-                    result.realize()
-                    result = self.match_insignificant_strides(result, strides)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
