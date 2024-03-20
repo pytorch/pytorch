@@ -922,27 +922,29 @@ class GraphLowering(torch.fx.Interpreter):
             self.current_node = old
 
     def match_insignificant_strides(
-        self, tensor: ir.TensorBox, meta_strides: Tuple[Union[int, torch.SymInt], ...]
+        self,
+        tensor: ir.TensorBox,
+        meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
     ) -> ir.TensorBox:
         # should have already been realized
         assert torch._inductor.ir.is_storage_and_layout(tensor)
 
         meta_strides = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides_inp
         ]
 
         if all(
-            self.sizevars.is_expr_static_and_true(s1 == s2)
+            self.sizevars.statically_known_equals(s1, s2)
             for s1, s2 in zip(meta_strides, tensor.get_stride())
         ):
             return tensor
 
         def significant_strides_equal(shape, meta_strides, tensor_strides):
             for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-                if self.sizevars.is_expr_static_and_true(dim <= 1):
+                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
                     continue
 
-                if not self.sizevars.is_expr_static_and_true(s1 == s2):
+                if not self.sizevars.statically_known_equals(s1, s2):
                     return False
 
             return True
@@ -955,7 +957,7 @@ class GraphLowering(torch.fx.Interpreter):
         storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
         new_stride = list(old_layout.stride)
         for i, s in enumerate(tensor.get_size()):
-            if self.sizevars.is_expr_static_and_true(s <= 1):
+            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
                 new_stride[i] = meta_strides[i]
 
         new_layout = torch._inductor.ir.FixedLayout(
