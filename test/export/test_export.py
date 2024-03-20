@@ -77,6 +77,16 @@ torch.library.define(
     "(Tensor(a!) x, Tensor(b!) z) -> (Tensor, Tensor, Tensor)",
     tags=torch.Tag.pt2_compliant_tag,
 )
+torch.library.define(
+    "testlib::foo_mutated",
+    "(Tensor(a!) x) -> (Tensor, Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+torch.library.define(
+    "testlib::foo_functional",
+    "(Tensor x) -> (Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
 @torch.library.impl_abstract("testlib::returns_tensor_symint")
@@ -93,6 +103,16 @@ def foo_impl(x, z):
 @torch.library.impl_abstract("testlib::foo")
 def foo_abstract(x, z):
     return x, z, x + z
+
+@torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
+def foo_mutated(x):
+    a, b, c = torch.ops.testlib.foo(x, x.cos())
+    return a, a.cos()
+
+@torch.library.impl("testlib::foo_functional", "CompositeImplicitAutograd")
+def foo_functional(x):
+    a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
+    return a.cos()
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -3680,6 +3700,61 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(x_new_eager, x_new_export))
         self.assertTrue(torch.allclose(z_new_eager, z_new_export))
         self.assertTrue(torch.allclose(legit_eager, legit_export))
+
+    def test_custom_op_auto_functionalize_pre_dispatch(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.testlib.foo_mutated(x)
+
+        inps = (torch.ones(5),)
+
+        ep = torch.export.export(M(), inps)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = arg0_1, z = cos);  arg0_1 = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_1 = torch.ops.aten.cos.default(getitem_3)
+    return (getitem_3, getitem_3, cos_1)""")
+
+        ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = arg0_1, z = cos);  arg0_1 = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_1 = torch.ops.aten.cos.default(getitem_3)
+    return (getitem_3, getitem_3, cos_1)""")
+
+
+    def test_custom_op_auto_warn_pre_dispatch(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.testlib.foo_functional(x)
+
+        inps = (torch.ones(5),)
+
+        ep = torch.export.export(M(), inps)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    cos_1 = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
+    return (cos_2,)""")
+
+        ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    foo_functional = torch.ops.testlib.foo_functional.default(arg0_1);  arg0_1 = None
+    return (foo_functional,)""")
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
