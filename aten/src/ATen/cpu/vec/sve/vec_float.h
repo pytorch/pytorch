@@ -6,7 +6,6 @@
 #if defined(CPU_CAPABILITY_SVE)
 #include <sleef.h>
 #endif
-#include <iostream>
 
 namespace at {
 namespace vec {
