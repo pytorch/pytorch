@@ -58,6 +58,25 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
 function_key_to_fx = {}
 
 
+def vt_to_fake_helper(vt, tx):
+    from ..utils import get_fake_value
+
+    proxy_ = vt.as_proxy()
+
+    def proxy_to_fake_helper(p):
+        if type(p) is torch.fx.proxy.Proxy:
+            return get_fake_value(p.node, tx)
+        elif type(p) is tuple:
+            return tuple(map(proxy_to_fake_helper, p))
+        else:
+            # mostly handle scalar
+            # check return type is a fake tensor
+            assert type(p) != torch.fx.proxy.Proxy
+            return p
+
+    return proxy_to_fake_helper(proxy_)
+
+
 def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key=None):
     from functorch import make_fx
 
@@ -73,11 +92,7 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
         # convert he arguments from VariableTracker to fake tensors + constants again
         fake_value_args = []
         for arg in args:
-            if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
-                fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
-            else:
-                # mostly handle tuple and scalar
-                fake_value_args.append(arg.as_proxy())
+            fake_value_args.append(vt_to_fake_helper(arg, tx))
 
         fake_value_kwargs = {}
         for key, value in kwargs.items():
