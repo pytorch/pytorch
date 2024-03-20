@@ -1183,7 +1183,7 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and TEST_WITH_CROSSREF
+        and (TEST_WITH_CROSSREF or TEST_WITH_ROCM)
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
     )
@@ -1705,6 +1705,7 @@ def main():
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
 
+    print_to_stderr(f"There are {NUM_PROCS} processes available for testing")
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
 
