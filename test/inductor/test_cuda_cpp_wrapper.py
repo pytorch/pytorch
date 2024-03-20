@@ -4,6 +4,7 @@ import unittest
 from typing import NamedTuple
 
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -11,7 +12,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -49,11 +49,11 @@ class CudaWrapperTemplate:
     pass
 
 
-class TestCudaWrapper(TorchTestCase):
+class TestCudaWrapper(InductorTestCase):
     device = "cuda"
 
 
-class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
+class DynamicShapesCudaWrapperCudaTests(InductorTestCase):
     device = "cuda"
 
 
@@ -91,6 +91,33 @@ if TEST_WITH_ROCM:
         )
         test_failures_cuda_wrapper[
             dynamic_shapes_test_name
+        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+
+if config.abi_compatible:
+    xfail_list = [
+        "test_bernoulli1_cuda",  # cpp fallback op naming issue
+        "test_conv_backward_cuda",
+        "test_custom_op_cuda",  # needs custom op support
+        "test_profiler_mark_wrapper_call_cuda",
+        "test_scaled_dot_product_attention_cuda_dynamic_shapes",
+    ]
+    for test_name in xfail_list:
+        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
+            ("cuda_wrapper",), is_skip=False
+        )
+        test_failures_cuda_wrapper[
+            f"{test_name}_dynamic_shapes"
+        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
+    skip_list = [
+        "test_multi_device_cuda",
+        "test_linear1_cuda",  # segfault from double free
+    ]
+    for test_name in skip_list:
+        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
+            ("cuda_wrapper",), is_skip=True
+        )
+        test_failures_cuda_wrapper[
+            f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 
@@ -147,11 +174,11 @@ if RUN_CUDA:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cuda"
-        tests: TorchTestCase = test_torchinductor.GPUTests()
+        tests: InductorTestCase = test_torchinductor.GPUTests()
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
-        BaseTest("test_add_complex2"),
+        BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bernoulli1"),
@@ -234,7 +261,7 @@ if RUN_CUDA:
     )
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if RUN_CUDA:
         run_tests(needs="filelock")

@@ -449,6 +449,18 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(scale, params[0])
             self.assertEqual(zero_point, params[1])
 
+    def test_per_channel_observers_load_state_dict(self):
+        observer_list = [PerChannelMinMaxObserver, MovingAveragePerChannelMinMaxObserver]
+
+        for obs_cls in observer_list:
+            obs = obs_cls()
+            obs(torch.randn((32, 32)))
+            new_obs = obs_cls()
+            # make sure the state_dict can be loaded
+            new_obs.load_state_dict(obs.state_dict())
+            self.assertTrue(torch.equal(obs.min_val, new_obs.min_val))
+            self.assertTrue(torch.equal(obs.max_val, new_obs.max_val))
+
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):
