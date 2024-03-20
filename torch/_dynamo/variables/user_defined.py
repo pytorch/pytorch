@@ -19,6 +19,11 @@ try:
 except ModuleNotFoundError:
     np = None
 
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec
+except ImportError:
+    PyTreeSpec = type(None)
+
 import torch._dynamo.config
 
 import torch.nn
@@ -65,7 +70,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __repr__(self):
+    def __str__(self):
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -307,7 +312,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
-            field_defaults = self.value._field_defaults
+            # check if this a quasi-namedtuple or a real one
+            if self.value.__module__ == "torch.return_types":
+                # create pseudo-defaults from values of the quasi-namedtuple
+                field_defaults = dict(zip(fields, args[0].items))
+            else:
+                field_defaults = self.value._field_defaults
 
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -319,7 +329,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
+                        field_var = SourcelessBuilder.create(
+                            tx, field_defaults[field_name]
+                        )
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
@@ -692,7 +704,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, torch.nn.Module)
+            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
@@ -746,7 +758,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else:
                 return trace_rules.lookup(func)(func)
         elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, source=source)
+            return variables.UserMethodVariable(
+                subobj.__func__, self.var_getattr(tx, "__class__"), source=source
+            )
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)

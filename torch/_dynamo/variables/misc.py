@@ -11,14 +11,14 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
+import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
-    check_constant_args,
-    check_unspec_python_args,
+    check_unspec_or_constant_args,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -29,9 +29,21 @@ from .user_defined import UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
+    _nonvar_fields = {
+        "specialized",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super().__init__(**kwargs)
+        # typevar is the fist argument to super(). In the case where no argument
+        # is provided to super(), it is the __class__ object where
+        # the super() function is being called
         self.typevar = typevar
+        # objvar here must be an instance or subtype of typevar.
+        # In the case where super() is called without arguments, it is the first argument
+        # to the current function where super() is called from (self for regular method,
+        # cls for a classmethod)
         self.objvar = objvar
         self.specialized = specialized  # directly get attr from self.typevar if true
 
@@ -50,9 +62,13 @@ class SuperVariable(VariableTracker):
             return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        # We default to the python type of the object. However, if this is
-        # a `type` or subclass of `type`, then the original object represents
-        # the user defined type.
+        # The rest of this function does two things:
+        #   - Walk the mro to find where the attribute comes from to be
+        #     able to provide accurate source
+        #   - Call the getattr to get the object
+
+        # Find the class object, where the function lives.
+        # When objvar is "self", use type(self), when objvar is "cls", use it as-is
         type_to_use = self.objvar.python_type()
         type_to_use_source = (
             TypeSource(self.objvar.source) if self.objvar.source else None
@@ -228,6 +244,11 @@ class ComptimeVariable(VariableTracker):
 
 
 class ClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -238,6 +259,11 @@ class ClosureVariable(UnknownVariable):
 
 # closure variable created by an inlined function
 class InlinedClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -298,6 +324,11 @@ def produce_trampoline_autograd_apply(fn_cls):
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
+    _nonvar_fields = {
+        "fn_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
@@ -313,9 +344,8 @@ class AutogradFunctionVariable(VariableTracker):
             if isinstance(node, variables.NNModuleVariable):
                 if node.is_training(tx):
                     requires_grad = True
-            return node
 
-        VariableTracker.apply(visit, (args, kwargs))
+        VariableTracker.visit(visit, (args, kwargs))
 
         if (
             requires_grad
@@ -424,6 +454,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "proxy",
         "inference",
+        "saved_tensors",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -512,6 +543,11 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
+    _nonvar_fields = {
+        "name",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, obj, name, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
@@ -597,6 +633,12 @@ class GetSetDescriptorVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "is_torch",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -710,11 +752,8 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
-            constant_args = check_constant_args(args, kwargs)
-            unspec_python_args = check_unspec_python_args(args, kwargs)
-
             if self.can_constant_fold_through(func) and (
-                constant_args or unspec_python_args
+                check_unspec_or_constant_args(args, kwargs)
             ):
                 # constant fold
                 return variables.ConstantVariable.create(
@@ -817,3 +856,58 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
+
+
+class DebuggingVariable(VariableTracker):
+    """
+    Represents a call to a debugging function like print(), or something
+    registered to config.reorderable_logging_functions.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    @staticmethod
+    def is_reorderable_logging_function(obj):
+        return (
+            callable(obj)
+            and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
+            and obj in torch._dynamo.config.reorderable_logging_functions
+        )
+
+    def call_function(self, tx, args, kwargs):
+        if tx.export:
+            # For export cases, we can just make debugging functions no-ops
+            return
+
+        if not self.can_reorder_logs(self.value, args, kwargs):
+            unimplemented(
+                f"Reordering debugging function {self.value} "
+                f"with inputs {args} {kwargs} is not yet implemented."
+            )
+
+        tx.debug_locals.append((self, list(args)))
+
+    def reconstruct(self, codegen):
+        return self.source.reconstruct(codegen)
+
+    @staticmethod
+    def can_reorder_logs(fn, args, kwargs) -> True:
+        """
+        Run some additional checks for what sort of function calls can we
+        actually reorder.
+        """
+
+        allowed_input_types = (
+            variables.TensorVariable,
+            variables.ConstantVariable,
+            StringFormatVariable,
+        )
+
+        flat_args = pytree.tree_leaves([args, kwargs])
+        for arg in flat_args:
+            if not isinstance(arg, allowed_input_types):
+                return False
+
+        return True
