@@ -58,7 +58,7 @@ def get_approximate_basis(
 
     niter = 2 if niter is None else niter
     m, n = A.shape[-2:]
-    dtype = _utils.get_floating_dtype(A)
+    dtype = _utils.get_floating_dtype(A) if not A.is_complex() else A.dtype
     matmul = _utils.matmul
 
     R = torch.randn(n, q, dtype=dtype, device=A.device)
