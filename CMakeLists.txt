@@ -182,7 +182,7 @@ cmake_dependent_option(
     "BUILD_CAFFE2" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_PROTOS "Build Caffe2 protobuf code" ON
-    "BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE" OFF)
+    "NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
