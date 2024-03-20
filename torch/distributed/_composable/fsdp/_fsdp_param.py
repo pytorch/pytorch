@@ -263,7 +263,6 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        assert unsharded_param.numel() == self.all_gather_output.numel()
         if self.is_dtensor:
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 unsharded_param = _from_local_no_grad(

@@ -165,7 +165,7 @@ def init():
         nn.Linear(hidden_dim, hidden_dim, device=device_type),
     )
     if per_param_fsdp:
-        torch.distributed._composable.fsdp.fully_shard(model, reshard_after_forward=True)
+        torch.distributed._composable.fsdp.fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
     else:
         fsdp_kwargs = {
             "use_orig_params": True,

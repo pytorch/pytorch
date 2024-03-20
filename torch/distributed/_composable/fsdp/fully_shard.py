@@ -28,6 +28,7 @@ def fully_shard(
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
+    _reshard_after_forward_root: bool = False,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
 ):
     """
@@ -76,9 +77,6 @@ def fully_shard(
             may be the intra-node size (e.g. ``torch.cuda.device_count()``).
             This allows the all-gather in backward to be over a smaller world
             size at the cost of higher memory usage than setting to ``True``.
-            - The root FSDP state has its value specially set to ``False`` as a
-            heuristic since its parameters would typically be immediately
-            all-gathered for backward.
             - After forward, the parameters registered to the module depend on
             to this: The registered parameters are the sharded parameters if
             ``True``; unsharded parameters if ``False``; and the paramters
@@ -86,6 +84,11 @@ def fully_shard(
             between forward and backward, the registered parameters must be the
             sharded parameters. For ``False`` or an ``int``, this can be done
             by manually resharding via :meth:`reshard`.
+        _reshard_after_forward_root (bool): This is a private API to control
+            whether to reshard root module parameters after forward and all-gather
+            them in backward. Default is ``False`` as an optimization since root module
+            parameters would typically be immediately all-gathered for backward.
+            Must be ``True`` if we are torch.compile-ing FSDP.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
@@ -116,6 +119,7 @@ def fully_shard(
         state._fsdp_param_group = FSDPParamGroup(
             params, module, mesh_info, post_forward_mesh_info, device, mp_policy
         )
+        state._reshard_after_forward_root = _reshard_after_forward_root
 
     # for dynamo
     for module in managed_modules:
