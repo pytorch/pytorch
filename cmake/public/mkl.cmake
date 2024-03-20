@@ -23,7 +23,7 @@ set_property(
   ${MKL_ROOT}/lib ${MKL_ROOT}/lib/intel64 ${MKL_ROOT}/lib/intel64_win ${MKL_ROOT}/lib/win-x64)
 
 if(UNIX)
-  if(${USE_STATIC_MKL})
+  if(USE_STATIC_MKL)
     foreach(MKL_LIB_PATH IN LISTS MKL_LIBRARIES)
       if(NOT EXISTS "${MKL_LIB_PATH}")
         continue()
