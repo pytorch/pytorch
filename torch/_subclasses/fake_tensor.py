@@ -1605,8 +1605,6 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
-        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
-        # seen before.
     ):
         shape_env = self.shape_env
         if static_shapes is None:
