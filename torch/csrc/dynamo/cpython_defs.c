@@ -67,6 +67,7 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 
 #if IS_PYTHON_3_12_PLUS
 
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1136
 // Initialize frame free variables if needed
 static void
 frame_init_get_vars(_PyInterpreterFrame *frame)
@@ -93,6 +94,7 @@ frame_init_get_vars(_PyInterpreterFrame *frame)
     frame->prev_instr = _PyCode_CODE(frame->f_code);
 }
 
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1162
 static int
 frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
               PyObject **pvalue)
@@ -115,7 +117,7 @@ frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
     if (frame->stacktop) {
         if (kind & CO_FAST_FREE) {
             // The cell was set by COPY_FREE_VARS.
-            assert(value != NULL && PyCell_Check(value));
+            CHECK(value != NULL && PyCell_Check(value));
             value = PyCell_GET(value);
         }
         else if (kind & CO_FAST_CELL) {
@@ -137,12 +139,13 @@ frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
         }
     }
     else {
-        assert(value == NULL);
+        CHECK(value == NULL);
     }
     *pvalue = value;
     return 1;
 }
 
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1213
 static PyObject *
 THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden)
 {
@@ -230,6 +233,7 @@ THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden)
     return NULL;
 }
 
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1301
 int
 THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame)
 {
@@ -534,6 +538,7 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     }
     Py_XDECREF(frame->frame_obj);
     Py_XDECREF(frame->f_locals);
+    // DYNAMO: additional field for 3.12
     #if IS_PYTHON_3_12_PLUS
     Py_DECREF(frame->f_funcobj);
     #else
@@ -542,12 +547,13 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     Py_DECREF(frame->f_code);
 }
 
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728
 static _PyStackChunk*
 allocate_chunk(int size_in_bytes, _PyStackChunk* previous)
 {
-    assert(size_in_bytes % sizeof(PyObject **) == 0);
-    // _PyStackChunk is a regular C struct, so
-    // it should be safe to use system malloc over Python malloc, e.g. PyMem_Malloc
+    CHECK(size_in_bytes % sizeof(PyObject **) == 0);
+    // DYNAMO: _PyStackChunk is a regular C struct, so
+    // it should be safe to use system malloc over Python malloc, e.g. _PyObject_VirtualAlloc
     _PyStackChunk *res = malloc(size_in_bytes);
     if (res == NULL) {
         return NULL;
@@ -561,6 +567,7 @@ allocate_chunk(int size_in_bytes, _PyStackChunk* previous)
 #define DATA_STACK_CHUNK_SIZE (16*1024)
 #define MINIMUM_OVERHEAD 1000
 
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2182
 static PyObject **
 push_chunk(PyThreadState *tstate, int size)
 {
@@ -586,10 +593,11 @@ push_chunk(PyThreadState *tstate, int size)
     return res;
 }
 
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Include/internal/pycore_frame.h#L199
 static inline bool
 THP_PyThreadState_HasStackSpace(PyThreadState *tstate, size_t size)
 {
-    assert(
+    CHECK(
         (tstate->datastack_top == NULL && tstate->datastack_limit == NULL)
         ||
         (tstate->datastack_top != NULL && tstate->datastack_limit != NULL)
@@ -598,6 +606,7 @@ THP_PyThreadState_HasStackSpace(PyThreadState *tstate, size_t size)
         size < (size_t)(tstate->datastack_limit - tstate->datastack_top);
 }
 
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2207
 _PyInterpreterFrame *
 THP_PyThreadState_BumpFramePointerSlow(PyThreadState *tstate, size_t size)
 {
@@ -613,24 +622,26 @@ THP_PyThreadState_BumpFramePointerSlow(PyThreadState *tstate, size_t size)
     return (_PyInterpreterFrame *)push_chunk(tstate, (int)size);
 }
 
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2222
 void
 THP_PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
 {
-    assert(tstate->datastack_chunk);
+    CHECK(tstate->datastack_chunk);
     PyObject **base = (PyObject **)frame;
     if (base == &tstate->datastack_chunk->data[0]) {
         _PyStackChunk *chunk = tstate->datastack_chunk;
         _PyStackChunk *previous = chunk->previous;
         // push_chunk ensures that the root chunk is never popped:
-        assert(previous);
+        CHECK(previous);
         tstate->datastack_top = &previous->data[previous->top];
         tstate->datastack_chunk = previous;
+        // DYNAMO: free instead of _PyObject_VirtualFree
         free(chunk);
         tstate->datastack_limit = (PyObject **)(((char *)previous) + previous->size);
     }
     else {
-        assert(tstate->datastack_top);
-        assert(tstate->datastack_top >= base);
+        CHECK(tstate->datastack_top);
+        CHECK(tstate->datastack_top >= base);
         tstate->datastack_top = base;
     }
 }
