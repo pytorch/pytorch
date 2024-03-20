@@ -1333,7 +1333,11 @@ void int8_gemm(
   // cublas team: alpha and beta need to be the same dtype as of scaleType
   at::opmath_type<int32_t> alpha_val = 1;
   int32_t beta_val = 0;
-
+/////////////////////////////////////////
+  size_t workspaceSize = _getWorkspaceSize();
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+/////////////////////////////////////////////
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -1352,8 +1356,16 @@ void int8_gemm(
       result_ptr,
       Cdesc.descriptor(),
       nullptr, // Heuristics don't seem to work for int8
+#ifdef USE_ROCM
+      workspace.mutable_get(),
+#else
       nullptr, // Non-zero workspace doesn't seem to work.
+#endif
+#ifdef USE_ROCM
+      workspaceSize,
+#else
       0,
+#endif
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
