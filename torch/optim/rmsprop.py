@@ -126,7 +126,8 @@ class RMSprop(Optimizer):
             momentum_buffer_list = []
             state_steps = []
 
-            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, momentum_buffer_list, grad_avgs, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, square_avgs,
+                                           momentum_buffer_list, grad_avgs, state_steps)
 
             rmsprop(
                 params_with_grad,
@@ -363,7 +364,8 @@ def _multi_tensor_rmsprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs,
+                                                                    momentum_buffer_list, state_steps])
     for (((grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
          grouped_momentum_buffer_list, grouped_state_steps)), _) in grouped_tensors.values():
         if has_complex:
