@@ -56,7 +56,7 @@ from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.select_algorithm import ChoiceCaller
+    from torch._inductor.ir import ChoiceCaller
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -1001,11 +1001,9 @@ def install_gcc_via_conda() -> str:
 
 
 def is_gcc() -> bool:
+    if sys.platform == "darwin" and is_apple_clang():
+        return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
-
-
-def is_clang() -> bool:
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 @functools.lru_cache(None)
@@ -1013,6 +1011,13 @@ def is_apple_clang() -> bool:
     cxx = cpp_compiler()
     version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
+
+
+def is_clang() -> bool:
+    # Mac OS apple clang maybe named as gcc, need check compiler info.
+    if sys.platform == "darwin":
+        return is_apple_clang()
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 class VecISA:
