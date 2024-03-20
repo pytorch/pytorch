@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import inspect
 from typing import Dict, List
 
@@ -52,14 +54,14 @@ def _get_subclass_type(var):
 def _get_subclass_type_var(tx, var):
     assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
     if isinstance(var, TensorWithTFOverrideVariable):
-        return var.class_type_var()
+        return var.class_type_var(tx)
     elif isinstance(var, UserDefinedObjectVariable):
         from .builder import SourcelessBuilder, VariableBuilder
 
         if var.source:
             return VariableBuilder(tx, var.source)(var.python_type())
         else:
-            return SourcelessBuilder()(tx, var.python_type())
+            return SourcelessBuilder.create(tx, var.python_type())
 
 
 def _is_attr_overidden(tx, var, name):
@@ -86,8 +88,8 @@ def call_torch_function(
         torch_function_type,
         fn,
         types,
-        SourcelessBuilder()(tx, tuple(args)),
-        SourcelessBuilder()(tx, kwargs),
+        SourcelessBuilder.create(tx, tuple(args)),
+        SourcelessBuilder.create(tx, kwargs),
     )
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
@@ -95,13 +97,13 @@ def call_torch_function(
 def build_torch_function_fn(tx, value, source):
     from .builder import SourcelessBuilder, VariableBuilder
 
-    if not source:
+    if source:
         return VariableBuilder(
             tx,
             AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
         )(value.__torch_function__.__func__)
     else:
-        return SourcelessBuilder()(tx, value.__torch_function__.__func__)
+        return SourcelessBuilder.create(tx, value.__torch_function__.__func__)
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
@@ -163,19 +165,29 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
         # each time the compiled artifact is run and outputs a wrapped tensor.
-        if self.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global(self.global_mangled_class_name(), self.class_type)
+        if self.global_mangled_class_name(tx) not in tx.output.global_scope:
+            # Safe because global_mangled_class_name figures it out
+            tx.output.install_global_unsafe(
+                self.global_mangled_class_name(tx), self.class_type
+            )
 
     def python_type(self):
         return self.class_type
 
-    def class_type_var(self):
+    def class_type_var(self, tx):
         return TensorSubclassVariable(
-            self.class_type, source=GlobalSource(self.global_mangled_class_name())
+            self.class_type, source=GlobalSource(self.global_mangled_class_name(tx))
         )
 
-    def global_mangled_class_name(self):
-        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}"
+    def global_mangled_class_name(self, tx):
+        # The global_mangled_class_name should be different for different
+        # invocations of torch.compile. Otherwise, we can run into a situation
+        # where multiple torch.compile invocations re-use the same global name,
+        # but the global's lifetime is tied to the first invocation (and
+        # may be deleted when the first torch.compile invocation is deleted)
+        # We mangle it based off of the output_graph's id.
+        compile_id = tx.output.compile_id
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
 
     def var_getattr(self, tx, name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
@@ -183,7 +195,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         import torch
         from .builder import SourcelessBuilder
 
-        if name in banned_attrs or not hasattr(torch.Tensor, name):
+        if name in banned_attrs:
             unimplemented(
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
@@ -194,19 +206,19 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 " subclass with a __torch_function__ override is not supported"
             )
 
-        if tx.output.torch_function_enabled:
+        if tx.output.torch_function_enabled and hasattr(torch.Tensor, name):
             if self.source:
                 install_guard(
                     AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
                         GuardBuilder.FUNCTION_MATCH
                     )
                 )
-            get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
+            get_fn = SourcelessBuilder.create(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
                 get_fn,
-                TupleVariable([self.class_type_var()]),
+                TupleVariable([self.class_type_var(tx)]),
                 [self],
                 {},
             )
@@ -216,7 +228,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self.class_type_var(),
+            self.class_type_var(tx),
             self.torch_function_fn,
             fn,
             types,
@@ -252,7 +264,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
                 )(inspect.getattr_static(self.python_type(), name))
             else:
-                func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)

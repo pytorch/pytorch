@@ -2,6 +2,7 @@
 
 import contextlib
 import functools
+import unittest
 
 import torch
 import torch._dynamo
@@ -10,6 +11,7 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch.utils.hooks import RemovableHandle
 
 
 def compiler_fn(gm):
@@ -29,6 +31,11 @@ def global_hook_2(grad):
 
 
 h0 = None
+
+
+class ClassWithVal:
+    def __init__(self, val):
+        self.val = val
 
 
 class HooksTests(torch._dynamo.test_case.TestCase):
@@ -72,7 +79,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         v = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))[0]
         v.backward(torch.tensor([1.0, 2.0, 3.0]))
         self.assertEqual(v.grad, torch.tensor([3.0, 6.0, 9.0]))
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_tensor_register_hook_multi_handle_return(self):
         def fn(x, y, z):
@@ -106,9 +113,27 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         v.backward(torch.tensor([1.0, 2.0, 3.0]))
         self.assertEqual(v.grad, torch.tensor([2.0, 4.0, 6.0]))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertNotEqual(h, None)
-        self.assertNotEqual(h2, None)
-        self.assertEqual(h2, h)
+        self.assertIsInstance(h, RemovableHandle)
+        self.assertIs(h2, h)
+
+    def test_removed_handle_return(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y, z):
+            handle = x.register_hook(lambda grad: grad * 2)
+            z = z * z
+            handle.remove()
+            handle.remove()
+            return x, y * y, z, handle, handle
+
+        v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
+        v, y, z, h, h2 = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))
+        v.backward(torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(v.grad, torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsInstance(h, RemovableHandle)
+        self.assertIs(h2, h)
 
     def test_tensor_register_hook_repeated_handle_not_local(self):
         def fn(x, y, z, mod):
@@ -117,7 +142,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             return x, y * y, z
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = torch._dynamo.optimize(cnts)(fn)
+        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
 
         mod = torch.nn.Module()
@@ -487,12 +512,131 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         x2 = torch.ones(4, requires_grad=True)
         with compiled_autograd.enable(compiler_fn):
             dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2, obj)
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, ".*BuiltinVariable\\(str\\).*"
-            ):
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: str"):
                 dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(obj.count, 2)
+
+    def test_register_hook_partial_guarding(
+        self,
+    ):
+        def some_hook(grad, *, obj):
+            return grad + obj.val
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x, obj):
+                y = x.mul(2)
+                hook1 = functools.partial(some_hook, obj=obj)
+                y.register_hook(hook1)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        obj1 = ClassWithVal(torch.tensor(88))
+        obj2 = ClassWithVal(torch.tensor(99))
+        obj3 = ClassWithVal(11)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+
+        with compiled_autograd.enable(compiler_fn):
+            torch.compile(mod, backend=cnt, fullgraph=True)(x0, obj1)
+            torch.compile(mod, backend=cnt, fullgraph=True)(x1, obj1)
+            torch.compile(mod, backend=cnt, fullgraph=True)(x0, obj2)
+            torch.compile(mod, backend=cnt, fullgraph=True)(x0, obj3)
+            self.assertEqual(cnt.frame_count, 1)
+
+    def test_hook_with_closure(self):
+        def fn(x, obj):
+            y = x.sin()
+            x.register_hook(lambda grad: grad + obj.val)
+            z = y.sin()
+            return z
+
+        cnt_fw = torch._dynamo.testing.CompileCounter()
+        cnt_bw = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt_fw, fullgraph=True)
+
+        obj1 = ClassWithVal(torch.tensor(88))
+        obj2 = ClassWithVal(torch.tensor(99))
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+        x2 = torch.ones(4, requires_grad=True)
+        x3 = torch.ones(4, requires_grad=True)
+        fn(x0, obj1).sum().backward()
+        fn(x1, obj2).sum().backward()
+
+        with compiled_autograd.enable(
+            functools.partial(torch.compile, backend=cnt_bw, fullgraph=True)
+        ):
+            opt(x2, obj1).sum().backward()
+            opt(x3, obj2).sum().backward()
+            self.assertEqual(cnt_fw.frame_count, 1)
+            self.assertEqual(cnt_bw.frame_count, 1)
+
+        self.assertEqual(x0.grad, x2.grad)
+        self.assertEqual(x1.grad, x3.grad)
+
+    def test_intermediate_hook_with_closure_eager(self):
+        def fn(x, obj):
+            y = x.sin()
+            y.register_hook(lambda grad: grad + obj.val)
+            z = y.sin()
+            return z
+
+        cnt_fw = torch._dynamo.testing.CompileCounter()
+        cnt_bw = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt_fw, fullgraph=True)
+
+        obj1 = ClassWithVal(torch.tensor(88))
+        obj2 = ClassWithVal(torch.tensor(99))
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+        x2 = torch.ones(4, requires_grad=True)
+        x3 = torch.ones(4, requires_grad=True)
+        fn(x0, obj1).sum().backward()
+        fn(x1, obj2).sum().backward()
+
+        with compiled_autograd.enable(
+            functools.partial(torch.compile, backend=cnt_bw, fullgraph=True)
+        ):
+            opt(x2, obj1).sum().backward()
+            opt(x3, obj2).sum().backward()
+            self.assertEqual(cnt_fw.frame_count, 1)
+            self.assertEqual(cnt_bw.frame_count, 1)
+
+        self.assertEqual(x0.grad, x2.grad)
+        self.assertEqual(x1.grad, x3.grad)
+
+    def test_intermediate_hook_with_closure_aot(self):
+        def fn(x, obj):
+            y = x.sin()
+            y.register_hook(lambda grad: grad + obj.val)
+            z = y.sin()
+            return z
+
+        cnt_bw = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        obj1 = ClassWithVal(torch.tensor(88))
+        obj2 = ClassWithVal(torch.tensor(99))
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+        x2 = torch.ones(4, requires_grad=True)
+        x3 = torch.ones(4, requires_grad=True)
+        fn(x0, obj1).sum().backward()
+        fn(x1, obj2).sum().backward()
+
+        with compiled_autograd.enable(
+            functools.partial(torch.compile, backend=cnt_bw, fullgraph=True)
+        ):
+            opt(x2, obj1).sum().backward()
+            opt(x3, obj2).sum().backward()
+            self.assertEqual(cnt_bw.frame_count, 1)
+
+        self.assertEqual(x0.grad, x2.grad)
+        self.assertEqual(x1.grad, x3.grad)
 
     def test_no_recompile_on_hook_identity_change(self):
         def my_hook(grad, k=0):
@@ -530,7 +674,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
             comp_out = comp_mod(x1)
 
-            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.frame_count, 1)
             comp_out[0].backward(torch.ones(4))
             self.assertEqual(x0.grad, x1.grad)
 
@@ -603,6 +747,26 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 )
                 with compiled_bwd_ctx:
                     test_fn(compiled_fn)
+
+    def test_recompile(self):
+        def hook(param):
+            param.grad *= 2
+
+        x = torch.ones(10)
+        x.requires_grad = True
+
+        def run(input):
+            return x * input
+
+        x.register_post_accumulate_grad_hook(hook)
+        with compiled_autograd.enable(compiler_fn):
+            for i in range(5):
+                with unittest.mock.patch(
+                    "torch._dynamo.config.error_on_recompile", True
+                ):
+                    # Mimic optimizer.zero_grad() to clear the gradient
+                    x.grad = None
+                    run(i).sum().backward()
 
 
 if __name__ == "__main__":

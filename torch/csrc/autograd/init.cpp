@@ -270,7 +270,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
-  m.def("_prepare_profiler", prepareProfiler);
+  m.def(
+      "_prepare_profiler",
+      prepareProfiler,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -663,8 +666,10 @@ static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* clear_autocast_cache(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  at::autocast::clear_cache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::autocast::clear_cache();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

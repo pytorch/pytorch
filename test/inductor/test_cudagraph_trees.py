@@ -14,6 +14,7 @@ import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
@@ -25,7 +26,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -43,7 +43,7 @@ importlib.import_module("filelock")
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
@@ -71,7 +71,7 @@ def cdata(t):
     return t.untyped_storage()._cdata
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -222,6 +222,52 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("fallback_random", True)
         def test_rng_non_trees(self):
             self.check_rng()
+
+        def test_mutation_reinplaced(self):
+            import torch.nn as nn
+
+            class Model(nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, input, other, out):
+                    input = torch.logical_xor(input=input, other=other, out=out)
+                    return input
+
+            x = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float32).cuda()
+            y = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float32).cuda()
+            z = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float16).cuda()
+
+            model = Model().cuda()
+            eag = model(x, y, z)
+            with capture_stderr() as captured_output:
+                opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
+
+            FileCheck().check(
+                "skipping cudagraphs due to mutaton on input. Found from"
+            ).check("torch.logical_xor").run(captured_output[0])
+
+        @requires_multigpu()
+        def test_multiple_devices_msg(self):
+            @torch.compile()
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check("skipping cudagraphs due to cpu device.").check(
+                "y + 2"
+            ).run(captured_output[0])
+
+            with capture_stderr() as captured_output:
+                foo(
+                    torch.ones([10], device="cuda:0"), torch.ones([10], device="cuda:1")
+                )
+
+            FileCheck().check("skipping cudagraphs due to multiple devices").run(
+                captured_output[0]
+            )
 
         def test_mutation(self):
             @torch.compile()
@@ -1379,6 +1425,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_incompatible_cudagraph_ops_item(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.item()
+
+            self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
+            self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_incompatible_cudagraph_ops_nonzero(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.nonzero()
+
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 2], device="cuda")), torch.tensor([[0], [2]])
+            )
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
+            )
+
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
             torch._C._set_storage_access_error_msg(x, "custom error msg")
@@ -1388,7 +1456,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if not TEST_CUDA_GRAPH:
         if __name__ == "__main__":

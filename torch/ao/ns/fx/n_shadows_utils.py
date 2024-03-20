@@ -92,7 +92,7 @@ class OutputProp:
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
 
-            if isinstance(result, torch.Tensor):
+            if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
                 node.traced_result = result
 
             env[node.name] = result
@@ -375,7 +375,7 @@ def create_submodule_from_subgraph(
             # TODO(future PR): this is ignoring kwargs, will need to support kwargs
             # for any fusion pattern which has them for a node that is not the
             # first node.
-            cur_args_copy = [cur_node_copy]  # type: ignore[has-type]  # noqa: F821
+            cur_args_copy = [cur_node_copy]  # type: ignore[has-type, possibly-undefined]  # noqa: F821
 
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
@@ -399,15 +399,15 @@ def create_submodule_from_subgraph(
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)
             cur_name_idx += 1
-            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)
+            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         elif cur_node_orig.op == 'call_function':
             cur_node_copy = g.call_function(
-                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)
+                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         elif cur_node_orig.op == 'call_method':
             cur_node_copy = g.call_method(
-                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)
+                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         else:
             raise AssertionError(f'{cur_node_orig.op} not supported yet')

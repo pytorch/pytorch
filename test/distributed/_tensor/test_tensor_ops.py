@@ -3,7 +3,9 @@
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
@@ -229,6 +231,44 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_stack(self):
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+        partial_replicate_placement = [_Partial(), Replicate()]
+        partial_placement = [_Partial(), _Partial()]
+
+        partial_replicate_dt = DTensor.from_local(
+            torch.randn(4, 8), mesh_2d, partial_replicate_placement
+        )
+        partial_dt = DTensor.from_local(torch.randn(4, 8), mesh_2d, partial_placement)
+
+        stack_dt = torch.stack([partial_replicate_dt, partial_dt])
+        self.assertEqual(stack_dt.placements, tuple(partial_placement))
+        self.assertEqual(stack_dt.shape, (2, 4, 8))
+
+        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        # stack before/after shard dim
+        global_input = torch.randn(8, 8)
+        shard1_input = distribute_tensor(global_input, mesh_1d, [Shard(1)])
+        cloned_shard1_input = shard1_input.clone()
+        stack_shard1_dt = torch.stack([shard1_input, cloned_shard1_input])
+        self.assertEqual(stack_shard1_dt.placements, (Shard(2),))
+        self.assertEqual(stack_shard1_dt.shape, (2, 8, 8))
+        self.assertEqual(
+            stack_shard1_dt.full_tensor(), torch.stack([global_input, global_input])
+        )
+
+        stack_dim1_shard1_dt = torch.stack([shard1_input, cloned_shard1_input], dim=1)
+        self.assertEqual(stack_dim1_shard1_dt.placements, (Shard(2),))
+        self.assertEqual(stack_dim1_shard1_dt.shape, (8, 2, 8))
+        self.assertEqual(
+            stack_dim1_shard1_dt.full_tensor(),
+            torch.stack([global_input, global_input], dim=1),
+        )
+
+    @with_comms
     def test_equal(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
@@ -277,6 +317,74 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertTrue(dtc.successful())
             d_out = op_call(*d_args, **d_kwargs)
             self.assertEqual(d_out.full_tensor(), out)
+
+    @with_comms
+    def test_new_full(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        placements = [[Shard(0)], [Replicate()]]
+        for placement in placements:
+            global_tensor = torch.randn(12, 8)
+            input_dt = distribute_tensor(global_tensor, device_mesh, placement)
+            # TODO: Currently CommDebugMode cannot capture communications within DTensor op dispatcher.
+            # Need to revisit the assertions once we have correct CommDebugMode support.
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                new_full_dt = input_dt.new_full((4, 8), 42.0)
+                # new_full creates a replicated tensor, which should not trigger any communication.
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+            new_full_expected = torch.full((4, 8), 42.0)
+            self.assertEqual(input_dt.placements, placement)
+            self.assertTrue(new_full_dt.placements[0].is_replicate())
+            self.assertEqual(new_full_expected, new_full_dt.to_local())
+
+    @with_comms
+    def test_gather(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        comm_mode = CommDebugMode()
+
+        # case 1 all replicate: input replicated, index replicated, output replicated
+        global_input = torch.randn(12, 8, 16)
+        global_index = torch.randint(8, (4, 4, 8))
+        input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
+        index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
+        for gather_dim in [0, 1, 2]:
+            global_output = torch.gather(global_input, gather_dim, global_index)
+            with comm_mode:
+                output_dt = torch.gather(input_dt, gather_dim, index_dt)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(output_dt.placements, [Replicate()])
+            self.assertEqual(output_dt.to_local(), global_output)
+
+        # case 2 input sharding: input sharded, index replicated, output mask partial
+        # only works when index has size 1 on the gather dimension and
+        # input is sharded on the gather dimension
+        from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+
+        gather_dim = 1
+        global_input = torch.randn(12, 8, 16)
+        global_index = torch.randint(8, (4, 1, 8))
+        global_output = torch.gather(global_input, gather_dim, global_index)
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(gather_dim)])
+        index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
+        with comm_mode:
+            output_dt = torch.gather(input_dt, gather_dim, index_dt)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertIsInstance(output_dt.placements[0], _MaskPartial)
+        self.assertEqual(output_dt.full_tensor(), global_output)
+
+        # case 3 index sharding: input replicated, index sharded, output sharded
+        # only works when the sharding dimension is the gather dimension
+        global_input = torch.randn(12, 8, 16)
+        global_index = torch.randint(8, (4, 4, 8))
+        for gather_dim in range(len(global_index.shape)):
+            input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
+            index_dt = distribute_tensor(global_index, device_mesh, [Shard(gather_dim)])
+            global_output = torch.gather(global_input, gather_dim, global_index)
+            with comm_mode:
+                output_dt = torch.gather(input_dt, gather_dim, index_dt)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(output_dt.placements, [Shard(gather_dim)])
+            self.assertEqual(output_dt.full_tensor(), global_output)
 
     @with_comms
     def test_index(self):
