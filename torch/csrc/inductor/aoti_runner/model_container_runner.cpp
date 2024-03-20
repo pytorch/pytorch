@@ -171,9 +171,10 @@ AOTIEagerKernelRunner::AOTIEagerKernelRunner(const std::string& model_so_path) {
 
 AOTIEagerKernelRunner::~AOTIEagerKernelRunner() {}
 
-std::vector<at::Tensor> AOTIEagerKernelRunner::operator()(
-    std::vector<at::Tensor>& inputs) {
-  return run_func_(inputs);
+void AOTIEagerKernelRunner::operator()(
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles) {
+  return run_func_(input_handles, output_handles);
 }
 
 } // namespace torch::inductor

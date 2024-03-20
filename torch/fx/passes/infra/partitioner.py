@@ -23,7 +23,7 @@ class Partition:
         return str(self.nodes)
 
     def add_node(self, node: Node):
-        self.nodes.update(node=None)
+        self.nodes.update({node: None})
 
     def remove_node(self, node: Node):
         del self.nodes[node]

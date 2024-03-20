@@ -1012,11 +1012,9 @@ def install_gcc_via_conda() -> str:
 
 
 def is_gcc() -> bool:
+    if sys.platform == "darwin" and is_apple_clang():
+        return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
-
-
-def is_clang() -> bool:
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 @functools.lru_cache(None)
@@ -1024,6 +1022,13 @@ def is_apple_clang() -> bool:
     cxx = cpp_compiler()
     version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
+
+
+def is_clang() -> bool:
+    # Mac OS apple clang maybe named as gcc, need check compiler info.
+    if sys.platform == "darwin":
+        return is_apple_clang()
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 class VecISA:
@@ -2146,8 +2151,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             c_func_name_decl = textwrap.dedent(
                 """
                 extern "C" {
-                    std::vector<at::Tensor> aoti_eager_inductor_entry_cpp(const std::vector<at::Tensor>& inputs) {
-                        return inductor_entry_cpp(inputs);
+                    void aoti_eager_inductor_entry_cpp(
+                            AtenTensorHandle* input_handles,
+                            AtenTensorHandle* output_handles) {
+                        inductor_entry_impl(input_handles, output_handles);
                     }
                 }
                 """
@@ -2194,7 +2201,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
             _extra_parse_arg = cls.extra_parse_arg % (
                 output_so_path,
-                cls.entry_function,
+                num_outputs,
             )
         else:
             _extra_parse_arg = (
@@ -2284,16 +2291,42 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
 
 class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
-    call_entry_function = "return THPVariable_WrapList(%s(%s));"
-    entry_function = "inductor_entry_cpp_eager"
     extra_parse_arg = textwrap.dedent(
         """
         #include <dlfcn.h>
-        #include <torch/csrc/autograd/python_variable.h>
-        template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
-            return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+        #include <vector>
+        #include <pybind11/pybind11.h>
+        #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+
+        static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {
+            std::vector<AtenTensorHandle> result;
+            size_t result_len = PyList_GET_SIZE(pyvec);
+            result.reserve(result_len);
+            for (size_t i = 0; i < result_len; i++) {
+                // AtenTensorHandle is essentially a pointer
+                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
+            }
+            return result;
         }
-        using inductor_entry_cpp_t = std::vector<at::Tensor> (*)(const std::vector<at::Tensor>&);
+
+        static inline PyObject* pack_tensor_handle_list(const std::vector<AtenTensorHandle>& cppvec) {
+            size_t result_len = cppvec.size();
+            PyObject* result = PyList_New(static_cast<Py_ssize_t>(result_len));
+            for (size_t i = 0; i < result_len; i++) {
+                // Store AtenTensorHandle as PyCapsulate
+                PyObject* elem = PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
+                PyList_SET_ITEM(result, i, elem);
+            }
+            return result;
+        }
+
+        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {
+            return unpack_tensor_handle_list(PyTuple_GET_ITEM(args, n));
+        }
+
+        using inductor_entry_cpp_t = void (*)(AtenTensorHandle*, AtenTensorHandle*);
+
         namespace {
             class SharedAOTIKernelObject {
             public:
@@ -2318,19 +2351,43 @@ class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
                 }
                 SharedAOTIKernelObject(const SharedAOTIKernelObject&) = delete;
                 SharedAOTIKernelObject& operator=(const SharedAOTIKernelObject&) = delete;
-                std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inputs) {
-                    return reinterpret_cast<inductor_entry_cpp_t>(inductor_entry_cpp_so_sym)(inputs);
+                void operator()(
+                        AtenTensorHandle* input_handles,
+                        AtenTensorHandle* output_handles) {
+                    reinterpret_cast<inductor_entry_cpp_t>(inductor_entry_cpp_so_sym)(
+                        input_handles,
+                        output_handles);
                 }
             private:
                 void* inductor_entry_cpp_so_handle = nullptr;
                 void* inductor_entry_cpp_so_sym = nullptr;
             };
             SharedAOTIKernelObject aoti_eager_inductor_entry_cpp_kernel("%s");
+
+            void inductor_entry_impl_shim(
+                    AtenTensorHandle* input_handles,
+                    AtenTensorHandle* output_handles) {
+                pybind11::gil_scoped_release release;
+                aoti_eager_inductor_entry_cpp_kernel(input_handles, output_handles);
+            }
         }
-        std::vector<at::Tensor> %s(const std::vector<at::Tensor>& inputs) {
-            pybind11::gil_scoped_release release;
-            return aoti_eager_inductor_entry_cpp_kernel(inputs);
+
+        PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {
+            // For outputs, we only allocate a vector to hold returned tensor handles,
+            // not allocating the actual output tensor storage here
+            std::vector<AtenTensorHandle> output_handles(%s);
+            try {
+                inductor_entry_impl_shim(input_handles.data(), output_handles.data());
+                return pack_tensor_handle_list(output_handles);
+            } catch(std::exception const& e) {
+                PyErr_SetString(PyExc_RuntimeError, e.what());
+                return {};
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
+                return {};
+            }
         }
+
         """
     )
 
