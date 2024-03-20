@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import os
 import sys
+import unittest
 from typing import Tuple
 
 import onnxruntime
@@ -716,6 +717,62 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             result = compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No CUDA to run mix devicei nputs")
+    def test_mix_device_inputs(self):
+        data = torch.randn(4, 8, device="cuda")
+        ref_data = torch.randn(8, 4, device="cpu")
+
+        def reshape_wrapper(data, ref_cpu_data):
+            # Dummy line to make sure ref_cpu_data
+            # is included in the captured graph.
+            ref_cpu_data += 1
+            shape = ref_cpu_data.shape
+            # A call with GPU and CPU inputs.
+            return torch.reshape(data, shape)
+
+        compiled_model = torch.compile(
+            reshape_wrapper,
+            backend="onnxrt",
+            dynamic=True,
+        )
+
+        result = compiled_model(data, ref_data)
+
+        self.assertTrue(torch.allclose(result, data.view(ref_data.shape)))
+
+    def test_no_input(self):
+        def reshape_wrapper():
+            # A model without input.
+            ones = torch.ones(4, 8)
+            zeros = torch.zeros(4, 8)
+            return ones + zeros
+
+        recorded_models = []
+
+        def record_onnx_model_transform(onnx_model):
+            # Record the ONNX model seen by the transform.
+            recorded_models.append(onnx_model)
+
+        compiled_model = torch.compile(
+            reshape_wrapper,
+            backend="onnxrt",
+            dynamic=True,
+            options=torch.onnx._OrtBackendOptions(
+                pre_ort_model_transforms=[
+                    record_onnx_model_transform,
+                ]
+            ),
+        )
+
+        result = compiled_model()
+
+        self.assertEqual(len(recorded_models), 1)
+        self.assertTrue(
+            "aten_add" in [node.op_type for node in recorded_models[0].graph.node]
+        )
+
+        self.assertEqual(result, torch.ones(4, 8))
 
     def test_custom_onnx_transform(self):
         # This test consists of 2 parts:

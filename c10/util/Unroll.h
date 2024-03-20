@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/macros/Macros.h>
+#include <type_traits>
 
 // Utility to guarantee complete unrolling of a loop where the bounds are known
 // at compile time. Various pragmas achieve similar effects, but are not as
@@ -11,18 +12,18 @@ namespace c10 {
 
 template <int n>
 struct ForcedUnroll {
-  template <typename Func>
-  C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    ForcedUnroll<n - 1>{}(f);
-    f(n - 1);
+  template <typename Func, typename... Args>
+  C10_ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+    ForcedUnroll<n - 1>{}(f, args...);
+    f(std::integral_constant<int, n - 1>{}, args...);
   }
 };
 
 template <>
 struct ForcedUnroll<1> {
-  template <typename Func>
-  C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    f(0);
+  template <typename Func, typename... Args>
+  C10_ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+    f(std::integral_constant<int, 0>{}, args...);
   }
 };
 

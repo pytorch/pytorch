@@ -1034,6 +1034,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
                                 torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -1117,21 +1118,30 @@ class GraphLowering(torch.fx.Interpreter):
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
             self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
-            return
+        else:
+            device_types = self.device_types.copy()
+            device_types.discard("cpu")
+            # TODO(Eikan): Only support mixing cpu and other device now.
+            assert len(device_types) <= 1, "Does not support mixing {}".format(
+                "+".join(device_types)
+            )
+            only_cpu = len(device_types) == 0
+            device_type = "cpu" if only_cpu else device_types.pop()
 
-        device_types = self.device_types.copy()
-        device_types.discard("cpu")
-        # TODO(Eikan): Only support mixing cpu and other device now.
-        assert len(device_types) <= 1, "Does not support mixing {}".format(
-            "+".join(device_types)
-        )
-        only_cpu = len(device_types) == 0
-        device_type = "cpu" if only_cpu else device_types.pop()
+            self.device_ops = get_device_op_overrides(device_type)
+            wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+            assert (
+                wrapper_code_gen_cls is not None
+            ), f"Device {device_type} not supported"
+            self.wrapper_code = wrapper_code_gen_cls()
 
-        self.device_ops = get_device_op_overrides(device_type)
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
-        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
-        self.wrapper_code = wrapper_code_gen_cls()
+        if self.const_module:
+            # If we have const module, we could reuse the kernels
+            # This could avoid duplication and save time on doing recompilation (if Triton.)
+            self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
+            self.wrapper_code.src_to_kernel = (
+                self.const_module.wrapper_code.src_to_kernel
+            )
 
     def codegen_with_cpp_wrapper(self):
         """
@@ -1194,6 +1204,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
+
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
 
@@ -1211,6 +1222,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code = parent_graph.wrapper_code
         self.device_ops = parent_graph.device_ops
+        self.cpp_wrapper = parent_graph.cpp_wrapper
 
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
