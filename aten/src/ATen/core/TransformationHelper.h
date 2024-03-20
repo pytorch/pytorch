@@ -1,11 +1,13 @@
+#include <ATen/NumericUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/MathConstants.h>
-#include <ATen/NumericUtils.h>
-#include <limits>
+#include <cmath>
 #include <cstdint>
 #include <cassert>
+#include <limits>
+#include <type_traits>
 
 namespace at {
 
@@ -54,12 +56,12 @@ C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
  * in this overloaded version
  */
 template <typename T, typename V>
-C10_HOST_DEVICE inline typename std::enable_if<!(std::is_floating_point<T>::value), T>::type uniform_int(V val) {
+C10_HOST_DEVICE inline std::enable_if_t<!(std::is_floating_point_v<T>), T>uniform_int(V val) {
   if constexpr (std::is_same_v<T, bool>) {
     return static_cast<bool>(val & 1);
   } else if constexpr (std::is_same_v<T, int64_t>) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
-  } else if constexpr (std::is_same_v<T, at::Half> || std::is_same<T, at::BFloat16>::value) {
+  } else if constexpr (std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) {
     return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
   } else if constexpr (std::is_integral_v<T>) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
@@ -74,7 +76,7 @@ C10_HOST_DEVICE inline typename std::enable_if<!(std::is_floating_point<T>::valu
  * added to fix compiler warnings reported in GitHub issue 46391. T is either float or double in this version.
  */
 template<typename T, typename V>
-C10_HOST_DEVICE inline typename std::enable_if<std::is_floating_point<T>::value, T>::type uniform_int(V val) {
+C10_HOST_DEVICE inline std::enable_if_t<std::is_floating_point_v<T>, T>uniform_int(V val) {
   return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
 }
 
