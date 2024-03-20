@@ -43,8 +43,8 @@
 
 #ifdef FBCODE_CAFFE2
 #include <common/logging/logging.h>
-#include <folly/dynamic.h>
-#include <folly/json.h>
+#include <folly/json/dynamic.h>
+#include <folly/json/json.h>
 #endif
 
 // used in test only
