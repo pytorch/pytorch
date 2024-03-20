@@ -413,13 +413,16 @@ def test_async_issue_repro():
     for use_shared, use_pinned in ([(True, False), (False, True), (True, True), (False, False)]):
 
         print(f"{use_shared=} {use_pinned=}")
-
+        # with record_function("torch_zeros"):
+        tensor = torch.zeros(50000, 50000, device="cuda")
+        state_dict = {"a": tensor}
+        cache = _create_cpu_state_dict(state_dict, share_memory=use_shared, pin_memory=use_pinned)
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            with record_function("torch_zeros"):
-                tensor = torch.zeros(50000, 50000, device="cuda")
-            state_dict = {"a": tensor}
-            with record_function("_create_cpu_state_dict"):
-                cache = _create_cpu_state_dict(state_dict, share_memory=use_shared, pin_memory=use_pinned)
+            # with record_function("torch_zeros"):
+            #     tensor = torch.zeros(50000, 50000, device="cuda")
+            # state_dict = {"a": tensor}
+            # with record_function("_create_cpu_state_dict"):
+            #     cache = _create_cpu_state_dict(state_dict, share_memory=use_shared, pin_memory=use_pinned)
             with record_function("_offload_state_dict_to_cpu-sync-1st"):
                 copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache)
             with record_function("_offload_state_dict_to_cpu-sync-2nd"):
