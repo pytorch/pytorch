@@ -133,6 +133,8 @@ def skip_torchlib_forward_compatibility(
 #     2a. If a test is now failing because of xpass, because some previous errors
 #     are now fixed, removed the corresponding xfail.
 #     2b. If a test is not failing consistently, use skip.
+# NOTE: EXPECTED_SKIPS_OR_FAILS only supports dtypes. If a matcher or model_type
+# is needed, use the SKIP_XFAIL_SUBTESTS list further down below.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "__getitem__",
@@ -1191,13 +1193,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),
     xfail(
-        "to",
-        dtypes=(torch.int32, torch.int64, torch.float16, torch.float32, torch.bool, torch.complex64),
-        # model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-        reason="This op requires torch.dtype as input, which is not supported currently.",
-    ),
-    xfail(
         "topk",
         dtypes=(torch.int64, torch.int32),
         reason="fixme: Assertion error: result mismatch",
@@ -1351,6 +1346,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
 )
 # fmt: on
 
+# NOTE: The xfail and skip with a matcher function or model_type should be
+# at under the `SKIP_XFAIL_SUBTESTS` section.
 SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
         "_native_batch_norm_legit",
@@ -1638,6 +1635,19 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: isinstance(sample.input, torch.Tensor)
         and len(sample.input.shape) < 2,
         reason="fixme: IsScalar",
+    ),
+    xfail(
+        "to",
+        dtypes=(
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.bool,
+            torch.complex64,
+        ),
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+        reason="This op requires torch.dtype as input, which is not supported currently.",
     ),
     xfail(
         "unflatten",
