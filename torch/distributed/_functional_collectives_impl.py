@@ -127,7 +127,7 @@ def _register_tensor_wrapper(tensor) -> None:
         # Tensor storage -> work mapping is maintained in C++
         return
     global data_ptr_to_work
-    data_ptr = tensor.elem.data_ptr()
+    data_ptr = tensor.elem.data_ptr() if tensor.elem.has_data_ptr() else 0
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
     wait_reg = data_ptr_to_work.get(data_ptr, None)

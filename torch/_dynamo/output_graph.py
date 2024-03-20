@@ -295,6 +295,7 @@ class OutputGraph:
             shape_env=shape_env,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
+            allow_unsafe_data_ptr_access=False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
@@ -1115,6 +1116,7 @@ class OutputGraph:
             # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
             backend_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=old_fake_mode.shape_env,
+                allow_unsafe_data_ptr_access=False,
             )
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates

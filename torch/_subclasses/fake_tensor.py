@@ -470,6 +470,9 @@ class FakeTensor(torch.Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
+        torch._C._set_has_data_ptr(self, False)
+        if not fake_mode.allow_unsafe_data_ptr_access:
+            torch._C._set_data_ptr_access_should_throw(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -819,6 +822,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        allow_unsafe_data_ptr_access=True,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -832,6 +836,7 @@ class FakeTensorMode(TorchDispatchMode):
         import torch._functorch.config
 
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
+        self.allow_unsafe_data_ptr_access = allow_unsafe_data_ptr_access
         self.cache_enabled = torch._dynamo.config.fake_tensor_cache_enabled
         self.cache_crosscheck_enabled = (
             torch._dynamo.config.fake_tensor_cache_crosscheck_enabled

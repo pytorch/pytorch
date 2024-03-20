@@ -12,6 +12,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
@@ -59,6 +60,73 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         eager_result = mod(*args)
         aot_result = aot_mod(*args)
         self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
+
+    def test_data_ptr_access_fails_in_forward(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            def _(x):
+                x.data_ptr()
+                return x.clone()
+
+            x = torch.randn(3)
+
+            def data_ptr_graph_input(x):
+                r0 = torch.ops.mylib.foo(x)
+                return r0
+
+            def data_ptr_graph_intermediate(x):
+                y = x.clone()
+                r0 = torch.ops.mylib.foo(y)
+                return r0
+
+            tests = [data_ptr_graph_input, data_ptr_graph_intermediate]
+
+            def ctx():
+                return self.assertRaisesRegex(
+                    RuntimeError, "Cannot access tensor.data_ptr()"
+                )
+
+            for f in tests:
+                with ctx():
+                    make_fx(f, tracing_mode="fake")(x)
+                with ctx():
+                    make_fx(f, tracing_mode="symbolic")(x)
+                with ctx():
+                    torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    def test_data_ptr_access_fails_in_backward(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+
+            backward_called = False
+
+            class Foo(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    nonlocal backward_called
+                    backward_called = True
+                    grad.data_ptr()
+                    return grad.clone()
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            def _(x):
+                return Foo.apply(x)
+
+            def f(x):
+                return torch.ops.mylib.foo(x)
+
+            x = torch.randn(3, requires_grad=True)
+            with self.assertRaisesRegex(
+                RuntimeError, "Cannot access tensor.data_ptr()"
+            ):
+                y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+            self.assertTrue(backward_called)
 
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301

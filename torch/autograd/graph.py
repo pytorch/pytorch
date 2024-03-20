@@ -536,11 +536,11 @@ _allow_mutation_on_saved_tensors_enabled = False
 
 
 def _get_tid(t) -> Tuple[int, int, int]:
-    return (id(t), t.data_ptr(), t._version)
+    return (id(t), t.data_ptr() if t.has_data_ptr() else 0, t._version)
 
 
 def _get_sid(t) -> Tuple[int, int]:
-    return (t.data_ptr(), t._version)
+    return (t.data_ptr() if t.has_data_ptr() else 0, t._version)
 
 
 class _Handle:

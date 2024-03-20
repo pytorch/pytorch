@@ -314,7 +314,21 @@ void TensorImpl::throw_data_ptr_access_error() const {
     TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
   }
   TORCH_CHECK(
-      false, "Cannot access data pointer of Tensor that doesn't have storage");
+      false,
+      "Cannot access tensor.data_ptr(). "
+      "You can use tensor.has_data_ptr() to check this. "
+      "If you're using torch.compile/export/tracing, this may be because those use FakeTensors "
+      "that do not have data_ptr and the Tensor is being passed to a third-party library "
+      "or an incorrect custom op that requires data_ptr. If this is the case, please see "
+      "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ");
+}
+
+void TensorImpl::warn_once_data_ptr_access() const {
+  TORCH_WARN_ONCE(
+      "Accessing data_ptr() of Tensor (a FakeTensor or wrapper Tensor subclass) that does not have it "
+      "(i.e. tensor.has_data_ptr() == False). You are likely doing something wrong "
+      "that may lead to crashes. "
+      "This behavior is deprecated and will be removed in a future version of PyTorch.");
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
@@ -607,6 +621,9 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
+  dest_impl->has_data_ptr_ = src_impl->has_data_ptr_;
+  dest_impl->data_ptr_access_should_throw_ =
+      src_impl->data_ptr_access_should_throw_;
 }
 
 void TensorImpl::copy_tensor_metadata(

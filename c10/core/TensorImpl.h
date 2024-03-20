@@ -1566,14 +1566,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  private:
+  inline void check_has_data_ptr() const {
+    if (C10_UNLIKELY(!has_data_ptr())) {
+      if (!has_storage() || data_ptr_access_should_throw()) {
+        throw_data_ptr_access_error();
+      } else {
+        warn_once_data_ptr_access();
+      }
+    }
+  }
+
   // Shared implementation of mutable_data_ptr_impl() and the future
   // mutable_data_ptr_impl().
   template <typename T, typename Func>
   __ubsan_ignore_pointer_overflow__ T* data_ptr_impl_impl(
       const Func& get_data) const {
-    if (C10_UNLIKELY(!has_storage())) {
-      throw_data_ptr_access_error();
-    }
+    check_has_data_ptr();
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -1625,9 +1633,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /// std::byte const*, etc.
   template <typename Void, typename Func>
   Void* data_impl(const Func& get_data) const {
-    if (C10_UNLIKELY(!has_storage())) {
-      throw_data_ptr_access_error();
-    }
+    check_has_data_ptr();
     TORCH_CHECK(
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
@@ -1686,6 +1692,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       c10::optional<std::string> s) {
     storage_ = {};
     set_storage_access_should_throw();
+    set_custom_data_ptr_error_msg(std::move(s));
+  }
+
+  void set_custom_data_ptr_error_msg(c10::optional<std::string> s) {
     get_extra_meta().custom_data_ptr_error_msg_ = s;
     get_extra_meta().custom_storage_error_msg_ = std::move(s);
   }
@@ -1702,6 +1712,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
  private:
   [[noreturn]] void throw_storage_access_error() const;
   [[noreturn]] void throw_data_ptr_access_error() const;
+  void warn_once_data_ptr_access() const;
 
   ExtraMeta& get_extra_meta() {
     if (!extra_meta_) {
@@ -2770,6 +2781,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_access_should_throw_ = true;
   }
 
+  // [NOTE] Tensor::has_data_ptr()
+  //
+  // Returns if the Tensor "has a data_ptr". If a Tensor doesn't
+  // have data_ptr, then we will error or warn when the data_ptr is accessed.
+  //
+  // Examples of Tensors that don't have data_ptr:
+  // - wrapper Tensor subclasses
+  // - FakeTensor
+  // - tensors that don't have storage.
+  //
+  // Notably, all regular Tensors that have zero data ptr still have a data_ptr.
+  //
+  // We're in the middle of changing data_ptr accesses on Tensors that don't
+  // have data_ptr to an error. Tensors that don't have data_ptr will error if
+  // data_ptr_access_should_throw_, otherwise, they will warn.
+  //
+  // Tensor subclass authors are able to change these values.
+  bool has_data_ptr() const {
+    if (!has_data_ptr_) {
+      return false;
+    }
+    return has_storage();
+  }
+
+  void set_has_data_ptr(bool has_data_ptr) {
+    has_data_ptr_ = has_data_ptr;
+  }
+
+  void set_data_ptr_access_should_throw() {
+    data_ptr_access_should_throw_ = true;
+  }
+
+  bool data_ptr_access_should_throw() const {
+    return data_ptr_access_should_throw_;
+  }
+
  public:
   void set_custom_sizes_strides(SizesStridesPolicy policy) {
     custom_sizes_strides_ = static_cast<uint8_t>(policy);
@@ -2907,6 +2954,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     layout_policy_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
+    has_data_ptr_ = true;
+    data_ptr_access_should_throw_ = false;
   }
 
   // Tensor is contiguous
@@ -2914,6 +2963,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ : 1;
+
+  // See [NOTE] Tensor::has_data_ptr()
+  bool has_data_ptr_ : 1;
+
+  // See [NOTE] Tensor::has_data_ptr()
+  bool data_ptr_access_should_throw_ : 1;
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
   // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)

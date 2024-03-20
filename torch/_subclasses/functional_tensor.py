@@ -120,6 +120,7 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
+        torch._C._set_data_ptr_access_should_throw(out)
         out.elem = elem
         return out
 

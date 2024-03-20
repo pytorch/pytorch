@@ -806,6 +806,18 @@ void initDispatchBindings(PyObject* module) {
   m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
     return at::functionalization::impl::unsafe_reset_storage(a);
   });
+  m.def("_set_has_data_ptr", [](const at::Tensor& a, bool has_data) {
+    return a.unsafeGetTensorImpl()->set_has_data_ptr(has_data);
+  });
+  m.def("_set_data_ptr_access_should_throw", [](const at::Tensor& a) {
+    return a.unsafeGetTensorImpl()->set_data_ptr_access_should_throw();
+  });
+  m.def(
+      "_set_custom_data_ptr_error_msg",
+      [](const at::Tensor& a, c10::optional<std::string> s) {
+        return a.unsafeGetTensorImpl()->set_custom_data_ptr_error_msg(
+            std::move(s));
+      });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {
     auto device = c10::Device(device_type);

@@ -155,7 +155,7 @@ def extract_val(val):
             # approach would be to maintain a per-trace FakeTensorMode and
             # from_real_tensor to create fake values (don't forget to
             # snapshot_fake)
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True, allow_unsafe_data_ptr_access=False)
             with fake_tensor_mode:
                 return torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
         else:
@@ -1101,6 +1101,7 @@ def make_fx(f,
                     allow_non_fake_inputs=_allow_non_fake_inputs,
                     shape_env=ShapeEnv(),
                     static_shapes=True,
+                    allow_unsafe_data_ptr_access=False,
                 )
         elif tracing_mode == "symbolic":
             import torch._dynamo
@@ -1110,7 +1111,9 @@ def make_fx(f,
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=False,
                     allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=shape_env)
+                    shape_env=shape_env,
+                    allow_unsafe_data_ptr_access=False,
+                )
             else:
                 shape_env = fake_tensor_mode.shape_env
                 assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"

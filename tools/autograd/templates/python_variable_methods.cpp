@@ -244,6 +244,17 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_has_data_ptr(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   if (check_has_torch_function(self)) {
+     return handle_torch_function(self, "has_data_ptr", args);
+   }
+   auto& self_ = THPVariable_Unpack(self);
+   return py::cast(self_.has_data_ptr()).release().ptr();
+   END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
@@ -1257,6 +1268,7 @@ PyMethodDef variable_methods[] = {
   {"map2_", castPyCFunctionWithKeywords(THPVariable_map2_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"ndimension", THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", THPVariable_numel, METH_NOARGS, NULL},
+  {"has_data_ptr", THPVariable_has_data_ptr, METH_NOARGS, NULL},
   {"new", castPyCFunctionWithKeywords(THPVariable_new), METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},

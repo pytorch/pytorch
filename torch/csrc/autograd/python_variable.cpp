@@ -815,6 +815,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
+    tensor_impl->set_has_data_ptr(false);
     if (sym_strides.has_value()) {
       tensor_impl->set_sizes_and_strides(
           sym_sizes, sym_strides.value(), sym_storage_offset);
