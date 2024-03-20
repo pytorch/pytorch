@@ -421,6 +421,11 @@ class TupleVariable(BaseListVariable):
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
+    _nonvar_fields = {
+        "proxy",
+        *TupleVariable._nonvar_fields,
+    }
+
     def __init__(
         self,
         items: List[VariableTracker],
@@ -548,6 +553,11 @@ class SizeVariable(TupleVariable):
 
 
 class NamedTupleVariable(TupleVariable):
+    _nonvar_fields = {
+        "tuple_cls",
+        *TupleVariable._nonvar_fields,
+    }
+
     def __init__(self, items, tuple_cls, **kwargs):
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
@@ -644,6 +654,11 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(VariableTracker):
+    _nonvar_fields = {
+        "index",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, items, index: int = 0, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(items, list)
