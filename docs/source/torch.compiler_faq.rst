@@ -199,6 +199,8 @@ generated kernels and try to see what’s going on for yourself.
 Why am I not seeing speedups?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. _torch.compiler_graph_breaks:
+
 Graph Breaks
 ------------
 

@@ -128,7 +128,7 @@ Note a few things:
 Finding graph breaks: "Torch-Compiled Region" and "CompiledFunction"
 --------------------------------------------------------------------
 
-Although there are logging tools for identifying graph breaks, the profiler provides a quick visual method of identifying :ref:`graph breaks <graph-breaks>`. There are two profiler events to look for: **Torch-Compiled Region** and **CompiledFunction**.
+Although there are logging tools for identifying graph breaks, the profiler provides a quick visual method of identifying :ref:`graph breaks <torch.compiler_graph_breaks>`. There are two profiler events to look for: **Torch-Compiled Region** and **CompiledFunction**.
 
 **Torch-Compiled Region** - which was introduced in PyTorch 2.2 - is a profiler event that covers the entire compiled region. Graph breaks almost always look the same: nested “Torch-Compiled Region” events.
 
