@@ -4,7 +4,14 @@ from typing import List
 import torch
 from torch._higher_order_ops.effects import with_effects
 from .exported_program import ExportedProgram
-from .graph_signature import InputKind, InputSpec, OutputKind, OutputSpec, TokenArgument
+from .graph_signature import (
+    InputKind,
+    InputSpec,
+    OutputKind,
+    OutputSpec,
+    TensorArgument,
+    TokenArgument,
+)
 
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
@@ -27,7 +34,7 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
             new_input_specs.append(inp)
 
     num_out_tokens: int = 0
-    new_output_specs: List[str] = []
+    new_output_specs: List[OutputSpec] = []
     output_token_names: List[OutputSpec] = []
     for out in ep.graph_signature.output_specs:
         if out.kind == OutputKind.TOKEN:
@@ -40,15 +47,19 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
 
     output_node = None
     with_effect_nodes: List[torch.fx.Node] = []
-    for node in ep.graph.nodes:
-        if node.op == "output":
-            output_node = node
-            break
-
-        if not (node.op == "call_function" and node.target is with_effects):
+    for module in ep.graph_module.modules():
+        if not isinstance(module, torch.fx.GraphModule):
             continue
 
-        with_effect_nodes.append(node)
+        for node in ep.graph.nodes:
+            if node.op == "output":
+                output_node = node
+                break
+
+            if not (node.op == "call_function" and node.target is with_effects):
+                continue
+
+            with_effect_nodes.append(node)
 
     # Remove tokens from outputs
     assert output_node is not None
@@ -86,6 +97,16 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
             for user in list(new_node.users.keys()):
                 assert user.args[1] == 1
                 user.replace_all_uses_with(new_node)
+
+                # If any of the users are in the output node, we need to udpate the
+                # output spec
+                for spec in new_output_specs:
+                    if (
+                        isinstance(spec.arg, TensorArgument)
+                        and spec.arg.name == user.name
+                    ):
+                        spec.arg.name = new_node.name
+                        break
 
             new_node.meta["val"] = node.meta["val"][1]
         elif len(func._schema.returns) > 1:
