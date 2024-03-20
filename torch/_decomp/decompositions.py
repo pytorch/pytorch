@@ -3538,6 +3538,7 @@ def _upsample_linear_vec(input, output_size, align_corners, scale_factors):
 
 
 @register_decomposition([aten.upsample_linear1d.default, aten.upsample_linear1d.out])
+@aten.upsample_linear1d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def upsample_linear1d(
     input: Tensor,
