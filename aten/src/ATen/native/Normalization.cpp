@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAContext.h>
+
 #include <ATen/AccumulateType.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
@@ -57,6 +57,10 @@
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sqrt.h>
+#endif
+
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAContext.h>
 #endif
 
 #include <c10/core/SymIntArrayRef.h>
@@ -493,7 +497,11 @@ BatchNormBackend _select_batch_norm_backend(
   bool cudnn_enabled = ctx.userEnabledCuDNN();
 
   static cudaDeviceProp* dprops = at::cuda::getCurrentDeviceProperties();
+  #ifdef USE_CUDA
   bool support_bf16 = dprops->major >= 8;
+  #else
+  bool support_bf16 = false;
+  #endif
 
   if (
       input.is_cuda()
