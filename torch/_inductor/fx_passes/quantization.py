@@ -1103,12 +1103,86 @@ def _register_quantization_reshape():
     )
 
 
+def _is_valid_woq_optimization_pattern():
+    def fn(match):
+        assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        x = match.kwargs["x"].meta["val"]
+        weight = match.kwargs["weight"].meta["val"]
+        scales = match.kwargs["scales"].meta["val"]
+        return (
+            # For now, we only support woq mm kernels
+            # with x.type=bfloat16 and w.type=int8
+            x.dtype == torch.bfloat16
+            and weight.dtype == torch.int8
+            and scales.dtype == torch.bfloat16
+            # _weight_int8pack_mm kernel only supports cpu now
+            # TODO: add cuda kernel support instead of calling mul+sum
+            and x.device.type == "cpu"
+            and x.device == weight.device
+            and x.device == scales.device
+        )
+
+    return fn
+
+
+def _register_woq_lowering(pattern, computation_woq, computation_reshape):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_woq_optimization_pattern(),
+    )
+    def woq(match: Match, *args, **kwargs):
+        x = kwargs["x"]
+        weight = kwargs["weight"]
+        scales = kwargs["scales"]
+        counters["inductor"]["woq_matcher_count"] += 1
+        counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
+        out_features = weight.get_size()[0]
+        origin_x_size = x.get_size()
+        x_shape = [-1, origin_x_size[-1]]
+        out_shape = origin_x_size[:-1] + [
+            out_features,
+        ]
+        func1 = L[computation_reshape](x, x_shape)
+        func2 = L[computation_woq](func1, weight, scales)
+        return L[computation_reshape](func2, out_shape)
+
+    return woq
+
+
+def _register_woq_mm_int8():
+    # torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(
+                aten.mm.default,
+                CallFunction(aten.reshape.default, KeywordArg("x"), Arg()),
+                CallFunction(
+                    aten.permute.default,
+                    CallFunction(
+                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                    ),
+                    Arg(),
+                ),
+            ),
+            Arg(),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
     _register_quantization_reshape()
+
+
+def _register_woq_lowerings():
+    _register_woq_mm_int8()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):

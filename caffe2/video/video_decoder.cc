@@ -436,7 +436,6 @@ void VideoDecoder::decodeLoop(
     // transport and getting decoded frames back.
     // Therefore, after EOF, continue going while
     // the decoder is still giving us frames.
-    int ipacket = 0;
     while ((!eof || gotPicture) &&
            /* either you must decode all frames or decode up to maxFrames
             * based on status of the mustDecodeAll flag */
@@ -463,7 +462,6 @@ void VideoDecoder::decodeLoop(
             LOG(ERROR) << "Error reading packet : " << ffmpegErrorStr(ret);
             return;
           }
-          ipacket++;
 
           auto si = packet.stream_index;
           if (params.getAudio_ && audioStreamIndex_ >= 0 &&
