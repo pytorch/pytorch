@@ -40,6 +40,7 @@
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_weight_int4pack_mm_native.h>
 #include <ATen/ops/_weight_int8pack_mm_native.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -120,6 +121,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mv.h>
 #include <ATen/ops/narrow.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/nuclear_norm_native.h>
 #include <ATen/ops/ones.h>
@@ -2818,55 +2820,30 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto size = self.sizes();
   auto ndim = self.dim();
 
-  bool all_reduction_dims_are_one_dimensional = true;
-  if (result.sizes().empty()){
-    // reduce over all dims and all dims are 1-dimensional
-    // if ndim == 0, self is scalar
-    for (const auto dim_ : c10::irange(ndim)) {
-      if (size[dim_] != 1){
-        all_reduction_dims_are_one_dimensional = false;
-        break;
-      }
-    }
-  } else {
-    // all reduction dims are 1-dimensional
-    if (opt_dim.has_value() && !opt_dim->empty()) {
-      DimVector dims_ = at::native::make_dim_vector(opt_dim, self.dim());
-      maybe_wrap_dims(dims_, self.dim());
-      for (const auto i : c10::irange(dims_.size())) {
-        size_t dim_ = dims_[i];
-        if (size[dim_] != 1){
-          all_reduction_dims_are_one_dimensional = false;
-          break;
-        }
-      }
-    } else {
-      all_reduction_dims_are_one_dimensional = false;
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
+
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1){
+      is_reduce_over_1D_vector = false;
+      break;
     }
   }
 
-  if (all_reduction_dims_are_one_dimensional && !self.is_complex()) {
-    Tensor result_tmp = self.clone();
-
-    if (result.sizes().empty()) {
-      // reduce over all dims and all dims are 1-dimensional
-      result_tmp.squeeze_();
-    } else {
-      // all reduction dims are 1-dimensional
-      if (!keepdim && opt_dim.has_value() && !opt_dim->empty()) {
-        if (opt_dim.has_value()) {
-          result_tmp.squeeze_(dim);
-        }
-      }
-    }
-
+  if (is_reduce_over_1D_vector && !self.is_complex()) {
     if (ord != 0.0) {
-      result_tmp.abs_();
+      at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
     } else {
-      result_tmp.ne_(0);
+      at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
     }
-
-    result.copy_(result_tmp);
     return;
   }
 
