@@ -16,8 +16,9 @@ static struct PyModuleDef _module =
 #if IS_PYTHON_3_11_PLUS
 
 std::vector<uint8_t> _PyOpcode_Caches_vec(
-    THP_PyOpcode_Caches,
-    THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
+  THP_PyOpcode_Caches,
+  THP_PyOpcode_Caches + THP_PyOpcode_Caches_size
+);
 
 #else
 
@@ -65,7 +66,6 @@ void initDynamoBindings(PyObject* torch) {
       .def("invalidate", &ExtraState::invalidate);
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
-  printf("size of _PyOpcode_Caches_vec: %d\n", THP_PyOpcode_Caches_size);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
 }
