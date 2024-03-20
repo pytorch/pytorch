@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real, _get_scalar_dtype)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real, _get_scalar_dtype)
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -182,6 +182,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
+        {_capturable_doc}
         {_maximize_doc}
         {_differentiable_doc}
 
