@@ -353,6 +353,11 @@ class TestControlFlowTraced(TestCase):
             self.assertEqual(graph(*args), eager_res)
         return graphs
 
+    def _check_compile(self, fn, args, *, backend="eager"):
+        eager_res = fn(*args)
+        compiled_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(compiled_fn(*args), eager_res)
+
     def test_cond_traced_not_nested(self):
         def true_fn(x):
             return x.sin()
@@ -511,6 +516,11 @@ def forward(self, arg0_1):
             mode = mode if mode is not None else contextlib.nullcontext()
             with mode:
                 self._check_tracing(fn, inp)
+
+    def test_while_loop_aot_eager(self):
+        for backend in ["eager", "aot_eager"]:
+            for fn, inp in _while_loop_tests().values():
+                self._check_compile(fn, inp, backend="aot_eager")
 
     def test_while_loop_nested2_traced(self):
         fn, inp = _while_loop_tests()["nested2"]
