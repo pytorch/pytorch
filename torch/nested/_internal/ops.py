@@ -1,7 +1,6 @@
 import functools
 import math
 import operator
-import warnings
 
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
@@ -1115,10 +1114,7 @@ def _nested_get_jagged_dummy(func, *args, **kwargs):
     return _nt_view_dummy
 
 
-with warnings.catch_warnings():
-    # catch warnings related to redefining these ops
-    warnings.filterwarnings("ignore", category=UserWarning)
-    with torch.library._scoped_library("aten", "IMPL") as aten:
-        aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
-        aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
-        aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")
+with torch.library._scoped_library("aten", "IMPL") as aten:
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")

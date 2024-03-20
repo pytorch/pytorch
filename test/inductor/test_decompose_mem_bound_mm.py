@@ -207,6 +207,45 @@ class TestDecomposeMemMM(TestCase):
         )
         counters.clear()
 
+    @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
+    @parametrize("has_bias", [True, False])
+    def test_dynamic_shape(self, m, n, k, has_bias, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        input = torch.randn(m, k, device="cuda").requires_grad_(True)
+
+        counters.clear()
+
+        module = MyModule(k, n, has_bias).to("cuda")
+        traced = torch.compile(module, dynamic=True)
+        input = [input]
+        ref = module(*input)
+        res = traced(*input)
+
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose else 0
+        if has_bias:
+            self.assertEqual(
+                counters["inductor"]["decompose_addmm"],
+                expected_val,
+            )
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.compare_parameters(module, traced)
+        self.compare_gradients(module, traced)
+
+        self.assertEqual(
+            counters["inductor"]["decompose_mm"],
+            1 if has_bias else 2,
+        )
+        self.assertEqual(
+            counters["inductor"]["decompose_mmt"],
+            expected_val,
+        )
+        counters.clear()
+
 
 if __name__ == "__main__":
     run_tests()

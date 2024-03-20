@@ -31,7 +31,7 @@ class TORCH_API AvgPoolImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AvgPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies avgpool over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AvgPool1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AvgPool1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AvgPool1dOptions` class to learn what
@@ -57,7 +57,7 @@ TORCH_MODULE(AvgPool1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AvgPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies avgpool over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AvgPool2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AvgPool2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AvgPool2dOptions` class to learn what
@@ -83,7 +83,7 @@ TORCH_MODULE(AvgPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AvgPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies avgpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AvgPool3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AvgPool3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AvgPool3dOptions` class to learn what
@@ -128,7 +128,7 @@ class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies maxpool over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxPool1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MaxPool1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MaxPool1dOptions` class to learn what
@@ -158,7 +158,7 @@ TORCH_MODULE(MaxPool1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies maxpool over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxPool2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MaxPool2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MaxPool2dOptions` class to learn what
@@ -188,7 +188,7 @@ TORCH_MODULE(MaxPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies maxpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxPool3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MaxPool3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MaxPool3dOptions` class to learn what
@@ -244,7 +244,7 @@ class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies adaptive maxpool over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveMaxPool1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveMaxPool1dOptions` class to
@@ -277,7 +277,7 @@ TORCH_MODULE(AdaptiveMaxPool1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies adaptive maxpool over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveMaxPool2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveMaxPool2dOptions` class to
@@ -314,7 +314,7 @@ TORCH_MODULE(AdaptiveMaxPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies adaptive maxpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveMaxPool3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveMaxPool3dOptions` class to
@@ -377,7 +377,7 @@ class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies adaptive avgpool over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveAvgPool1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveAvgPool1dOptions` class to
@@ -406,7 +406,7 @@ TORCH_MODULE(AdaptiveAvgPool1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies adaptive avgpool over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveAvgPool2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveAvgPool2dOptions` class to
@@ -439,7 +439,7 @@ TORCH_MODULE(AdaptiveAvgPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies adaptive avgpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveAvgPool3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveAvgPool3dOptions` class to
@@ -491,7 +491,7 @@ class TORCH_API MaxUnpoolImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxUnpool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies maxunpool over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxUnpool1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MaxUnpool1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MaxUnpool1dOptions` class to learn
@@ -523,7 +523,7 @@ TORCH_MODULE(MaxUnpool1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxUnpool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies maxunpool over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxUnpool2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MaxUnpool2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MaxUnpool2dOptions` class to learn
@@ -555,7 +555,7 @@ TORCH_MODULE(MaxUnpool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxUnpool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies maxunpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxUnpool3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MaxUnpool3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MaxUnpool3dOptions` class to learn
@@ -588,7 +588,7 @@ TORCH_MODULE(MaxUnpool3d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies fractional maxpool over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.FractionalMaxPool2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.FractionalMaxPool2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::FractionalMaxPool2dOptions` class to
@@ -633,7 +633,7 @@ TORCH_MODULE(FractionalMaxPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies fractional maxpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.FractionalMaxPool3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.FractionalMaxPool3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::FractionalMaxPool3dOptions` class to
@@ -695,7 +695,7 @@ class TORCH_API LPPoolImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LPPool1d function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LPPool1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LPPool1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LPPool1dOptions` class to learn what
@@ -722,7 +722,7 @@ TORCH_MODULE(LPPool1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LPPool2d function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LPPool2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LPPool2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LPPool2dOptions` class to learn what
@@ -750,7 +750,7 @@ TORCH_MODULE(LPPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LPPool3d function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LPPool3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LPPool3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LPPool3dOptions` class to learn what
