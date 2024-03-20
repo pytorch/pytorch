@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import collections
+import copy
 import functools
 import inspect
 import itertools
@@ -110,6 +111,12 @@ class BaseUserFunctionVariable(VariableTracker):
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
+
+    _nonvar_fields = {
+        "fn",
+        "is_constant",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -556,6 +563,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 class SkipFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "reason",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value, reason=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -833,8 +846,6 @@ class TritonKernelVariable(VariableTracker):
     ) -> "VariableTracker":
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
@@ -851,15 +862,24 @@ class TritonKernelVariable(VariableTracker):
             if isinstance(self.kernel, Autotuner):
                 # if there is Autotuner already, set
                 # special kwargs to each of its configs
-                for config in self.kernel.configs:
+                new_configs = copy.deepcopy(self.kernel.configs)
+                for config in new_configs:
                     config.__dict__.update(special_kwargs)
+                new_key = [self.kernel.arg_names[i] for i in self.kernel.key_idx]
+                # skip other args of autotune, as we only support these
+                new_kernel = autotune(configs=new_configs, key=new_key)(
+                    self.kernel.fn  # inner kernel of the existing Autotuner
+                )
             else:
                 # if there is no Autotuner, wrap the kernel into a
                 # new one with a single config with special kwargs
-                config = Config(kwargs={}, **special_kwargs)
-                new_kernel = autotune(configs=[config], key=[])(self.kernel)
-                kernel_side_table.replace_kernel(self.kernel, new_kernel)
-                self.kernel = new_kernel
+                new_config = Config(kwargs={}, **special_kwargs)
+                new_kernel = autotune(configs=[new_config], key=[])(self.kernel)
+
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = TritonKernelVariable(new_kernel, None, self.grid)
+            return new_var.call_function(tx, args, kwargs)
 
         if self.grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")
