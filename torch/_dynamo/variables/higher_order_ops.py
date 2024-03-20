@@ -1615,7 +1615,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_graph.output(new_fwd_graph_outputs)
 
         # Store fwd_body
-        fwd_nn_modules = tx.copy_graphstate().output.nn_modules
+
+        fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = add_subgraph(
             tx,
             fwd_src,
@@ -1626,7 +1627,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_node = make_attr(tx, fwd_name)
 
         # Store bwd_body
-        bwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         bwd_name = add_subgraph(
             tx,
             bwd_src,
