@@ -1553,6 +1553,11 @@ class CppTile2DOverrides(CppVecOverrides):
         return CppVecOverrides.index_expr(expr, dtype)
 
 
+@dataclasses.dataclass
+class OuterLoopFusedKernel:
+    inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
+
+
 class CppKernel(Kernel):
     overrides = CppOverrides  # type: ignore[assignment]
     sexpr = cexpr
@@ -1875,19 +1880,8 @@ class CppKernel(Kernel):
         loop_nest,
         code,
         worksharing,
-        loop_nest_list=None,
-        outer_loop_fusion_depth=0,
     ):
         threads = parallel_num_threads()
-
-        outer_loop_fusion = outer_loop_fusion_depth >= 1
-        if outer_loop_fusion:
-            # The loop_nest in loop_nest_list should generate same outer loop code.
-            # Only do preprocess with the first loop_nest.
-            assert isinstance(loop_nest_list, List)
-            loop_nest = loop_nest_list[0]
-            metrics.cpp_outer_loop_fused_inner_counts.append(len(loop_nest_list))
-
         assert self.call_ranges is not None
         par_depth = self.decide_parallel_depth(
             self.call_ranges[: loop_nest.max_parallel_depth()], threads
@@ -1905,17 +1899,21 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
 
             def gen_kernel(kernel):
-                with contextlib.ExitStack() as stack:
-                    assert kernel
+                if type(kernel) is OuterLoopFusedKernel:
+                    for loop_level in kernel.inner:
+                        gen_loops(loop_level.inner, loop_level.is_reduction)
+                else:
+                    with contextlib.ExitStack() as stack:
+                        assert kernel
+                        if hasattr(kernel, "codegen_inner_loops"):
+                            code.splice(kernel.preloads)
+                            kernel.codegen_inner_loops(code)
+                            stack.enter_context(code.indent())
+                        code.splice(kernel.loads)
+                        code.splice(kernel.compute)
+                        code.splice(kernel.stores)
                     if hasattr(kernel, "codegen_inner_loops"):
-                        code.splice(kernel.preloads)
-                        kernel.codegen_inner_loops(code)
-                        stack.enter_context(code.indent())
-                    code.splice(kernel.loads)
-                    code.splice(kernel.compute)
-                    code.splice(kernel.stores)
-                if hasattr(kernel, "codegen_inner_loops"):
-                    code.splice(kernel.poststores)
+                        code.splice(kernel.poststores)
 
             def get_reduction_code_buffer(loops, buffer="prefix"):
                 assert buffer in ("prefix", "suffix", "local")
@@ -1986,76 +1984,13 @@ class CppKernel(Kernel):
                     else:
                         kernels = loop.get_kernels()
                         assert len(kernels) == 1
-                        if is_parallel_reduction(loop):
-                            kernels[0].update_stores_with_parallel_reduction()
+                        if type(kernels[0]) is not OuterLoopFusedKernel:
+                            if is_parallel_reduction(loop):
+                                kernels[0].update_stores_with_parallel_reduction()
                         gen_kernel(kernels[0])
 
             stack.enter_context(code.indent())
-            if outer_loop_fusion:
-
-                def gen_loops_with_outer_fusion(
-                    _loop_level_nested_list: List[List[LoopLevel]],
-                    outer_loop_fusion_depth,
-                ):
-                    # Generate the code for outer loops
-                    with contextlib.ExitStack() as stack:
-                        # Use the first loop_level_list in _loop_level_nested_list to
-                        # generate the outer loop code.
-                        first_loop_level_list: List[
-                            LoopLevel
-                        ] = _loop_level_nested_list[0]
-                        assert len(first_loop_level_list) == 1
-                        code.writelines(first_loop_level_list[0].lines())
-                        stack.enter_context(code.indent())
-
-                        outer_loop_fusion_depth -= 1
-                        assert outer_loop_fusion_depth >= 0
-                        if outer_loop_fusion_depth > 0:
-                            # Do the next level fused outer loop codegen
-                            for inner_idx in range(len(first_loop_level_list[0].inner)):
-                                _next_loop_level_nested_list: List[List[LoopLevel]] = [
-                                    [
-                                        _loop_level_list[0].inner[inner_idx],
-                                    ]
-                                    for _loop_level_list in _loop_level_nested_list
-                                    if _loop_level_list[0].inner[inner_idx].lines()
-                                    is not None
-                                ]
-                                if _next_loop_level_nested_list != []:
-                                    gen_loops_with_outer_fusion(
-                                        _next_loop_level_nested_list,
-                                        outer_loop_fusion_depth,
-                                    )
-                        else:
-                            # Generate the code of inner loops one by one
-                            for _loop_level_list in _loop_level_nested_list:
-                                assert len(_loop_level_list) == 1
-                                loop = _loop_level_list[0]
-                                if loop.inner:
-                                    gen_loops(loop.inner, loop.is_reduction)
-                                else:
-                                    kernels = loop.get_kernels()
-                                    assert len(kernels) == 1
-                                    if is_parallel_reduction(loop):
-                                        kernels[
-                                            0
-                                        ].update_stores_with_parallel_reduction()
-                                    gen_kernel(kernels[0])
-
-                for idx in range(len(loop_nest_list[0].root)):
-                    # Main loop and tail loop will codegen fused outer loop specific
-                    loop_nest_root_list: List[List[LoopLevel]] = [
-                        [
-                            _loop_nest.root[idx],
-                        ]
-                        for _loop_nest in loop_nest_list
-                        if _loop_nest.root[idx].lines() is not None
-                    ]
-                    if loop_nest_root_list != []:
-                        gen_loops_with_outer_fusion(
-                            loop_nest_root_list, outer_loop_fusion_depth
-                        )
-            elif loop_nest.root:
+            if loop_nest.root:
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3670,15 +3605,11 @@ class CppKernelProxy(CppKernel):
                 if schedule_log.isEnabledFor(logging.DEBUG):
                     schedule_log.debug("Disabled vectorization: %s", e)
 
-    def codegen_loops(
-        self, code, worksharing, loop_nest_list=None, outer_loop_fusion_depth=0
-    ):
+    def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(
-            None if (outer_loop_fusion_depth >= 1) else self.loop_nest,
+            self.loop_nest,
             code,
             worksharing,
-            loop_nest_list=loop_nest_list,
-            outer_loop_fusion_depth=outer_loop_fusion_depth,
         )
 
 
@@ -4074,9 +4005,60 @@ class KernelGroup:
             loop_nest_list: List[LoopNestWithSplit] = [
                 kernel.loop_nest for kernel in new_kernel
             ]
-            new_kernel[0].codegen_loops(
-                code, ws, loop_nest_list, outer_loop_fusion_depth
+            metrics.cpp_outer_loop_fused_inner_counts.append(len(loop_nest_list))
+
+            def _merge_loop_levels(
+                _loop_level_nested_list: List[List[LoopLevel]],
+                _outer_loop_fusion_depth,
+            ):
+                assert _outer_loop_fusion_depth >= 1
+                if (_outer_loop_fusion_depth := _outer_loop_fusion_depth - 1) >= 1:
+                    # Further merge the next loop level
+                    # In certain outer loop fusion depth, still may have the
+                    # splits of main loop and tile loop (refer to test_outer_loop_fusion_log_softmax in test_cpu_repro.py).
+                    # We assume for each kernel, same loop split at certain outer loop fusion depth.
+                    _loop_level_split_num = len(_loop_level_nested_list[0])
+                    for _loop_level_split_idx in range(_loop_level_split_num):
+                        # Deal main loop and tail loop seperately
+                        _next_loop_level_nested_list = [
+                            _loop_level_list[_loop_level_split_idx].inner
+                            for _loop_level_list in _loop_level_nested_list
+                        ]
+                        _merge_loop_levels(
+                            _next_loop_level_nested_list,
+                            _outer_loop_fusion_depth,
+                        )
+                else:
+                    # This is the last looplevel to do outer loop fusion
+                    _loop_level_split_num = len(_loop_level_nested_list[0])
+                    for _loop_level_split_idx in range(_loop_level_split_num):
+                        # If at any outer loop fusion depth, we have split loop into main loop and tail loop,
+                        # The main loop and tail loop should have different OuterLoopFusedKernel.
+                        outer_loop_fused_kernel = OuterLoopFusedKernel()
+                        _loop_level_of_first_kernel = _loop_level_nested_list[0][
+                            _loop_level_split_idx
+                        ]
+                        for _kernel_idx in range(len(_loop_level_nested_list)):
+                            # Append each LoopLevel into OuterLoopFusedKernel.inner
+                            outer_loop_fused_kernel.inner.append(
+                                deepcopy(
+                                    _loop_level_nested_list[_kernel_idx][
+                                        _loop_level_split_idx
+                                    ]
+                                ),
+                            )
+                        _loop_level_of_first_kernel.inner = []
+                        _loop_level_of_first_kernel.kernel = outer_loop_fused_kernel
+
+            # Merge the List[LoopNestWithSplit] from kernels into new_kernel[0].loop_nest
+            loop_level_nested_list: List[List[LoopLevel]] = [
+                _loop_nest.root for _loop_nest in loop_nest_list
+            ]
+            _merge_loop_levels(
+                loop_level_nested_list,
+                outer_loop_fusion_depth,
             )
+            new_kernel[0].codegen_loops(code, ws)
         else:
             self.scheduled_nodes += nodes
             new_kernel.codegen_loops(code, ws)
