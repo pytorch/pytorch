@@ -6,7 +6,65 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-template <typename T, int N = 1>
+template <typename T, int N>
+class VecMask;
+
+template <
+    typename data_t,
+    int data_n,
+    typename mask_t,
+    int mask_n,
+    typename Enabled = void>
+struct VecMaskLoad {
+  static inline VectorizedN<data_t, data_n> apply(
+      const data_t* ptr,
+      const VecMask<mask_t, mask_n>& vec_mask) {
+    constexpr typename VecMask<mask_t, mask_n>::size_type size =
+        VecMask<mask_t, mask_n>::size();
+    static_assert(VectorizedN<data_t, data_n>::size() >= size);
+    __at_align__ data_t data[size];
+    __at_align__ mask_t mask[size];
+    auto mask_ = VectorizedN<mask_t, mask_n>(vec_mask);
+    mask_.store(mask);
+    for (int i = 0; i < size; i++) {
+      data[i] = mask[i] ? ptr[i] : static_cast<data_t>(0);
+    }
+    return VectorizedN<data_t, data_n>::loadu(data, size);
+  }
+};
+
+template <
+    typename dst_t,
+    int dst_n,
+    typename src_t,
+    int src_n,
+    typename Enabled = void>
+struct VecMaskTo {
+  static inline VecMask<dst_t, dst_n> apply(
+      const VecMask<src_t, src_n>& vec_mask) {
+    auto zeros = VectorizedN<dst_t, dst_n>(static_cast<dst_t>(0));
+    auto ones = VectorizedN<dst_t, dst_n>(static_cast<dst_t>(1));
+    return VectorizedN<dst_t, dst_n>::blendv(
+        zeros, ones, vec_mask.template cast<dst_t, dst_n>());
+  }
+};
+
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+struct VecMaskCast {
+  static inline VecMask<dst_t, dst_n> apply(
+      const VecMask<src_t, src_n>& vec_mask) {
+    return VecMask<dst_t, dst_n>::from(VectorizedN<src_t, src_n>(vec_mask));
+  }
+};
+
+template <typename T, int N>
+struct VecMaskCast<T, N, T, N> {
+  static inline VecMask<T, N> apply(const VecMask<T, N>& vec_mask) {
+    return vec_mask;
+  }
+};
+
+template <typename T, int N>
 class VecMask {
  public:
   using size_type = int;
@@ -16,27 +74,6 @@ class VecMask {
 
  private:
   VectorizedN<T, N> mask_;
-
-  template <
-      typename U,
-      int L,
-      std::enable_if_t<VectorizedN<U, L>::size() >= size(), int> = 0>
-  VectorizedN<U, L> loadu_helper(const U* ptr) const {
-    __at_align__ U data[size()];
-    __at_align__ T mask[size()];
-    mask_.store(mask);
-    for (int i = 0; i < size(); i++) {
-      data[i] = mask[i] ? ptr[i] : static_cast<U>(0);
-    }
-    return VectorizedN<U, L>::loadu(data, size());
-  }
-
-  template <typename U, int L>
-  inline VectorizedN<U, L> to_helper() const {
-    auto zeros = VectorizedN<U, L>(static_cast<U>(0));
-    auto ones = VectorizedN<U, L>(static_cast<U>(1));
-    return VectorizedN<U, L>::blendv(zeros, ones, cast<U, L>());
-  }
 
  public:
   VecMask() : mask_(static_cast<T>(0)) {}
@@ -76,18 +113,17 @@ class VecMask {
 
   template <typename U, int L, std::enable_if_t<L >= 2, int> = 0>
   inline VectorizedN<U, L> to() const {
-    return to_helper<U, L>();
+    return VecMaskTo<U, L, T, N>::apply(*this);
   }
 
   template <typename U, int L, std::enable_if_t<L == 1, int> = 0>
   inline Vectorized<U> to() const {
-    return to_helper<U, L>();
+    return VecMaskTo<U, L, T, N>::apply(*this);
   }
 
-  // TODO: add specialization for T=U and L=N
   template <typename U, int L>
   inline VecMask<U, L> cast() const {
-    return VecMask<U, L>::from(mask_);
+    return VecMaskCast<U, L, T, N>::apply(*this);
   }
 
   inline bool all_zero() const {
@@ -119,12 +155,16 @@ class VecMask {
     return mask_[0];
   }
 
+  inline Vectorized<T> operator[](int i) const {
+    return mask_[i];
+  }
+
   template <
       typename U,
       int L,
       std::enable_if_t<L >= 2 && VectorizedN<U, L>::size() >= size(), int> = 0>
   VectorizedN<U, L> loadu(const U* ptr) const {
-    return loadu_helper<U, L>(ptr);
+    return VecMaskLoad<U, L, T, N>::apply(ptr, *this);
   }
 
   template <
@@ -132,7 +172,7 @@ class VecMask {
       int L,
       std::enable_if_t<L == 1 && Vectorized<U>::size() >= size(), int> = 0>
   Vectorized<U> loadu(const U* ptr) const {
-    return loadu_helper<U, L>(ptr);
+    return VecMaskLoad<U, L, T, N>::apply(ptr, *this);
   }
 };
 
