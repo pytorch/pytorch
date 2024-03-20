@@ -20,6 +20,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_if_lt_x_gpu,
     with_comms,
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+
+import pytest
 
 
 class TestStateDictUtils(DTensorTestBase):
@@ -172,6 +178,39 @@ class TestStateDictUtils(DTensorTestBase):
         cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True, pin_memory=True)
         _verify(cpu_state_dict)
 
+    @pytest.mark.parametrize("use_shared", [True, False])
+    def test_async_issue_repro(use_shared):
+        # from torch.distributed.checkpoint._state_dict_utils import (
+        #     _offload_state_dict_to_cpu,
+        #     _create_cpu_state_dict,
+        # )
+        import timeit
+        import torch
+        from torch.profiler import profile, record_function, ProfilerActivity
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            with record_function("torch_zeros"):
+                tensor = torch.zeros(50000, 50000, device="cuda")
+            state_dict = {"a": tensor}
+            with record_function("_create_cpu_state_dict"):
+                cache = _create_cpu_state_dict(state_dict, share_memory=use_shared, pin_memory=not use_shared)
+            with record_function("_offload_state_dict_to_cpu-sync-1st"):
+                copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache)
+            with record_function("_offload_state_dict_to_cpu-sync-2nd"):
+                copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache)
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                with record_function("_offload_state_dict_to_cpu-async-1st"):
+                    copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache, cpu_offload_sync=False)
+            with record_function("stream.synchronize-1st"):
+                stream.synchronize()
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                with record_function("_offload_state_dict_to_cpu-async-2nd"):
+                    copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache, cpu_offload_sync=False)
+            with record_function("stream.synchronize-2nd"):
+                stream.synchronize()
+
+        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=100))
 
 if __name__ == "__main__":
     run_tests()
