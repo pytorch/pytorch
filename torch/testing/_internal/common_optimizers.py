@@ -116,6 +116,8 @@ class OptimizerInfo:
         supports_param_groups: bool = True,
         # whether the optimizer supports parameters on multiple devices
         supports_multiple_devices: bool = True,
+        # whether the optimizer uses init_state_per_param to initialize state
+        supports_init_state_per_param: bool = False,
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
@@ -129,6 +131,7 @@ class OptimizerInfo:
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
         self.supports_multiple_devices = supports_multiple_devices
+        self.supports_init_state_per_param = supports_init_state_per_param
         self.decorators = (
             *(decorators if decorators else []),
             *(skips if skips else []),
@@ -1135,6 +1138,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adam,
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1312,6 +1316,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
