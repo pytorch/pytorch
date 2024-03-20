@@ -10,7 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -21,13 +21,7 @@ import torch._logging
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    GlobalContextCheckpointState,
-    GuardsCheckpointState,
-    Source,
-    TracingContext,
-)
+from torch._guards import GlobalContextCheckpointState, Source, TracingContext
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -147,45 +141,6 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-class OutputGraphState(NamedTuple):
-    input_source_to_var: Dict[Source, VariableTracker]
-    tracked_fakes: List[TrackedFake]
-    guard_state: GuardsCheckpointState
-    nn_modules: Optional[Dict[str, torch.nn.Module]]
-    register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
-    global_state: Optional[Dict[str, bool]]
-    param_name_to_source: Optional[Dict[str, Source]]
-    side_effects: SideEffects
-    variable_tracker_cache: VariableTrackerCache
-    timestamp: int
-    non_compliant_ops: Set[torch._ops.OpOverload]
-    compliant_custom_ops: Set[torch._ops.OpOverload]
-
-    def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
-        for k in self._fields:
-            if k == "guard_state":
-                r = self.guard_state.diff(other.guard_state)
-                if r is not None:
-                    return r
-                continue
-            elif k == "side_effects":
-                r = self.side_effects.diff(other.side_effects)
-                if r is not None:
-                    return r
-                continue
-
-            sv = getattr(self, k)
-            ov = getattr(other, k)
-            if sv != ov:
-                return f"{prefix}{k} mismatch: {sv} != {ov}"
-        return None
-
-    # Back compat .guards api
-    @property
-    def guards(self):
-        return self.guard_state.dynamo_guards
-
-
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -263,7 +218,7 @@ class WrapperBackend:
 Scope = Dict[str, object]
 
 
-class OutputGraph(Checkpointable[OutputGraphState]):
+class OutputGraph:
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -635,66 +590,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     @property
     def current_tx(self):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
-
-    def copy_graphstate(self) -> OutputGraphState:
-        """Create a checkpoint of the current state by copying everything"""
-        assert self.param_name_to_source is not None
-        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
-        module_state = self.tracing_context.module_context.copy_graphstate()
-        global_state = self.tracing_context.global_context.copy_graphstate()
-        state = OutputGraphState(
-            dict(self.input_source_to_var),
-            list(self.tracked_fakes),
-            guards_graph_state,
-            module_state,
-            list(self.register_finalizer_fns),
-            global_state,
-            dict(self.param_name_to_source),
-            self.side_effects.clone(),
-            self.variable_tracker_cache.clone(),
-            self.timestamp,
-            set(self.non_compliant_ops),
-            set(self.compliant_custom_ops),
-        )
-        self.timestamp += 1
-        return state
-
-    def restore_graphstate(self, state: OutputGraphState):
-        """Restore a checkpoint created by self.copy_graphstate()"""
-        (
-            self.input_source_to_var,
-            self.tracked_fakes,
-            guards_state,
-            module_state,
-            self.register_finalizer_fns,
-            global_state,
-            self.param_name_to_source,
-            self.side_effects,
-            self.variable_tracker_cache,
-            self.timestamp,
-            self.non_compliant_ops,
-            self.compliant_custom_ops,
-        ) = state
-        self.tracing_context.guards_context.restore_graphstate(guards_state)
-        self.tracing_context.module_context.restore_graphstate(module_state)
-        self.tracing_context.global_context.restore_graphstate(global_state)
-
-        # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
-        removed_nodes = 0
-        for node in reversed(list(self.graph.nodes)):
-            if (
-                node.meta["creation_timestamp"] > self.timestamp
-                # placeholders here may have been lazily added by existing objects
-                and node.op != "placeholder"
-            ):
-                # Erasing node alone does not remove the meta information
-                # So, remove the help tensor explicitly
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-                self.remove_node(node)
-                self.real_value_cache.pop(node, None)
-                removed_nodes += 1
-        log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
     def add_symbol_bindings(self, arg: GraphArg):
         # Insert implicit size vars as necessary.  With dynamic shapes, we
