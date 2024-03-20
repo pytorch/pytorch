@@ -2376,7 +2376,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
