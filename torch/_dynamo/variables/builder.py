@@ -1626,6 +1626,7 @@ def _automatic_dynamic(
 
     name = source.name()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
+    assert prior_policy is None
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
     )
