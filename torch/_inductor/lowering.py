@@ -2208,13 +2208,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        if not meta_val.is_cuda:
-            return arg
 
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if not meta_val.is_cuda:
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
@@ -5356,7 +5357,7 @@ def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
         inner_fn_args = x.inner_fn_args()
     else:
         size = x.get_size()
-        idx = [sympy_index_symbol(f"i{n}") for n, s in enumerate(size)]
+        idx = [sympy_index_symbol(f"i{n}") for n in range(len(size))]
         inner_fn_args = (idx,)
 
     handler = torch._inductor.ops_handler.ExtractConstantsHandler(x.get_device())
@@ -5977,13 +5978,22 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+    from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    ir.UserDefinedTritonKernel(
+        kernel_idx=kernel_idx,
+        grid=grid,
+        kernel_args={**kwargs, **constant_args},
+    )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
 @register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+def triton_kernel_wrap(
+    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+):
     new_kwargs = {}
     for name, value in kwargs.items():
         if isinstance(value, ir.TensorBox):
@@ -6005,7 +6015,12 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
                 value = clone_preserve_reinterpret_view(value)
         new_kwargs[name] = value
 
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
+    return triton_kernel_wrap_(
+        kernel_idx=kernel_idx,
+        constant_args_idx=constant_args_idx,
+        grid=grid,
+        kwargs=new_kwargs,
+    )
 
 
 @register_lowering(torch.ops.higher_order.cond)
@@ -6208,3 +6223,4 @@ import_submodule(kernel)
 from . import quantized_lowerings
 
 quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
