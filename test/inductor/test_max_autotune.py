@@ -6,7 +6,6 @@ from typing import Callable, List, Optional
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo import reset
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config
 from torch._inductor.autotune_process import (
@@ -15,13 +14,13 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
-    ChoiceCaller,
     TritonTemplateCaller,
 )
+from torch._inductor.test_case import run_tests, TestCase
 
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
