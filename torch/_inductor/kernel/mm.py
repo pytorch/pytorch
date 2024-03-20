@@ -298,7 +298,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
                 **mm_options(config, m, n, k, layout, b_prologue_cast_type),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
