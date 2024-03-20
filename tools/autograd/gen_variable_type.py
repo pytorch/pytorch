@@ -734,7 +734,7 @@ FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate(
 auto ${inp_name}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp_name}_tensor = toNonOptTensor(${inp});
 auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined())
-  ? ${inp_name}_t_raw : at::${zeros_fn}(${inp_name}_tensor.sizes(), ${inp_name}_tensor.options());
+  ? ${inp_name}_t_raw : at::${zeros_fn}(${inp_name}_tensor.sym_sizes(), ${inp_name}_tensor.options());
 """
 )
 
@@ -1872,9 +1872,9 @@ def emit_body(
                     if inp.name in refargname2inplace_foreacharg:
                         inp_name = refargname2inplace_foreacharg[inp.name].name
                 zeros_fn = (
-                    "zeros"
+                    "zeros_symint"
                     if inplace and inp.name == "self"
-                    else "_efficientzerotensor"
+                    else "_efficientzerotensor_symint"
                 )
                 if inp.name in derivative.required_inputs_fw_grad:
                     unpacked_arguments += (
