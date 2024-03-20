@@ -231,14 +231,13 @@ def run_and_get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
     for node in gm.graph.find_nodes(op="get_attr"):
-        if node.op == "get_attr":
-            used_to_fold = False
-            for u in node.users:
-                if u.meta[META_TAG] == CONST_MODULE_TAG:
-                    used_to_fold = True
-                    break
-            if not used_to_fold:
-                node.meta[META_TAG] = MODULE_TAG
+        used_to_fold = False
+        for u in node.users:
+            if u.meta[META_TAG] == CONST_MODULE_TAG:
+                used_to_fold = True
+                break
+        if not used_to_fold:
+            node.meta[META_TAG] = MODULE_TAG
 
     new_graph = torch.fx.Graph()
 
