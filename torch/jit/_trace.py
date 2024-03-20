@@ -7,6 +7,7 @@ This module contains functionality to support the JIT's tracing frontend, notabl
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import contextlib
 
 import copy
@@ -25,6 +26,8 @@ from torch._jit_internal import (
     get_callable_argument_names,
     is_scripting,
 )
+
+from torch._utils_internal import log_torchscript_usage
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
 
@@ -254,7 +257,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         if assert_compiled:
             hits = compiled_fn.hits
         out = model(*args)
-        if assert_compiled and compiled_fn.hits == hits:
+        if assert_compiled and compiled_fn.hits == hits:  # type: ignore[possibly-undefined]
             raise RuntimeError("failed to use the compiled function")
         if not isinstance(out, tuple):
             out = (out,)
@@ -280,7 +283,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         assert model.has_trace_for(*args)
 
     if is_module:
-        model.load_state_dict(saved_state)
+        model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
     compiled_outs, compiled_grads = run_fwd_bwd(args, assert_compiled=True)
 
     _verify_equal(uncompiled_outs, compiled_outs)
@@ -539,6 +542,20 @@ def _check_trace(
                                 atol=default_tolerances(orig, ref)[1],
                                 equal_nan=True,
                             )
+                        elif getattr(orig, "is_nested", None) or getattr(
+                            ref, "is_nested", None
+                        ):
+                            assert getattr(orig, "is_nested", None) == getattr(
+                                ref, "is_nested", None
+                            )
+                            for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
+                                torch.testing.assert_close(
+                                    t_orig.double(),
+                                    t_ref.double(),
+                                    rtol=check_tolerance,
+                                    atol=default_tolerances(t_orig, t_ref)[1],
+                                    equal_nan=True,
+                                )
                         else:
                             torch.testing.assert_close(
                                 orig.double(),
@@ -788,6 +805,8 @@ def trace(
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
+    log_torchscript_usage("trace")
 
     if isinstance(func, torch.jit.ScriptModule):
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it

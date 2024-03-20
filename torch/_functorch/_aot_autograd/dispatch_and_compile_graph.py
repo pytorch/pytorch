@@ -11,7 +11,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -34,7 +34,9 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     # FunctionalTensorMode must be enabled here.
     # See Note [Accessing .grad_fn on FunctionalTensor]
-    with enable_python_dispatcher(), FunctionalTensorMode(aot_config.pre_dispatch):
+    with enable_python_dispatcher(), FunctionalTensorMode(
+        pre_dispatch=aot_config.pre_dispatch, export=aot_config.is_export
+    ):
         fx_g = make_fx(
             f,
             decomposition_table=aot_config.decompositions,
@@ -106,6 +108,10 @@ def aot_dispatch_base_graph(
     if aot_config.enable_log:
         aot_graphs_log.info(
             "%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id)
+        )
+        trace_structured(
+            "aot_forward_graph",
+            payload_fn=lambda: fw_module.print_readable(print_output=False),
         )
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.

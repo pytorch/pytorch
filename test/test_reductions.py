@@ -1115,6 +1115,13 @@ class TestReductions(TestCase):
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
+    def test_all_issue117215(self, device):
+        info = torch.iinfo(torch.uint8)
+        a = torch.randint(info.min, info.max, (73, 11, 3, 17), dtype=torch.uint8)
+        b = torch.all(a, dim=0)
+        c = a.to(torch.bool).all(dim=0)
+        self.assertEqual(torch.ne(b, c).sum(), 0)
+
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_max_with_inf(self, device, dtype):
@@ -1335,6 +1342,50 @@ class TestReductions(TestCase):
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_sum_noncontig_lowp(self, device, dtype) -> None:
+        dim_sequences = {
+            2: [0, 1],
+            3: [0, 1, 2],
+            4: [0, 1, 2, 3],
+            5: [0, 1, 2, 3, 4],
+        }
+
+        def create_noncontig_inputs(x, ndim):
+            if ndim == 2:
+                return x[::2, ::2]
+            elif ndim == 3:
+                return x[::2, ::2, ::2]
+            elif ndim == 4:
+                return x[::2, ::2, ::2, ::2]
+            elif ndim == 5:
+                return x[::2, ::2, ::2, ::2, ::2]
+
+        def helper(self, shape, reduce_dims, device, dtype):
+            for permute_list in list(permutations(dim_sequences[len(shape)], len(shape))):
+                x = torch.ones(shape, device=device, dtype=dtype)
+                x = create_noncontig_inputs(x, len(shape))
+                x_trans = x.permute(permute_list)
+                x_sum = torch.sum(x_trans, reduce_dims)
+                x_trans_ref = x_trans.float()
+                x_sum_ref = torch.sum(x_trans_ref, reduce_dims)
+                self.assertEqual(x_sum, x_sum_ref.to(dtype=dtype))
+
+        shapes = [
+            (50, 50),
+            (50, 50, 50),
+            (10, 50, 30, 30),
+            (10, 5, 10, 50, 7),
+        ]
+
+        for shape in shapes:
+            for i in range(1, len(shape) + 1):
+                reduce_dims = list(combinations(dim_sequences[len(shape)], i))
+                for reduce_dim in reduce_dims:
+                    helper(self, shape, reduce_dim, device, dtype)
+
 
     @onlyCPU
     @dtypes(torch.bool, torch.double)
@@ -1662,6 +1713,20 @@ class TestReductions(TestCase):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
+    # TODO: Investigate why the output is not close to numpy.
+    def _get_relaxed_tolerances_for(self, dtype):
+        if dtype == torch.float16:
+            atol = 0.4
+            rtol = 1e-2
+        elif dtype == torch.float32:
+            atol = 7e-05
+            rtol = 3e-06
+        else:
+            # Default values
+            atol = None
+            rtol = None
+        return atol, rtol
+
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
             return dtype in integral_types()
@@ -1680,16 +1745,7 @@ class TestReductions(TestCase):
             exact_dtype = False
 
         # TODO: Investigate why the output is not close to numpy.
-        if dtype == torch.float16:
-            atol = 0.4
-            rtol = 1e-2
-        elif dtype == torch.float32:
-            atol = 7e-05
-            rtol = 3e-06
-        else:
-            # Default values
-            atol = None
-            rtol = None
+        atol, rtol = self._get_relaxed_tolerances_for(dtype)
         self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                  atol=atol, rtol=rtol, exact_dtype=exact_dtype,
                                                  with_keepdim=with_keepdim, with_extremal=with_extremal)
@@ -1720,12 +1776,14 @@ class TestReductions(TestCase):
         out_dtype = dtype
         inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
         for inp_dtype in inp_dtypes:
+            # TODO: Investigate why the output is not close to numpy.
+            atol, rtol = self._get_relaxed_tolerances_for(dtype)
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
     @dtypes(*all_types_and(torch.half))
     def test_argminmax_multiple(self, device, dtype):

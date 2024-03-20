@@ -82,6 +82,19 @@ if ! which conda; then
   fi
 else
   export CMAKE_PREFIX_PATH=/opt/conda
+
+  # Workaround required for MKL library linkage
+  # https://github.com/pytorch/pytorch/issues/119557
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+    export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
+    export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/ComputeLibrary
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -242,6 +255,11 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
+      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
+        # Install numpy-2.0 release candidate for builds
+        # Which should be backward compatible with Numpy-1.X
+        python -mpip install --pre numpy==2.0.0b1
+      fi
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel

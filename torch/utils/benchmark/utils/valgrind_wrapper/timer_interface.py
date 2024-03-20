@@ -465,7 +465,7 @@ class GlobalsBridge:
                 path = os.path.join(self._data_dir, f"{name}.pt")
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
-                    torch.jit.save(wrapped_value.value, f)
+                    torch.jit.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
 
             else:
                 raise NotImplementedError(
@@ -502,7 +502,7 @@ class _ValgrindWrapper:
                 ).returncode
 
         self._build_type: Optional[str] = None
-        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())
+        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())  # type: ignore[no-untyped-call]
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
@@ -701,7 +701,7 @@ class _ValgrindWrapper:
                         if fn_match:
                             ir_str, file_function = fn_match.groups()
                             ir = int(ir_str.replace(",", ""))
-                            if ir == program_totals:
+                            if ir == program_totals:  # type: ignore[possibly-undefined]
                                 # Callgrind includes some top level red herring symbols when
                                 # a program dumps multiple profiles.
                                 continue

@@ -1,7 +1,5 @@
 #include <Python.h>
 
-#include <vector>
-
 namespace torch::autograd {
 
 extern PyObject* THPVariableFunctionsModule;
