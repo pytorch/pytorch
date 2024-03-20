@@ -103,6 +103,7 @@ static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
     "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
 
 // Whether to compute duration between start and end cuda events.
+// If true, timing (enableTiming_) will also be automatically enabled.
 static std::vector<std::string> TORCH_NCCL_COMPUTE_DURATION = {
     "TORCH_NCCL_COMPUTE_DURATION"};
 
@@ -1031,7 +1032,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool desyncDebug_;
 
   // Whether or not to compute duration between start and end cuda events.
-  bool computeDuratoin_;
+  bool computeDuration_;
 
   // Whether or not to dump debug info on timeout
   bool dumpOnTimeout_;
