@@ -30,7 +30,7 @@ def wrap_bound_arg(tx, val, source=None):
     elif not source:
         from torch._dynamo.variables.builder import SourcelessBuilder
 
-        return SourcelessBuilder()(tx, val)
+        return SourcelessBuilder.create(tx, val)
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
@@ -110,6 +110,12 @@ class BaseUserFunctionVariable(VariableTracker):
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
+
+    _nonvar_fields = {
+        "fn",
+        "is_constant",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -267,7 +273,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 else:
                     from .builder import SourcelessBuilder
 
-                    result[name] = SourcelessBuilder()(tx, cell.cell_contents)
+                    result[name] = SourcelessBuilder.create(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -556,6 +562,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 class SkipFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "reason",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value, reason=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -841,12 +853,12 @@ class TritonKernelVariable(VariableTracker):
             raise Unsupported("Triton kernels should always be called with a grid")
 
         # Both for grid's meta as well as for the kernel, we need combined
-        # args and kwargs normalized
-        names = (
-            variables.ConstantVariable.create(name) for name in self.kernel.arg_names
-        )
-        kwargs = {variables.ConstantVariable.create(k): v for k, v in kwargs.items()}
-        normalized_args = {**dict(zip(names, args)), **kwargs}
+        # args and kwargs combined and normalized
+        combined_args_raw = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        combined_args = {
+            variables.ConstantVariable.create(k): v
+            for k, v in combined_args_raw.items()
+        }
 
         configs = (
             [config.kwargs for config in self.kernel.configs]
@@ -864,7 +876,7 @@ class TritonKernelVariable(VariableTracker):
                     ConstantVariable.create(k): ConstantVariable.create(v)
                     for k, v in config_args.items()
                 }
-                meta = ConstDictVariable({**normalized_args, **config_args}, dict)
+                meta = ConstDictVariable({**combined_args, **config_args}, dict)
                 grid = grid.call_function(tx, [meta], {})
 
             # Now, the grid must be a list either originally or through above
@@ -891,19 +903,33 @@ class TritonKernelVariable(VariableTracker):
             grids = [grids[0]]
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
             triton_kernel_wrapper_mutation,
         )
 
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
-        meta = ConstDictVariable(normalized_args, dict)
+        constant_args = {
+            k: v.as_python_constant()
+            for k, v in combined_args_raw.items()
+            if isinstance(v, ConstantVariable)
+        }
+        non_constant_args = {
+            k: v
+            for k, v in combined_args.items()
+            if not isinstance(v, ConstantVariable)
+        }
+
+        constant_args_idx = kernel_side_table.add_constant_args(constant_args)
+        meta = ConstDictVariable(non_constant_args, dict)
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
             {
                 "kernel_idx": self.kernel_idx,
+                "constant_args_idx": constant_args_idx,
                 "grid": grids,
                 "kwargs": meta.as_proxy(),
             },
