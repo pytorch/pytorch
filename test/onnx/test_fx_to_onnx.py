@@ -677,6 +677,35 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
 
+    def test_checkpoint_cast(self):
+        model_id = "openai/whisper-large-v3"
+        feature_extractor = transformers.WhisperFeatureExtractor(feature_size=128)
+        batch = 4
+
+        with torch.onnx.enable_fake_mode() as ctx:
+            model = transformers.AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id, low_cpu_mem_usage=False, use_safetensors=False
+            )
+            input = {
+                "input_features": torch.randn(
+                    (
+                        batch,
+                        feature_extractor.feature_size,
+                        feature_extractor.nb_max_frames,
+                    )
+                ),
+                "decoder_input_ids": torch.tensor([[1, 1]]) * 8001,
+                "return_dict": False,
+            }
+
+        export_options = torch.onnx.ExportOptions(fake_context=ctx)
+        onnx_program = torch.onnx.dynamo_export(
+            model, **input, export_options=export_options
+        )
+        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+            onnx_program.save(tmp_onnx_file.name)
+            onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
