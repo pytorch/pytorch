@@ -102,12 +102,13 @@ inline void check_foreach_api_restrictions(
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
 inline bool _check_tensors_share_device_and_dtype(
-    ArrayRef<TensorList> tensorLists) {
+    ArrayRef<TensorList> tensorLists,
+    const bool skip_dtype_check = false) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
 
   auto is_tensor_okay = [&](const Tensor& tensor) {
-    return tensor.dtype() == expected_dtype &&
+    return (skip_dtype_check || tensor.dtype() == expected_dtype) &&
         tensor.device() == expected_device && tensor.layout() == at::kStrided &&
         tensor.is_non_overlapping_and_dense();
   };
@@ -252,17 +253,10 @@ using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
     std::vector<std::vector<c10::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
-
-// Warning: Do not use ParamsHash for keys with potentially uninitialized
-// padding bytes!
-struct _DeviceDtypeHasher {
-  std::size_t operator()(const DeviceDtypeKey& k) const noexcept {
-    return std::hash<at::Device>{}(k.first) ^
-        std::hash<at::ScalarType>{}(k.second);
-  }
-};
-using FlatMap =
-    std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, _DeviceDtypeHasher>;
+using FlatMap = std::unordered_map<
+    DeviceDtypeKey,
+    TensorsAndIndicesT,
+    ParamsHash<DeviceDtypeKey>>;
 
 inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
     const nested_optional_tensorvec_t& nested_tensorlist,

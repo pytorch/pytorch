@@ -2,7 +2,6 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
-#include <c10/core/Device.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
@@ -57,10 +56,12 @@ struct ArgumentInfo {
  private:
   unsigned defined_ : 1;
   unsigned requires_grad_ : 1;
+  unsigned : 5;
   unsigned dim_ : 8;
-  signed device_ : sizeof(c10::DeviceIndex) * 8;
+  unsigned device_ : 8;
   unsigned type_ : 8;
   unsigned dev_type_ : 16;
+  unsigned : 16;
 };
 
 static_assert(
@@ -68,7 +69,7 @@ static_assert(
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
-    "ArgumentInfo is expected to be a 64-bit struct");
+    "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
   ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs)
@@ -222,8 +223,8 @@ struct CompleteArgumentInfoPOD {
   unsigned type : 8; // scalar type
   unsigned defined : 1;
   unsigned requires_grad : 1;
-  signed dev_type : sizeof(c10::DeviceType) * 8;
-  signed device : sizeof(c10::DeviceIndex) * 8;
+  signed device : 14;
+  unsigned dev_type : 16;
   unsigned
       total_dims : 16; // all TensorInfoPODs are in CompleteArgumentSpec's
                        // tensor_info() array. total_dims is the total number of
