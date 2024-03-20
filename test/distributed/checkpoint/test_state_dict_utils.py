@@ -169,6 +169,8 @@ class TestStateDictUtils(DTensorTestBase):
         _verify(cpu_state_dict)
         cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True)
         _verify(cpu_state_dict)
+        cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True, pin_memory=True)
+        _verify(cpu_state_dict)
 
 
 if __name__ == "__main__":

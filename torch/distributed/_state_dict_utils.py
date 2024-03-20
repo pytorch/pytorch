@@ -306,9 +306,10 @@ def _create_cpu_state_dict(
     """
 
     if pin_memory and share_memory:
-        raise ValueError(
-            "Cannot allocate both memory on both pin_memory and share_memory"
-        )
+        # raise ValueError(
+        #     "Cannot allocate both memory on both pin_memory and share_memory"
+        # ) # not anymore!
+        pass
 
     def tensor_func(
         obj: torch.Tensor,
@@ -320,9 +321,17 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            return torch.empty(
+            t = torch.empty(
                 *tuple(companion_obj.size()), dtype=companion_obj.dtype
             ).share_memory_()
+            if pin_memory:
+                succ = torch.cuda.cudart().cudaHostRegister(
+                    t.data_ptr(),
+                    t.numel() * t.element_size(),
+                    1 # lines up with 'cudaHostRegisterPortable'
+                )
+                assert succ == 0, f"Pinning shared memory failed with {succ}"
+            return t
         else:
             return torch.empty(
                 *tuple(companion_obj.size()), dtype=companion_obj.dtype
