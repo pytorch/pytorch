@@ -692,8 +692,7 @@ class TestInductorDynamic(TestCase):
             )
 
 
-# @TODO: Uncomment again
-# instantiate_device_type_tests(TestInductorDynamic, globals())
+instantiate_device_type_tests(TestInductorDynamic, globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
