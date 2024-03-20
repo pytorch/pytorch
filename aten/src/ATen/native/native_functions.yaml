@@ -6204,6 +6204,12 @@
   category_override: dummy
   dispatch: {}
 
+- func: _nested_compute_contiguous_strides_offsets(Tensor nested_size) -> (Tensor, Tensor)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: _nested_compute_contiguous_strides_offsets
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
     # calls unsqueeze

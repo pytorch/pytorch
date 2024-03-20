@@ -3610,6 +3610,60 @@ class TestNestedTensorSubclass(TestCase):
 
             _check_grad(base if values_is_view else values)
 
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("dim", range(5))
+    @parametrize("layout", [torch.strided, torch.jagged],
+                 name_fn=lambda l: f"layout_{str(l).split('.')[1]}")
+    @parametrize("requires_grad", [False, True])
+    @parametrize("contiguous", [False, True])
+    def test_as_nested_tensor_from_tensor(
+            self, device, dtype, dim, layout, requires_grad, contiguous):
+        if dim == 0:
+            t = torch.tensor(3., requires_grad=requires_grad)
+        else:
+            t = torch.randn(*(3 for _ in range(dim)), requires_grad=requires_grad)
+        assert t.dim() == dim
+
+        if dim < 2:
+            # 0-1 dim tensors can't be converted to NTs
+            with self.assertRaisesRegex(RuntimeError, "Expected tensor argument to have dim"):
+                nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
+            return
+
+        orig_t = t
+        if not contiguous:
+            t = t.transpose(0, 1)
+
+        nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
+        expected_dim = t.dim()
+        expected_batch_size = t.size(0)
+        self._validate_nt(
+            nt, device, dtype, layout, requires_grad, expected_dim, expected_batch_size)
+
+        if torch.device(device) == t.device and dtype == t.dtype and contiguous:
+            # should be the non-copying (view) case
+            self.assertTrue(nt._is_view() and nt._base is t)
+
+        # should be equivalent to construction from unbound tensor list
+        nt_from_unbind = torch.nested.as_nested_tensor(
+            list(t.unbind(0)), device=device, dtype=dtype, layout=layout)
+        self.assertEqual(nt, nt_from_unbind)
+
+        # ensure call on a NT with the same properties returns the NT directly
+        nt2 = torch.nested.as_nested_tensor(nt, device=device, dtype=dtype, layout=layout)
+        self.assertTrue(nt is nt2)
+
+        # we don't support conversion between layouts this way atm
+        other_layout = torch.strided if layout == torch.jagged else torch.jagged
+        with self.assertRaisesRegex(
+                RuntimeError, "Converting between nested tensor layouts is not supported"):
+            torch.nested.as_nested_tensor(nt, device=device, dtype=dtype, layout=other_layout)
+
+        if requires_grad:
+            # make sure gradients flow back into inputs
+            (nt * 2).backward(torch.ones_like(nt))
+            self.assertEqual(orig_t.grad, torch.ones_like(orig_t) * 2)
+
     @dtypes(torch.double, torch.half)
     @onlyCUDA
     def test_device_dtype_transfer_maintains_offsets(self, device, dtype):
