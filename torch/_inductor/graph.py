@@ -651,6 +651,7 @@ class GraphLowering(torch.fx.Interpreter):
         When a buffer is mutated we need to make sure all the reads to
         the old version are realized before the mutation happens.
         """
+        print(f"mark_buffer_mutated {name}")
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 

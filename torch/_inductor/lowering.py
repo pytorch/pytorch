@@ -481,6 +481,8 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if not (user.op == "call_function" and (user.target in foreach_ops)):
                     realize_outputs = True
 
+        print("realize_outputs:", realize_outputs)
+
         a_list_input = None
         for input in inputs:
             if isinstance(input, (list, tuple)):
@@ -5260,7 +5262,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=False):
+def mutate_to(changed, val, unsafe_alias=True):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -5799,7 +5801,7 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
 
         return mut_results
 
-    _register_foreach_lowering(aten_op, fn)
+    # _register_foreach_lowering(aten_op, fn)
 
 
 register_foreach_inplace(

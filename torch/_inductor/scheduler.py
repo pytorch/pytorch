@@ -1254,6 +1254,8 @@ class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
+        print(len(nodes))
+        # print(nodes)
         self.backends = {}
         self.fuse_cache = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -1298,6 +1300,7 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
+        print(len(nodes))
         if config.reorder_for_compute_comm_overlap:
             comms.decide_global_ordering_of_comms(self.nodes)
         self.compute_ancestors()

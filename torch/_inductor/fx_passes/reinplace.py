@@ -511,6 +511,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         elif (
             inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
         ) is not None:
+            continue
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
             if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
