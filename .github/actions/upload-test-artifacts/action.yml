@@ -11,6 +11,10 @@ inputs:
       Suffix to add to the filename of the artifacts. This should include the
       workflow job id, see [Job id in artifacts].
     required: true
+  s3-bucket:
+    description: S3 bucket to download builds
+    required: false
+    default: "gha-artifacts"
 
 runs:
   using: composite
@@ -87,6 +91,7 @@ runs:
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
@@ -97,6 +102,7 @@ runs:
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
@@ -108,6 +114,7 @@ runs:
       if: ${{ !inputs.use-gha }}
       continue-on-error: true
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14

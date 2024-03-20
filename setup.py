@@ -1273,6 +1273,7 @@ def main():
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
+        "include/torch/csrc/profiler/python/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",
