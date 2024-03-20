@@ -607,9 +607,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         def e() -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(
-            infer_schema(e), """() -> Tensor"""
-        )
+        self.assertExpectedInline(infer_schema(e), """() -> Tensor""")
 
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
