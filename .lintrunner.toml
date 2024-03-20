@@ -147,7 +147,7 @@ init_command = [
     'filelock==3.13.1',
     'junitparser==2.1.1',
     'rich==10.9.0',
-    'pyyaml==6.0',
+    'pyyaml==6.0.1',
     'optree==0.10.0',
 ]
 
@@ -204,9 +204,7 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    'c10/**/cuda/*pp',
     'aten/**/cuda/*pp',
-    '**/cuda/*pp',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
@@ -979,7 +977,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'PyYAML==6.0',
+    'PyYAML==6.0.1',
 ]
 
 # Black + usort
@@ -1907,6 +1905,7 @@ exclude_patterns = [
     'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
+    "torch/cuda/_gpu_trace.py",
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
@@ -2434,7 +2433,6 @@ exclude_patterns = [
     'torch/utils/_contextlib.py',
     'torch/utils/_cpp_extension_versioner.py',
     'torch/utils/_crash_handler.py',
-    'torch/utils/_cuda_trace.py',
     'torch/utils/_device.py',
     'torch/utils/_foreach_utils.py',
     'torch/utils/_freeze.py',

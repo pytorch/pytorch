@@ -15,6 +15,7 @@ from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
+from torch._inductor.test_case import TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
 from torch.testing._internal.common_utils import (
@@ -25,7 +26,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCaseBase as TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -696,7 +696,7 @@ class TestInductorDynamic(TestCase):
 # instantiate_device_type_tests(TestInductorDynamic, globals())
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
     if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:

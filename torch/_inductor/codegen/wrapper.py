@@ -1013,10 +1013,6 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
-        from torch.utils._triton import patch_triton_dtype_repr
-
-        patch_triton_dtype_repr()
-
         original_name = kernel.__name__
 
         from .common import KernelArgType, SizeArg, TensorArg
@@ -1299,15 +1295,10 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+    def val_to_cpp_arg_str(self, type_, val) -> str:
         raise NotImplementedError()
 
     def val_to_arg_str(self, s):
-        from torch.utils._triton import dtype_to_string, has_triton
-
-        if has_triton():
-            import triton
-
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
         elif isinstance(s, sympy.Expr):
@@ -1326,8 +1317,6 @@ class WrapperCodeGen(CodeGen):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
-        elif has_triton() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
-            return dtype_to_string(s)
         else:
             return repr(s)
 
