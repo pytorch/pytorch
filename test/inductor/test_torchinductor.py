@@ -8037,12 +8037,11 @@ class CommonTemplate:
         )
 
     def test_insignificant_strides(self):
-
         def f(x):
             tmp = x + 1
             return tmp.view(-1, 1, 2)
 
-        x = torch.arange(8, device='cuda', dtype=torch.float32)
+        x = torch.arange(8, device="cuda", dtype=torch.float32)
         out = f(x)
         compiled_out = torch.compile(f)(x)
 

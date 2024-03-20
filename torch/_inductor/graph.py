@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -20,12 +20,7 @@ from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import (
-    guard_size_oblivious,
-    has_free_symbols,
-    ShapeEnv,
-    SymTypes,
-)
+from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 
 from torch.utils._mode_utils import no_dispatch
 
@@ -926,33 +921,28 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
-    @staticmethod
     def match_insignificant_strides(
-        tensor: ir.TensorBox, meta_strides: Tuple[int, ...]
+        self, tensor: ir.TensorBox, meta_strides: Tuple[Union[int, torch.SymInt], ...]
     ) -> ir.TensorBox:
         # should have already been realized
         assert torch._inductor.ir.is_storage_and_layout(tensor)
 
-        def guard_oblivious(expr):
-            # Getting error in guard_size_oblivious because I am passing in sympy.logic.boolalg.BooleanFalse
-            # instead of SymBool or bool.
-            if isinstance(expr, torch.SymBool):
-                return guard_size_oblivious(expr)
-
-            return expr
+        meta_strides = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides
+        ]
 
         if all(
-            guard_oblivious(s1 == s2)
+            self.sizevars.is_expr_static_and_true(s1 == s2)
             for s1, s2 in zip(meta_strides, tensor.get_stride())
         ):
             return tensor
 
-        def significant_strides_equal(shape, strides1, strides2):
-            for dim, s1, s2 in zip(shape, strides1, strides2):
-                if guard_oblivious(dim <= 1):
+        def significant_strides_equal(shape, meta_strides, tensor_strides):
+            for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+                if self.sizevars.is_expr_static_and_true(dim <= 1):
                     continue
 
-                if not guard_oblivious(s1 == s2):
+                if not self.sizevars.is_expr_static_and_true(s1 == s2):
                     return False
 
             return True
@@ -965,7 +955,7 @@ class GraphLowering(torch.fx.Interpreter):
         storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
         new_stride = list(old_layout.stride)
         for i, s in enumerate(tensor.get_size()):
-            if guard_oblivious(s <= 1):
+            if self.sizevars.is_expr_static_and_true(s <= 1):
                 new_stride[i] = meta_strides[i]
 
         new_layout = torch._inductor.ir.FixedLayout(
