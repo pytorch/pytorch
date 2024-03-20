@@ -802,8 +802,20 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
-            tx, args[0], operands, {}, "while_loop", source_target=self.value
+            tx,
+            args[0],
+            operands,
+            {},
+            "while_loop",
+            source_target=self.value,
+            set_subgraph_inputs="manual",
         )
+        if len(cond_lifted_freevars) > 0:
+            unimplemented(
+                f"while_loop's cond_fn doesn't support capturing free variables yet."
+                f" All used inputs must be passed in as arguments explicitly."
+                f" Proxies for the lifted vars:{cond_lifted_freevars}."
+            )
         cond_nn_modules = dict(tx.output.nn_modules)
         if not isinstance(cond_r, TensorVariable):
             unimplemented(
@@ -831,28 +843,17 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "while_loop",
             source_target=self.value,
+            set_subgraph_inputs="manual",
             should_flatten_outputs=True,
         )
         body_nn_modules = dict(tx.output.nn_modules)
 
-        (
-            cond_graph,
-            body_graph,
-            cond_shared,
-            body_shared,
-            cond_unique,
-            body_unique,
-        ) = _merge_graph_inputs(
-            cond_graph,
-            cond_lifted_freevars,
-            "cond_fn",
-            body_graph,
-            body_lifted_freevars,
-            "body_fn",
-        )
-        # We pick cond_shared but it shouldn't matter
-        merged_input = tuple(cond_shared + cond_unique + body_unique)
-
+        if len(body_lifted_freevars) > 0:
+            unimplemented(
+                f"while_loop's body_fn doesn't support capturing free variables yet."
+                f" All used inputs must be passed in as arguments explicitly."
+                f" Proxies for the lifted vars:{body_lifted_freevars}."
+            )
         cond_name = add_subgraph(
             tx,
             self.source,
@@ -872,7 +873,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            merged_input,
+            tuple([operand.as_proxy() for operand in operands]),
         )
 
         return _call_function_and_unflatten_output(
