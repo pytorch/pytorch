@@ -2819,17 +2819,17 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto dim = opt_dim.value_or(IntArrayRef{});
   auto size = self.sizes();
   auto ndim = self.dim();
-
+  
   auto opt_dim_ = dim.vec();
   maybe_wrap_dims(opt_dim_, ndim);
-
+  
   using Int = IntArrayRef::value_type;
   std::vector<Int> all_dim(ndim);
   std::iota(all_dim.begin(), all_dim.end(), 0);
-
+  
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
-
+  
   bool is_reduce_over_1D_vector = true;
   for (auto i : reduce_dim) {
     if (size[i] != 1){
@@ -2837,16 +2837,16 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
       break;
     }
   }
-
-  if (is_reduce_over_1D_vector && !self.is_complex()) {
+  
+  if (is_reduce_over_1D_vector) {
     if (ord != 0.0) {
-      at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
+      at::abs_out(const_cast<Tensor&>(result), self.squeeze(reduce_dim));
     } else {
-      at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+      at::ne_out(const_cast<Tensor&>(result), self.squeeze(reduce_dim), 0);
     }
     return;
   }
-
+  
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
   // https://github.com/pytorch/pytorch/issues/52648
