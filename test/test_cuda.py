@@ -2748,6 +2748,9 @@ exit(2)
             for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
                 (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
         ] + [
+            (torch.optim.Rprop, {"lr": 0.1, "foreach": foreach, "maximize": maximize})
+            for foreach, maximize in product((False, True,), (False, True,))
+        ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
                 (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
