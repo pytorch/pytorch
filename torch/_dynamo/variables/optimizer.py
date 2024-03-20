@@ -28,6 +28,13 @@ class GuardInstallException(Exception):
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
+    _nonvar_fields = {
+        "grad_to_source",
+        "tensor_to_source",
+        "static_tensor_names",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
+
     @classmethod
     def throw_if_unsupported_step(cls, symbolic_locals, f_name):
         """
