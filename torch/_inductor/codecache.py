@@ -56,7 +56,7 @@ from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.select_algorithm import ChoiceCaller
+    from torch._inductor.ir import ChoiceCaller
 
 from torch.hub import _Faketqdm, tqdm
 
