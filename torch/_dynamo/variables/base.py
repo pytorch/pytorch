@@ -8,7 +8,7 @@ from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import identity, istype
+from ..utils import istype
 
 
 class MutableLocalSource(Enum):
@@ -20,31 +20,6 @@ class MutableLocalSource(Enum):
 
     Existing = 0
     Local = 1
-
-
-class ParentsTracker:
-    """
-    This is a perf optimization to limit the number of objects we need to visit in tx.replace_all.
-    This must be a seperate object so that it is not cloned in apply.
-    """
-
-    def __init__(self):
-        # logically this is a set, but we use a dict to ensure deterministic ordering
-        self.parents: Dict[ParentsTracker, bool] = dict()
-
-    def add(self, parent):
-        self.parents[parent] = True
-
-    def recursive_parents(self):
-        rv = dict(self.parents)
-        worklist = list(self.parents)
-        while worklist:
-            for parent in worklist.pop().parents:
-                if parent not in rv:
-                    assert isinstance(parent, ParentsTracker)
-                    rv[parent] = True
-                    worklist.append(parent)
-        return rv.keys()
 
 
 class MutableLocalBase:
@@ -118,11 +93,7 @@ def is_side_effect_safe(m: MutableLocalBase):
 
 
 class VariableTrackerMeta(type):
-    def __call__(cls, *args, **kwargs):
-        """Call __post_init__"""
-        obj = type.__call__(cls, *args, **kwargs)
-        obj.__post_init__(*args, **kwargs)
-        return obj
+    all_subclasses = []
 
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
@@ -134,6 +105,10 @@ class VariableTrackerMeta(type):
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
+
+    def __init__(cls, name, bases, attrs):
+        super().__init__(name, bases, attrs)
+        VariableTrackerMeta.all_subclasses.append(cls)
 
 
 class VariableTracker(metaclass=VariableTrackerMeta):
@@ -159,11 +134,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args = dict(self.__dict__)
         args.update(kwargs)
         return self.__class__(**args)
-
-    @classmethod
-    def copy(cls, value):
-        """Deeper (but not full) copy, leaving FX and user objects alone"""
-        return cls.apply(identity, value)
 
     @classmethod
     def apply(
@@ -367,8 +337,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.var_getattr(tx, args[0].as_python_constant())
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
-    def rename(self, tx, name):
-        return self
+    def set_name_hint(self, name):
+        pass
 
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""
@@ -391,22 +361,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-        parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
-        self.parents_tracker = parents_tracker
-
-    def __post_init__(self, *args, **kwargs):
-        if self.parents_tracker is None:
-            self.parents_tracker = ParentsTracker()
-        # visit children 1 level deep and ensure parent is set properly
-        VariableTracker.apply(
-            lambda node: node.parents_tracker.add(self.parents_tracker),
-            [v for k, v in self.__dict__.items() if k not in self._nonvar_fields],
-            skip_fn=lambda _: True,
-        )
 
 
 def typestr(*objs):

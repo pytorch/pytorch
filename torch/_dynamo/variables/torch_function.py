@@ -61,7 +61,7 @@ def _get_subclass_type_var(tx, var):
         if var.source:
             return VariableBuilder(tx, var.source)(var.python_type())
         else:
-            return SourcelessBuilder()(tx, var.python_type())
+            return SourcelessBuilder.create(tx, var.python_type())
 
 
 def _is_attr_overidden(tx, var, name):
@@ -88,8 +88,8 @@ def call_torch_function(
         torch_function_type,
         fn,
         types,
-        SourcelessBuilder()(tx, tuple(args)),
-        SourcelessBuilder()(tx, kwargs),
+        SourcelessBuilder.create(tx, tuple(args)),
+        SourcelessBuilder.create(tx, kwargs),
     )
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
@@ -103,7 +103,7 @@ def build_torch_function_fn(tx, value, source):
             AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
         )(value.__torch_function__.__func__)
     else:
-        return SourcelessBuilder()(tx, value.__torch_function__.__func__)
+        return SourcelessBuilder.create(tx, value.__torch_function__.__func__)
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
@@ -213,7 +213,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                         GuardBuilder.FUNCTION_MATCH
                     )
                 )
-            get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
+            get_fn = SourcelessBuilder.create(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
@@ -264,7 +264,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
                 )(inspect.getattr_static(self.python_type(), name))
             else:
-                func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)
