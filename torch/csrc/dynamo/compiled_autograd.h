@@ -268,9 +268,9 @@ class CompiledNodeArgs {
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
       collect_size(ordered_dict.size());
-      for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
-        collect(it->key());
-        collect(it->value());
+      for (auto it : ordered_dict) {
+        collect(it.key());
+        collect(it.value());
       }
     } else {
       try {

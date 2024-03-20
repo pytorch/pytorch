@@ -112,7 +112,7 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : compiled_fn(nullptr) {}
+  CacheNode() : compiled_fn(nullptr) = default;
   ~CacheNode() {
     if (!Py_IsInitialized()) {
       compiled_fn.release(); // leak on shutdown
