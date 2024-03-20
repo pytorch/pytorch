@@ -28,6 +28,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
+from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
@@ -457,6 +458,12 @@ def _export_non_strict(
 
         gm = replace_set_grad_with_hop_pass(gm)
 
+    # Remove nn_module_stack metadata from all placeholders/inputs nodes.
+    for mod in gm.modules():
+        for node in mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                node.meta.pop("nn_module_stack", None)
+
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
@@ -594,6 +601,34 @@ def _rewrite_non_persistent_buffers(
                 assert spec.target not in constants
                 spec.persistent = False
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
+
+
+def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
+    """
+    Perform nn_module_stack checks on the graph.
+    Current constraints:
+        For the top level graph:
+        - populated for 'call_function', 'get_attr'
+        - None for 'placeholder', 'output'
+        For submodule graphs:
+        - None for 'placeholder', output'
+
+    TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
+    """
+    # Check top-level graph for all nodes, all graphs for placeholder & output nodes
+    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
+        for node in mod.graph.nodes:
+            if node.op in ["call_function", "get_attr"]:
+                if i == 0:
+                    if node.meta.get("nn_module_stack", None) is None:
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+            elif node.op in ["placeholder", "output"]:
+                if node.meta.get("nn_module_stack", None):
+                    raise SpecViolationError(
+                        f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                    )
 
 
 def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
@@ -847,6 +882,7 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+        _verify_nn_module_stack(gm)
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -866,6 +902,7 @@ def _export(
             ],
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
+            from_export=True,
         )
 
     gm_torch_level = _export_to_torch_ir(
@@ -902,8 +939,8 @@ def _export(
                     attr, static_shapes=True
                 )
 
-    # When aot_export lifts the params, we lose the nn_module_stack
-    # and source_fn from the param nodes as they are treated as fresh inputs
+    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
+    # from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
     params_buffers_to_node_meta = {}
     for node in gm_torch_level.graph.nodes:
@@ -972,6 +1009,10 @@ def _export(
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
+
+    # Don't copy over nn_module_stack metadata for params/buffers nodes
+    for metadata in params_buffers_to_node_meta.values():
+        metadata.pop("nn_module_stack", None)
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -1043,6 +1084,7 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
+    _verify_nn_module_stack(gm)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
@@ -1060,6 +1102,7 @@ def _export(
         + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         example_inputs=(args, kwargs),
         constants=constants,
+        from_export=True,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
