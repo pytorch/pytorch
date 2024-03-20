@@ -711,6 +711,34 @@ class TestCustomOp(CustomOpTestCaseBase):
             z = f(x, y)
             self.assertEqual(z.shape, x.shape)
 
+    @skipIfTorchDynamo("recursive dynamo")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    def test_blackbox_compile(self):
+        @torch.library.def_blackbox(mutated_args=())
+        def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+            return (x @ weight.t()) + bias
+
+        @custom_linear.impl_abstract
+        def _(x, weight, bias):
+            assert x.dim() == 2
+            assert weight.dim() == 2
+            assert bias.dim() == 1
+            assert x.shape[1] == weight.shape[1]
+            assert weight.shape[0] == bias.shape[0]
+            assert x.device == weight.device
+            return x.new_empty(x.size(0), weight.size(0))
+
+        x = torch.randn(2, 2)
+        weight = torch.randn(2, 2)
+        bias = torch.randn(2)
+        out = torch.compile(custom_linear, backend="eager", fullgraph=True)(
+            x, weight, bias
+        )
+        assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
+
     def test_blackbox_replaces(self):
         @def_blackbox(mutated_args=())
         def f(x: Tensor) -> Tensor:
@@ -774,6 +802,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
 
+    @skipIfTorchDynamo("dynamo module stack is different")
     def test_blackbox_namespace_inference(self):
         @def_blackbox(mutated_args=())
         def f(x: Tensor) -> Tensor:

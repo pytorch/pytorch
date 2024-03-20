@@ -65,7 +65,10 @@ def def_blackbox(*, mutated_args: Sequence[str], types: device_types_t = None):
     """
     assert len(mutated_args) == 0, "NYI"
     mod = get_caller_module(stacklevel=2)
-    namespace = mangle_module(mod.__name__)
+    if mod is None:
+        namespace = "module_not_found"  # can happen in colab
+    else:
+        namespace = mangle_module(mod.__name__)
 
     def inner(fn):
         return BlackBoxDef._from_fn(fn, types, mutated_args, namespace)
@@ -324,8 +327,6 @@ def get_caller_module(stacklevel=1):
     """Returns the fully qualified name of the module that called this function."""
     frame = sys._getframe(stacklevel)
     mod = inspect.getmodule(frame)
-    if mod is None:
-        raise RuntimeError("Can't infer namespace from module")
     return mod
 
 

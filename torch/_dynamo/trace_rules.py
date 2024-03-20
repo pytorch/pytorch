@@ -156,6 +156,7 @@ manual_torch_name_rule_map = {
     "torch.resize_as_": SkipFunctionVariable,
     "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
+    # "torch._library.define.BlackBoxDef.__call__": UserFunctionVariable,
     # functorch/vmap
     "torch._functorch.vmap._check_int_or_none": UserFunctionVariable,
     "torch._functorch.vmap._check_out_dims_is_int_or_int_pytree": UserFunctionVariable,
@@ -3180,6 +3181,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._functorch.vmap",
+    "torch._library.define",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
