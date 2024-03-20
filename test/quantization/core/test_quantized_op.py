@@ -4169,8 +4169,8 @@ class TestQuantizedLinear(TestCase):
         self,
         qlinear_op,
         post_op="none",
-        unary_post_op_args=[],
-        post_op_algorithms=["none"],
+        unary_post_op_args=(),
+        post_op_algorithms=("none"),
     ):
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
@@ -6518,7 +6518,7 @@ class TestQuantizedConv(TestCase):
             # The following should pass when input shape is changed
             torch.ops.quantized.conv_transpose2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
 
-    def _test_qconv_impl_cpu_tensor( ###
+    def _test_qconv_impl_cpu_tensor(
         self,
         qconv,
         qconv_prepack,
