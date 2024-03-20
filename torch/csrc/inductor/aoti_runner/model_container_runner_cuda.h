@@ -31,7 +31,9 @@ class TORCH_API AOTIEagerKernelRunnerCuda : public AOTIEagerKernelRunner {
   AOTIEagerKernelRunnerCuda(const std::string& kernel_so_path);
   ~AOTIEagerKernelRunnerCuda(){};
 
-  std::vector<at::Tensor> operator()(std::vector<at::Tensor>& inputs);
+  void operator()(
+      AtenTensorHandle* input_handles,
+      AtenTensorHandle* output_handles);
 };
 
 } // namespace torch::inductor

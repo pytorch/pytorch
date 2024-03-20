@@ -34,10 +34,11 @@ AOTIEagerKernelRunnerCuda::AOTIEagerKernelRunnerCuda(
     const std::string& kernel_so_path)
     : AOTIEagerKernelRunner(kernel_so_path) {}
 
-std::vector<at::Tensor> AOTIEagerKernelRunnerCuda::operator()(
-    std::vector<at::Tensor>& inputs) {
+void AOTIEagerKernelRunnerCuda::operator()(
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles) {
   at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
-  return AOTIEagerKernelRunner::operator()(inputs);
+  return AOTIEagerKernelRunner::operator()(input_handles, output_handles);
 }
 
 } // namespace torch::inductor

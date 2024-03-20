@@ -80,8 +80,7 @@ class TORCH_API AOTIModelContainerRunner {
   AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 };
 
-typedef std::vector<at::Tensor> (*AOTIEagerKernelFunc)(
-    std::vector<at::Tensor>& inputs);
+typedef void (*AOTIEagerKernelFunc)(AtenTensorHandle*, AtenTensorHandle*);
 
 class TORCH_API AOTIEagerKernelRunner {
  public:
@@ -92,7 +91,9 @@ class TORCH_API AOTIEagerKernelRunner {
   AOTIEagerKernelRunner& operator=(AOTIEagerKernelRunner&& other) = delete;
   ~AOTIEagerKernelRunner();
 
-  std::vector<at::Tensor> operator()(std::vector<at::Tensor>& inputs);
+  void operator()(
+      AtenTensorHandle* input_handles,
+      AtenTensorHandle* output_handles);
 
  protected:
   AOTIEagerKernelRunner(const std::string& model_so_path);
