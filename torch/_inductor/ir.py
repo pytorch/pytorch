@@ -66,6 +66,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    do_bench,
     get_kernel_metadata,
     is_dynamic,
     is_gpu,
@@ -3477,6 +3478,92 @@ class TritonTemplateBuffer(TemplateBuffer):
     pass
 
 
+PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
+
+
+class ChoiceCaller:
+    """
+    Represents a possible choice used in autotune_process.py.
+    During autotuning, self.benchmark() is first called to get benchmark result,
+    and if this choice is selected, self.output_node() is called to get the output_node.
+
+    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    """
+
+    def __init__(self, name, input_nodes, layout):
+        super().__init__()
+        self.name = name
+        self.layout = layout
+        self.input_nodes = input_nodes
+
+    def benchmark(self, *args, out) -> float:
+        algo = self.to_callable()
+        return do_bench(lambda: algo(*args, out=out))
+
+    def call_name(self) -> str:
+        raise NotImplementedError()
+
+    def to_callable(self):
+        raise NotImplementedError()
+
+    def hash_key(self) -> str:
+        raise NotImplementedError()
+
+    def output_node(self) -> "TensorBox":
+        raise NotImplementedError()
+
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        return {}
+
+
+class TritonTemplateCallerBase(ChoiceCaller):
+    def get_make_kernel_render(self) -> Any:
+        raise NotImplementedError()
+
+
+class MultiTemplateBuffer(TritonTemplateBuffer):
+    """
+    Represents a Buffer with multiple backing implementation choices.
+
+    Choices can be TritonTemplates or ExternKernels. During scheduling if there is a potential
+    epilogue we will benchmark each of the choices with the epilogue to determine an implementation.
+    Otherwise, the fastest base choice will be chosen.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: List[IRNode],
+        choice_timings: Dict[ChoiceCaller, float],
+    ):
+        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        self.choice_timings = choice_timings
+        self.original_inputs = inputs
+
+    @contextlib.contextmanager
+    def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):
+        assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        assert self.layout == caller.layout
+
+        render = self.make_kernel_render
+        self.make_kernel_render = caller.get_make_kernel_render()
+        try:
+            yield
+        finally:
+            self.make_kernel_render = render
+
+    def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase):
+        assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        assert self.layout.size == caller.layout.size
+        assert self.layout.stride == caller.layout.stride
+        self.make_kernel_render = caller.get_make_kernel_render()
+
+    def get_min_choice(self) -> Tuple[ChoiceCaller, float]:
+        min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
+        return (min_choice, self.choice_timings[min_choice])
+
+
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(
         self,
@@ -5478,9 +5565,22 @@ def _prepare_convolution_fusion_create(
 
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
-        output_stride = make_channels_last_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
+
+    # We won't do weight prepack for Conv if dynamic_shapes.
+    # In static shape cases, since weight is prepacked, we'll always force output to be channels last in the Conv kernel.
+    # In dynamic shape cases, for input with channels = 1, like tensor of size (s0, 1, 28, 28) and stride (784, 784, 28, 1),
+    # x = cls.require_stride_order(x, req_stride_order) where req_stride_order is in the channels last order
+    # won't change the stride of this tensor since stride for dimensions of size 1 is ignored. While in Conv kernel,
+    # this tensor is considered as channels first and the output will be in contiguous format.
+    # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
+    dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
+    if dynamic_shapes and is_contiguous_storage_and_layout(x):
+        output_stride = make_contiguous_strides_for(output_size)
+    else:
+        output_stride = make_channels_last_strides_for(output_size)
+
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
