@@ -1683,8 +1683,8 @@ class GraphModuleDeserializer:
                 shape_env=self.shape_env,
             )
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
-            self.signature = self.deserialize_signature(serialized_graph_module.signature)
             self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(serialized_graph_module.signature)
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
