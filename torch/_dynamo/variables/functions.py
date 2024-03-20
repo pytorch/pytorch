@@ -17,6 +17,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
+from .distributed import ProcessGroupVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -29,11 +30,11 @@ def wrap_bound_arg(tx, val, source=None):
     elif not source:
         from torch._dynamo.variables.builder import SourcelessBuilder
 
-        return SourcelessBuilder()(tx, val)
+        return SourcelessBuilder.create(tx, val)
     else:
-        from torch._dynamo.variables.builder import VariableBuilder
-
-        return VariableBuilder(tx, source=source)(val)
+        # Create a lazy variable to avoid guarding on __defaults__ unless really
+        # needed.
+        return variables.LazyVariableTracker.create(val, source)
 
 
 def wrap_args_kwargs(tx, result):
@@ -266,7 +267,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 else:
                     from .builder import SourcelessBuilder
 
-                    result[name] = SourcelessBuilder()(tx, cell.cell_contents)
+                    result[name] = SourcelessBuilder.create(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -691,9 +692,34 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
+        import torch.distributed as dist
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+
+        # Merge args into kwargs so positional and keyword args
+        # can be processed the same way.
+        signature = inspect.signature(self.fn)
+        kwargs = dict(signature.bind(*args, **kwargs).arguments)
+        args = ()
+
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
+            )
+
+        if kwargs.get("group") is None or kwargs["group"].value is None:
+            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
+
+        if self.fn == dist.all_reduce:
+            reduce_op_var = kwargs.get("op")
+            reduce_op = (
+                reduce_op_var.value
+                if reduce_op_var is not None
+                else signature.parameters["op"].default
+            )
+            if reduce_op not in REDUCE_OP_TO_STR:
+                raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
+            kwargs["op"] = variables.ConstantVariable.create(
+                REDUCE_OP_TO_STR[reduce_op]
             )
         return self.replacement_var.call_function(tx, args, kwargs)
 
@@ -815,12 +841,12 @@ class TritonKernelVariable(VariableTracker):
             raise Unsupported("Triton kernels should always be called with a grid")
 
         # Both for grid's meta as well as for the kernel, we need combined
-        # args and kwargs normalized
-        names = (
-            variables.ConstantVariable.create(name) for name in self.kernel.arg_names
-        )
-        kwargs = {variables.ConstantVariable.create(k): v for k, v in kwargs.items()}
-        normalized_args = {**dict(zip(names, args)), **kwargs}
+        # args and kwargs combined and normalized
+        combined_args_raw = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        combined_args = {
+            variables.ConstantVariable.create(k): v
+            for k, v in combined_args_raw.items()
+        }
 
         configs = (
             [config.kwargs for config in self.kernel.configs]
@@ -838,7 +864,7 @@ class TritonKernelVariable(VariableTracker):
                     ConstantVariable.create(k): ConstantVariable.create(v)
                     for k, v in config_args.items()
                 }
-                meta = ConstDictVariable({**normalized_args, **config_args}, dict)
+                meta = ConstDictVariable({**combined_args, **config_args}, dict)
                 grid = grid.call_function(tx, [meta], {})
 
             # Now, the grid must be a list either originally or through above
@@ -865,19 +891,33 @@ class TritonKernelVariable(VariableTracker):
             grids = [grids[0]]
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
             triton_kernel_wrapper_mutation,
         )
 
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
-        meta = ConstDictVariable(normalized_args, dict)
+        constant_args = {
+            k: v.as_python_constant()
+            for k, v in combined_args_raw.items()
+            if isinstance(v, ConstantVariable)
+        }
+        non_constant_args = {
+            k: v
+            for k, v in combined_args.items()
+            if not isinstance(v, ConstantVariable)
+        }
+
+        constant_args_idx = kernel_side_table.add_constant_args(constant_args)
+        meta = ConstDictVariable(non_constant_args, dict)
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
             {
                 "kernel_idx": self.kernel_idx,
+                "constant_args_idx": constant_args_idx,
                 "grid": grids,
                 "kwargs": meta.as_proxy(),
             },
