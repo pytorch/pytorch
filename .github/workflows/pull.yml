@@ -20,9 +20,17 @@ concurrency:
 permissions: read-all
 
 jobs:
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
+
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
     permissions:
       id-token: write
       contents: read
@@ -311,7 +319,7 @@ jobs:
     name: linux-focal-py3_8-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3_8-clang9-xla
+      build-environment: linux-focal-py3.8-clang9-xla
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
       test-matrix: |
         { include: [
@@ -323,7 +331,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-py3_8-clang9-xla-build
     with:
-      build-environment: linux-focal-py3_8-clang9-xla
+      build-environment: linux-focal-py3.8-clang9-xla
       docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
 
