@@ -1239,11 +1239,12 @@ class PatternMatcherPass:
                 get_mutation_region_id, graph
             )
         count = 0
-        for op, target in itertools.product(
-            ["call_function", "call_method", "call_module"], self.patterns
-        ):
-            for node in reversed(graph.find_nodes(op=op, target=target)):
-                target = extract_target(node)
+        for node in reversed(graph.nodes):
+            target = extract_target(node)
+            if (
+                node.op in ["call_function", "call_method", "call_module"]
+                and target in self.patterns
+            ):
                 # conservatively not applying pattern for cpu input,
                 # since some of the patterns induce codegen and split nodes.
                 # Note: we will only skip cpu compute if disable_cpp_codegen=True
