@@ -3,12 +3,19 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
-from ...select_algorithm import ChoiceCaller
+from ...ir import (
+    Buffer,
+    ChoiceCaller,
+    CUDATemplateBuffer,
+    IRNode,
+    Layout,
+    PrimitiveInfoType,
+    TensorBox,
+)
 from ...utils import sympy_product
 from ...virtualized import V
+from ..common import IndentedBuffer, Kernel, OpOverrides
 
-from ..common import IndentedBuffer, Kernel, OpOverrides, PrimitiveInfoType
 from ..cpp import CppPrinter, DTYPE_TO_CPP
 
 if TYPE_CHECKING:

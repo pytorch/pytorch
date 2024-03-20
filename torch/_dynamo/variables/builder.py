@@ -39,7 +39,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SubclassSymbolicContext,
     SymbolicContext,
 )
-from torch.fx.immutable_collections import immutable_list
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
@@ -76,7 +76,6 @@ from ..utils import (
     is_utils_checkpoint,
     istype,
     odict_values,
-    preserve_rng_state,
     tensor_always_has_static_shape,
     tuple_iterator,
     tuple_iterator_getitem,
@@ -85,7 +84,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 
-from .base import MutableLocal, typestr, VariableTracker
+from .base import MutableLocal, typestr, VariableTracker, VariableTrackerMeta
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -1104,7 +1103,9 @@ class VariableBuilder:
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 inner_source = AttrSource(self.source, attr)
-                VariableBuilder(self.tx, inner_source)(inner_value).recursive_realize()
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(self.tx, inner_source)(inner_value)
+                )
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
@@ -1152,7 +1153,7 @@ class VariableBuilder:
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
         # that there's not another great way to do this atm.
         # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
-        VariableBuilder(self.tx, source)(tensor_value).recursive_realize()
+        LazyVariableTracker.realize_all(VariableBuilder(self.tx, source)(tensor_value))
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
         )
@@ -1416,45 +1417,40 @@ def wrap_fx_proxy_cls(
 
         return value
 
-    with preserve_rng_state():
-        if example_value is None:
-            # only allow_non_graph_fake in this instance because we handle the non-fake
-            # cases properly below.
-            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+    # with preserve_rng_state():
+    if example_value is None:
+        # only allow_non_graph_fake in this instance because we handle the non-fake
+        # cases properly below.
+        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
-        # Handle recursive calls here
-        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
-            pass
+    # Handle recursive calls here
+    elif maybe_get_fake_mode(example_value) is tx.fake_mode:
+        pass
 
-        elif isinstance(example_value, torch.Tensor):
-            if tx.export:
-                # The legacy behavior for real value cache with subclasses was
-                # to perform a clone WITHOUT preserving the subclass.  It's
-                # not entirely clear this is what you actually want though.
-                with torch._C.DisableTorchFunctionSubclass():
-                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
-                        example_value
-                    )
-            # NB: If we're ignoring subclass, then the expectation is you will
-            # take the returned TensorVariable and wrap it into a more
-            # accurate TensorVariable that is able to track subclass-ness;
-            # otherwise this is wrong!
-            kwargs = {
-                "is_tensor": target_cls
-                in (TensorVariable, TensorWithTFOverrideVariable),
-            }
-            assert "source" in options and options["source"] is not None
-            kwargs["source"] = options["source"]
-            example_value = wrap_to_fake_tensor_and_record(
-                example_value, tx=tx, **kwargs
-            )
-        if isinstance(example_value, torch.Tensor) and (
-            maybe_get_fake_mode(example_value) is not tx.fake_mode
-        ):
-            raise InternalTorchDynamoError(
-                "`example_value` needs to be a `FakeTensor`"
-                f"wrapped by this instance of Dynamo. Found: {example_value}"
-            )
+    elif isinstance(example_value, torch.Tensor):
+        if tx.export:
+            # The legacy behavior for real value cache with subclasses was
+            # to perform a clone WITHOUT preserving the subclass.  It's
+            # not entirely clear this is what you actually want though.
+            with torch._C.DisableTorchFunctionSubclass():
+                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+        # NB: If we're ignoring subclass, then the expectation is you will
+        # take the returned TensorVariable and wrap it into a more
+        # accurate TensorVariable that is able to track subclass-ness;
+        # otherwise this is wrong!
+        kwargs = {
+            "is_tensor": target_cls in (TensorVariable, TensorWithTFOverrideVariable),
+        }
+        assert "source" in options and options["source"] is not None
+        kwargs["source"] = options["source"]
+        example_value = wrap_to_fake_tensor_and_record(example_value, tx=tx, **kwargs)
+    if isinstance(example_value, torch.Tensor) and (
+        maybe_get_fake_mode(example_value) is not tx.fake_mode
+    ):
+        raise InternalTorchDynamoError(
+            "`example_value` needs to be a `FakeTensor`"
+            f"wrapped by this instance of Dynamo. Found: {example_value}"
+        )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -1937,17 +1933,25 @@ class SourcelessBuilder:
     if/else type->VariableTracker trees that were cropping up all over dynamo.
     """
 
-    def __call__(self, tx, value) -> VariableTracker:
+    def __init__(self):
+        raise AssertionError("Use SourcelessBuilder.create()")
+
+    @staticmethod
+    def create(tx, value) -> VariableTracker:
+        fast_handler = SourcelessBuilder._type_handlers.get(type(value))
+        if fast_handler:
+            return fast_handler(tx, value)
+
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
-        if ConstantVariable.is_literal(value):
-            return SourcelessBuilder.wrap_constant_literal(value)
+        elif ConstantVariable.is_literal(value):
+            return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
+                tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
@@ -1955,17 +1959,6 @@ class SourcelessBuilder:
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
-        elif isinstance(value, dict):
-            items = {self(tx, k): self(tx, v) for k, v in value.items()}
-            return ConstDictVariable(items, mutable_local=MutableLocal())
-        elif isinstance(value, set):
-            # Nb. value is a set here so the iteration below is non-deterministic!
-            return SetVariable(
-                [self(tx, x) for x in value], mutable_local=MutableLocal()
-            )
-        elif isinstance(value, (tuple, list)):
-            cls = BaseListVariable.cls_for(type(value))
-            return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
         elif PlacementVariable.is_placement(value):
@@ -1978,3 +1971,38 @@ class SourcelessBuilder:
     def wrap_constant_literal(value):
         assert ConstantVariable.is_literal(value)
         return ConstantVariable.create(value=value)
+
+    @staticmethod
+    def make_type_handlers():
+        create = SourcelessBuilder.create
+        handlers = {}
+        for t in common_constant_types:
+            handlers[t] = lambda tx, value: ConstantVariable(value)
+        handlers[set] = lambda tx, value: SetVariable(
+            [create(tx, x) for x in value], mutable_local=MutableLocal()
+        )
+        handlers[dict] = lambda tx, value: ConstDictVariable(
+            {create(tx, k): create(tx, v) for k, v in value.items()},
+            mutable_local=MutableLocal(),
+        )
+        handlers[list] = lambda tx, value: ListVariable(
+            [create(tx, x) for x in value], mutable_local=MutableLocal()
+        )
+        handlers[tuple] = lambda tx, value: TupleVariable(
+            [create(tx, x) for x in value]
+        )
+        handlers[torch.Size] = lambda tx, value: SizeVariable(
+            [create(tx, x) for x in value]
+        )
+        handlers[immutable_dict] = handlers[dict]
+        handlers[immutable_list] = handlers[list]
+
+        def passthrough(tx, value):
+            return value
+
+        for cls in VariableTrackerMeta.all_subclasses:
+            handlers[cls] = passthrough
+        return handlers
+
+
+SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
