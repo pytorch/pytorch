@@ -1685,6 +1685,9 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
+        # Stash the compiler_fn to be used for backend match guard.
+        from torch._inductor.compile_fx import compile_fx
+        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -1817,7 +1820,7 @@ def compile(model: Optional[Callable] = None, *,
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom_backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
