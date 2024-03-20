@@ -17,7 +17,11 @@ from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
 from torch._inductor.test_case import TestCase
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_CI,
