@@ -223,10 +223,6 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
-sudo chown -R jenkins /var/lib/jenkins/workspace
-git config --global --add safe.directory /var/lib/jenkins/workspace
-
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
@@ -252,12 +248,18 @@ else
   ( ! get_exit_code python setup.py clean bad_argument )
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
+      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
+        # Install numpy-2.0 release candidate for builds
+        # Which should be backward compatible with Numpy-1.X
+        python -mpip install --pre numpy==2.0.0b1
+      fi
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel
@@ -358,5 +360,3 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
 fi
 
 print_sccache_stats
-
-sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
