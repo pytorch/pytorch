@@ -29,6 +29,7 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
+    make_strides_for,
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -2275,11 +2276,8 @@ make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 # See resize_storage_bytes
-make_fallback(aten.resize)
 make_fallback(aten.resize_)
-make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
-
 
 # 2) Medium
 make_fallback(aten.max_unpool2d)
@@ -5930,6 +5928,73 @@ def resize_storage_bytes_(variable, new_size):
 def create_nn_parameter(self, placeholder):
     self.realize()
     return TensorBox.create(ir.BindNNParameter(self, placeholder))
+
+
+@register_lowering(torch.ops.aten.resize)
+def resize(x, size, *, memory_format=None):
+    if memory_format is None:
+        memory_format = torch.contiguous_format
+    if memory_format == torch.preserve_format:
+        raise RuntimeError(f"unsupported memory format: {memory_format}")
+
+    assert isinstance(x, TensorBox)
+    assert isinstance(size, (list, tuple))
+
+    new_numel = sympy_product(size)
+    old_numel = x.get_numel()
+    dtype = x.get_dtype()
+    device = x.get_device()
+
+    if isinstance(x.data, ir.BaseView):
+        x.data = x.data.unwrap_view()
+
+    if (
+        torch.are_deterministic_algorithms_enabled()
+        and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    ):
+        if is_float_dtype(dtype):
+            uninitalized_val = float("nan")
+        elif is_integer_dtype(dtype):
+            uninitalized_val = torch.iinfo(dtype).max
+        else:
+            uninitalized_val = True
+    else:
+        # using zero as that is what empty does
+        uninitalized_val = 0.0
+
+    x_flat = view(x, (-1,))
+    flat_loader = x_flat.make_loader()
+    new_stride = make_strides_for(size, memory_format)
+    out_layout = ir.FixedLayout(
+        device,
+        dtype,
+        list(size),
+        new_stride,
+    )
+    out_indexer = out_layout.make_indexer()
+
+    def inner_fn(idx):
+        flat_index = out_indexer(idx)
+        flat_index_expr = ops.index_expr(flat_index, torch.int64)
+        limit = ops.index_expr(old_numel, torch.int64)
+        mask = ops.lt(flat_index_expr, limit)
+        x_val = flat_loader(
+            [
+                flat_index,
+            ]
+        )
+        return ops.where(mask, x_val, uninitalized_val)
+        # return ops.where(ops.lt(flat_index_expr, limit), flat_loader([flat_index, ]), uninitalized_val)
+
+    pointwise = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
+    return ir.ExternKernel.require_stride_order(
+        pointwise, ir.get_stride_order(new_stride)
+    )
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
