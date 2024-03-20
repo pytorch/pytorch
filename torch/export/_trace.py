@@ -42,6 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
@@ -311,6 +312,27 @@ def _restore_state_dict(
                 node.target = param_buffer_table[attr_name]
 
     traced_module.recompile()
+
+
+def _get_module_hierarchy(mod: torch.nn.Module) -> Dict[str, str]:
+    return {name: type(m).__name__ for name, m in mod.named_modules()}
+
+
+def _make_module_call_graph(
+    module_hierarchy: Dict[str, str],
+    in_spec: TreeSpec,
+    out_spec: TreeSpec,
+    module_call_signatures: Dict[str, ModuleCallSignature],
+) -> List[ModuleCallEntry]:
+    ret = [
+        ModuleCallEntry(fqn=fqn, signature=module_call_signatures.get(fqn))
+        for fqn in module_hierarchy
+    ]
+    assert ret[0].fqn == ""
+    ret[0].signature = ModuleCallSignature(
+        inputs=[], outputs=[], in_spec=in_spec, out_spec=out_spec
+    )
+    return ret
 
 
 def _export_to_torch_ir(
@@ -652,12 +674,13 @@ def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
 
 
 _EXPORT_FLAGS: Optional[Set[str]] = None
+_EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        global _EXPORT_FLAGS
+        global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
         try:
             start = time.time()
             ep = fn(*args, **kwargs)
@@ -680,6 +703,7 @@ def _log_export_wrapper(fn):
             raise e
         finally:
             _EXPORT_FLAGS = None
+            _EXPORT_MODULE_HIERARCHY = None
 
         return ep
 
@@ -738,7 +762,9 @@ def _export(
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
 
-    global _EXPORT_FLAGS
+    global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
+    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
+
     flags = set()
     flags.add("strict" if strict else "non_strict")
     flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
@@ -895,17 +921,9 @@ def _export(
             graph_signature=ep_non_strict.sig,
             state_dict=mod.state_dict(keep_vars=True),
             range_constraints=range_constraints,
-            module_call_graph=[
-                ModuleCallEntry(
-                    "",
-                    ModuleCallSignature(
-                        inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=out_spec
-                    ),
-                )
-            ]
-            + [
-                ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()
-            ],
+            module_call_graph=_make_module_call_graph(
+                _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
+            ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
             from_export=True,
@@ -1097,15 +1115,12 @@ def _export(
         graph_signature=export_graph_signature,
         state_dict=mod.state_dict(keep_vars=True),
         range_constraints=range_constraints,
-        module_call_graph=[
-            ModuleCallEntry(
-                "",
-                ModuleCallSignature(
-                    inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec
-                ),
-            )
-        ]
-        + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        module_call_graph=_make_module_call_graph(
+            _EXPORT_MODULE_HIERARCHY,
+            orig_in_spec,
+            orig_out_spec,
+            module_call_signatures,
+        ),
         example_inputs=(args, kwargs),
         constants=constants,
         from_export=True,
