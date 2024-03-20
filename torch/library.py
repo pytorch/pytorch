@@ -8,6 +8,7 @@ import inspect
 import re
 import contextlib
 import sys
+from torch._library.define import def_blackbox
 
 __all__ = [
     'Library',
@@ -16,6 +17,7 @@ __all__ = [
     'fallthrough_kernel',
     'impl_abstract',
     'get_ctx',
+    'def_blackbox',
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -178,6 +180,8 @@ class Library:
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        global _impls
+        _impls -= self._op_impls
         for name in self._op_defs:
             # Delete the cached torch.ops.ns.foo if it was registered.
             # Otherwise, accessing it leads to a segfault.
