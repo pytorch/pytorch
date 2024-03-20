@@ -73,6 +73,7 @@ from .utils import (
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
+    is_gpu,
 )
 from .virtualized import ops, V
 
@@ -245,7 +246,7 @@ def get_device_type(x):
 
 
 def is_triton(x):
-    return get_device_type(x) in ["cuda", "xpu"]
+    return is_gpu(get_device_type(x))
 
 
 def is_cpu(x):
@@ -1659,7 +1660,7 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if device.type not in ["cuda", "xpu"]:
+        if not is_gpu(device.type):
             # TODO: CPU support
             return [None] * len(dtypes)
 
@@ -3624,7 +3625,7 @@ class ConcatKernel(NopKernel):
 
             if (
                 input_unwrapped.is_input_buffer()
-                and inputs[i].get_device().type in ["cuda", "xpu"]
+                and is_gpu(inputs[i].get_device().type)
                 and not is_dynamic(input_buffer)
             ):
                 buffer_names.append(input_buffer.get_name())
@@ -5030,7 +5031,7 @@ class FallbackKernel(ExternKernelAlloc):
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
-                if device.type in ["cuda", "xpu"]:
+                if is_gpu(device.type):
                     return device
             return devices[0]
         return None

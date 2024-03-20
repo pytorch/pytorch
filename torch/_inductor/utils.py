@@ -1428,6 +1428,10 @@ def collect_defined_kernels(kernel_list):
         yield
 
 
-def device_need_guard(device: str):
+def is_gpu(device: str):
     assert isinstance(device, str)
     return device in ["cuda", "xpu"]
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    return is_gpu(device)

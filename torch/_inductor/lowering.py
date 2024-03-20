@@ -58,6 +58,7 @@ from .utils import (
     pad_listlike,
     parallel_num_threads,
     sympy_product,
+    is_gpu,
 )
 from .virtualized import ops, V
 
@@ -435,7 +436,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type in ["cuda", "xpu"]:
+                if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
@@ -514,7 +515,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type in ["cuda", "xpu"] and use_foreach and realize_outputs:
+                if is_gpu(device.type) and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -3333,8 +3334,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
-            and src.get_device().type
-            in [torch.device("cuda").type, torch.device("xpu").type]
+            and is_gpu(src.get_device().type)
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (

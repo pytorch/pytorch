@@ -49,6 +49,7 @@ from .utils import (
     is_wait,
     red_text,
     sympy_product,
+    is_gpu,
 )
 from .virtualized import V
 
@@ -580,7 +581,7 @@ class BaseSchedulerNode:
             layout = self.node.get_layout()
             dtype = self.node.get_dtype()
 
-        if layout.device.type not in ["cuda", "xpu"]:
+        if not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
@@ -2251,7 +2252,7 @@ class Scheduler:
 
     def create_backend(self, device: torch.device):
         assert (
-            device.type not in ["cuda", "xpu"] or device.index is not None
+            not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.add_device_info(device)
 
@@ -2267,7 +2268,7 @@ class Scheduler:
                 raise RuntimeError(
                     f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                 )
-            elif device.type in ["cuda", "xpu"]:
+            elif is_gpu(device.type):
                 raise RuntimeError(
                     "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
