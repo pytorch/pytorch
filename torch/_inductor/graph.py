@@ -1055,7 +1055,9 @@ class GraphLowering(torch.fx.Interpreter):
                         stride_order = ir.NHWC_STRIDE_ORDER
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
 
-                result = self.match_insignificant_strides(result, strides)
+                if is_output and len(strides):
+                    result.realize()
+                    result = self.match_insignificant_strides(result, strides)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
