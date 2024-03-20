@@ -4,13 +4,7 @@ from typing import List
 import torch
 from torch._higher_order_ops.effects import with_effects
 from .exported_program import ExportedProgram
-from .graph_signature import (
-    InputKind,
-    InputSpec,
-    OutputKind,
-    OutputSpec,
-    TensorArgument,
-)
+from .graph_signature import InputKind, InputSpec, OutputKind, OutputSpec, TokenArgument
 
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
@@ -27,7 +21,7 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     for inp in ep.graph_signature.input_specs:
         if inp.kind == InputKind.TOKEN:
             num_tokens += 1
-            assert isinstance(inp.arg, TensorArgument)
+            assert isinstance(inp.arg, TokenArgument)
             input_token_names.append(inp.arg.name)
         else:
             new_input_specs.append(inp)

@@ -49,6 +49,7 @@ from .graph_signature import (  # noqa: F401
     OutputSpec,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 
 
@@ -142,6 +143,7 @@ class ExportedProgram:
         constants: Optional[
             Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
         ] = None,
+        from_export: bool = False,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -165,6 +167,14 @@ class ExportedProgram:
             verifier = Verifier
         assert issubclass(verifier, Verifier)
         self._verifier = verifier
+
+        # from_export is True if the ExportedProgram is created from export/_trace.py or _export/serde/serialize.py
+        # With this we have stronger guarantees on graph metadata, and perform more checks with the verifier.
+        # External users may have their own workflows of constructing ExportedPrograms
+        # (e.g. dynamo trace -> make_fx() -> ExportedProgram() without going through export)
+        # and for this we cannot provide complete guarantees on graph metadata.
+        self.from_export = from_export
+
         # Validate should be always the last step of the constructor.
         self.verifier().check(self)
 
@@ -563,6 +573,7 @@ class ExportedProgram:
             example_inputs=self.example_inputs,
             verifier=self.verifier,
             constants=self.constants,
+            from_export=True,
         )
 
         if len(new_range_constraints) > 0:
@@ -651,6 +662,7 @@ class ExportedProgram:
             example_inputs=self.example_inputs,
             verifier=self.verifier,
             constants=self.constants,
+            from_export=True,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -686,6 +698,7 @@ class ExportedProgram:
             example_inputs=self.example_inputs,
             verifier=self.verifier,
             tensor_constants=self.tensor_constants,
+            from_export=True,
         )
 
 

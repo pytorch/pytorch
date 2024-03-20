@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import functools
 import logging
 import os
@@ -38,7 +39,6 @@ from torch._dynamo.utils import (
 )
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
@@ -59,7 +59,7 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops, output_node
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 if config.is_fbcode():
@@ -74,6 +74,15 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
+
+
+@dataclasses.dataclass
+class BoxedDeviceIndex:
+    value: Optional[int]
+
+    def set(self, device_idx):
+        assert device_idx is None or isinstance(device_idx, int)
+        self.value = device_idx
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -165,7 +174,7 @@ def _unlift_graph(mod, gm, graph_signature):
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
     for out in outputs:
-        if out.name in graph_signature.buffers_to_mutate:
+        if out in graph_signature.buffers_to_mutate:
             mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
         else:
             mutated_outputs.append(None)
@@ -459,7 +468,7 @@ def compile_fx_inner(
 
     if cudagraphs:
         # output args are tuple of first argument
-        output = output_node(gm)
+        output = list(gm.graph.nodes)[-1]
         assert len(output.args) == 1
         stack_traces = [
             (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
@@ -508,7 +517,7 @@ def compile_fx_inner(
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
             compiled_graph.current_callable = cudagraphify(
-                compiled_graph.get_current_callable(),
+                compiled_graph.current_callable,
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(compiled_graph.device_idxs)),
@@ -526,7 +535,7 @@ def compile_fx_inner(
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index is not None
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_callable = compiled_graph.get_current_callable()
+                compiled_graph_callable = compiled_graph.current_callable
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -553,9 +562,9 @@ def compile_fx_inner(
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
         new_callable = align_inputs(
-            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+            compiled_graph.current_callable, example_inputs, range(num_fixed)
         )
-        if new_callable is not compiled_graph.get_current_callable():
+        if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
 
     _step_logger()(
@@ -1356,6 +1365,13 @@ def _shape_env_from_inputs(inputs: List[torch.Tensor]):
 
     # TODO(voz): Should we always have one anyway?
     return None
+
+
+def output_node(gm: torch.fx.GraphModule):
+    """Get the output node from an FX graph"""
+    last_node = next(iter(reversed(gm.graph.nodes)))
+    assert last_node.op == "output"
+    return last_node
 
 
 def graph_returns_tuple(gm: torch.fx.GraphModule):
