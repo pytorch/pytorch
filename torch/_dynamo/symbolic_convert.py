@@ -17,12 +17,12 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, tracing, TracingContext
+from torch._guards import tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -45,7 +45,7 @@ from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
-from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
+from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
@@ -216,26 +216,6 @@ class BlockStackEntry:
 
 class ReturnValueOp(Exception):
     pass
-
-
-class InstructionTranslatorGraphState(NamedTuple):
-    output: OutputGraphState
-    symbolic_locals: Dict[str, VariableTracker]
-    stack: List[VariableTracker]
-    block_stack: List[BlockStackEntry]
-    instruction_pointer: Optional[int]
-    current_instruction: Instruction
-    lineno: int
-
-    def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
-        for k in self._fields:
-            if k == "output":
-                return self.output.diff(other.output, prefix=f"{k}.")
-            sv = getattr(self, k)
-            ov = getattr(other, k)
-            if sv != ov:
-                return f"{k} mismatch: {sv} != {ov}"
-        return None
 
 
 def stack_op(fn: typing.Callable[..., object]):
@@ -625,7 +605,6 @@ class BytecodeDistpatchTableMeta(type):
 
 
 class InstructionTranslatorBase(
-    Checkpointable[InstructionTranslatorGraphState],
     metaclass=BytecodeDistpatchTableMeta,
 ):
     output: OutputGraph
@@ -1850,31 +1829,6 @@ class InstructionTranslatorBase(
 
     def RETURN_GENERATOR(self, inst):
         self.append_prefix_inst(inst)
-
-    def copy_graphstate(self) -> InstructionTranslatorGraphState:
-        """Create a checkpoint of the current state by copying everything"""
-        return InstructionTranslatorGraphState(
-            self.output.copy_graphstate(),
-            dict(self.symbolic_locals),
-            list(self.stack),
-            list(self.block_stack),
-            self.instruction_pointer,
-            self.current_instruction,
-            self.lineno,
-        )
-
-    def restore_graphstate(self, state: InstructionTranslatorGraphState):
-        """Restore a checkpoint created by self.copy_graphstate()"""
-        (
-            output_state,
-            self.symbolic_locals,
-            self.stack,
-            self.block_stack,
-            self.instruction_pointer,
-            self.current_instruction,
-            self.lineno,
-        ) = state
-        self.output.restore_graphstate(output_state)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:

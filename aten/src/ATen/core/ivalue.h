@@ -1168,6 +1168,7 @@ struct TORCH_API IValue final {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   C10_ALWAYS_INLINE void moveFrom(IValue&& rhs) noexcept {
     if (rhs.isTensor()) {
       new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));
