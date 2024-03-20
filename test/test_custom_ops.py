@@ -607,8 +607,20 @@ class TestCustomOp(CustomOpTestCaseBase):
         def e() -> Tensor:
             return torch.empty([])
 
+        self.assertExpectedInline(infer_schema(e), """() -> Tensor""")
+
+        def f(x: Tensor) -> None:
+            pass
+
+        self.assertExpectedInline(infer_schema(f), """(Tensor x) -> ()""")
+
+        def g(
+            x: Tensor, y: List[Tensor], z: Tuple[Tensor, ...], w: List[Optional[Tensor]]
+        ) -> None:
+            pass
+
         self.assertExpectedInline(
-            infer_schema(e), """() -> Tensor"""
+            infer_schema(g), """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()"""
         )
 
     def test_infer_schema_unsupported(self):
