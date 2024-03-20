@@ -14,6 +14,7 @@ from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from ..eval_frame import skip_code
 
@@ -428,7 +429,7 @@ class DictView(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(
             [
-                create_instruction("LOAD_METHOD", argval=self.kv),
+                create_load_method(self.kv),
                 *create_call_method(0),
             ]
         )

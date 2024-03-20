@@ -3842,7 +3842,8 @@ def fn():
         fn = locals["fn"]
         orig_inst_str = "\n".join(list(map(str, dis.get_instructions(fn))))
         self.assertIn("EXTENDED_ARG", orig_inst_str)
-        self.assertIn("LOAD_METHOD", orig_inst_str)
+        load_method_str = "LOAD_ATTR" if sys.version_info >= (3, 12) else "LOAD_METHOD"
+        self.assertIn(load_method_str, orig_inst_str)
         keys = bytecode_transformation.get_code_keys()
         code_options = {k: getattr(fn.__code__, k) for k in keys}
         result = bytecode_transformation.clean_and_assemble_instructions(
@@ -3852,7 +3853,7 @@ def fn():
         )
         new_inst_str = "\n".join(list(map(str, result[0])))
         self.assertIn("EXTENDED_ARG", new_inst_str)
-        self.assertIn("LOAD_METHOD", new_inst_str)
+        self.assertIn(load_method_str, new_inst_str)
         l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
