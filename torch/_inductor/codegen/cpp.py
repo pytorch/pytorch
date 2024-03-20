@@ -359,7 +359,6 @@ def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
     return stride_at(index_vec_simplified, var)
 
 
-# TODO<Leslie>: Find a better name
 class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(  # type: ignore[override]
@@ -1875,12 +1874,7 @@ class CppKernel(Kernel):
             sympy_product(self.call_ranges), fallback=8192
         )
 
-    def codegen_loops_impl(
-        self,
-        loop_nest,
-        code,
-        worksharing,
-    ):
+    def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
         par_depth = self.decide_parallel_depth(
@@ -1967,11 +1961,11 @@ class CppKernel(Kernel):
                         if loop.is_reduction and not in_reduction:
                             code.splice(get_reduction_code_buffer(loops, "suffix"))
 
-            def is_parallel_reduction(loop):
-                root = loop.get_root()
-                return root.is_reduction and root.parallel
-
             def gen_loop(loop: LoopLevel):
+                def is_parallel_reduction(loop):
+                    root = loop.get_root()
+                    return root.is_reduction and root.parallel
+
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
                     if loop_lines is None:
@@ -3606,11 +3600,7 @@ class CppKernelProxy(CppKernel):
                     schedule_log.debug("Disabled vectorization: %s", e)
 
     def codegen_loops(self, code, worksharing):
-        self.codegen_loops_impl(
-            self.loop_nest,
-            code,
-            worksharing,
-        )
+        self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
 class ReasonFusedNodes(Enum):
@@ -3855,7 +3845,6 @@ class CppScheduling(BaseScheduling):
         """
         Turn an set of pre-fused nodes into a C++ kernel.
         """
-
         kernel_group = self.kernel_group
 
         if isinstance(node, OuterLoopFusedSchedulerNode):
@@ -4048,11 +4037,11 @@ class KernelGroup:
                                 ),
                             )
                         _loop_level_of_first_kernel.inner = []
-                        _loop_level_of_first_kernel.kernel = outer_loop_fused_kernel
+                        _loop_level_of_first_kernel.kernel = outer_loop_fused_kernel  # type: ignore[assignment]
 
             # Merge the List[LoopNestWithSplit] from kernels into new_kernel[0].loop_nest
             loop_level_nested_list: List[List[LoopLevel]] = [
-                _loop_nest.root for _loop_nest in loop_nest_list
+                _loop_nest.root for _loop_nest in loop_nest_list  # type: ignore[misc]
             ]
             _merge_loop_levels(
                 loop_level_nested_list,
