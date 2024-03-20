@@ -628,12 +628,12 @@ Tensor _sparse_semi_structured_linear(
                 "_sparse_semi_structured_linear: Setting out_dtype is only "
                 "supported for int8 input and int32 output");
 
-    // For now, only CC 8.x devices are supported.
+    // For now, only CC 8.x and 9.x devices are supported.
     const auto dprops = at::cuda::getCurrentDeviceProperties();
-    const auto is_sm8x = dprops->major == 8;
-    TORCH_CHECK(is_sm8x,
+    const auto is_sm8x_sm9x = dprops->major == 8 || dprops->major == 9;
+    TORCH_CHECK(is_sm8x_sm9x,
                 "_sparse_semi_structured_linear: Supported only on GPUs with "
-                "compute capability 8.x");
+                "compute capability 8.x and 9.x");
 
     // Validate datatypes of input tensors.
     TORCH_CHECK(tensor_a.dtype() == at::kChar ||
