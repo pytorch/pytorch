@@ -662,7 +662,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="kwarg key mismatch"
+        error_message="Trying to flatten user inputs with exported input tree spec"
     )
     def test_gpt2_tiny_from_config(self):
         # Model
@@ -1073,7 +1073,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 onnx_program.save(
-                    tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
                 )
 
                 # Generate random inputs.
@@ -1081,8 +1081,12 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 kwargs = create_kwargs()
                 # Original outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
+                if isinstance(real_model, torch.export.ExportedProgram):
+                    outputs = real_model.module()(*args, **kwargs)
+                else:
+                    outputs = real_model(*args, **kwargs)
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    real_model(*args, **kwargs), model_with_state_dict=real_model
+                    outputs, model_with_state_dict=real_model
                 )
                 # ORT outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
@@ -1251,8 +1255,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     @pytorch_test_common.xfail_dynamic_fx_test(
-        error_message=" Failed running call_function <built-in function scaled_dot_product_attention>",
-        reason="dynamo does not support it.",
+        error_message="NOT_IMPLEMENTED : Could not find an implementation for Trilu(14) node",
+        reason="Need to check Trilu node in the ONNX graph",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
@@ -1316,8 +1320,9 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
-    @pytorch_test_common.xfail(
-        error_message="whole graph export entails exactly one guard export"
+    @pytorch_test_common.skip_dynamic_fx_test(
+        reason="Dynamic shape check is not expected for exported program in this test suite.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
         config = transformers.MptConfig(
