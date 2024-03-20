@@ -818,7 +818,6 @@ def derived_types(
     def derived_seq_types(typ):
         return [
             typing.Sequence[typ],  # type: ignore[valid-type]
-            typing.Tuple[typ, ...],  # type: ignore[valid-type]
             typing.List[typ],  # type: ignore[valid-type]
         ]
 
@@ -829,7 +828,7 @@ def derived_types(
         for seq_typ in derived_seq_types(typing.Optional[base_type]):
             result.append((seq_typ, f"{cpp_type}?[]"))  # type: ignore[valid-type]
     if optional_list_base:
-        for seq_typ in derived_seq_types(typing.Sequence[base_type]):  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(base_type):  # type: ignore[valid-type]
             result.append((typing.Optional[seq_typ], f"{cpp_type}[]?"))  # type: ignore[valid-type]
     return result
 
