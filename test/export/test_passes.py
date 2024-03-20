@@ -7,8 +7,8 @@ with test_functionalization_with_native_python_assertion)
 import math
 import operator
 import unittest
-from typing import List, Set
 from re import escape
+from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -17,22 +17,38 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
 )
+from torch._export.passes.replace_set_grad_with_hop_pass import (
+    _is_set_grad_enabled_node,
+    _is_set_grad_enabled_sub_mod,
+)
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     get_view_copy_of_view_op,
     is_view_op,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from torch._export.utils import (
+    node_inline_,
+    nodes_count,
+    nodes_filter,
+    nodes_map,
+    sequential_split,
+)
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch.export import export
+from torch.export._remove_auto_functionalized_pass import (
+    unsafe_remove_auto_functionalized_pass,
+)
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
+from torch.library import impl, _scoped_library
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
-from torch.utils import _pytree as pytree
-from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_, nodes_count
-from torch._export.passes.replace_set_grad_with_hop_pass import (
-    _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
 )
-
+from torch.utils import _pytree as pytree
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
     count = 0
@@ -619,6 +635,97 @@ def forward(self, sin, cos):
             after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
             self.assertEqual(gm(*args), new_gm(*args))
+
+    def test_remove_auto_functionalized_pass(self) -> None:
+        with _scoped_library("DO_NOT_USE_TEST_ONLY", "DEF") as lib:
+
+            lib.define("custom_mutator(Tensor x, Tensor(a!) y) -> Tensor")
+
+            @impl(lib, "custom_mutator", "Meta")
+            def custom_mutator_meta(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ) -> torch.Tensor:
+                return torch.empty_like(x)
+
+
+            @impl(lib, "custom_mutator", "CompositeExplicitAutograd")
+            def custom_mutator(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ) -> torch.Tensor:
+                return x + y.add_(1)
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("state", torch.zeros(1))
+
+                def forward(self, x):
+                    return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator(x, self.state)
+
+            mod = M()
+            x = torch.randn([3, 3])
+            ep = export(mod, (x,))
+            inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+            nodes = inplace_ep.graph.nodes
+            for node in nodes:
+                if node.op == "call_function":
+                    self.assertFalse(node.target is auto_functionalized)
+                    self.assertFalse(node.target is operator.getitem)
+
+            for spec in inplace_ep.graph_signature.output_specs:
+                self.assertFalse("getitem" in spec.arg.name)
+
+    def test_remove_auto_functionalized_pass_tuple(self) -> None:
+        with _scoped_library("DO_NOT_USE_TEST_ONLY", "DEF") as lib:
+
+            lib.define("custom_mutator_tuple(Tensor x, Tensor(a!) y) -> (Tensor, Tensor)")
+
+            @impl(lib, "custom_mutator_tuple", "Meta")
+            def custom_mutator_tuple_meta(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                return (torch.empty_like(x), torch.empty_like(x))
+
+
+            @impl(lib, "custom_mutator_tuple", "CompositeExplicitAutograd")
+            def custom_mutator_tuple(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                return (x, x + y.add_(1))
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("state", torch.zeros(1))
+
+                def forward(self, x):
+                    return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple(
+                        x, self.state
+                    )
+
+            mod = M()
+            x = torch.randn([3, 3])
+            ep = export(mod, (x,))
+            inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+
+            nodes = inplace_ep.graph.nodes
+            getitems = 0
+            for node in nodes:
+                if node.op == "call_function":
+                    self.assertFalse(node.target is auto_functionalized)
+                    if node.target is operator.getitem:
+                        getitems += 1
+            self.assertEqual(getitems, 2)  # tuple return of len 2
+
+            out_specs = inplace_ep.graph_signature.output_specs
+            self.assertEqual(out_specs[0].arg.name, "arg0_1")  # state
+            self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
+            self.assertEqual(out_specs[2].arg.name, "getitem_1")  # tuple return 2
+
 
 if __name__ == '__main__':
     run_tests()
