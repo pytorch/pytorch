@@ -723,14 +723,14 @@ class Node:
                 name in ("target", "op") and
                 hasattr(self, name) and
                 getattr(self, name) != value and
-                hasattr(self.graph, "_side_table") and
-                self in self.graph._side_table
+                hasattr(self.graph, "_find_nodes_lookup_table") and
+                self in self.graph._find_nodes_lookup_table
         ):
             update = True
-            self.graph._side_table.remove(self)
+            self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
         if update:
-            self.graph._side_table.insert(self)
+            self.graph._find_nodes_lookup_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
