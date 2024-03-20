@@ -2057,6 +2057,7 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_runtime_checks_dtype_failed(self):
         class Model(torch.nn.Module):
             def __init__(self):
