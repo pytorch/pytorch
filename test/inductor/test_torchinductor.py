@@ -8036,6 +8036,18 @@ class CommonTemplate:
             "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         )
 
+    def test_insignificant_strides(self):
+        def f(x):
+            tmp = x + 1
+            return tmp.view(-1, 1, 2)
+
+        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(out.stride(), compiled_out.stride())
+        self.assertEqual(out, compiled_out)
+
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
