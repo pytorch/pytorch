@@ -1434,7 +1434,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     }
 
     privateuse1_backend_name = torch.utils.backend_registration._privateuse1_backend_name
-    if privateuse1_backend_name != "privateuseone":
+    if hasattr(Tensor, privateuse1_backend_name):
         ret[getattr(Tensor, privateuse1_backend_name)] = lambda self, device=None, non_blocking=False, **kwargs: -1
         ret[getattr(Tensor, f'is_{privateuse1_backend_name}').__get__] = lambda self: -1  # noqa: B009
 
