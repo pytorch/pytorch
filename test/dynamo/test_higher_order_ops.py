@@ -4479,9 +4479,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_simple(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
 
         def fn(x):
@@ -4493,6 +4490,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         v = torch.randn(3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -4536,9 +4537,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_has_aux(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
 
         def fn(x):
@@ -4550,6 +4548,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         v = torch.randn(3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -4595,9 +4597,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_two_tensors_has_aux(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
 
         def fn(x, y):
@@ -4610,6 +4609,10 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3, 3)
         v = torch.randn(3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x, y, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -4662,9 +4665,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_two_tensors_disable_grad(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
 
         def fn(x):
@@ -4677,6 +4677,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         v = torch.randn(3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -4722,9 +4726,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_two_tensors_disable_enable_disable_grad(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
 
         def fn(x):
@@ -4748,6 +4749,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
         v = torch.randn(3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -4797,9 +4802,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_freevar_tensor(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
         y = torch.randn(3, 3)
 
@@ -4818,9 +4820,6 @@ class GraphModule(torch.nn.Module):
     def test_jvp_jvp(self):
         counters.clear()
 
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         def fn(x):
             return torch.func.jvp(torch.sin, (x,), (x,))
 
@@ -4829,6 +4828,10 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -4898,9 +4901,6 @@ class GraphModule(torch.nn.Module):
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_freevar_python_scalar(self):
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         counters.clear()
         y = 3
 
