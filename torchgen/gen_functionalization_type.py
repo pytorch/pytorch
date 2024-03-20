@@ -664,7 +664,7 @@ def emit_inplace_functionalization_body(
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
          {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-         {return_from_mutable_noop_redispatch(f, 'tmp_output')};
+         {return_from_mutable_noop_redispatch(f, 'tmp_output')}
         }}
       }} else {{
         {return_type} tmp_output;

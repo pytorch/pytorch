@@ -1,7 +1,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 std::atomic<const DeviceGuardImplInterface*>
@@ -14,5 +13,4 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
   device_guard_impl_registry[static_cast<size_t>(type)].store(impl);
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

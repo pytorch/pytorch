@@ -274,9 +274,9 @@ Examples::
 
     no_grad
     enable_grad
-    set_grad_enabled
+    autograd.grad_mode.set_grad_enabled
     is_grad_enabled
-    inference_mode
+    autograd.grad_mode.inference_mode
     is_inference_mode_enabled
 
 Math operations
@@ -742,7 +742,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/compile/index.html>`__
+`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------
