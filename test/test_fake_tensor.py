@@ -12,7 +12,6 @@ import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._guards import tracing, TracingContext
 from torch._subclasses.fake_tensor import (
-    _ShapeEnvSettings,
     extract_tensor_metadata,
     FakeTensor,
     FakeTensorMode,
@@ -21,7 +20,7 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext, ShapeEnvSettings
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
@@ -1341,9 +1340,9 @@ class FakeTensorDispatchCache(TestCase):
     def test_shape_env_settings(self):
         """
         Validation that any boolean settings in ShapeEnv are present in the
-        _ShapeEnvSettings. We hope to ensure that any new settings that might
+        ShapeEnvSettings. We hope to ensure that any new settings that might
         affect FakeTensor dispatch are included in the cache key calculation.
-        If this test fails, consider updating _ShapeEnvSettings or change this
+        If this test fails, consider updating ShapeEnvSettings or change this
         test to omit checking for the new field.
         """
         init_sig = inspect.signature(ShapeEnv._init)
@@ -1352,7 +1351,7 @@ class FakeTensorDispatchCache(TestCase):
             if type(param.default) is bool
         ]
 
-        settings = [f.name for f in dataclasses.fields(_ShapeEnvSettings)]
+        settings = [f.name for f in dataclasses.fields(ShapeEnvSettings)]
         for arg in args:
             self.assertTrue(arg in settings)
 
