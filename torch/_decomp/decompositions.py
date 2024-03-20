@@ -2340,7 +2340,7 @@ def cudnn_batch_norm_backward(
 
 
 @register_decomposition(aten._adaptive_avg_pool2d)
-@aten._adaptive_avg_pool2d.py_impl(DispatchKey.Autograd)
+@aten._adaptive_avg_pool2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
