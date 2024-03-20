@@ -138,11 +138,11 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        self._check_graph_module(ep.graph_module)
+        self._check_graph_module(ep.graph_module, from_export=ep.from_export)
         _verify_exported_program_signature(ep)
 
     @final
-    def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
+    def _check_graph_module(self, gm: torch.fx.GraphModule, from_export: bool = False) -> None:
         def _allowed_getattr_types() -> Tuple[Type[Any], ...]:
             ret = self.allowed_getattr_types()
             assert not any(t is object for t in ret)
@@ -412,6 +412,6 @@ def _verify_exported_program_signature(exported_program) -> None:
 
 
 def load_verifier(dialect: str) -> Optional[Type[Verifier]]:
-    if dialect == "ATEN":
+    if dialect == "ATEN" or dialect == "":
         return _VerifierMeta._registry.get(dialect)
     return _VerifierMeta._registry[dialect]
