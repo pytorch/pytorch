@@ -58,7 +58,8 @@ class TORCH_API Reducer {
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
       std::unordered_map<size_t, std::string> param_names,
-      int64_t first_bucket_bytes_cap);
+      int64_t first_bucket_bytes_cap,
+      bool use_float_for_local_used_map);
 
   ~Reducer() noexcept(false);
 
@@ -563,6 +564,9 @@ class TORCH_API Reducer {
       cached_variables_for_bucket_;
 
   bool optim_in_backward_{false};
+
+  // Whether to use the float data type for local_used_map.
+  bool use_float_for_local_used_map_{false};
   friend class Logger;
 };
 
