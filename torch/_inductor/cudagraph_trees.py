@@ -786,11 +786,11 @@ class CUDAGraphNode:
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
 
-        self.non_static_input_idx: List[int] = [
+        self.non_static_input_idx: LevelList[int] = [
             i for i in range(len(inputs)) if i not in self.static_input_idxs
         ]
 
-        self.non_managed_static_input_idxs: List[int] = [
+        self.non_managed_static_input_idxs: LevelList[int] = [
             i
             for i in wrapped_function.static_input_idxs
             if i not in self.cudagraph_managed_idxs
@@ -962,7 +962,7 @@ class CUDAGraphNode:
         return outputs
 
     def run(self, new_inputs):
-        # self.check_static_inputs_are_stable(new_inputs)
+        self.check_static_inputs_are_stable(new_inputs)
 
         for idx in self.non_static_input_idx:
             if not isinstance(new_inputs[idx], torch.Tensor):
