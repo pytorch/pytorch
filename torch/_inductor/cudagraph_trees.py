@@ -961,7 +961,6 @@ class CUDAGraphNode:
         self.recording_outputs = None
         return outputs
 
-    @torch.profiler.record_function("CUDAGraphNode.run")
     def run(self, new_inputs):
         # self.check_static_inputs_are_stable(new_inputs)
 
@@ -1068,7 +1067,6 @@ class CUDAGraphNode:
 
         return output_storages
 
-    @torch.profiler.record_function("run_graph")
     def run_graph(self):
         assert self.graph is not None
         self.graph.replay()
