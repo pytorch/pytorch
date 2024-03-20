@@ -201,6 +201,24 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_noncontiguous_output(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x, y, z):
+            x_transposed = x.permute(0, 2, 1).contiguous()
+            tmp = torch._C._nn.linear(x_transposed, y, z)
+            return tmp.permute(0, 2, 1)
+
+        x_inner = torch.randn(4, 16, 4, requires_grad=True)
+        y_inner = torch.randn(4, 16, requires_grad=True)
+        z_inner = torch.randn(4, requires_grad=True)
+        x = DTensor.from_local(x_inner, mesh, [Shard(1)], run_check=False)
+        y = DTensor.from_local(y_inner, mesh, [Shard(1)], run_check=False)
+        z = DTensor.from_local(z_inner, mesh, [Replicate()], run_check=False)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y, z)
+        out.contiguous().sum().backward()
+
     @run_with_both_funcol_impls
     def test_dynamo_dtensor_from_local(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
