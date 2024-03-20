@@ -1,4 +1,5 @@
 import contextlib
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
 
@@ -307,7 +308,16 @@ class FunctionalTensorMode(TorchDispatchMode):
                 alias_info = len(
                     [i for i in func._schema.arguments if i.alias_info is not None]
                 )
-                return alias_info != 0 or func._schema.is_mutable
+                should_decompose = alias_info != 0 or func._schema.is_mutable
+                if not should_decompose:
+                    if func.namespace not in ["aten", "prim"]:
+                        warnings.warn(
+                            f"At pre-dispatch tracing, we will assume that any "
+                            f"custom op that is marked with CompositeImplicitAutograd "
+                            f"and functional are safe to not decompose. We found {func}"
+                            f" to be one such op."
+                        )
+                return should_decompose
             return True
 
         if (
@@ -347,10 +357,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            if self.pre_dispatch:
-                raise NotImplementedError(
-                    "Auto functionalization is not supported on pre-dispatch tracing"
-                )
+            # it doesn't matter what mode we use here because
+            # the implementation of do_auto_functionalize doesn't
+            # interact with FunctionalTensorMode at all
             return do_auto_functionalize(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
