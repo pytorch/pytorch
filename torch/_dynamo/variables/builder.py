@@ -867,13 +867,10 @@ class VariableBuilder:
             # which are freed as they are used in inductor. Dynamo's default behavior is to
             # lift all tensors to the graph inputs, but this will cause dynamo to hold an
             # extra reference to the activation tensors and increase peak memory usage.
-            # e.g.
-            #   def compiled_autograd_graph(inputs: List[Tensor], ...):
-            #     getitem = inputs[0]
-            #     activation = inputs[1]; inputs = None
-            #     mm = torch.ops.aten.mm.default(getitem, activation)
-            #     activation = None  # this frees memory if it is not a graph input
-            #     ...
+            # To allow freeing ASAP, we keep the list as graph argument to the dynamo output
+            # graph, and unpack it locally.
+            # e.g. instead of `def forward(self, L_inputs_0_, L_inputs_1_, ...):`, we have
+            # `def forward(self, L_inputs_):`
             source = self.source
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
