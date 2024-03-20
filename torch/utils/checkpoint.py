@@ -132,13 +132,14 @@ class DefaultDeviceType:
 
 
 def _infer_device_type(*args):
-    device_types = list(
-        {
-            arg.device.type
-            for arg in args
-            if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"
-        }
-    )
+    device_types = []
+
+    def add_device_types(arg):
+        nonlocal device_types
+        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+            device_types.append(arg.device.type)
+    tree_map(add_device_types, args)
+
     if len(device_types) > 1:
         warnings.warn(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices. "
@@ -165,13 +166,13 @@ def _infer_device_type(*args):
 def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
-    fwd_device_ids = list(
-        {
-            arg.get_device()
-            for arg in args
-            if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"
-        }
-    )
+    fwd_device_ids = []
+
+    def add_device_ids(arg):
+        nonlocal fwd_device_ids
+        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+            fwd_device_ids.append(arg.get_device())
+    tree_map(add_device_ids, args)
 
     fwd_device_states = []
     device_module = _get_device_module(_infer_device_type(*args))
