@@ -2275,7 +2275,7 @@ make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-# See resize_storage_bytes
+# Looking like impossible, see: https://github.com/pytorch/pytorch/pull/121354
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as_)
 
