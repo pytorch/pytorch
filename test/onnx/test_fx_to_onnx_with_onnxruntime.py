@@ -887,11 +887,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.xfail_dynamic_fx_test(
         error_message="shape_env should be set if tracing with 'symbolic'"
     )
-    @pytorch_test_common.xfail(
-        error_message="Type Error: Data in initializer 'h_0_attn_bias' has element type tensor(uint8) "
-        "but usage of initializer in graph expects tensor(bool)",
-        reason="https://github.com/huggingface/transformers/issues/21013",
-    )
     def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
         device = "cpu"
