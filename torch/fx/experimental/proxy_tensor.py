@@ -629,8 +629,9 @@ def dispatch_trace(
         root: Union[torch.nn.Module, Callable],
         tracer: Tracer,
         concrete_args: Optional[Tuple[Any, ...]] = None,
+        concrete_arg_names: Optional[Tuple[str, ...]] = None,
 ) -> GraphModule:
-    graph = tracer.trace(root, concrete_args)
+    graph = tracer.trace(root, concrete_args, concrete_arg_names)
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
     dedupe_symints(graph)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
@@ -977,8 +978,8 @@ class _ModuleStackTracer(PythonKeyTracer):
             return attr_val
         return self.proxy_type(attr_val, attr)
 
-    def trace(self, root, concrete_args):
-        res = super().trace(root, concrete_args)
+    def trace(self, root, concrete_args, concrete_arg_names):
+        res = super().trace(root, concrete_args, concrete_arg_names)
         # Since we are making AttrProxy mimic the original
         # submodule, when someone registers a module directly
         # to the tracer while tracing, the proxy object gets registered
@@ -1180,7 +1181,10 @@ def make_fx(f,
         # thus irrelevant to any external functional trace.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():
-            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
+            arg_names = [x._name if isinstance(x, FakeTensor) and hasattr(x, "_name") else None for x in args]
+            if all([x is None for x in arg_names]):
+                arg_names = None
+            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs), concrete_arg_names=arg_names)
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if tracing_mode == "symbolic":

@@ -564,7 +564,7 @@ class Tracer(TracerBase):
 
     # This method will be refactored
     @compatibility(is_backward_compatible=False)
-    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
+    def create_args_for_root(self, root_fn, is_module, concrete_args=None, concrete_arg_names=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
@@ -618,6 +618,12 @@ class Tracer(TracerBase):
             return root_fn, args
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
+        # arg_names = [
+        #     next(names_iter)
+        #     if concrete_arg_names[idx] is None
+        #     else concrete_arg_names[idx]
+        #     for idx in range(skip_arg_idx, total_args)
+        # ]
         if isinstance(concrete_args, tuple):
             if len(arg_names) != len(concrete_args):
                 raise RuntimeError(
@@ -629,6 +635,7 @@ class Tracer(TracerBase):
             return self._proxy_placeholder(name, concrete_args, sig, fn_for_analysis)
 
         args.extend(proxy_placeholder(names) for names in arg_names)
+        breakpoint()
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs
@@ -665,6 +672,7 @@ class Tracer(TracerBase):
         self,
         root: Union[torch.nn.Module, Callable[..., Any]],
         concrete_args: Optional[Dict[str, Any]] = None,
+        concrete_arg_names: Optional[List[str]] = None,
     ) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -744,7 +752,7 @@ class Tracer(TracerBase):
 
             fn_globals = fn.__globals__  # run before it gets patched
             fn, args = self.create_args_for_root(
-                fn, isinstance(root, torch.nn.Module), concrete_args
+                fn, isinstance(root, torch.nn.Module), concrete_args, concrete_arg_names
             )
 
             parameter_proxy_cache: Dict[

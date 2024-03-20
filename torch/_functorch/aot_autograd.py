@@ -1088,31 +1088,31 @@ https://github.com/pytorch/pytorch/issues/101192
             return *fw_outs, *output_gradients
         fx_g = make_fx(flattened_joint)(*full_args)
 
-    # deal with strict/non-strict
-    if hasattr(mod, "_export_root"):  # non-strict
-        forward_call = mod._export_root.forward
-        prettify_func = lambda x:"_".join(x.split(".")[1:])
-    else:
-        forward_call = mod.forward
-        prettify_func = lambda x:x[len("L__self___" if x.startswith("L__self____") else "fn.") : ].replace(".", "__")
+    # # deal with strict/non-strict
+    # if hasattr(mod, "_export_root"):  # non-strict
+    #     forward_call = mod._export_root.forward
+    #     prettify_func = lambda x:"_".join(x.split(".")[1:])
+    # else:
+    #     forward_call = mod.forward
+    #     prettify_func = lambda x:x[len("L__self___" if x.startswith("L__self____") else "fn.") : ].replace(".", "__")
 
-    # assign parameter & buffer names
-    graph_nodes = list(fx_g.graph.nodes)
-    node_index = 0
-    for tensor_dict, tensor_type in zip([named_parameters, named_buffers], ["p", "b"]):
-        for i, tensor_name in enumerate(tensor_dict.keys()):
-            node = graph_nodes[node_index]
-            name = f"{tensor_type}_{prettify_func(tensor_name)}"
-            node.name = node.target = name
-            node_index += 1
+    # # assign parameter & buffer names
+    # graph_nodes = list(fx_g.graph.nodes)
+    # node_index = 0
+    # for tensor_dict, tensor_type in zip([named_parameters, named_buffers], ["p", "b"]):
+    #     for i, tensor_name in enumerate(tensor_dict.keys()):
+    #         node = graph_nodes[node_index]
+    #         name = f"{tensor_type}_{prettify_func(tensor_name)}"
+    #         node.name = node.target = name
+    #         node_index += 1
 
-    # assign input names
-    forward_sig = inspect.signature(forward_call).bind(*args, **kwargs).arguments
-    flat_args, _ = pytree.tree_flatten_with_path(forward_sig)
-    for i, (tree_path, val) in enumerate(flat_args):
-        node = graph_nodes[params_len + i]
-        name = "_".join(str(y.key if isinstance(y, pytree.MappingKey) else y.idx) for y in tree_path).replace(".", "__")
-        node.name = node.target = name
+    # # assign input names
+    # forward_sig = inspect.signature(forward_call).bind(*args, **kwargs).arguments
+    # flat_args, _ = pytree.tree_flatten_with_path(forward_sig)
+    # for i, (tree_path, val) in enumerate(flat_args):
+    #     node = graph_nodes[params_len + i]
+    #     name = "_".join(str(y.key if isinstance(y, pytree.MappingKey) else y.idx) for y in tree_path).replace(".", "__")
+    #     node.name = node.target = name
 
     # assign input names for submodules
     def prettify_cond_submodule_names(gm):
@@ -1161,7 +1161,7 @@ https://github.com/pytorch/pytorch/issues/101192
                     prettify_cond_submodule_names(subgraph)  # recurse on subgraphs
                     subgraph.recompile()
 
-    prettify_cond_submodule_names(fx_g)
+    # prettify_cond_submodule_names(fx_g)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(

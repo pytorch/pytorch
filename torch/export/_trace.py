@@ -466,9 +466,15 @@ def _export_non_strict(
             torch.compiler._is_compiling_flag = old_value
 
     # convert to named fake tensors
-    fake_args = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_args, is_leaf=lambda x:isinstance(x, FakeTensor))
-    fake_kwargs = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_kwargs, is_leaf=lambda x:isinstance(x, FakeTensor))
-    fake_params_buffers = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_params_buffers, is_leaf=lambda x:isinstance(x, FakeTensor))
+    def _assign_name(x):
+        x._name = "hello"
+        return x
+    # fake_args = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_args, is_leaf=lambda x:isinstance(x, FakeTensor))
+    # fake_kwargs = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_kwargs, is_leaf=lambda x:isinstance(x, FakeTensor))
+    # fake_params_buffers = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_params_buffers, is_leaf=lambda x:isinstance(x, FakeTensor))
+    fake_args = pytree.tree_map(_assign_name, fake_args, is_leaf=lambda x:isinstance(x, FakeTensor))
+    fake_kwargs = pytree.tree_map(_assign_name, fake_kwargs, is_leaf=lambda x:isinstance(x, FakeTensor))
+    fake_params_buffers = pytree.tree_map(_assign_name, fake_params_buffers, is_leaf=lambda x:isinstance(x, FakeTensor))
     breakpoint()
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
