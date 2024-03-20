@@ -66,10 +66,10 @@ ARG TRITON
 # try to reach out to S3, which docker build runners don't have access
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
-# TODO: will add triton xpu commit
-COPY ci_commit_pins/triton.txt triton.txt
+COPY ci_commit_pins/triton-xpu.txt triton-xpu.txt
+COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
+RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 
 # (optional) Install database packages like LMDB and LevelDB
 ARG DB
