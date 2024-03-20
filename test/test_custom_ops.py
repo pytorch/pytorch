@@ -615,7 +615,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertExpectedInline(infer_schema(f), """(Tensor x) -> ()""")
 
         def g(
-            x: Tensor, y: List[Tensor], z: Tuple[Tensor, ...], w: List[Optional[Tensor]]
+            x: Tensor, y: List[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
         ) -> None:
             pass
 
@@ -831,15 +831,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             # int[N] in Dispatcher is a bit wild, so we don't try to support it.
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
-                raise NotImplementedError()
-
-            del foo
-
-        with self.assertRaisesRegex(ValueError, "unsupported type"):
-            # We could theoretically support this, but the syntax for suporting
-            # int[] is Sequence[int]
-            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor, y: List[int]) -> Tensor:
                 raise NotImplementedError()
 
             del foo
