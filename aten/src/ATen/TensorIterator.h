@@ -167,6 +167,17 @@ struct TORCH_API OperandInfo {
 
   bool is_output = false;
 
+  // will_resize is only for output tensor.
+  // 1) Functional call(like torch.add(self, other)): output tensor is
+  //    undefined, and pytorch creates a new tensor by using common shape
+  //    and computed stride in TensorIterator;
+  // 2) Inplace call(like torch.add_(self, other)): output tensor is same
+  //    with input tensor, and can't to modify tensor's size and stride;
+  // 3) Op call with output(like torch.add(self, other, out = output)):
+  //    output tensor is defined, but tensor shape maybe different with common
+  //    shape. If tensor shape is not same with common shape, this output
+  //    tensor will be resized by using common shape and computed stride in
+  //    TensorIterator. Otherwise can't modify tensor's size and stride.
   bool will_resize = false;
 
   bool is_read_write = false;
@@ -470,6 +481,21 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
   void _unsafe_set_arg_data(const int64_t arg, void* data) {
     operands_[arg].data = data;
+  }
+
+  // Helper functions for custom device, custom device can get OperandInfo and
+  // NameVector in their side.
+  const OperandInfo& operand(int arg = 0) const {
+    return operands_[arg];
+  }
+  OperandInfo& operand(int arg = 0) {
+    return operands_[arg];
+  }
+  NameVector& get_dim_names() {
+    return names_;
+  }
+  const NameVector& get_dim_names() const {
+    return names_;
   }
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU
