@@ -1138,7 +1138,8 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
-    def test_triton_kernel_special_kwargs_with_autotune(self):
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_special_kwargs_with_autotune(self, backend):
         @triton.autotune(
             configs=[
                 triton.Config({"BLOCK_SIZE": 128}),
@@ -1163,7 +1164,7 @@ def forward(self, x_1, output_1):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend=backend)
         def f(x, y):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -1183,7 +1184,8 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
-    def test_triton_kernel_special_kwargs_without_autotune(self):
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_special_kwargs_without_autotune(self, backend):
         @triton.jit
         def add_kernel(
             in_ptr0,
@@ -1201,7 +1203,7 @@ def forward(self, x_1, output_1):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend=backend)
         def f(x, y):
             output = torch.zeros_like(x)
             n_elements = output.numel()

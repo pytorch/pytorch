@@ -871,11 +871,7 @@ class TritonKernelVariable(VariableTracker):
                 new_configs = copy.deepcopy(self.kernel.configs)
                 for config in new_configs:
                     config.__dict__.update(special_kwargs)
-                new_key = [self.kernel.arg_names[i] for i in self.kernel.key_idx]
-                # skip other args of autotune, as we only support these
-                new_kernel = autotune(configs=new_configs, key=new_key)(
-                    self.kernel.fn  # inner kernel of the existing Autotuner
-                )
+                new_kernel = autotune(configs=new_configs, key=[])(self.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
                 # new one with a single config with special kwargs
