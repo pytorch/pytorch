@@ -3618,6 +3618,30 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_fused_attention_conv(self):
+        # https://github.com/pytorch/pytorch/issues/121174.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_conv = torch.nn.Conv2d(4, 4, 1)
+                self.k_conv = torch.nn.Conv2d(4, 4, 1)
+                self.v_conv = torch.nn.Conv2d(4, 4, 1)
+
+            def forward(self, x):
+                q = self.q_conv(x)
+                k = self.k_conv(x)
+                v = self.v_conv(x)
+                q = q.permute(0, 2, 1, 3)
+                k = k.permute(0, 2, 1, 3)
+                v = v.permute(0, 2, 1, 3)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, dropout_p=0.0, is_causal=False
+                )
+
+        fn = Model()
+        x = torch.randn(1, 4, 2, 2)
+        self.common(fn, (x,))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
