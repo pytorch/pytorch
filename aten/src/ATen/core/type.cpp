@@ -500,7 +500,7 @@ MatchTypeReturn matchTypeVariables(
     if (it == type_env.end()) {
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
-    } else if (auto unified = unifyTypes(it->second, actual)) {
+    } else if (unifyTypes(it->second, actual)) {
       // note: unifyTypes allows subtyping in either direction, so actual
       // may be a supertype of the current binding. we're not responsible
       // for reporting the error, only for keeping type_env stable
