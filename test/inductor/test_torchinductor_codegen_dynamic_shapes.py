@@ -396,7 +396,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")
