@@ -753,7 +753,7 @@ class _PyTreeCodeGen(CodeGen):
         else:
             return super().generate_output(output_args)
 
-class _GraphSideTable:
+class _FindNodesLookupTable:
     """
     Side table for the graph for the purpose of doing fast queries
     """
@@ -776,9 +776,6 @@ class _GraphSideTable:
         if op == "call_function":
             assert target is not None
             return sorted(dict(self.table[(op, target)]).keys())
-
-        if op in ("placeholder", "output"):
-            assert target is None
 
         if target is None:
             return sorted(dict(self.table[(op, None)]).keys())
@@ -847,7 +844,7 @@ class Graph:
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
         self._co_fields : Dict[str, Any] = {}
-        self._side_table = _GraphSideTable()
+        self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
     def owning_module(self):
@@ -888,7 +885,7 @@ class Graph:
             Iteratable of nodes with the requested op and target.
             The nodes are guaranteed to be in order they appear on the graph.
         """
-        return self._side_table.find_nodes(op=op, target=target)
+        return self._find_nodes_lookup_table.find_nodes(op=op, target=target)
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
@@ -979,7 +976,7 @@ class Graph:
         self._graph_namespace.associate_name_with_obj(name, n)
 
         self._insert(n)
-        self._side_table.insert(n)
+        self._find_nodes_lookup_table.insert(n)
         self._len += 1
         return n
 
@@ -1014,7 +1011,7 @@ class Graph:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
 
-        self._side_table.remove(to_erase)
+        self._find_nodes_lookup_table.remove(to_erase)
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
@@ -1475,7 +1472,7 @@ class Graph:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
-            if node not in self._side_table:
+            if node not in self._find_nodes_lookup_table:
                 raise RuntimeError(f"Node \'{node}\' is not added to the side table")
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
