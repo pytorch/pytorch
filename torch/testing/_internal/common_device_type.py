@@ -696,7 +696,7 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 
     # run some cuda testcases on other devices if available
     # Usage:
-    # export PYTORCH_TESTING_DEVICE_FOR_CUSTOM = 'privateuse1'
+    # export PYTORCH_TESTING_DEVICE_FOR_CUSTOM=privateuse1
     env_custom_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, ''))
     if env_custom_only_for:
         desired_device_type_test_bases += filter(lambda x: x.device_type in env_custom_only_for, test_cases)
