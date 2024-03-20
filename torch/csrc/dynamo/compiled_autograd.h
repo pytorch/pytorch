@@ -171,7 +171,7 @@ struct AutogradCompilerCall {
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
   }
 
-  int emplace_hook(c10::SafePyObject&& fn) {
+  size_t emplace_hook(c10::SafePyObject&& fn) {
     hooks.emplace_back(std::move(fn));
     return hooks.size() - 1;
   }
@@ -418,35 +418,35 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  int add_backward(c10::SafePyObject&& obj) {
+  size_t add_backward(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 
-  int add_backward_state(c10::SafePyObject&& obj) {
+  size_t add_backward_state(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.pre_hooks.emplace_back(fn_id);
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.post_hooks.emplace_back(fn_id);
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
