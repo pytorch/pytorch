@@ -37,6 +37,7 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -73,7 +74,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -192,7 +192,7 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -784,7 +784,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
                 " ".join(code).count(
-                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                    "view_dtype" if config.cpp_wrapper else "aten.view"
                 ),
                 3,
             )
@@ -918,6 +918,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @config.patch({"fx_graph_cache": False})
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -927,6 +928,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
+    @config.patch({"fx_graph_cache": False})
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -951,7 +953,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 2)
 
     def test_index_propagation(self):
         def flip(x):
@@ -3216,6 +3218,50 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_fractional_max_pool2d1(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (3, 3), (2, 2), samples)
+
+        self.common(
+            fn, (torch.randn(1, 4, 16, 16), torch.rand(1, 4, 2)), check_lowp=False
+        )
+
+    def test_fractional_max_pool2d2(self):
+        # fallback for larger kernel size
+
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    def test_fractional_max_pool2d3(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (1, 1), (16, 16), samples)
+
+        self.common(
+            fn, (torch.randn(2, 4, 16, 16), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
+    @config.patch(fallback_random=True)
+    def test_fractional_max_pool2d4(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        # check rectangular kernel/output size
+
+        def fn(x):
+            return torch.nn.functional.fractional_max_pool2d_with_indices(
+                x, (4, 3), (3, 2)
+            )
+
+        self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
@@ -4273,6 +4319,48 @@ class CommonTemplate:
             ),
         )
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_unbacked_refinement(self):
+        # It is kind of cursed that this test currently passes.
+        #
+        # The problem that this test is trying to test for is
+        # that we have performed a refinement on the unbacked SymInt
+        # replacing u0 == 4.  When this occurs, we could potentially
+        # have a problem in Inductor lowering where we replace u0 with 4
+        # and then be unable to codegen the runtime assert (since even
+        # though all occurrences of u0 can be validly replaced with 4,
+        # you can't do this for the runtime assert that actually tests u0 ==
+        # 4!)
+        #
+        # So how come this test actually passes?  It's because of the symbol
+        # reallocation problem.  When we retrace the Dynamo output graph
+        # in AOTAutograd, we allocate a new symbol u1 when we rerun nonzero.
+        # Ordinarily, we would then immediately unify u0 == u1, replacing u1
+        # with u0.  But because u0 has been refined to a constant, we don't
+        # perform the equality.  And then because _constrain_symbol_range
+        # u1 to [4, 4] doesn't cause refinement to 4, u1 actually survives
+        # and doesn't have a refinement, unlike u0.  Since it's survived,
+        # codegen works fine.
+        #
+        # If any of these things change, this test will break.  But it's not
+        # you, it's the existing code.
+        #
+        # As of Mar 2024, ezyang is not sure what the right way to structure
+        # this code is.
+
+        def fn(x):
+            z = x.nonzero()
+            torch._check(z.size(0) == 4)
+            return z + 3
+
+        self.common(
+            fn,
+            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+        )
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):
@@ -4481,6 +4569,14 @@ class CommonTemplate:
                 torch.randn(8, dtype=torch.float32),
             ),
         )
+
+    def test_remove_noop_clone(self):
+        def fn(x):
+            y = x.clone().reshape(-1, 4)
+            y[:, [2, 0]] = y[:, [0, 2]]
+            return y + x
+
+        self.common(fn, (torch.randn(2, 4),))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -4766,7 +4862,7 @@ class CommonTemplate:
                     dtype=torch.float32,
                     device=a.device,
                 ),
-                torch.zeros(2, 3, names=None),
+                torch.zeros(2, 3),
                 a + torch.ones(8, device=a.device),
                 torch.full((2, 3), 3.1416, device=a.device),
             )
@@ -7125,7 +7221,7 @@ class CommonTemplate:
         )
 
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
 
@@ -7144,7 +7240,7 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
@@ -7747,6 +7843,13 @@ class CommonTemplate:
 
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
+
+    def test_diagonal_copy(self):
+        def fn(x):
+            return torch.diagonal_copy(x)
+
+        for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
+            self.common(fn, (x,))
 
     def test_kwargs(self):
         if self.device == GPU_TYPE:
@@ -8846,6 +8949,7 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
+    @config.patch({"fx_graph_cache": False})
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
@@ -8875,7 +8979,7 @@ class CommonTemplate:
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
                 )
 
         with add_scheduler_init_hook(hook_fn):
@@ -9127,6 +9231,24 @@ class CommonTemplate:
                 return op(x)
 
         self.common(fn, args, check_lowp=check_lowp)
+
+    # codegen test fails with no dynamic for loop in dynamic shape tests
+    @expectedFailureCodegenDynamic
+    def test_view_uint8_through_differing_bitwidths(self):
+        # https://github.com/pytorch/pytorch/issues/120998
+        def fn(x, view_dtype):
+            return x.view(view_dtype).view(torch.uint8)
+
+        view_dtypes = [torch.int16, torch.int32, torch.int64]
+        for dtype in view_dtypes:
+            x = torch.randint(0, 2**4, [4096, 4096], dtype=torch.uint8)
+            self.common(
+                fn,
+                (
+                    x,
+                    dtype,
+                ),
+            )
 
 
 @dataclasses.dataclass
@@ -9498,7 +9620,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
             r = fn_gpu(x)
             code = run_and_get_triton_code(fn_gpu, x)
-            self.assertIn("tl.sin", code)
+            self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
@@ -9963,7 +10085,7 @@ if HAS_CPU and RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

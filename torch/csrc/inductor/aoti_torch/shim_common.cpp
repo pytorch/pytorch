@@ -51,22 +51,6 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
         static_cast<c10::DeviceIndex>(device_index));
   }
 }
-
-template <class T>
-c10::optional<T> pointer_to_optional(T* ptr) {
-  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
-}
-
-template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
-c10::optional<T> pointer_to_optional(U* ptr) {
-  return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
-}
-
-AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
-  at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
-  return tensor_pointer_to_tensor_handle(new_tensor);
-}
-
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -607,6 +591,16 @@ AOTITorchError aoti_torch_assign_tensors(
     at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
     at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
     *dst_tensor = *src_tensor;
+  });
+}
+
+AOTITorchError aoti_torch_assign_tensors_out(
+    AtenTensorHandle src,
+    AtenTensorHandle* ret_dst) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* src_tensor_ptr = tensor_handle_to_tensor_pointer(src);
+    at::Tensor dst_tensor = *src_tensor_ptr;
+    *ret_dst = new_tensor_handle(std::move(dst_tensor));
   });
 }
 
