@@ -792,6 +792,11 @@ class EventVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "target",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(ctx, ContextWrappingVariable)
