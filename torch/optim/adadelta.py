@@ -366,6 +366,7 @@ def _multi_tensor_adadelta(
         torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)
 
         # If LR is a tensor, the else branch will internally call item()
+        # which will cause silent incorrectness if we are capturing
         if capturable and isinstance(lr, torch.Tensor):
             torch._foreach_mul_(deltas, -lr)
             torch._foreach_add_(device_params, deltas)
