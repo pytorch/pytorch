@@ -73,9 +73,8 @@ mm_template = TritonTemplate(
             b = tl.load(B)
         else:
             k_remaining = K - k * (BLOCK_K * SPLIT_K)
-            _0 = tl.zeros((1, 1), dtype=ACC_TYPE)
-            a = tl.load(A, mask=rk[None, :] < k_remaining, other=_0)
-            b = tl.load(B, mask=rk[:, None] < k_remaining, other=_0)
+            a = tl.load(A, mask=rk[None, :] < k_remaining, other=0.)
+            b = tl.load(B, mask=rk[:, None] < k_remaining, other=0.)
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
