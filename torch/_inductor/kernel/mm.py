@@ -169,11 +169,12 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     # TODO: Re-enable eager mode implementation once cuBLAS is fixed
     if m * n != 0 and (
-        use_cutlass_template(layout) or use_triton_template(layout, enable_int32=True)
+        use_cutlass_template(layout, m, n, k)
+        or use_triton_template(layout, enable_int32=True)
     ):
         choices = []
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
