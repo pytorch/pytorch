@@ -11,7 +11,6 @@ jobs:
   llm-retrieval:
     runs-on: linux.4xlarge
     continue-on-error: true
-    if: false
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
@@ -57,12 +56,6 @@ jobs:
           pip install -r requirements.txt
           cd ../codellama
           pip install -e .
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read
-          aws-region: us-east-1
 
       - name: Fetch CodeLlama Checkpoint
         shell: bash -l {0}
