@@ -110,7 +110,7 @@ class Adadelta(Optimizer):
             square_avgs = []
             acc_deltas = []
             state_steps = []
-            lr, rho, eps, weight_decay, foreach, maximize, differentiable = (
+            lr, rho, eps, weight_decay, foreach, maximize, differentiable, capturable = (
                 group["lr"],
                 group["rho"],
                 group["eps"],
@@ -118,6 +118,7 @@ class Adadelta(Optimizer):
                 group["foreach"],
                 group["maximize"],
                 group["differentiable"],
+                group["capturable"]
             )
 
             has_complex = self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas, state_steps)
@@ -135,6 +136,7 @@ class Adadelta(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                capturable=capturable,
                 has_complex=has_complex,
             )
 
