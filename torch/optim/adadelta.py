@@ -362,12 +362,12 @@ def _multi_tensor_adadelta(
         torch._foreach_div_(deltas, std)
         torch._foreach_mul_(deltas, device_grads)
 
-        # If LR is a tensor, the else branch will internally call item()
-        if capturable:
-            deltas_modified = torch._foreach_mul(deltas, -lr)
-            torch._foreach_add_(device_params, deltas_modified)
-        else:
-            torch._foreach_add_(device_params, deltas, alpha=-lr)
-
         torch._foreach_mul_(device_acc_deltas, rho)
         torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)
+
+        # If LR is a tensor, the else branch will internally call item()
+        if capturable and isinstance(lr, torch.Tensor):
+            torch._foreach_mul_(deltas, -lr)
+            torch._foreach_add_(device_params, deltas)
+        else:
+            torch._foreach_add_(device_params, deltas, alpha=-lr)
