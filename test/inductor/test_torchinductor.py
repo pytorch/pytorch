@@ -1339,11 +1339,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     def test_expanded_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -6368,13 +6363,7 @@ class CommonTemplate:
                 ],
             )
 
-    # issue #1150
     def test_dense_mask_index(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
