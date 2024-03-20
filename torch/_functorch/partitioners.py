@@ -891,7 +891,7 @@ def min_cut_rematerialization_partition(
                 continue
             visited.add(cur)
             if cur.fw_order > start_order + 50 and len(fusible) == 0:
-                print("force materializing ", cur, start_node, cur.fw_order, start_node.fw_order)
+                print("too long", cur, start_node, cur.fw_order, start_node.fw_order)
                 nx_graph.add_edge("source", cur.name + "_in", capacity=math.inf)
                 break
 
@@ -915,17 +915,17 @@ def min_cut_rematerialization_partition(
                     heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
         return max_range
 
-    for used_node in joint_graph.nodes:
-        if used_node not in required_fw_nodes:
-            continue
-        orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
-        fw_users = [user for user in used_node.users if user in required_fw_nodes]
-        if len(orders) > 0:
-            first_unfusible_use = find_first_unfusible(fw_users, max(orders))
-            for user in tuple(used_node.users):
-                if user in required_fw_nodes and user.fw_order > first_unfusible_use:
-                    # print(f"forcing {used_node} -> {user} {user.fw_order}")
-                    nx_graph.add_edge("source", user.name+"_in", capacity=math.inf)
+    # for used_node in joint_graph.nodes:
+    #     if used_node not in required_fw_nodes:
+    #         continue
+    #     orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
+    #     fw_users = [user for user in used_node.users if user in required_fw_nodes]
+    #     if len(orders) > 0:
+    #         first_unfusible_use = find_first_unfusible(fw_users, max(orders))
+    #         for user in tuple(used_node.users):
+    #             if user in required_fw_nodes and user.fw_order > first_unfusible_use:
+    #                 print(f"used above/below fusible {used_node}:{used_node.fw_order} -> {first_unfusible_use} -> {user} {user.fw_order}")
+    #                 nx_graph.add_edge("source", user.name+"_in", capacity=math.inf)
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
