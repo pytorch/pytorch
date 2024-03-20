@@ -8,7 +8,7 @@ body:
       value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/pytorch/issues)
-        It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/master/dynamo/index.html)
+        It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/main/dynamo/index.html)
   - type: textarea
     attributes:
       label: 🐛 Describe the bug
@@ -33,7 +33,7 @@ body:
       label: Minified repro
       description: |
         Please run the minifier on your example and paste the minified code below
-        Learn more here https://pytorch.org/docs/master/compile/troubleshooting.html
+        Learn more here https://pytorch.org/docs/main/torch.compiler_troubleshooting.html
       placeholder: |
         env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
         or

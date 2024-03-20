@@ -999,6 +999,38 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @ops(
+        [op for op in op_db if op.supports_out and (op.supports_autograd or op.is_factory_function)],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float, torch.cfloat]
+    )
+    def test_out_requires_grad_error(self, device, dtype, op):
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+
+        # Call op to get prototype for out arguments
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+        any_requires_grad = False
+
+        def set_requires_grad(x):
+            nonlocal any_requires_grad
+            if isinstance(x, torch.Tensor) and (
+                x.is_floating_point() or x.is_complex()
+            ):
+                any_requires_grad = True
+                x.requires_grad_(True)
+            return x
+
+        out = pytree.tree_map_(set_requires_grad, expect)
+        if not any_requires_grad:
+            # Skip ops without any floating point outputs, e.g. isnan
+            return
+
+        msg = (
+            "functions with out=... arguments don't support automatic "
+            "differentiation, but one of the arguments requires grad."
+        )
+        with self.assertRaises(RuntimeError, msg=msg):
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
@@ -1548,11 +1580,14 @@ class TestCompositeCompliance(TestCase):
 
         for sample in samples:
             args_raw = [sample.input] + list(sample.args)
-            kwargs = sample.kwargs
+            kwargs_raw = sample.kwargs
             args_copy = []
             args = []
+            kwargs_copy = {}
+            kwargs = {}
 
-            # Convert strided tensor inputs to COW tensors
+            # Convert strided tensor inputs to COW tensors and make copies of
+            # all inputs
             for idx, arg in enumerate(args_raw):
                 if is_strided_tensor(arg):
                     args_copy.append(arg.clone().detach())
@@ -1564,30 +1599,52 @@ class TestCompositeCompliance(TestCase):
                         args_copy.append(copy.deepcopy(arg))
                     args.append(arg)
 
+            for kw, arg in kwargs_raw.items():
+                if is_strided_tensor(arg):
+                    kwargs_copy[kw] = arg.clone().detach()
+                    kwargs[kw] = torch._lazy_clone(arg)
+                else:
+                    if torch.is_tensor(arg):
+                        kwargs_copy[kw] = arg.clone().detach()
+                    else:
+                        kwargs_copy[kw] = copy.deepcopy(arg)
+                    kwargs[kw] = arg
+
             res = op.get_op()(*args, **kwargs)
 
-            # Check that COW inputs remain COW after the op is executed
-            for idx, arg in enumerate(args):
+            def ignore_materialize(idx_or_kw):
+                return (op.allow_cow_input_materialize is not None) and (idx_or_kw in op.allow_cow_input_materialize)
+
+            def check_cow_input(arg, arg_copy, idx_or_kw):
+                arg_name = f"Argument {idx_or_kw}" if isinstance(idx_or_kw, int) else f"Keyword argument '{idx_or_kw}'"
+
                 if is_strided_tensor(arg):
                     is_cow = torch._C._is_cow_tensor(arg)
 
-                    if op.supports_cow_input_no_materialize:
+                    if op.supports_cow_input_no_materialize and not ignore_materialize(idx_or_kw):
                         self.assertTrue(
                             is_cow,
                             msg=(
-                                f"Argument {idx} unexpectedly materializes. "
+                                f"{arg_name} unexpectedly materializes. "
                                 "Either set `supports_cow_input_no_materialize=False` "
-                                "in this operation's OpInfo or change the "
+                                "in this operation's OpInfo, add the arg to the OpInfo's "
+                                "`allow_cow_input_materialize` list, or change the "
                                 "implementation to avoid materialization."))
 
                     if is_cow:
-                        orig = args_copy[idx]
                         self.assertTrue(
-                            torch.allclose(arg, orig, rtol=0, atol=0, equal_nan=True),
+                            torch.allclose(arg, arg_copy, rtol=0, atol=0, equal_nan=True),
                             msg=(
-                                f"Argument {idx} avoided materialization, "
+                                f"{arg_name} avoided materialization, "
                                 "but the operation mutated its data."
                             ))
+
+            # Check that COW inputs remain COW after the op is executed
+            for idx, arg in enumerate(args):
+                check_cow_input(arg, args_copy[idx], idx)
+
+            for kw, arg in kwargs.items():
+                check_cow_input(arg, kwargs_copy[kw], kw)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):

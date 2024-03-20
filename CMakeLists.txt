@@ -19,6 +19,12 @@ cmake_policy(SET CMP0069 NEW)
 # nice when it's possible, and it's possible on our Windows configs.
 cmake_policy(SET CMP0092 NEW)
 
+# Prohibit in-source builds
+if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+message(FATAL_ERROR "In-source build are not supported")
+endif()
+
+
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
@@ -743,6 +749,12 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
   "USE_CUDA AND NOT MSVC" OFF)
+
+# We are currenlty not using alibi attention for Flash
+# So we disable this feature by default
+# We dont currently document this feature because we don't
+# Suspect users building from source will need this
+add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
 # CAVEAT: Again, do not check USE_ROCM here
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
