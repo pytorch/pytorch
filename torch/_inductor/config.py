@@ -284,6 +284,10 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
+benchmark_multi_templates = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+)
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -630,10 +634,10 @@ class triton:
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
     # Use IEEE rounding on division operations
-    precise_div = True
+    precise_div = False
 
     # Allow ptxas to generate fma instructions
-    enable_fp_fusion = True
+    enable_fp_fusion = False
 
 
 class aot_inductor:

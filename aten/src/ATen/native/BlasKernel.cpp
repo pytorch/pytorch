@@ -205,7 +205,7 @@ bool gemv_use_fast_path<at::Half>(
   return true;
 }
 
-#ifndef FBCODE_CAFFE2
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
 static inline float16_t reduce(float16x4_t x) {
         auto sum = vpadd_f16(x, x);
         return vget_lane_f16(vpadd_f16(sum, sum), 0);
@@ -286,7 +286,7 @@ void fp16_gemv_trans(
     float16_t* y,
     const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && n % 4 == 0) {
-#ifndef FBCODE_CAFFE2
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
     return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_trans_fp16_arith(m, n, a, lda, x, y, incy)
                                                        : fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
 #else
@@ -308,7 +308,7 @@ void fp16_gemv_trans(
 }
 
 
-#ifndef FBCODE_CAFFE2
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
 static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
   for (auto j = 0; j < n; j++) {
     auto vecCol = vdup_n_f16(x[j]);
@@ -355,7 +355,7 @@ void fp16_gemv_notrans(
     float16_t* y,
     const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
-#ifndef FBCODE_CAFFE2
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
     return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
                                                        : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
 #else

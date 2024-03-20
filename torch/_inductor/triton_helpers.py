@@ -11,10 +11,13 @@ else:
     math = tl
 
 
-@triton.jit
-def promote_to_tensor(x):
-    # Addition promotes to tensor for us
-    return x + tl.zeros((1,), tl.int1)
+if hasattr(tl, "to_tensor"):
+    promote_to_tensor = tl.to_tensor
+else:
+    @triton.jit
+    def promote_to_tensor(x):
+        # Where promotes without effecting the value in any way
+        return tl.where(True, x, x)
 
 
 @triton.jit

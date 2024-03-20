@@ -1258,7 +1258,6 @@ class Scheduler:
         self.fuse_cache = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
 
-        self.nodes = []
         self.available_buffer_names = {
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
@@ -1310,6 +1309,7 @@ class Scheduler:
         self.topological_sort_schedule()
         self.logged_slow_fusion = set()
         self.fuse_nodes()
+        self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
             self.compute_node_users()
@@ -1695,7 +1695,7 @@ class Scheduler:
                 fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
                 break
 
-    def benchmark_fused_nodes(self, nodes):
+    def benchmark_fused_nodes(self, nodes) -> Tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -1706,6 +1706,54 @@ class Scheduler:
         self.current_device = device
         backend = self.get_backend(device)
         return backend.benchmark_fused_nodes(nodes)
+
+    def finalize_multi_template_buffers(self):
+        def replace_buffer(orig_node: ir.MultiTemplateBuffer, new_node: ir.Buffer):
+            replaced_name = new_node.name
+            orig_name = orig_node.get_name()
+            assert isinstance(orig_name, str) and isinstance(replaced_name, str)
+
+            del V.graph.name_to_buffer[replaced_name]
+            new_node.name = orig_name
+
+            V.graph.buffers.remove(orig_node)
+            V.graph.name_to_buffer[orig_name] = new_node
+
+        for i, node in enumerate(self.nodes):
+            if isinstance(node, SchedulerNode) and isinstance(
+                node.node, ir.MultiTemplateBuffer
+            ):
+                multi_node = node.node
+                min_node_unfused, _ = multi_node.get_min_choice()
+
+                if isinstance(
+                    min_node_unfused,
+                    torch._inductor.ir.TritonTemplateCallerBase,
+                ):
+                    node.node.finalize_as_triton_caller(min_node_unfused)
+                    continue
+
+                out_tensorbox = min_node_unfused.output_node()
+                out_storage = out_tensorbox.data
+                assert isinstance(out_storage, ir.StorageBox)
+                out_buffer = out_storage.data
+                assert isinstance(out_buffer, ir.Buffer)
+
+                out_buffer.layout = multi_node.layout
+                replace_buffer(multi_node, out_buffer)
+                new_scheduler_node = self.create_scheduler_node(out_buffer)
+
+                self.nodes[i] = new_scheduler_node
+                self.name_to_node[node.get_name()] = new_scheduler_node
+                self.name_to_fused_node[node.get_name()] = new_scheduler_node
+
+                new_scheduler_node.users = node.users
+                new_scheduler_node.min_order = node.min_order
+                new_scheduler_node.max_order = node.max_order
+                new_scheduler_node.last_usage = node.last_usage
+                for user in new_scheduler_node.users:
+                    user.node.inverse_users.remove(node)
+                    user.node.inverse_users.append(new_scheduler_node)
 
     def speedup_by_fusion(self, node1, node2):
         """
@@ -1749,42 +1797,82 @@ class Scheduler:
 
         why = WhyNoFuse(node1, node2)
 
-        try:
-            ms1, path1 = self.benchmark_fused_nodes(node_list_1)
-            if math.isinf(ms1):
-                why("register spilling of the first kernel")
-                return False
+        def log_fusion(ms_fused, ms1, ms2):
+            if fusion_log.isEnabledFor(logging.DEBUG):
+                if ms_fused < ms1 + ms2:
+                    fusion_log.debug(
+                        "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+                        node1.get_names(),
+                        node2.get_names(),
+                        green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+                    )
+                else:
+                    fusion_log.debug(
+                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+                        node1.get_names(),
+                        node2.get_names(),
+                        red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+                    )
+
+        if isinstance(node1, SchedulerNode) and isinstance(
+            node1.node, ir.MultiTemplateBuffer
+        ):
+            multi_node = node1.node
+            choice_timings = multi_node.choice_timings
+
+            _, ms1 = multi_node.get_min_choice()
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
-            if math.isinf(ms2):
-                why("register spilling of the second kernel")
-                return False
-            ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
-            if math.isinf(ms_fused):
-                why("register spilling of the fused kernel")
-                return False
-        except CompilationError as e:
-            # workaround triton issue: https://github.com/openai/triton/issues/2151
-            if "Loop-carried variable" in str(e):
-                return True  # allow fusion
-            else:
-                raise
 
-        if fusion_log.isEnabledFor(logging.DEBUG):
-            if ms_fused < ms1 + ms2:
-                fusion_log.debug(
-                    "can fuse (benchmark): fusing %s with %s cause %sx speedup",
-                    node1.get_names(),
-                    node2.get_names(),
-                    green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
-                )
-            else:
-                fusion_log.debug(
-                    "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
-                    node1.get_names(),
-                    node2.get_names(),
-                    red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
-                )
+            min_ms_fused = float("inf")
+            ms_fused_choice = None
 
+            for choice, unfused_time in choice_timings.items():
+                if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+                    continue
+
+                if unfused_time >= ms1 + ms2:
+                    continue
+
+                # TODO - parallel compile triton templates
+                # TODO - should prune/skip choices that are not within certain % of best choice
+                with node1.node.swap_as_triton_caller(choice):
+                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused)
+
+                    if ms_fused < min_ms_fused:
+                        min_ms_fused = ms_fused
+                        ms_fused_choice = choice
+
+            log_fusion(min_ms_fused, ms1, ms2)
+
+            # after we do a fusion, we finalize a triton template.
+            # TODO - could preserve multi template and choices for subsequent fusions
+            if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
+                node1.node.finalize_as_triton_caller(ms_fused_choice)
+                return True
+            else:
+                return False
+        else:
+            try:
+                ms1, path1 = self.benchmark_fused_nodes(node_list_1)
+                if math.isinf(ms1):
+                    why("register spilling of the first kernel")
+                    return False
+                ms2, path2 = self.benchmark_fused_nodes(node_list_2)
+                if math.isinf(ms2):
+                    why("register spilling of the second kernel")
+                    return False
+                ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
+                if math.isinf(ms_fused):
+                    why("register spilling of the fused kernel")
+                    return False
+            except CompilationError as e:
+                # workaround triton issue: https://github.com/openai/triton/issues/2151
+                if "Loop-carried variable" in str(e):
+                    return True  # allow fusion
+                else:
+                    raise
+
+        log_fusion(ms_fused, ms1, ms2)
         if (
             is_metric_table_enabled("slow_fusion")
             and ms_fused >= ms1 + ms2
