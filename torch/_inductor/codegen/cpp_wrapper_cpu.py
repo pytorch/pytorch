@@ -1,4 +1,5 @@
 import functools
+import math
 import os
 import sys
 from itertools import count
@@ -50,10 +51,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
-        # Specify the max length for any dtype name. This is used for making a temp
-        # array of "char"s to hold the dtype name of a tensor. It's only used in
-        # debug_compile mode. 50 should be enough.
-        self.max_dtype_name_len = 50
 
         from .cpp import cexpr, CppPrinter
 
@@ -259,25 +256,25 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def generate_input_output_runtime_checks(self):
         dtype_to_name = {
-            torch.bfloat16: "c10::BFloat16",
-            torch.float16: "c10::Half",
-            torch.float32: "float",
-            torch.float64: "double",
-            torch.bool: "bool",
-            torch.int8: "signed char",
-            torch.int16: "short int",
-            torch.int32: "int",
-            torch.int64: "long int",
-            torch.uint8: "unsigned char",
+            torch.uint8: (0, "unsigned char"),
+            torch.int8: (1, "signed char"),
+            torch.int16: (2, "short int"),
+            torch.int32: (3, "int"),
+            torch.int64: (4, "long int"),
+            torch.float16: (5, "c10::Half"),
+            torch.float32: (6, "float"),
+            torch.float64: (7, "double"),
             # the following dtype(s) are not supported by cpp_wrapper
             # torch.uint16, torch.uint32, torch.uint64, torch.uint32
-            torch.complex32: "c10::complex<c10::Half>",
-            torch.complex64: "c10::complex<float>",
-            torch.complex128: "c10::complex<double>",
-            torch.float8_e4m3fn: "c10::Float8_e4m3fn",
-            torch.float8_e5m2: "c10::Float8_e5m2",
-            torch.float8_e4m3fnuz: "c10::Float8_e4m3fnuz",
-            torch.float8_e5m2fnuz: "c10::Float8_e5m2fnuz",
+            torch.complex32: (8, "c10::complex<c10::Half>"),
+            torch.complex64: (9, "c10::complex<float>"),
+            torch.complex128: (10, "c10::complex<double>"),
+            torch.bool: (11, "bool"),
+            torch.bfloat16: (15, "c10::BFloat16"),
+            torch.float8_e4m3fn: (23, "c10::Float8_e4m3fn"),
+            torch.float8_e5m2: (24, "c10::Float8_e5m2"),
+            torch.float8_e4m3fnuz: (25, "c10::Float8_e4m3fnuz"),
+            torch.float8_e5m2fnuz: (26, "c10::Float8_e5m2fnuz"),
         }
 
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
@@ -285,34 +282,65 @@ class CppWrapperCpu(WrapperCodeGen):
         # input/output.
         def gen_check(handle_kind, idx, name, tensor):
             self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
-            self.codegen_tensor_dtype_name_var_decl(self.prefix, name)
-            expected_dtype = dtype_to_name[tensor.dtype]
+            self.codegen_tensor_dtype_var_decl(self.prefix, name)
+            expected_dtype, expected_dtype_name = dtype_to_name[tensor.dtype]
             self.prefix.splice(
                 f"""
-                    if (std::string("{expected_dtype}") != {name}_dtype_name) {{
+                    if ({expected_dtype} != {name}_dtype) {{
                         std::stringstream ss;
                         ss << "{handle_kind}[{idx}]: unmatched dtype, "
-                           << "expected: {expected_dtype}, " << "but got: "
-                           << {name}_dtype_name << "\\n";
+                           << "expected: {expected_dtype} ({expected_dtype_name=}, "
+                           << "but got: " << {name}_dtype << "\\n";
                         throw std::runtime_error(ss.str());
                     }}
                 """
             )
             self.codegen_input_size_var_decl(self.prefix, name)
             for dim_idx, d in enumerate(tensor.get_size()):
-                if not isinstance(d, (int, sympy.Integer)):
-                    continue
-                self.prefix.splice(
-                    f"""
-                        if ({d} != {name}_size[{dim_idx}]) {{
-                            std::stringstream ss;
-                            ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
-                               << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
-                               << "\\n";
-                            throw std::runtime_error(ss.str());
-                        }}
-                    """
-                )
+                if isinstance(d, (int, sympy.Integer)):
+                    self.prefix.splice(
+                        f"""
+                            if ({d} != {name}_size[{dim_idx}]) {{
+                                std::stringstream ss;
+                                ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
+                                   << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
+                                   << "\\n";
+                                throw std::runtime_error(ss.str());
+                            }}
+                        """
+                    )
+                else:
+                    assert isinstance(
+                        d, sympy.Symbol
+                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
+                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
+                    if sym_range is None:
+                        continue
+                    if not math.isinf(sym_range.lower):
+                        self.prefix.splice(
+                            f"""
+                                if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
+                                    std::stringstream ss;
+                                    ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
+                                       << "expected it to be >= {sym_range.lower}, " << "but got: "
+                                       << {name}_size[{dim_idx}] << "\\n";
+                                    throw std::runtime_error(ss.str());
+                                }}
+                            """
+                        )
+                    if not math.isinf(sym_range.upper):
+                        self.prefix.splice(
+                            f"""
+                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                    std::stringstream ss;
+                                    ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
+                                       << "expected to be <= {sym_range.upper}, " << "but got: "
+                                       << {name}_size[{dim_idx}] << "\\n";
+                                    throw std::runtime_error(ss.str());
+                                }}
+                            """
+                        )
+
             self.codegen_input_stride_var_decl(self.prefix, name)
             for stride_idx, s in enumerate(tensor.get_stride()):
                 if not isinstance(s, (int, sympy.Integer)):
@@ -581,18 +609,18 @@ class CppWrapperCpu(WrapperCodeGen):
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
 
-    def codegen_tensor_dtype_name_var_decl(self, code: IndentedBuffer, name):
+    def codegen_tensor_dtype_var_decl(self, code: IndentedBuffer, name):
         if config.abi_compatible:
-            code.writeline(f"char {name}_dtype_name[{self.max_dtype_name_len}];")
+            code.writeline(f"int32_t {name}_dtype;")
             code.writeline(
-                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype_name"
-                f"({name}, {self.max_dtype_name_len}, {name}_dtype_name));"
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype"
+                f"({name}, &{name}_dtype));"
             )
         else:
             # Note that we don't have a corresponding class method from
             # the WrapperCodeGen since this method is used for asserting AOTI
             # cpp wrapper code.
-            code.writeline(f"auto {name}_dtype_name = {name}.dtype().name();")
+            code.writeline(f"auto {name}_dtype = {name}.dtype();")
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.abi_compatible:

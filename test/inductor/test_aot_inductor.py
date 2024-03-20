@@ -1956,12 +1956,17 @@ class AOTInductorTestsTemplate:
                 "unmatched dtype",
                 10,
                 exactly=True,
-            )
+            ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21,  # we have 9 dynamic dims for which we don't generate checks
+                21,  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
-            )
+            ).run(src_code)
+            FileCheck().check_count(
+                "dim value is too",
+                18,  # we have 9 dynamic dims for which we generate two checks
+                exactly=True,
+            ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
                 21,  # we have 9 symbolic strides for which we don't generate checks
@@ -2092,7 +2097,10 @@ class AOTInductorTestsTemplate:
         y2 = rand_strided(
             (4, 4, 4), (16, 1, 4), dtype=torch.float16, device=self.device
         )
-        dim0 = Dim("s0", min=2, max=1024)
+        # batch size is outside of the range
+        y3 = torch.randn(2048, 3, 4, dtype=torch.float16, device=self.device)
+        y4 = torch.randn(2048, 4, 4, dtype=torch.float16, device=self.device)
+        dim0 = Dim("s0", min=4, max=1024)
         dynamic_shapes = {
             "x": {0: dim0},
         }
@@ -2113,6 +2121,10 @@ class AOTInductorTestsTemplate:
             aot_inductor_module(y1)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(y2)
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(y3)
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(y4)
 
     def test_add_complex(self):
         class Model(torch.nn.Module):
