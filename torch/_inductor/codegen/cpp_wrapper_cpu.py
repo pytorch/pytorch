@@ -255,26 +255,28 @@ class CppWrapperCpu(WrapperCodeGen):
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
     def generate_input_output_runtime_checks(self):
-        dtype_to_name = {
-            torch.uint8: (0, "unsigned char"),
-            torch.int8: (1, "signed char"),
-            torch.int16: (2, "short int"),
-            torch.int32: (3, "int"),
-            torch.int64: (4, "long int"),
-            torch.float16: (5, "c10::Half"),
-            torch.float32: (6, "float"),
-            torch.float64: (7, "double"),
+        from .cpp import DTYPE_TO_ATEN
+
+        dtype_to_enum = {
+            torch.uint8: 0,
+            torch.int8: 1,
+            torch.int16: 2,
+            torch.int32: 3,
+            torch.int64: 4,
+            torch.float16: 5,
+            torch.float32: 6,
+            torch.float64: 7,
             # the following dtype(s) are not supported by cpp_wrapper
             # torch.uint16, torch.uint32, torch.uint64, torch.uint32
-            torch.complex32: (8, "c10::complex<c10::Half>"),
-            torch.complex64: (9, "c10::complex<float>"),
-            torch.complex128: (10, "c10::complex<double>"),
-            torch.bool: (11, "bool"),
-            torch.bfloat16: (15, "c10::BFloat16"),
-            torch.float8_e4m3fn: (23, "c10::Float8_e4m3fn"),
-            torch.float8_e5m2: (24, "c10::Float8_e5m2"),
-            torch.float8_e4m3fnuz: (25, "c10::Float8_e4m3fnuz"),
-            torch.float8_e5m2fnuz: (26, "c10::Float8_e5m2fnuz"),
+            torch.complex32: 8,
+            torch.complex64: 9,
+            torch.complex128: 10,
+            torch.bool: 11,
+            torch.bfloat16: 15,
+            torch.float8_e4m3fn: 23,
+            torch.float8_e5m2: 24,
+            torch.float8_e4m3fnuz: 25,
+            torch.float8_e5m2fnuz: 26,
         }
 
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
@@ -283,7 +285,8 @@ class CppWrapperCpu(WrapperCodeGen):
         def gen_check(handle_kind, idx, name, tensor):
             self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
-            expected_dtype, expected_dtype_name = dtype_to_name[tensor.dtype]
+            expected_dtype = dtype_to_enum[tensor.dtype]
+            expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
             self.prefix.splice(
                 f"""
                     if ({expected_dtype} != {name}_dtype) {{
