@@ -67,43 +67,25 @@ else:
             return self.mesh_stack[-1]
 
         def create_child_mesh(
-            self,
-            device_mesh: "DeviceMesh",
-            mesh_dim_names: Tuple[str],
+            self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
-            mesh_dims = [
-                not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
-                for mesh_dim_name in mesh_dim_names
-            ]
             cur_rank = device_mesh.get_rank()
-            mesh = device_mesh.mesh
-            all_mesh_dims = list(range(mesh.ndim))
-            for mesh_dim in mesh_dims:
-                # remove not pop b/c we want the value of the ind removed not it's position in the list
-                # because this list dynamically changes.
-                all_mesh_dims.remove(mesh_dim)
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
+            )
 
-            mesh_sizes = [device_mesh.mesh.size(mesh_dim) for mesh_dim in mesh_dims]
-
-            pg_ranks_by_dim = device_mesh.mesh.permute(
-                *all_mesh_dims, *mesh_dims
-            ).reshape(-1, *mesh_sizes)
-
-            for mesh_nd in pg_ranks_by_dim:
-                if cur_rank in mesh_nd:
-                    sub_mesh = DeviceMesh(
-                        device_mesh.device_type,
-                        mesh_nd,
-                        mesh_dim_names=mesh_dim_names,
-                    )
+            for mesh_1d in pg_ranks_by_dim:
+                sub_mesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                )
+                if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
 
-            res_sub_mesh._dim_group_infos = [  # type: ignore[possibly-undefined]
-                device_mesh._dim_group_infos[mesh_dim] for mesh_dim in mesh_dims
-            ]
-
+            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
             return res_sub_mesh
@@ -228,7 +210,6 @@ else:
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
-            self._parent_mesh = _mesh_resources.get_parent_mesh(self)
 
             # Skip process group initialization if xla device.
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -237,8 +218,7 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 self._get_or_create_default_group()
-                if not self._parent_mesh:
-                    self._init_process_groups()
+                self._init_process_groups()
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -360,7 +340,7 @@ else:
                 and self._flatten_mesh_list == other._flatten_mesh_list
             )
 
-        def __getitem__(self, mesh_dim_names: Union[str, Tuple[str]]) -> "DeviceMesh":
+        def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
             DeviceMesh.
@@ -388,39 +368,17 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if not self.mesh_dim_names:
-                raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names.")
+            if self.mesh.ndim == 1:
+                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
+                    return self
+                else:
+                    raise RuntimeError(
+                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
+                    )
 
-            mesh_dim_names = (
-                (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
-            )
+            mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
+            submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
-            error_msg = (
-                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
-            )
-
-            # When the dimension slicing out is equal to the mesh dimensions of the current DeviceMesh,
-            # we simply return self if the given slicing is valid.
-            if mesh_dim_names == self.mesh_dim_names:
-                return self
-            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
-            # of the current DeviceMesh.
-            elif len(mesh_dim_names) < len(self.mesh_dim_names):
-                outermost_dim_name = mesh_dim_names[0]
-                if outermost_dim_name not in self.mesh_dim_names:
-                    raise ValueError(error_msg)
-                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
-                for i, j in zip(
-                    mesh_dim_names,
-                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
-                ):
-                    if i != j:
-                        raise ValueError(error_msg)
-            else:
-                raise ValueError(error_msg)
-
-            submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
 
         def get_group(
