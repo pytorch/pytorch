@@ -412,6 +412,6 @@ def _verify_exported_program_signature(exported_program) -> None:
 
 
 def load_verifier(dialect: str) -> Optional[Type[Verifier]]:
-    if dialect == "ATEN":
+    if dialect == "ATEN" or dialect == "":
         return _VerifierMeta._registry.get(dialect)
     return _VerifierMeta._registry[dialect]
