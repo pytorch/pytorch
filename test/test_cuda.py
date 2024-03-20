@@ -2756,7 +2756,8 @@ exit(2)
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD, torch.optim.Adadelta), (False, True),
+            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD,
+                                                                            torch.optim.Adadelta), (False, True),
                                                                            (False, True), (0, 0.1))
         ]
 
