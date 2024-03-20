@@ -73,10 +73,8 @@ class Adadelta(Optimizer):
 
             # Lazy state initialization
             if len(state) == 0:
-                if group["capturable"]:
-                    state["step"] = torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                else:
-                    state["step"] = torch.zeros((), dtype=_get_scalar_dtype())
+                state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                                 if group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
 
                 state["square_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
@@ -99,6 +97,8 @@ class Adadelta(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -215,14 +215,15 @@ def adadelta(
 
     See :class:`~torch.optim.Adadelta` for details.
     """
+
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
-
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -231,11 +232,6 @@ def adadelta(
         func = _multi_tensor_adadelta
     else:
         func = _single_tensor_adadelta
-
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     func(
         params,
@@ -249,6 +245,7 @@ def adadelta(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        capturable=capturable,
         has_complex=has_complex,
     )
 
@@ -266,8 +263,13 @@ def _single_tensor_adadelta(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
 
     for (param, grad, square_avg, acc_delta, step) in zip(
         params, grads, square_avgs, acc_deltas, state_steps
@@ -309,10 +311,16 @@ def _multi_tensor_adadelta(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
 
     if len(params) == 0:
         return
@@ -352,7 +360,12 @@ def _multi_tensor_adadelta(
         torch._foreach_div_(deltas, std)
         torch._foreach_mul_(deltas, device_grads)
 
-        torch._foreach_add_(device_params, deltas, alpha=-lr)
+        # If LR is a tensor, the else branch will internally call item()
+        if capturable:
+            torch._foreach_mul_(deltas, -lr)
+            torch._foreach_add_(device_params, deltas)
+        else:
+            torch._foreach_add_(device_params, deltas, alpha=-lr)
 
         torch._foreach_mul_(device_acc_deltas, rho)
         torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)

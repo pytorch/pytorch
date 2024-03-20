@@ -271,7 +271,7 @@ def optim_inputs_func_adadelta(device):
         OptimizerInput(
             params=None,
             kwargs={"weight_decay": 0.1, "capturable": True},
-            desc="capturable",
+            desc="capturable with weight decay",
         ),
         OptimizerInput(
             params=None,

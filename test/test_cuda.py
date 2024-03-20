@@ -2771,7 +2771,7 @@ exit(2)
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
                                                                  torch.optim.ASGD, torch.optim.Adamax,
-                                                                 torch.optim.NAdam, torch.optim.RAdam), (True, False)):
+                                                                 torch.optim.NAdam, torch.optim.RAdam, torch.optim.Adadelta), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
