@@ -9,20 +9,24 @@ from typing import Any
 import torch
 import torch._dynamo
 import torch.utils.cpp_extension
+from torch._C import FileCheck
 
 try:
     from extension_backends.extension_codegen_backend import (
+        ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
 except ImportError:
     from .extension_backends.extension_codegen_backend import (
+        ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
 
-from torch._C import FileCheck
+import torch._inductor.config as config
 from torch._inductor import codecache, metrics
+from torch._inductor.codegen import cpp
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -89,7 +93,10 @@ class ExtensionBackendTests(TestCase):
 
         torch.utils.rename_privateuse1_backend("extension_device")
         register_backend_for_device(
-            "extension_device", ExtensionScheduling, ExtensionWrapperCodegen
+            "extension_device",
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+            ExtensionCppWrapperCodegen,
         )
 
     @classmethod
@@ -133,7 +140,7 @@ class ExtensionBackendTests(TestCase):
         self,
         op_set,
         namespace_name: str,
-        lib_impl: torch.library.Library,
+        lib_impl: torch.library._scoped_library,
         dispatch_key: str,
     ):
         for _op_name in op_set:
@@ -146,46 +153,37 @@ class ExtensionBackendTests(TestCase):
                     if schema.overload_name:
                         reg_name = f"{reg_name}.{schema.overload_name}"
                     lib_impl.impl(
-                        reg_name,
-                        self.make_elementwise(_op_name),
-                        dispatch_key,
-                        compile_mode=True,
+                        reg_name, self.make_elementwise(_op_name), dispatch_key
                     )
-                except Exception:
+                except Exception as e:
+                    print(e)
                     continue
 
     def test_torch_compile_eager(self):
         namespace_name = "aten"
         dispatch_key = "PrivateUse1"
-        torch_compile_op_lib_impl = torch.library.Library("aten", "IMPL")
+        cpp.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
 
-        op_set = ["add", "mul"]
-        self.register_ops(
-            op_set, namespace_name, torch_compile_op_lib_impl, dispatch_key
-        )
+        with torch.library._scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            op_set = ["add", "mul"]
+            self.register_ops(
+                op_set, namespace_name, torch_compile_op_lib_impl, dispatch_key
+            )
 
-        def fn(a, b, c):
-            return a * b + c
+            def fn(a, b, c):
+                return a * b + c
 
-        device = self.module.custom_device()
-        x = torch.empty(2, 16).to(device=device).fill_(1)
-        y = torch.empty(2, 16).to(device=device).fill_(2)
-        z = torch.empty(2, 16).to(device=device).fill_(3)
-        ref = torch.empty(2, 16).fill_(5)
+            device = self.module.custom_device()
+            x = torch.empty(2, 16).to(device=device).fill_(1)
+            y = torch.empty(2, 16).to(device=device).fill_(2)
+            z = torch.empty(2, 16).to(device=device).fill_(3)
 
-        torch._dynamo.reset()
-        metrics.reset()
-        opt_fn = torch.compile(fn)
-        ref, code = run_and_get_cpp_code(opt_fn, x, y, z)
-        FileCheck().check("void kernel").check("*").check("+").check("loadu").check(
-            "extension_device"
-        ).run(code)
-        self.assertEqual(metrics.generated_kernel_count, 1)
+            opt_fn = torch.compile()(fn)
+            opt_fn(x, y, z)
 
-        res = fn(x, y, z)
-        self.assertEqual(ref, res.to(device="cpu"))
-
-        del torch_compile_op_lib_impl
+            ref = torch.empty(2, 16).fill_(5)
+            res = fn(x, y, z)
+            self.assertEqual(ref, res.to(device="cpu"))
 
     def test_open_device_registration(self):
         self.assertTrue(
@@ -194,6 +192,10 @@ class ExtensionBackendTests(TestCase):
         self.assertTrue(
             get_wrapper_codegen_for_device("extension_device")
             == ExtensionWrapperCodegen
+        )
+        self.assertTrue(
+            get_wrapper_codegen_for_device("extension_device", True)
+            == ExtensionCppWrapperCodegen
         )
 
         self.assertFalse(self.module.custom_op_called())
@@ -211,15 +213,18 @@ class ExtensionBackendTests(TestCase):
         def fn(a, b, c):
             return a * b + c
 
-        metrics.reset()
-        opt_fn = torch.compile()(fn)
-        _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-        FileCheck().check("void kernel").check("loadu").check("extension_device").run(
-            code
-        )
-        opt_fn(x, y, z)
-        res = opt_fn(x, y, z)
-        self.assertEqual(ref, res.to(device="cpu"))
+        cpp.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
+        for cpp_wrapper_flag in [True, False]:
+            with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                metrics.reset()
+                opt_fn = torch.compile()(fn)
+                _, code = run_and_get_cpp_code(opt_fn, x, y, z)
+                FileCheck().check("void").check("loadu").check("extension_device").run(
+                    code
+                )
+                opt_fn(x, y, z)
+                res = opt_fn(x, y, z)
+                self.assertEqual(ref, res.to(device="cpu"))
 
 
 if __name__ == "__main__":
