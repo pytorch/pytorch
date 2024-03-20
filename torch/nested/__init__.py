@@ -348,26 +348,26 @@ Example::
     >>> values = torch.randn(12, 5)
     >>> offsets = torch.tensor([0, 3, 5, 6, 10, 12])
     >>> nt = nested_tensor_from_jagged(values, offsets)
-    # Note: 3D shape with the middle dimension jagged
+    >>> # 3D shape with the middle dimension jagged
     >>> nt.shape
-    torch.Size([6, j0, 5])
-    # Note: Length of each item in the batch:
+    torch.Size([5, j2, 5])
+    >>> # Length of each item in the batch:
     >>> offsets.diff()
     tensor([3, 2, 1, 4, 2])
 
     >>> values = torch.randn(6, 5)
     >>> offsets = torch.tensor([0, 2, 3, 6])
     >>> lengths = torch.tensor([1, 1, 2])
-    # NT with holes
+    >>> # NT with holes
     >>> nt = nested_tensor_from_jagged(values, offsets, lengths)
     >>> a, b, c = nt.unbind()
-    # Batch item 1 consists of indices [0, 1)
+    >>> # Batch item 1 consists of indices [0, 1)
     >>> torch.equal(a, values[0:1, :])
     True
-    # Batch item 2 consists of indices [2, 3)
+    >>> # Batch item 2 consists of indices [2, 3)
     >>> torch.equal(b, values[2:3, :])
     True
-    # Batch item 3 consists of indices [3, 5)
+    >>> # Batch item 3 consists of indices [3, 5)
     >>> torch.equal(c, values[3:5, :])
     True
     """
