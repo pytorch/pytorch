@@ -175,7 +175,7 @@ class JitScalarType(enum.IntEnum):
         """
         if onnx_type not in _ONNX_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown onnx_type: {onnx_type}")
-        return _ONNX_TO_SCALAR_TYPE[onnx_type]
+        return _ONNX_TO_SCALAR_TYPE[typing.cast(_C_onnx.TensorProtoDataType, onnx_type)]
 
     @classmethod
     @_beartype.beartype
