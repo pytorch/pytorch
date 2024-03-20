@@ -17,6 +17,7 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -50,11 +51,14 @@ log = logging.getLogger(__name__)
 supported_ctx_manager_classes = dict.fromkeys(
     [
         torch.profiler.profiler.profile,
+        torch.autograd.forward_ad._set_fwd_grad_enabled,
+        torch.autograd.forward_ad.dual_level,
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
         torch._C.DisableTorchFunctionSubclass,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
+        torch._functorch.eager_transforms.jvp_increment_nesting,
         torch._functorch.eager_transforms.enable_inplace_requires_grad,
         torch.amp.autocast_mode.autocast,
         torch.autograd.grad_mode.enable_grad,
@@ -184,10 +188,13 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
+            DualLevelContextManager,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
+            JvpIncrementNestingCtxManagerVariable,
+            SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
@@ -251,6 +258,18 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
+        elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
+            assert len(args) == 0
+            return JvpIncrementNestingCtxManagerVariable.create(tx)
+        elif self.value is torch.autograd.forward_ad._set_fwd_grad_enabled:
+            assert len(args) == 1
+            return SetFwdGradEnabledContextManager.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
+        elif self.value is torch.autograd.forward_ad.dual_level:
+            assert len(args) == 0
+            return DualLevelContextManager.create(tx)
         elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
             assert len(args) == 0
             return GradIncrementNestingCtxManagerVariable.create(tx)
@@ -328,14 +347,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
             # some variable types to track and compare tensor getset descriptors
-            return SourcelessBuilder()(
+            return SourcelessBuilder.create(
                 tx, torch.overrides.get_default_nowrap_functions()
             )
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx, *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.accumulate_grad), args, kwargs
+                SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -343,7 +362,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder()(tx, polyfill.radians), args, kwargs
+                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -572,7 +591,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
-                return SourcelessBuilder()(tx, invocation_result)
+                return SourcelessBuilder.create(tx, invocation_result)
 
             @register(DTensor.from_local)
             def handle_from_local(self, tx, *args, **kwargs):
@@ -840,7 +859,38 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        unimplemented("Parameter() on non-input")
+        try:
+            shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
+            dtype = data.var_getattr(tx, "dtype").as_python_constant()
+            device = data.var_getattr(tx, "device").as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(f"Parameter not python_constant: {e}")
+
+        placeholder = tx.output.synthetic_graph_input(
+            new_parameter_placeholder, [shape, dtype, device, requires_grad]
+        )
+        if data.requires_grad:
+            data = data.call_method(tx, "detach", [], {})
+
+        from .builder import wrap_fx_proxy
+
+        result = wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                tracable_create_parameter,
+                (data.as_proxy(), placeholder.as_proxy()),
+                {},
+            ),
+        )
+        assert isinstance(result, variables.TensorVariable)
+        result.class_type = torch.nn.Parameter
+        # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
+        result.source = placeholder.source
+
+        # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
+        # the end of the graph.  We should fix this.
+        return result
 
     @staticmethod
     def _nn_param_via_prefix_insert(tx, data, requires_grad):

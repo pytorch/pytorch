@@ -7,10 +7,13 @@ from .ctx_manager import (
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
+    DualLevelContextManager,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
+    JvpIncrementNestingCtxManagerVariable,
+    SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
     VmapIncrementNestingCtxManagerVariable,
@@ -73,6 +76,8 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
+from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
@@ -148,4 +153,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "OptimizerVariable",
 ]
