@@ -364,8 +364,8 @@ def _multi_tensor_adadelta(
 
         # If LR is a tensor, the else branch will internally call item()
         if capturable:
-            torch._foreach_mul_(deltas, -lr)
-            torch._foreach_add_(device_params, deltas)
+            deltas_modified = torch._foreach_mul(deltas, -lr)
+            torch._foreach_add_(device_params, deltas_modified)
         else:
             torch._foreach_add_(device_params, deltas, alpha=-lr)
 
