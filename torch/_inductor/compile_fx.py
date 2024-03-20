@@ -157,7 +157,7 @@ def _unlift_graph(mod, gm, graph_signature):
             attr_kind=_AttrKind.BUFFER,
         )
 
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     lifted_inputs = []
     for node in placeholder_nodes:
         node_name = node.name
@@ -192,13 +192,12 @@ def _unlift_graph(mod, gm, graph_signature):
 
 
 def _get_subgraph_names(gm):
-    for node in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.cond
-    ):
-        true_subgraph_name = node.args[1].name
-        false_subgraph_name = node.args[2].name
-        yield true_subgraph_name
-        yield false_subgraph_name
+    for node in gm.graph.nodes:
+        if node.target == torch.ops.higher_order.cond:
+            true_subgraph_name = node.args[1].name
+            false_subgraph_name = node.args[2].name
+            yield true_subgraph_name
+            yield false_subgraph_name
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
@@ -289,14 +288,15 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
         aten.bmm.default,
         aten.baddbmm.default,
     }
-    for target in tf32_ops:
-        for node in gm.graph.find_nodes(op="call_function", target=target):
-            if (
-                isinstance(node.meta.get("val", None), torch.Tensor)
-                and node.meta["val"].dtype == torch.float32
-                and node.meta["val"].device.type == "cuda"
-            ):
-                return True
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target in tf32_ops
+            and isinstance(node.meta.get("val", None), torch.Tensor)
+            and node.meta["val"].dtype == torch.float32
+            and node.meta["val"].device.type == "cuda"
+        ):
+            return True
     return False
 
 
