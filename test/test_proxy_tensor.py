@@ -1927,6 +1927,15 @@ inplace_symbolic_tensor_failures = {
 }
 
 out_symbolic_tensor_failures = {
+    # Cast error details: Unable to cast (...) to Tensor
+    #
+    # This happens because the test is set up to call the out variant using the `out` kwarg:
+    #   torch._some_op(arg1, arg2, out=(out1, out2, out3))
+    #
+    # However, this only works on torch ops, not aten ops. For `_batch_norm_with_update`,
+    # this fails because the op has no python bindings, so it doesn't support the `out` kwarg
+    # way of calling its out variant.
+    xfail('_batch_norm_with_update', ''),
     xfail('_native_batch_norm_legit', ''),
     xfail('angle', ''),
     xfail('argmax', ''),
