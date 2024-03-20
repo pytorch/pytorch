@@ -46,10 +46,10 @@ from .utils import (
     get_gpu_dram_gbps,
     green_text,
     is_collective,
+    is_gpu,
     is_wait,
     red_text,
     sympy_product,
-    is_gpu,
 )
 from .virtualized import V
 

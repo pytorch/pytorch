@@ -68,12 +68,12 @@ from .utils import (
     developer_warning,
     get_kernel_metadata,
     is_dynamic,
+    is_gpu,
     pad_listlike,
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    is_gpu,
 )
 from .virtualized import ops, V
 

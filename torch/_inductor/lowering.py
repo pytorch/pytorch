@@ -54,11 +54,11 @@ from .utils import (
     ceildiv,
     decode_device,
     is_dynamic,
+    is_gpu,
     is_pointwise_use,
     pad_listlike,
     parallel_num_threads,
     sympy_product,
-    is_gpu,
 )
 from .virtualized import ops, V
 
