@@ -183,6 +183,8 @@ class DeviceMeshVariable(DistributedVariable):
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
+        if name == "device_type":
+            return ConstantVariable.create(self.value.device_type)
         return super().var_getattr(tx, name)
 
     def call_method(
