@@ -72,11 +72,27 @@ from torch.export import export
 
 
 torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
+torch.library.define(
+    "testlib::foo",
+    "(Tensor(a!) x, Tensor(b!) z) -> (Tensor, Tensor, Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
 @torch.library.impl_abstract("testlib::returns_tensor_symint")
 def returns_tensor_symint_impl(x):
     return x, x.shape[0]
+
+@torch.library.impl("testlib::foo", "cpu")
+@torch._dynamo.disable
+def foo_impl(x, z):
+    x.add_(5)
+    z.add_(5)
+    return x, z, x + z
+
+@torch.library.impl_abstract("testlib::foo")
+def foo_abstract(x, z):
+    return x, z, x + z
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -713,6 +729,45 @@ class TestExport(TestCase):
             ).size()[0],
             6,
         )
+
+    def test_dim_1_2(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes=({0: dx, 1: None}, )
+        )
+        ep.module()(torch.randn(1, 2))
+        ep.module()(torch.randn(2, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 2, but got 3"
+        ):
+            ep.module()(torch.randn(3, 2))
+        vr = list(ep.range_constraints.values())[0]
+        self.assertEquals(vr.lower, 1)
+        self.assertEquals(vr.upper, 2)
+
+    def test_derived_dim_1_2(self):
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Bar(),
+            (torch.randn(2, 2), torch.randn(3, 2)),
+            dynamic_shapes=({0: dx, 1: None}, {0: dx+1, 1: None})
+        )
+        ep.module()(torch.randn(1, 2), torch.randn(2, 2))
+        range_lower_bounds = sorted(vr.lower for vr in ep.range_constraints.values())
+        range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
+        self.assertEquals(range_lower_bounds, [1, 2])
+        self.assertEquals(range_upper_bounds, [2, 3])
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
@@ -3601,6 +3656,30 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
 
+    def test_custom_op_auto_functionalize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, z):
+                return torch.ops.testlib.foo(x, z)
+
+        inps = (torch.ones(5), torch.ones(5))
+        inps_for_export = (torch.ones(5), torch.ones(5))
+        inps_for_export_with_decomp = (torch.ones(5), torch.ones(5))
+
+        ep = torch.export.export(M(), inps_for_export)
+        x_new_eager, z_new_eager, legit_eager = M()(*inps)
+        x_new_export, z_new_export, legit_export = ep.module()(*inps_for_export)
+        self.assertTrue(torch.allclose(x_new_eager, x_new_export))
+        self.assertTrue(torch.allclose(z_new_eager, z_new_export))
+        self.assertTrue(torch.allclose(legit_eager, legit_export))
+
+        ep = ep.run_decompositions()
+        x_new_export, z_new_export, legit_export = ep.module()(*inps_for_export_with_decomp)
+        self.assertTrue(torch.allclose(x_new_eager, x_new_export))
+        self.assertTrue(torch.allclose(z_new_eager, z_new_export))
+        self.assertTrue(torch.allclose(legit_eager, legit_export))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
