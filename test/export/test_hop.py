@@ -43,7 +43,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
 )
-from torch.testing._internal.hop_exportability_db import hop_export_opinfo_db
+from torch.testing._internal.hop_exportability_db import hop_export_opinfo_db, hop_that_doesnt_need_export_support
+import torch.utils._pytree as pytree
 
 try:
     from . import testing
@@ -57,48 +58,74 @@ hop_tests = []
 for _, val in hop_export_opinfo_db.items():
     hop_tests.extend(val)
 
-
-class TestHOP(TestCase):
+class TestHOPGeneric(TestCase):
     def test_all_hops_have_op_info(self):
         from torch._ops import _higher_order_ops
-        print(_higher_order_ops.keys())
+        hops_that_have_op_info = hop_export_opinfo_db.keys()
+        all_hops = _higher_order_ops.keys()
+
+        missing_ops = []
+
+        for op in all_hops:
+            if op not in hops_that_have_op_info and op not in hop_that_doesnt_need_export_support:
+                missing_ops.append(op)
+
+        self.assertTrue(len(missing_ops) == 0, f"Missing op info for {missing_ops}")
+
+class TestHOP(TestCase):
+    def _compare(self, eager_model, export, input):
+        eager_inp = copy.deepcopy(input)
+        export_inp = copy.deepcopy(input)
+
+        flat_orig_outputs = pytree.tree_leaves(eager_model(*eager_inp))
+        flat_loaded_outputs = pytree.tree_leaves(export.module()(*export_inp))
+
+        for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
+            self.assertEqual(type(orig), type(loaded))
+            if isinstance(orig, torch.Tensor):
+                if orig.is_meta:
+                    self.assertEqual(orig, loaded)
+                else:
+                    self.assertTrue(torch.allclose(orig, loaded))
+            else:
+                self.assertEqual(orig, loaded)
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_aot_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
-            def forward(self, x):
-                return op.op(x)
+            def forward(self, *args):
+                return op.op(*args)
 
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = export(model, (inp.input,))
-            self.assertTrue(torch.allclose(model(inp.input), ep.module()(inp.input)))
+            ep = export(model, inp.input)
+            self._compare(model, ep, inp.input)
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_pre_dispatch_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
-            def forward(self, x):
-                return op.op(x)
+            def forward(self, *args):
+                return op.op(*args)
 
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = _export(model, (inp.input,), pre_dispatch=True)
-            self.assertTrue(torch.allclose(model(inp.input), ep.module()(inp.input)))
+            ep = _export(model, inp.input, pre_dispatch=True)
+            self._compare(model, ep, inp.input)
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_retrace_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
-            def forward(self, x):
-                return op.op(x)
+            def forward(self, *args):
+                return op.op(*args)
 
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = _export(model, (inp.input,), pre_dispatch=True)
+            ep = _export(model, inp.input, pre_dispatch=True)
             ep = ep.run_decompositions()
-            self.assertTrue(torch.allclose(model(inp.input), ep.module()(inp.input)))
+            self._compare(model, ep, inp.input)
 
 instantiate_device_type_tests(TestHOP, globals())
 
