@@ -142,6 +142,20 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_nonzero_in_inference_mode(self, device):
+        def fn(x):
+            return torch.nonzero(x)
+
+        example_inputs = (torch.randint(0, 2, (128,), device=device),)
+
+        with torch.inference_mode():
+            actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+            expected = fn(*example_inputs)
+
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(
     TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
