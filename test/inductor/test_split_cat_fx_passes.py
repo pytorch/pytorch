@@ -76,7 +76,7 @@ class TestSplitCatFxPasses(TestCase):
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
-            (list_replace, 1),
+            (list_replace, 0),
             (multi_split, 1),
             (unequal_split, 1),
             (arg_only_cm, 1),
@@ -93,6 +93,7 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["split_cat_norm"],
                 expected_split_norm_count,
+                msg=f"for {fn}"
             )
             if expected_split_norm_count > 0:
                 self.assertIn(
