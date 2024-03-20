@@ -2840,9 +2840,9 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
 
   if (is_reduce_over_1D_vector) {
     if (ord != 0.0) {
-      at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
+      keepdim ? at::abs_outf(self, const_cast<Tensor&>(result)) : at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
     } else {
-      at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+      keepdim ? at::ne_outf(self, 0, const_cast<Tensor&>(result)) : at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
     }
     return;
   }
