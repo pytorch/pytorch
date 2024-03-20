@@ -852,26 +852,11 @@ def fix_extended_args(instructions: List[Instruction]) -> int:
     return added
 
 
-# from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
-# TODO use the actual object instead, can interface from eval_frame.c
-_PYOPCODE_CACHES = {
-    "BINARY_SUBSCR": 4,
-    "STORE_SUBSCR": 1,
-    "UNPACK_SEQUENCE": 1,
-    "STORE_ATTR": 4,
-    "LOAD_ATTR": 4,
-    "COMPARE_OP": 2,
-    "LOAD_GLOBAL": 5,
-    "BINARY_OP": 1,
-    "LOAD_METHOD": 10,
-    "PRECALL": 1,
-    "CALL": 4,
-}
-
-
 def instruction_size(inst) -> int:
+    import torch
+
     if sys.version_info >= (3, 11):
-        return 2 * (_PYOPCODE_CACHES.get(dis.opname[inst.opcode], 0) + 1)
+        return 2 * (torch._C._dynamo.eval_frame.py_opcode_caches[inst.opcode] + 1)
     return 2
 
 

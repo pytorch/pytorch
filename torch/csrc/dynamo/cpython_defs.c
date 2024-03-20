@@ -26,7 +26,7 @@
 
 #define Py_BUILD_CORE
 #include <internal/pycore_pystate.h>
-#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
+#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
@@ -646,5 +646,17 @@ THP_PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
     }
 }
 
+
+#endif
+
+#if IS_PYTHON_3_11_PLUS
+
+const uint8_t* THP_PyOpcode_Caches = _PyOpcode_Caches;
+const int THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
+
+#else
+
+const uint8_t* THP_PyOpcode_Caches = NULL;
+const int THP_PyOpcode_Caches_size = 0;
 
 #endif
