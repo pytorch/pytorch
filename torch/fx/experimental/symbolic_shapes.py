@@ -3653,10 +3653,10 @@ class ShapeEnv:
         self._update_version_counter()
 
     @_lru_cache
-    def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
+    def simplify(self, expr: "sympy.Expr", resolve_unbacked=True) -> "sympy.Expr":
         """Use known constraints and replacements to simplify the given expr
         """
-        expr = self.replace(expr, resolve_unbacked=True)
+        expr = self.replace(expr, resolve_unbacked=resolve_unbacked)
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
         # the non-recursive replacement doesn't work, and
