@@ -748,10 +748,10 @@ def fresh_inductor_cache(cache_entries=None):
     """
     with tempfile.TemporaryDirectory() as inductor_cache_dir:
         with mock.patch.dict(
-            os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
+            os.environ, {"TORCHINDUCTOR_CACHE_DIR_": inductor_cache_dir}
         ):
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
-            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
+            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR_": triton_cache_dir}):
                 yield
                 if isinstance(cache_entries, dict):
                     assert len(cache_entries) == 0, "expected empty cache_entries dict"
