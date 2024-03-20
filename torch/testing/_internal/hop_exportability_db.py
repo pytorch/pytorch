@@ -56,8 +56,9 @@ def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwa
 def simple_auto_functionalize(x, z):
     return torch.ops.testlib.mutating_custom_op(x, z)
 
-
-hop_that_doesnt_need_export_support = [
+# Please consult with torch.export team before
+# adding new entry to this list.
+hop_that_doesnt_have_export_test_allowlist = [
     "custom_function_call",
     "autograd_function_apply",
     "run_and_save_rng_state",

@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import run_tests, TestCase as TorchTestCase
 from torch.testing._internal.hop_exportability_db import (
     hop_export_opinfo_db,
-    hop_that_doesnt_need_export_support,
+    hop_that_doesnt_have_export_test_allowlist,
 )
 
 try:
@@ -42,7 +42,7 @@ class TestHOPGeneric(TestCase):
         for op in all_hops:
             if (
                 op not in hops_that_have_op_info
-                and op not in hop_that_doesnt_need_export_support
+                and op not in hop_that_doesnt_have_export_test_allowlist
             ):
                 missing_ops.append(op)
 
