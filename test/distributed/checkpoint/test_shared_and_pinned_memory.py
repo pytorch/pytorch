@@ -28,13 +28,17 @@ def test_shared_pinned_ipc(
 
     for idx in range(100):
 
-        event = torch.cuda.Event(blocking=True,interprocess=True)
+        event = torch.cuda.Event(blocking=True, interprocess=True)
         with torch.cuda.stream(torch.cuda.Stream()):
+            _offload_state_dict_to_cpu(
+                state_dict,
+                cpu_offload_state_dict=cache,
+                cpu_offload_sync=False
+            )
             event.record()
-            copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache)
 
-        send_queue.put((copy, event))
-        # event.synchronize() # this doesn't really do anything, since we're going to call synchronize
+        send_queue.put((cache, event))
+         # this doesn't really do anything, since we're going to call synchronize
         # and the following get will wait.
 
         t_recv = recv_queue.get()
