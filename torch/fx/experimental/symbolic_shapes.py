@@ -3227,6 +3227,10 @@ class ShapeEnv:
                 self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
+        for var, sources in self.var_to_sources.items():
+            if not symbol_to_source[var]:
+                symbol_to_source[var].extend(sources)
+
         # First, issue all the non-trivial guards.
         for guard in self.guards:
             if self._maybe_evaluate_static(guard.expr) is not None:
