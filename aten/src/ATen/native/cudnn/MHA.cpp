@@ -379,23 +379,23 @@ auto build_graph_and_tensors_backward(
         fe::graph::Tensor_attributes()
             .set_name("Q")
             .set_dim(
-                std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
+                std::vector<int64_t>(q.sizes().begin(), q.sizes().end()))
             .set_stride(std::vector<int64_t>(
-                params.q_stride.begin(), params.q_stride.end())));
+                q.strides().begin(), q.strides().end())));
     auto K = mha_graph->tensor(
         fe::graph::Tensor_attributes()
             .set_name("K")
             .set_dim(
-                std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
+                std::vector<int64_t>(k.sizes().begin(), k.sizes().end()))
             .set_stride(std::vector<int64_t>(
-                params.k_stride.begin(), params.k_stride.end())));
+                k.strides().begin(), k.strides().end())));
     auto V = mha_graph->tensor(
         fe::graph::Tensor_attributes()
             .set_name("V")
             .set_dim(
-                std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
+                std::vector<int64_t>(v.sizes().begin(), v.sizes().end()))
             .set_stride(std::vector<int64_t>(
-                params.v_stride.begin(), params.v_stride.end())));
+                v.strides().begin(), v.strides().end())));
     auto attn_scale =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_name("attn_scale")
@@ -431,9 +431,9 @@ auto build_graph_and_tensors_backward(
         fe::graph::Tensor_attributes()
             .set_name("dO")
             .set_dim(
-                std::vector<int64_t>(o.sizes().begin(), o.sizes().end()))
+                std::vector<int64_t>(dO.sizes().begin(), dO.sizes().end()))
             .set_stride(std::vector<int64_t>(
-                o.strides().begin(), o.strides().end())));
+                dO.strides().begin(), dO.strides().end())));
      auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
                                      .set_name("flash_attention_backward")
                                      .set_causal_mask(is_causal)
@@ -442,9 +442,9 @@ auto build_graph_and_tensors_backward(
         sdpa_backward_options.set_dropout(dropout_probability, Seed, Offset);
      }
      auto [DQ, DK, DV] = mha_graph->sdpa_backward(Q, K, V, O, DO, STATS, sdpa_backward_options);
-     DQ->set_output(true).set_dim(std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end())).set_stride(std::vector<int64_t>(params.q_stride.begin(), params.q_stride.end()));
-     DK->set_output(true).set_dim(std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end())).set_stride(std::vector<int64_t>(params.k_stride.begin(), params.k_stride.end()));
-     DV->set_output(true).set_dim(std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end())).set_stride(std::vector<int64_t>(params.v_stride.begin(), params.v_stride.end()));
+     DQ->set_output(true).set_dim(std::vector<int64_t>(dQ.sizes().begin(), dQ.sizes().end())).set_stride(std::vector<int64_t>(dQ.strides().begin(), dQ.strides().end()));
+     DK->set_output(true).set_dim(std::vector<int64_t>(dK.sizes().begin(), dK.sizes().end())).set_stride(std::vector<int64_t>(dK.strides().begin(), dK.strides().end()));
+     DV->set_output(true).set_dim(std::vector<int64_t>(dV.sizes().begin(), dV.sizes().end())).set_stride(std::vector<int64_t>(dV.strides().begin(), dV.strides().end()));
      AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
      AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
      AT_CUDNN_FRONTEND_CHECK(
@@ -618,16 +618,18 @@ void run_cudnn_SDP_bprop(
    {Dv, dV.data_ptr()},
    // pass by value
    {attn_scale, &scaling_factor}};
+   TORCH_WARN(q.data_ptr(), k.data_ptr(), v.data_ptr(), o.data_ptr(), dO.data_ptr(), softmaxstats.data_ptr(), dQ.data_ptr(), dK.data_ptr(), dV.data_ptr());
    if (dropout_probability != 0.0f) {
        variant_pack[Seed]   = dropoutseed.data_ptr();
        variant_pack[Offset] = dropoutoffset.data_ptr();
    }
-  auto workspace_size = mha_graph->get_workspace_size();
-  auto workspace_ptr =
-      c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  TORCH_INTERNAL_ASSERT(
-      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
-  mhagraphbackwardcache.update(key, graph_and_tensors_backward_values);
+   auto workspace_size = mha_graph->get_workspace_size();
+   auto workspace_ptr =
+       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+   TORCH_INTERNAL_ASSERT(!workspace_size || workspace_ptr.get());
+   TORCH_INTERNAL_ASSERT(
+       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
+   mhagraphbackwardcache.update(key, graph_and_tensors_backward_values);
 }
 
 
