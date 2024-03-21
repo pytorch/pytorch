@@ -1238,7 +1238,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
-    def _quantize(self, m, quantizer, example_inputs):
+    def _quantize(self, m, quantizer, example_inputs, is_qat: bool = False):
         # resetting dynamo cache
         torch._dynamo.reset()
 
@@ -1246,7 +1246,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m,
             example_inputs,
         )
-        m = prepare_pt2e(m, quantizer)
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         m = convert_pt2e(m)
         return m
