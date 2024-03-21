@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -31,8 +32,21 @@ __all__ = [
     "tensorboard_trace_handler",
     "profile",
     "ExecutionTraceObserver",
+    "EnableCaptureGeneratedKernel",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
+
+
+# global python state - whether the generated kernel should be captured
+_capture_generated_kernel: bool = False
+
+
+# EnableCaptureGeneratedKernel is to control if the generated kernel should be
+# instrumented to be captured during profiling. The current supported genetrated
+# kernels is triton kernel.
+def EnableCaptureGeneratedKernel(enable: bool):
+    global _capture_generated_kernel
+    _capture_generated_kernel = enable
 
 
 def supported_activities():
@@ -788,6 +802,24 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         if self._registered:
             self.stop()
+
+            if _capture_generated_kernel:
+                # Save the kernel paths for the generated kernels
+                from torch._inductor.codecache import PyCodeCache as PyCodeCache
+
+                kernel_files = [
+                    v.__file__
+                    for v in PyCodeCache.cache.values()
+                    if getattr(v, "__file__", None) is not None
+                ]
+                work_dir, _ = os.path.split(self._output_file_path)
+                for kernel_file in kernel_files:
+                    if kernel_file is None:
+                        continue
+                    path, name = os.path.split(kernel_file)
+                    dst = work_dir + "/" + name
+                    shutil.copyfile(kernel_file, dst)
+
             _remove_execution_trace_observer()
             self._registered = False
 

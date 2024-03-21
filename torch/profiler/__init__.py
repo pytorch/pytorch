@@ -16,6 +16,7 @@ from torch.optim.optimizer import register_optimizer_step_post_hook
 
 from .profiler import (
     _KinetoProfile,
+    EnableCaptureGeneratedKernel,
     ExecutionTraceObserver,
     profile,
     ProfilerAction,
@@ -35,6 +36,7 @@ __all__ = [
     "DeviceType",
     "record_function",
     "ExecutionTraceObserver",
+    "EnableCaptureGeneratedKernel",
 ]
 
 from . import itt

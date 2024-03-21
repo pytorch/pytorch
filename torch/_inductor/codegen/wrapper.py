@@ -24,6 +24,7 @@ from sympy import Expr
 
 import torch
 import torch._ops
+import torch.profiler.profiler as profiler
 from torch._dynamo.utils import counters, dynamo_timed
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
@@ -488,6 +489,10 @@ class WrapperCodeGen(CodeGen):
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+                from torch._C._autograd import (
+                    _record_function_with_args_enter,
+                    _record_function_with_args_exit)
+                import torch.autograd.profiler as autograd_profiler
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
@@ -666,9 +671,23 @@ class WrapperCodeGen(CodeGen):
         stream_name = self.write_get_raw_stream(
             V.graph.scheduler.current_device.index, V.graph
         )
-        self.writeline(
-            f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
-        )
+
+        if profiler._capture_generated_kernel:
+            self.writeline("if autograd_profiler._is_profiler_enabled:")
+            self.writeline(
+                f'    handle = _record_function_with_args_enter("{kernel_name}", getattr({kernel_name}, "__file__", '
+                "),"
+                f"{', '.join(args)}, grid=\"{grid}\", stream={stream_name})"
+            )
+            self.writeline(
+                f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
+            )
+            self.writeline("if autograd_profiler._is_profiler_enabled:")
+            self.writeline("    _record_function_with_args_exit(handle)")
+        else:
+            self.writeline(
+                f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
+            )
 
     def generate_scatter_fallback(
         self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
@@ -1284,9 +1303,21 @@ class WrapperCodeGen(CodeGen):
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
                 grid_str = f"{grid_fn}({grid_str})"
-                self.writeline(
-                    f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
-                )
+                if profiler._capture_generated_kernel:
+                    self.writeline("if autograd_profiler._is_profiler_enabled:")
+                    self.writeline(
+                        f'    handle = _record_function_with_args_enter("{name}", getattr({name}, "__file__", ""),'
+                        f'{call_args_str}, grid="{grid_str}", stream={stream_name})'
+                    )
+                    self.writeline(
+                        f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                    )
+                    self.writeline("if autograd_profiler._is_profiler_enabled:")
+                    self.writeline("    _record_function_with_args_exit(handle)")
+                else:
+                    self.writeline(
+                        f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                    )
             else:
                 stream_ptr = f"c_void_p({stream_name})"
                 self.writeline(f"{name}.{name}({call_args_str}, {stream_ptr})")

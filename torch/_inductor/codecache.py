@@ -2166,9 +2166,9 @@ class PyCodeCache:
         extra: str = "",
         linemap: Optional[List[Tuple[int, str]]] = None,
         attrs: Optional[Dict[str, Any]] = None,
-    ) -> ModuleType:
+    ) -> Tuple[ModuleType, str]:
         key, path = write(source_code, "py", extra=extra)
-        return cls.load_by_key_path(key, path, linemap, attrs)
+        return cls.load_by_key_path(key, path, linemap, attrs), path
 
     @classmethod
     def load_by_key_path(
@@ -2235,9 +2235,9 @@ class PyCodeCache:
 
 class TritonCodeCache:
     @classmethod
-    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
-        mod = PyCodeCache.load(source_code)
-        return getattr(mod, kernel_name)
+    def load(cls, kernel_name: str, source_code: str) -> Tuple[ModuleType, str]:
+        mod, path = PyCodeCache.load(source_code)
+        return getattr(mod, kernel_name), path
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -2523,14 +2523,16 @@ def _worker_compile(
 ) -> None:
     device_interface = get_interface_for_device(device.type)
     device_interface.Worker.set_device(device.index)
-    kernel = TritonCodeCache.load(kernel_name, source_code)
+    kernel, path = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
+    kernel.__file__ = path
 
 
 def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
     _set_triton_ptxas_path()
-    kernel = TritonCodeCache.load(kernel_name, source_code)
+    kernel, path = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile()
+    kernel.__file__ = path
     return kernel
 
 
