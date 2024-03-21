@@ -2376,6 +2376,7 @@ class TritonKernel(Kernel):
         class CSEProxy:
             def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
                 def inner(*args, **kwargs):
+                    nonlocal helper_name
                     helper_name += f"_{name}"
                     return cse.generate(
                         helper,
