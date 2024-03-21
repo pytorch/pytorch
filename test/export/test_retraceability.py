@@ -1,7 +1,10 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 
-import test_export
-import testing
+try:
+    from . import test_export, testing
+except ImportError:
+    import test_export
+    import testing
 from torch.export import export
 
 test_classes = {}
@@ -9,7 +12,7 @@ test_classes = {}
 
 def mocked_retraceability_export(*args, **kwargs):
     ep = export(*args, **kwargs)
-    ep = export(ep, *(args[1:]), **kwargs)
+    ep = export(ep.module(), *(args[1:]), **kwargs)
     return ep
 
 

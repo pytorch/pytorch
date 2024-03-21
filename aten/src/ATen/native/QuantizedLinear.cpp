@@ -125,6 +125,9 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto& pack_b =
       cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
+  int32_t* col_offsets_data = col_offsets.data_ptr<int32_t>();
+  float* bias_contig_data = bias_contig.data_ptr<float>();
+
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     // This operation does the following:
@@ -162,8 +165,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
           /*Aq_zero_point=*/q_params.zero_point,
           /*Bq_zero_point=*/&weight_zero_point_int32,
           /*row_offsets=*/pack_a.getRowOffsetBuffer(),
-          /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
-          /*bias=*/bias_contig.data_ptr<float>(),
+          /*col_offsets=*/col_offsets_data,
+          /*bias=*/bias_contig_data,
           /*nCol=*/N);
       // Do the GEMM
       fbgemm::fbgemmPacked(

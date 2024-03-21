@@ -280,7 +280,7 @@ class TestMisc(JitTestCase):
         self.checkScript(foo, ())
 
         def annotated_list_fail():
-            return expects_intlist(torch.jit.annotate([], List[Tensor]))
+            return expects_intlist(torch.jit.annotate([], List[Tensor]))  # noqa: F821
 
         with self.assertRaises(RuntimeError):
             torch.jit.script(annotated_list_fail)

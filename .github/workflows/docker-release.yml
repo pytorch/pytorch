@@ -11,6 +11,8 @@ on:
     branches:
       - nightly
     tags:
+      # Final Release tags look like: v1.11.0
+      - v[0-9]+.[0-9]+.[0-9]+
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - ciflow/nightly/*
@@ -27,6 +29,8 @@ env:
   NO_BUILD_SUFFIX: true
   USE_BUILDX: 1
   WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
+
+permissions: read-all
 
 jobs:
   generate-matrix:
@@ -99,6 +103,16 @@ jobs:
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
           echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)" >> "${GITHUB_ENV}"
+      - name: Setup test specific variables
+        if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+        run: |
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
+            {
+              echo "DOCKER_IMAGE=pytorch-test";
+              echo "INSTALL_CHANNEL=pytorch-test";
+              echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)";
+            } >> "${GITHUB_ENV}"
+          fi
       - name: Setup nightly specific variables
         if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         run: |
@@ -114,7 +128,7 @@ jobs:
       - name: Push nightly tags
         if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' }}
         run: |
-          PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime"
+          PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-runtime"
 
           PYTORCH_NIGHTLY_COMMIT=$(docker run ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
                                           python -c 'import torch; print(torch.version.git_version[:7],end="")')

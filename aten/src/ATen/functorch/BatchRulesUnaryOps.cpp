@@ -7,7 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 namespace{
 std::tuple<Tensor,optional<int64_t>>
@@ -185,4 +185,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 #undef INVOKE
-}}
+} // namespace at::functorch

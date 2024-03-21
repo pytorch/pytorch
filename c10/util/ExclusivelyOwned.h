@@ -55,10 +55,7 @@ struct ExclusivelyOwnedTraits;
 template <typename T>
 class ExclusivelyOwned {
   using EOT = ExclusivelyOwnedTraits<T>;
-  union {
-    char dummy_;
-    typename ExclusivelyOwnedTraits<T>::repr_type repr_;
-  };
+  typename ExclusivelyOwnedTraits<T>::repr_type repr_;
 
  public:
   ExclusivelyOwned() : repr_(EOT::nullRepr()) {}

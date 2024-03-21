@@ -88,10 +88,16 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
 }
 
 TORCH_LIBRARY_FRAGMENT(custom, m) {
+    m.impl_abstract_pystub("nonexistent");
+    m.def("asin(Tensor x) -> Tensor");
+}
+
+TORCH_LIBRARY_FRAGMENT(custom, m) {
     m.def("tan(Tensor x) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(custom, CPU, m) {
   m.impl("nonzero", &custom_nonzero);
   m.impl("sin", &custom_sin);
+  m.impl("asin", &at::asin);
 }

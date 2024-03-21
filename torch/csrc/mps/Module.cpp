@@ -95,7 +95,7 @@ static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkDouble(args), "invalid argument to setMemoryFraction()");
   double fraction = THPUtils_unpackDouble(args);
   at::detail::getMPSHooks().setMemoryFraction(fraction);

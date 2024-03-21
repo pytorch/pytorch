@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import sys
 from unittest.mock import patch
 
 import functorch
@@ -8,11 +9,8 @@ import torch
 import torch._inductor.config as config
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    skipIfRocm,
-    TestCase as TorchTestCase,
-)
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -27,7 +25,9 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-if not IS_WINDOWS:
+# We don't support torch.compile() on
+# Windows and Python 3.12+
+if not IS_WINDOWS and sys.version_info < (3, 12):
 
     @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
@@ -76,7 +76,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     device = DEVICE
     pass
 
@@ -208,13 +208,76 @@ class NumBytesMetricTests(TestCase):
             return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
 
         inp = [T(10, 10) for _ in range(5)]
-        self.assertExpectedInline(count_numel(f, *inp), """2000""")
+        self.assertExpectedInline(count_numel(f, *inp), """1000""")
 
         def f(a, b):
             return torch.cat([a.sum(dim=0), b.sum(dim=0)]) + 10
 
         inp = [T(10, 10, 10), T(10, 10, 10)]
         self.assertExpectedInline(count_numel(f, *inp), """2600""")
+
+    def test_cat_pointwise(self):
+        def f(a, b):
+            return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+        def f(a, b):
+            return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
+
+        # potentially beneficial to fuse but we exclude reductions from pointwise cat
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """800""")
+
+        # Should turn into pointwise even if only some of inputs are pointwise.
+        def f(a, b):
+            out = torch.cat([a.cos(), torch.mm(b, b)])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
+
+        # Should not turn into pointwise if all inputs are not pointwise
+        def f(a, b):
+            out = torch.cat([torch.mm(a, a), torch.mm(b, b)])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """800""")
+
+        def f(a, b):
+            out = torch.cat([a, b])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+    @patch.object(config, "split_cat_fx_passes", False)
+    def test_cat_pointwise_many_complex_inputs(self):
+        def f(*inputs):
+            input = [torch.nn.functional.gelu(val) for val in inputs]
+            return torch.cat(input) + 10
+
+        inp = (T(10, 10) for _ in range(16))
+        self.assertExpectedInline(count_numel(f, *inp), """6400""")
+
+    @patch.object(config, "split_cat_fx_passes", False)
+    def test_cat_pointwise_many_simple_inputs(self):
+        def f(*inputs):
+            input = [torch.nn.functional.relu(val) for val in inputs]
+            return torch.cat(input) + 10
+
+        inp = (T(10, 10) for _ in range(16))
+        self.assertExpectedInline(count_numel(f, *inp), """9600""")
+
+    @patch.object(config, "max_pointwise_cat_inputs", 0)
+    def test_cat_pointwise_config_option(self):
+        def f(a, b):
+            return torch.cat([a + 1, b + 2]) + 3
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     def test_index(self):
         def f(a, b):
@@ -451,7 +514,7 @@ class SchedulerFusionTests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(patch.object(config, "realize_bytes_threshold", 0))
+        cls._stack.enter_context(patch.object(config, "realize_opcount_threshold", 0))
 
     @classmethod
     def tearDownClass(cls):
@@ -497,6 +560,28 @@ class SchedulerFusionTests(TestCase):
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """800""")
+
+    @patch.object(config, "pattern_matcher", False)
+    def test_fusion_choice4_cpu(self):
+        # Fuse nodes with same number of elements and compatible orginal var ranges
+        # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
+        def f(x, w):
+            o1 = x * w
+            output = o1 + 1.0
+            return output
+
+        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"))
+        self.assertExpectedInline(count_numel(f, *inp), """1331""")
+
+        # [buf0_buf1: {d0: 60, d1: 11}, buf2: {d0: 660}] -> buf0_buf1_buf2
+        def f(x, w1, w2):
+            o1 = x * w1
+            o2 = x * w2
+            output = o1 + o2
+            return output
+
+        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"), T(11, device="cpu"))
+        self.assertExpectedInline(count_numel(f, *inp), """1342""")
 
 
 class TilingTests(TestCase):
@@ -581,7 +666,10 @@ class MinCutPartitioningTests(TestCase):
 
 
 def unfusible(x):
-    return aten.special_bessel_j0(x)
+    # For the purpose of noop tests, we want inductor to fall back to
+    # eager mode, so, below we must use a aten operator that does not
+    # have decomposition nor lowering:
+    return aten._lazy_clone(x)
 
 
 class NoopTests(TestCase):
@@ -703,7 +791,7 @@ class InplacingTests(TestCase):
         inp = (T(10, 10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_inplace_triton_kernel_v1(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -716,7 +804,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_inplace_triton_kernel_v2(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -730,7 +818,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_inplace_triton_kernel_v3(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -742,9 +830,9 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """90""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_inplace_triton_kernel_v4(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -759,7 +847,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_inplace_triton_kernel_v5(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -772,9 +860,9 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """90""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_inplace_triton_kernel_v6(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -786,7 +874,7 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        self.assertExpectedInline(count_numel(f, *inp), """150""")
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     def test_inplace_randperm_scatter(self):
         def scaled_index_add(x, y, scale_y):
@@ -818,7 +906,7 @@ class WouldBeNiceIfItWorked:
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
     # TODO: The greedy fusion strategy results in suboptimal grouping
-    @patch.object(config, "realize_bytes_threshold", 0)
+    @patch.object(config, "realize_opcount_threshold", 0)
     def test_fusion_choice4(self):
         def f(a, b, b2):
             c = a + b
@@ -840,7 +928,7 @@ class WouldBeNiceIfItWorked:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests(needs="filelock")

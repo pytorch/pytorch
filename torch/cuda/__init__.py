@@ -19,14 +19,14 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, cast, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
 from torch.types import Device
 from .. import device as _device
-from .._utils import classproperty
-from ._utils import _dummy_type, _get_device_index
+from .._utils import _dummy_type, _LazySeedTracker, classproperty
+from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
     graph,
@@ -44,7 +44,9 @@ except ImportError:
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls = []  # don't invoke these until initialization occurs
+_queued_calls: List[
+    Tuple[Callable[[], None], List[str]]
+] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
@@ -56,31 +58,6 @@ try:
     _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
-
-
-class _LazySeedTracker:
-    # Since seeding is memory-less, only track the latest seed.
-    # Note: `manual_seed_all` followed by `manual_seed` overwrites
-    # the seed on current device. We track the order of **latest**
-    # calls between these two API.
-    def __init__(self):
-        self.manual_seed_all_cb = None
-        self.manual_seed_cb = None
-        self.call_order = []
-
-    def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
-        # update seed_all to be latest
-        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
-
-    def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
-        # update seed to be latest
-        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
-
-    def get_calls(self) -> List:
-        return self.call_order
-
 
 _lazy_seed_tracker = _LazySeedTracker()
 
@@ -111,8 +88,8 @@ else:
 
 
 has_half: bool = True
-# Global variables dynamically populated by native code
-has_magma: bool = False
+has_magma: bool = torch._C._has_magma
+
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
@@ -148,15 +125,29 @@ def is_bf16_supported():
     if torch.version.hip:
         return True
 
-    cu_vers = torch.version.cuda
-    if cu_vers is not None:
-        cuda_maj_decide = int(cu_vers.split(".")[0]) >= 11
-    else:
-        cuda_maj_decide = False
-    return (
-        torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8
-        and cuda_maj_decide
-    )
+    device = torch.cuda.current_device()
+
+    # Check for CUDA version and device compute capability.
+    # This is a fast way to check for it.
+    cuda_version = torch.version.cuda
+    if (
+        cuda_version is not None
+        and int(cuda_version.split(".")[0]) >= 11
+        and torch.cuda.get_device_properties(device).major >= 8
+    ):
+        return True
+
+    # Finally try to create a bfloat16 device.
+    return _check_bf16_tensor_supported(device)
+
+
+@lru_cache(maxsize=16)
+def _check_bf16_tensor_supported(device: _device_t):
+    try:
+        torch.tensor([1.0], dtype=torch.bfloat16, device=device)
+        return True
+    except Exception:
+        return False
 
 
 def _sleep(cycles):
@@ -740,12 +731,12 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         visible_devices = _transform_uuid_to_ordinals(
             cast(List[str], visible_devices), uuids
         )
-    idx_map = dict(enumerate(cast(List[int], visible_devices)))
-    if idx not in idx_map:
+    visible_devices = cast(List[int], visible_devices)
+    if idx < 0 or idx >= len(visible_devices):
         raise RuntimeError(
             f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    return visible_devices[idx]
 
 
 @lru_cache(maxsize=1)

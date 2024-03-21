@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+import collections
 import functools
 from typing import Optional
 
@@ -13,14 +15,13 @@ class LazyCache:
         self.source = source
         self.vt: Optional[VariableTracker] = None
 
-    def realize(self, parents_tracker):
+    def realize(self):
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
         from .builder import VariableBuilder
 
         tx = InstructionTranslator.current_tx()
         self.vt = VariableBuilder(tx, self.source)(self.value)
-        self.vt.parents_tracker.add(parents_tracker)
         del self.value
         del self.source
 
@@ -53,7 +54,7 @@ class LazyVariableTracker(VariableTracker):
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
-            self._cache.realize(self.parents_tracker)
+            self._cache.realize()
         return self._cache.vt
 
     def unwrap(self):
@@ -72,16 +73,56 @@ class LazyVariableTracker(VariableTracker):
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
     def __str__(self):
+        if self.is_realized():
+            return self.unwrap().__str__()
         return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
-    apply = VariableTracker.apply
-    copy = VariableTracker.copy
-    __post_init__ = VariableTracker.__post_init__
+    visit = VariableTracker.visit
     __repr__ = VariableTracker.__repr__
+
+    @classmethod
+    def realize_all(
+        cls,
+        value,
+        cache=None,
+    ):
+        """
+        Walk an object and realize all LazyVariableTrackers inside it.
+        """
+        if cache is None:
+            cache = dict()
+
+        idx = id(value)
+        if idx in cache:
+            return cache[idx][0]
+
+        value_cls = type(value)
+        if issubclass(value_cls, LazyVariableTracker):
+            result = cls.realize_all(value.realize(), cache)
+        elif issubclass(value_cls, VariableTracker):
+            # update value in-place
+            result = value
+            value_dict = value.__dict__
+            nonvars = value._nonvar_fields
+            for key in value_dict:
+                if key not in nonvars:
+                    value_dict[key] = cls.realize_all(value_dict[key], cache)
+        elif value_cls is list:
+            result = [cls.realize_all(v, cache) for v in value]
+        elif value_cls is tuple:
+            result = tuple(cls.realize_all(v, cache) for v in value)
+        elif value_cls in (dict, collections.OrderedDict):
+            result = {k: cls.realize_all(v, cache) for k, v in list(value.items())}
+        else:
+            result = value
+
+        # save `value` to keep it alive and ensure id() isn't reused
+        cache[idx] = (result, value)
+        return result
 
 
 def _create_realize_and_forward(name):

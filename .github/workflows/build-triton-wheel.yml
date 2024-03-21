@@ -37,7 +37,7 @@ jobs:
         device: ["cuda", "rocm"]
         include:
           - device: "rocm"
-            rocm_version: "5.7"
+            rocm_version: "6.0"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40
@@ -119,8 +119,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          # NB: Use the same name here and all wheels can be downloaded by referring to the same artifact
-          name: pytorch-triton-wheel
+          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
@@ -131,17 +130,41 @@ jobs:
   upload-wheel:
     runs-on: ubuntu-22.04
     needs: build-wheel
+    permissions:
+      id-token: write
+      contents: read
     container:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
+      - name: Configure AWS credentials(PyTorch account) for main
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
+          aws-region: us-east-1
+
+      - name: Configure AWS credentials(PyTorch account) for RC builds
+        if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
+          aws-region: us-east-1
+
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: pytorch-triton-wheel
-          path: ${{ runner.temp }}/artifacts/
+          # Download all available artifacts
+          path: ${{ runner.temp }}/artifacts-all
+
+      - name: Select Wheel Artifacts
+        shell: bash
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
@@ -168,9 +191,6 @@ jobs:
           # to nightly or test
           UPLOAD_SUBFOLDER: ""
           PKG_DIR: ${{ runner.temp }}/artifacts
-          # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
         shell: bash
         run: |
           set -ex
@@ -232,8 +252,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          # NB: Use the same name here and all wheels can be downloaded by referring to the same artifact
-          name: pytorch-triton-conda
+          name: pytorch-triton-conda-${{ matrix.py_vers }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
@@ -253,8 +272,15 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: pytorch-triton-conda
-          path: ${{ runner.temp }}/artifacts/
+          # Download all available artifacts
+          path: ${{ runner.temp }}/artifacts-all
+
+      - name: Select Conda Artifacts
+        shell: bash
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-conda-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}

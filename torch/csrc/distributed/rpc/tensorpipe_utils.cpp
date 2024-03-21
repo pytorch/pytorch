@@ -3,6 +3,7 @@
 #ifdef USE_TENSORPIPE
 
 #include <c10/util/irange.h>
+#include <limits>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
@@ -74,7 +75,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
   }
 
   at::DataPtr allocateTensorForReceiving(
-      int /* deviceIndex */,
+      c10::DeviceIndex /* deviceIndex */,
       size_t length,
       const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Allocation& allocation) const override {
@@ -151,8 +152,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   buffers.payload = std::move(rpcMessage->payload());
   // TensorPipe uses the same Message class for both reading and writing, thus
   // it uses non-const pointers even though it doesn't modify them when writing.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  char* payloadPtr = buffers.payload.data();
   // kTpMessagePayloadIdx = 2
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
@@ -267,8 +267,14 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
         targetDeviceType);
 
     TORCH_INTERNAL_ASSERT(tpAllocation.tensors.size() == tensorIdx);
+    TORCH_INTERNAL_ASSERT(
+        tensor.targetDevice->index <=
+        std::numeric_limits<c10::DeviceIndex>::max());
     at::DataPtr dataPtr = converter->allocateTensorForReceiving(
-        tensor.targetDevice->index, tensor.length, streams, tpAllocation);
+        static_cast<c10::DeviceIndex>(tensor.targetDevice->index),
+        tensor.length,
+        streams,
+        tpAllocation);
     TORCH_INTERNAL_ASSERT(tpAllocation.tensors.size() == tensorIdx + 1);
 
     buffers.tensors.push_back(std::move(dataPtr));

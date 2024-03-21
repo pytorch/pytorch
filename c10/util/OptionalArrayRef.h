@@ -110,13 +110,13 @@ class OptionalArrayRef final {
     return *this;
   }
 
-  template <typename U = ArrayRef<T>>
-  constexpr std::enable_if_t<
-      !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
+  template <
+      typename U = ArrayRef<T>,
+      typename = std::enable_if_t<
+          !std::is_same_v<std::decay_t<U>, OptionalArrayRef> &&
           std::is_constructible_v<ArrayRef<T>, U&&> &&
-          std::is_assignable_v<ArrayRef<T>&, U&&>,
-      OptionalArrayRef&>
-  operator=(U&& value) noexcept(
+          std::is_assignable_v<ArrayRef<T>&, U&&>>>
+  constexpr OptionalArrayRef& operator=(U&& value) noexcept(
       std::is_nothrow_constructible_v<ArrayRef<T>, U&&> &&
       std::is_nothrow_assignable_v<ArrayRef<T>&, U&&>) {
     wrapped_opt_array_ref = std::forward<U>(value);

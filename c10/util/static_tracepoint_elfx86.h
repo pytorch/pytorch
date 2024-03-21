@@ -1,7 +1,6 @@
 #pragma once
 
 // clang-format off
-#include <cstddef>
 
 // Default constraint for the probe arguments as operands.
 #ifndef TORCH_SDT_ARG_CONSTRAINT

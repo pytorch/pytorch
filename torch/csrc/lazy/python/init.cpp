@@ -261,7 +261,7 @@ void initLazyBindings(PyObject* module) {
             if (tsDataPtr->HasValue()) {
               ivalues.emplace_back(tsDataPtr->data());
             } else {
-              CHECK(tsDataPtr->scalar.has_value());
+              TORCH_CHECK(tsDataPtr->scalar.has_value());
               ivalues.emplace_back(tsDataPtr->scalar.value());
             }
           }

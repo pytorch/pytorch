@@ -81,7 +81,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             "debug_dir_root",
         }
         for k in dynamo_guarded_config_ignorelist:
-            assert k in torch._dynamo.config._compile_ignored_keys
+            assert k in torch._dynamo.config._compile_ignored_keys, k
 
     def test_config_hash(self):
         config = torch._dynamo.config

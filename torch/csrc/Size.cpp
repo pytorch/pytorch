@@ -12,7 +12,6 @@
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/utils/pybind.h>
 
 struct THPSize {
   PyTupleObject tuple;
