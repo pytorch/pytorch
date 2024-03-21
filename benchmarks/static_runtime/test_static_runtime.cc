@@ -649,6 +649,19 @@ TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
   testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
 }
 
+TEST(StaticRuntime, EmbeddingBagWithMixedInt32Int64Input) {
+  const std::string embedding_bag_default = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
+  )JIT";
+  auto weight = torch::randn({3, 11}, at::ScalarType::Float);
+  auto input = torch::tensor({0, 1, 0, 2}, at::ScalarType::Long);
+  auto offset = torch::tensor({0, 2, 4}, at::ScalarType::Int);
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default, args);
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):

@@ -128,7 +128,7 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y          = Input(1);
   auto& alpha_in   = Input(2);
   auto& alpha_out  = Input(3);
-  auto& d_avg_loss = Input(4);  // gradient of net w.r.t. avg_loss ("gradOuput")
+  auto& d_avg_loss = Input(4);  // gradient of net w.r.t. avg_loss ("gradOutput")
   // We intentially don't compute gradients for Y, alpha_{in,out} since they
   // are not needed (can change in the future if desired)
 

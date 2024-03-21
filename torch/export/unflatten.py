@@ -74,7 +74,7 @@ class InterpreterModule(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if torch._dynamo.is_compiling():
+        if torch.compiler.is_dynamo_compiling():
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
             return self.graph_module(*args, **kwargs)

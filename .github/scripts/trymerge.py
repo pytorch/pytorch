@@ -1398,7 +1398,10 @@ def find_matching_merge_rule(
         )
         required_checks = list(
             filter(
-                lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks
+                lambda x: ("EasyCLA" in x)
+                or ("Facebook CLA Check" in x)
+                or not skip_mandatory_checks,
+                mandatory_checks,
             )
         )
         pending_checks, failed_checks, _ = categorize_checks(
@@ -1408,6 +1411,13 @@ def find_matching_merge_rule(
             if rule.ignore_flaky_failures
             else 0,
         )
+
+        # categorize_checks assumes all tests are required if required_checks is empty.
+        # this is a workaround as we want to keep that behavior for categorize_checks
+        # generally.
+        if not required_checks:
+            pending_checks = []
+            failed_checks = []
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:

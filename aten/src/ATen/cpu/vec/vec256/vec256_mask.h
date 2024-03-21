@@ -14,8 +14,8 @@ struct VecMaskLoad<float, 1, mask_t, 1> {
   static inline VectorizedN<float, 1> apply(
       const float* ptr,
       const VecMask<mask_t, 1>& vec_mask) {
-    return Vectorized<float>(
-        _mm256_maskload_ps(ptr, vec_mask.template cast<int, 1>()[0]));
+    auto int_mask = vec_mask.template cast<int, 1>()[0];
+    return Vectorized<float>(_mm256_maskload_ps(ptr, int_mask));
   }
 };
 
@@ -24,14 +24,14 @@ struct VecMaskLoad<float, 1, mask_t, 1> {
 template <>
 struct VecMaskCast<float, 1, int, 1> {
   static inline VecMask<float, 1> apply(const VecMask<int, 1>& vec_mask) {
-    return VectorizedN<float, 1>(_mm256_castsi256_ps(vec_mask[0]));
+    return Vectorized<float>(_mm256_castsi256_ps(vec_mask[0]));
   }
 };
 
 template <>
 struct VecMaskCast<int, 1, float, 1> {
   static inline VecMask<int, 1> apply(const VecMask<float, 1>& vec_mask) {
-    return VectorizedN<int, 1>(_mm256_castps_si256(vec_mask[0]));
+    return Vectorized<int>(_mm256_castps_si256(vec_mask[0]));
   }
 };
 
@@ -43,7 +43,7 @@ struct VecMaskCast<dst_t, 1, int64_t, 2> {
     low = _mm256_permute4x64_epi64(low, _MM_SHUFFLE(3, 1, 2, 0));
     high = _mm256_permute4x64_epi64(high, _MM_SHUFFLE(3, 1, 2, 0));
     return VecMask<int, 1>(
-        VectorizedN<int, 1>(_mm256_blend_epi32(low, high, 0xF0)));
+        Vectorized<int>(_mm256_blend_epi32(low, high, 0xF0)));
   }
 };
 
