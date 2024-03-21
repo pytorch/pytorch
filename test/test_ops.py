@@ -999,6 +999,38 @@ class TestCommon(TestCase):
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
 
+    @ops(
+        [op for op in op_db if op.supports_out and (op.supports_autograd or op.is_factory_function)],
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=[torch.float, torch.cfloat]
+    )
+    def test_out_requires_grad_error(self, device, dtype, op):
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+
+        # Call op to get prototype for out arguments
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+        any_requires_grad = False
+
+        def set_requires_grad(x):
+            nonlocal any_requires_grad
+            if isinstance(x, torch.Tensor) and (
+                x.is_floating_point() or x.is_complex()
+            ):
+                any_requires_grad = True
+                x.requires_grad_(True)
+            return x
+
+        out = pytree.tree_map_(set_requires_grad, expect)
+        if not any_requires_grad:
+            # Skip ops without any floating point outputs, e.g. isnan
+            return
+
+        msg = (
+            "functions with out=... arguments don't support automatic "
+            "differentiation, but one of the arguments requires grad."
+        )
+        with self.assertRaises(RuntimeError, msg=msg):
+            op(sample.input, *sample.args, **sample.kwargs, out=out)
 
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
@@ -1840,7 +1872,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
-# ouput tensor properties
+# output tensor properties
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -2212,6 +2244,7 @@ class TestFakeTensor(TestCase):
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        self.assertEqual(fake_out, real_out)
                         continue
 
                     self.assertTrue(isinstance(fake_out, FakeTensor))

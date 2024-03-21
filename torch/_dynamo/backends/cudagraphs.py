@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Set
 
 import torch
+from torch._inductor.utils import BoxedBool
 
 from torch.fx import GraphModule
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
@@ -133,10 +134,27 @@ def apply_cuda_graphs(gm):
     # NB: we didn't actually change the graph, no need for recompile
 
 
-def cudagraphs(model, inputs):
-    model = partition_cudagraphs(model, inputs)
-    apply_cuda_graphs(model)
-    return model
+def cudagraphs(dynamo_model, dynamo_inputs):
+    do_cudagraphs = BoxedBool(True)
+
+    def forward_cudagraphs(aot_model, aot_inputs):
+        fixed = torch._inductor.utils.num_fw_fixed_arguments(
+            len(dynamo_inputs), len(aot_inputs)
+        )
+        model = partition_cudagraphs(aot_model, aot_inputs)
+        apply_cuda_graphs(model)
+        return model
+
+    def backward_cudagraphs(aot_model, aot_inputs):
+        fixed = torch._inductor.utils.count_tangents(aot_model)
+        model = partition_cudagraphs(aot_model, aot_inputs)
+        apply_cuda_graphs(model)
+        return model
+
+    aot_cudagraphs = aot_autograd(
+        fw_compiler=forward_cudagraphs, bw_compiler=backward_cudagraphs
+    )
+    return aot_cudagraphs(dynamo_model, dynamo_inputs)
 
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
@@ -144,7 +162,7 @@ aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
 # for debugging and can serve as a perf baseline.
 # TODO(jansel): rename to just "cudagraphs"?
-register_backend(name="cudagraphs", compiler_fn=aot_cudagraphs)
+register_backend(name="cudagraphs", compiler_fn=cudagraphs)
 
 
 def cudagraphs_inner(model, inputs, copy_outputs=True, copy_inputs=True):

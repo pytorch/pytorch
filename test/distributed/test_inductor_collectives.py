@@ -22,7 +22,11 @@ from torch.testing._internal.common_distributed import (
     run_with_both_funcol_impls_with_arg,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, requires_cuda
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_cuda,
+)
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
@@ -825,22 +829,49 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(outputs, correct_outputs)
 
     @run_with_both_funcol_impls
-    def test_dynamo_rewrite_dist_allreduce(self):
+    @parametrize(
+        "pg_mode",
+        [
+            "positional",
+            "positional_none",
+            "kwargs",
+            "kwargs_none",
+            "unspecified",
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce(self, pg_mode):
 
-        def func(tensor, pg):
+        def func(tensor, *args, **kwargs):
             torch.distributed.all_reduce(
                 tensor,
-                group=pg
+                *args,
+                **kwargs,
             )
 
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter, fullgraph=True)
 
+        args = []
+        kwargs = {}
+
+        if pg_mode == "positional":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(GroupMember.WORLD)
+        elif pg_mode == "positional_none":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(None)
+        elif pg_mode == "kwargs":
+            kwargs["group"] = GroupMember.WORLD
+        elif pg_mode == "kwargs_none":
+            kwargs["group"] = None
+        else:
+            assert pg_mode == "unspecified"
+
         inputs_compiled = torch.ones(2, device=self.device)
         inputs_eager = torch.ones(2, device=self.device)
 
-        compiled(inputs_compiled, GroupMember.WORLD)
-        func(inputs_eager, GroupMember.WORLD)
+        compiled(inputs_compiled, *args, **kwargs)
+        func(inputs_eager, *args, **kwargs)
 
         assert counter.frame_count == 1
         # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
@@ -870,6 +901,44 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         assert counter.frame_count == 1
         assert same(output_compiled, output_eager)
+
+    @run_with_both_funcol_impls
+    @parametrize(
+        "reduce_op",
+        [
+            torch.distributed.ReduceOp.SUM,
+            torch.distributed.ReduceOp.AVG,
+            torch.distributed.ReduceOp.PRODUCT,
+            torch.distributed.ReduceOp.MIN,
+            torch.distributed.ReduceOp.MAX,
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce_reduce_op(self, reduce_op):
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+
+        def verify_rewrite(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            reduce_op_str = ar_nodes[0].args[1]
+            self.assertEqual(REDUCE_OP_TO_STR[reduce_op], reduce_op_str)
+            return gm
+
+        compiled = torch.compile(
+            torch.distributed.all_reduce,
+            backend=verify_rewrite,
+            fullgraph=True,
+        )
+        inputs = (
+            torch.ones(2, device=self.device),
+            reduce_op,
+            GroupMember.WORLD,
+        )
+        compiled(*inputs)
 
     @run_with_both_funcol_impls
     def test_dynamo_support_collective_op_with_async_op_False(self):

@@ -59,19 +59,15 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         out = make_fx(_multiply_invoke)(x)
         self.assertEqual(out(x), torch.tensor([0.25, 0.25]))
         actual = normalize_gm(out.print_readable(False))
-
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: "f32[2]"):
         trace_wrapped: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(grad_1);  grad_1 = None
-        assert_1: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(trace_wrapped, (2,), (1,), torch.float32);  trace_wrapped = None
-        detach: "f32[2]" = torch.ops.aten.detach.default(assert_1);  assert_1 = None
-        detach_1: "f32[2]" = torch.ops.aten.detach.default(detach);  detach = None
-        detach_2: "f32[2]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        detach_3: "f32[2]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        return detach_3
-"""
-        self.assertExpectedInline(actual, expected)
+        return trace_wrapped
+""",
+        )
 
     def test_invoke_make_bw(self):
         x = torch.tensor([0.5, 0.5], requires_grad=True)
@@ -86,14 +82,15 @@ class _multiply_invoke(torch.nn.Module):
         self.assertEqual(out(x.grad), torch.tensor([4.0, 4.0]))
         actual = normalize_gm(out.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: "f32[2]"):
         trace_wrapped: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(grad_1);  grad_1 = None
-        assert_1: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(trace_wrapped, (2,), (1,), torch.float32);  trace_wrapped = None
-        return assert_1
-"""
-        self.assertExpectedInline(actual, expected)
+        return trace_wrapped
+""",
+        )
 
     def test_invoke_in_pt2_compiled_autograd(self):
         graph = None
@@ -125,19 +122,21 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            expected = """\
+            self.assertExpectedInline(
+                actual,
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor):
-        getitem = L_inputs_0_
+        l_inputs_0_ = L_inputs_0_
 
-        new_grad = torch.clone(getitem)
+        new_grad = torch.clone(l_inputs_0_)
 
-        call_hook = getitem * getitem;  getitem = None
+        result = l_inputs_0_ * l_inputs_0_;  l_inputs_0_ = None
 
-        new_grad_1 = torch.clone(call_hook);  call_hook = None
+        new_grad_1 = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
-"""
-            self.assertExpectedInline(actual, expected)
+""",
+            )
 
             graph = None
 
@@ -192,13 +191,13 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor):
-        getitem = L_inputs_0_
+        l_inputs_0_ = L_inputs_0_
 
-        new_grad = torch.clone(getitem)
+        new_grad = torch.clone(l_inputs_0_)
 
-        call_hook = getitem * getitem;  getitem = None
+        result = l_inputs_0_ * l_inputs_0_;  l_inputs_0_ = None
 
-        new_grad_1 = torch.clone(call_hook);  call_hook = None
+        new_grad_1 = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
             )
