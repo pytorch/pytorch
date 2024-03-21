@@ -90,14 +90,11 @@ TORCH_IMPL_FUNC(softmax_mps_out)
       }
     }
 
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    string key = "softmax_mps_out" + getTensorsStringKey(input, true, /*exclude_shape*/ true) + ":" + mem_format_key +
-        ":" + std::to_string(dim_);
-
+    bool disableTypeInference = input_.dim() <= 4;
+    string key = "softmax_mps_out" + getTensorsStringKey(input, true, /*exclude_shape*/true) + ":" +
+                 mem_format_key + ":" + std::to_string(dim_);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()));
-
+      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input));
       // passing selector of softMaxWithTensor on the mpsGraph object
       MPSGraphTensor* outputTensor = [mpsGraph softMaxWithTensor:inputTensor axis:(NSInteger)dim_ name:nil];
 
@@ -124,7 +121,8 @@ TORCH_IMPL_FUNC(softmax_mps_out)
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+    auto results = dictionaryFromPlaceholders(outputPlaceholder);
+    runMPSGraph(stream, cachedGraph, feeds, results, disableTypeInference);
   }
 }
 

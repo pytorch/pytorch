@@ -58,6 +58,15 @@ void runMPSGraph(MPSStream* mpsStream,
     NSDictionary* feeds,
     NSDictionary* results);
 
+struct MPSCachedGraph;
+void runMPSGraph(
+  MPSStream *mpsStream,
+  MPSCachedGraph* cachedGraph,
+  NSDictionary *feeds,
+  NSDictionary *results,
+  bool disableTypeInference = false,
+  SyncType syncType = SyncType::COMMIT_ADAPTIVE);
+
 MPSDataType getMPSDataType(ScalarType scalar_type);
 static inline MPSDataType getMPSDataType(const Tensor& t) {
   return getMPSDataType(t.scalar_type());
@@ -124,6 +133,7 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
+MPSGraphTensorData* allocMPSGraphTensorData(id<MTLBuffer> buffer, MPSShape *mpsShape, MPSDataType mpsDataType);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
@@ -158,8 +168,11 @@ struct MPSCachedGraph
 
   MPSGraph *graph() const { return (MPSGraph *)_object; }
   NSObject *object() const { return _object; }
+  MPSGraphExecutable *getExecultable() const { return _executable; }
+  void setExecultable(MPSGraphExecutable *executable) { _executable = executable; }
 private:
   NSObject *_object = nullptr;
+  MPSGraphExecutable* _executable = nullptr;
 };
 
 struct MPSUnaryCachedGraph : public MPSCachedGraph
