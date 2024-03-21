@@ -634,8 +634,12 @@ class Tracer(TracerBase):
         def proxy_placeholder(name):
             return self._proxy_placeholder(name, concrete_args, sig, fn_for_analysis)
 
-        args.extend(proxy_placeholder(names) for names in arg_names)
-        breakpoint()
+        for idx, name in enumerate(arg_names):
+            proxy = proxy_placeholder(name)
+            concrete_name = concrete_arg_names[skip_arg_idx + idx]
+            if concrete_name:
+                proxy.node.name = proxy.node.target = concrete_name
+            args.append(proxy)
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs

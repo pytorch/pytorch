@@ -349,7 +349,6 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
                 # but copy_() nodes do not (since we manually added them during functionalization).
                 # Instead, we manually propagate here.
                 if "stack_trace" in copy_from_node.meta:
-                    assert "stack_trace" not in n.meta, str(n)
                     n.meta["stack_trace"] = copy_from_node.meta["stack_trace"]
 
 

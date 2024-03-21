@@ -15,11 +15,11 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.non_strict_utils import (
+    get_export_module_name,
+    get_wrapped_export_root_str,
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
-    get_export_module_name,
-    get_wrapped_export_root_str
 )
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -430,7 +430,11 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
 
 def _verify_placeholder_node_names(gm: torch.fx.GraphModule, sig: ExportGraphSignature):
-    name_to_kind = {spec.arg.name: spec.kind for spec in sig.input_specs if isinstance(spec.arg, TensorArgument)}
+    name_to_kind = {
+        spec.arg.name: spec.kind
+        for spec in sig.input_specs
+        if isinstance(spec.arg, TensorArgument)
+    }
     kind_to_prefix = {
         InputKind.PARAMETER: "p",
         InputKind.BUFFER: "b",
@@ -440,8 +444,6 @@ def _verify_placeholder_node_names(gm: torch.fx.GraphModule, sig: ExportGraphSig
     }
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if not isinstance(node.meta['val'], FakeTensor):  # skip constant inputs
-                continue
             node_kind = name_to_kind[node.name]
             if node_kind in [InputKind.USER_INPUT]:
                 continue
@@ -452,18 +454,9 @@ def _verify_placeholder_node_names(gm: torch.fx.GraphModule, sig: ExportGraphSig
                 )
 
 
-from torch._subclasses.fake_tensor import FakeTensor
-class NamedFakeTensor:
-    def __init__(self, name, fake_tensor):
-        self.fake_tensor = fake_tensor
-        self.name = name
-    def __torch_function__(self, f, t, a, kw):
-        return self.fake_tensor.__torch_function__(f, t, a, kw)
-
 def _export_non_strict(
     mod: torch.nn.Module,
-    fake_args,
-    fake_kwargs,
+    fake_combined_args,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
     *,
@@ -487,18 +480,6 @@ def _export_non_strict(
         finally:
             torch.compiler._is_compiling_flag = old_value
 
-    # convert to named fake tensors
-    def _assign_name(x):
-        x._name = "hello"
-        return x
-    # fake_args = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_args, is_leaf=lambda x:isinstance(x, FakeTensor))
-    # fake_kwargs = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_kwargs, is_leaf=lambda x:isinstance(x, FakeTensor))
-    # fake_params_buffers = pytree.tree_map(lambda x:NamedFakeTensor("hello", x), fake_params_buffers, is_leaf=lambda x:isinstance(x, FakeTensor))
-    fake_args = pytree.tree_map(_assign_name, fake_args, is_leaf=lambda x:isinstance(x, FakeTensor))
-    fake_kwargs = pytree.tree_map(_assign_name, fake_kwargs, is_leaf=lambda x:isinstance(x, FakeTensor))
-    fake_params_buffers = pytree.tree_map(_assign_name, fake_params_buffers, is_leaf=lambda x:isinstance(x, FakeTensor))
-    breakpoint()
-
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -507,10 +488,10 @@ def _export_non_strict(
     ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
-            fake_args,
+            fake_combined_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
-            kwargs=fake_kwargs,
+            kwargs={},
         )
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -535,7 +516,7 @@ def _export_non_strict(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    flat_args = pytree.tree_leaves(fake_combined_args)
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -607,6 +588,69 @@ def _export_non_strict(
 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    def _propagate_node_names_for_cond(
+        gm: torch.fx.GraphModule, constant_names: Set[str]
+    ):
+        def _assign_placeholder_name_with_node_index(
+            gm: torch.fx.GraphModule,
+            name: str,
+            index: int,
+        ):
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    if index == 0:
+                        node.name = node.target = name
+                    index -= 1
+
+        for node in gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and isinstance(node.target, torch._ops.HigherOrderOperator)
+                and node.name.startswith("conditional")
+            ):
+                true_graph = getattr(gm, node._args[1].name)
+                false_graph = getattr(gm, node._args[2].name)
+                cond_args = node._args[3]
+
+                for arg_index, cond_arg in enumerate(cond_args):
+                    # propagate call_function names with nn_module_stack
+                    if cond_arg.op == "call_function":
+                        if module_stack := cond_arg.meta.get("nn_module_stack", None):
+                            modules = ["_root"]
+                            for i, (val, _) in enumerate(module_stack.values()):
+                                if i >= 1:
+                                    modules.append(val)
+                            new_name = "_".join(modules + [cond_arg.name])
+
+                            _assign_placeholder_name_with_node_index(
+                                true_graph, new_name, arg_index
+                            )
+                            _assign_placeholder_name_with_node_index(
+                                false_graph, new_name, arg_index
+                            )
+
+                    # propagate constant node names
+                    if cond_arg.op == "placeholder" and cond_arg.name in constant_names:
+                        _assign_placeholder_name_with_node_index(
+                            true_graph, cond_arg.name, arg_index
+                        )
+                        _assign_placeholder_name_with_node_index(
+                            false_graph, cond_arg.name, arg_index
+                        )
+
+                _propagate_node_names_for_cond(true_graph, constant_names)
+                _propagate_node_names_for_cond(false_graph, constant_names)
+
+        gm.recompile()
+
+    # pass to rename and propagate constant node names
+    constant_names = {
+        spec.arg.name
+        for spec in export_graph_signature.input_specs
+        if spec.kind in [InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ]
+    }
+    _propagate_node_names_for_cond(gm, constant_names)
 
     # run this here instead of verifier, to allow users to create nodes that don't follow spec
     _verify_placeholder_node_names(gm, export_graph_signature)
@@ -900,8 +944,7 @@ def _export(
 
         (
             fake_mode,
-            fake_args,
-            fake_kwargs,
+            fake_combined_args,
             equalities_inputs,
             original_signature,
         ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
@@ -912,8 +955,7 @@ def _export(
         with fake_mode:
             ep_non_strict = _export_non_strict(
                 mod,
-                fake_args,
-                fake_kwargs,
+                fake_combined_args,
                 fake_params_buffers,
                 constant_attrs,
                 pre_dispatch=pre_dispatch,

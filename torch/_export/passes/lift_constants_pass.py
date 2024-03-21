@@ -148,11 +148,11 @@ def lift_constants_pass(
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_fqn = constant_attrs.get(constant_val)
                 if constant_fqn is not None:
-                    constant_name = "c_" + constant_fqn.replace(
+                    constant_name = "o_" + constant_fqn.replace(
                         ".", "_"
                     )  # let's not delete this hierarchy info
                 else:
-                    constant_name = f"c_lifted_custom_obj{num_custom_obj}"
+                    constant_name = f"o_lifted_custom_obj{num_custom_obj}"
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):

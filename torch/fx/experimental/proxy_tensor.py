@@ -1182,9 +1182,12 @@ def make_fx(f,
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():
             arg_names = [x._name if isinstance(x, FakeTensor) and hasattr(x, "_name") else None for x in args]
-            if all([x is None for x in arg_names]):
-                arg_names = None
-            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs), concrete_arg_names=arg_names)
+            t = dispatch_trace(
+                wrap_key(func, args, fx_tracer, pre_dispatch),
+                tracer=fx_tracer,
+                concrete_args=tuple(phs),
+                concrete_arg_names=arg_names
+            )
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if tracing_mode == "symbolic":

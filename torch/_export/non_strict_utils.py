@@ -58,6 +58,13 @@ def _is_constant_argument(t):
     return t is None or isinstance(t, (int, float, bool, str))
 
 
+class NamedFakeTensor(torch.Tensor):
+    def __init__(self, fake_tensor, name):
+        super().__init__()
+        self.fake_tensor = fake_tensor
+        self.name = name
+
+
 def fakify(
     mode: FakeTensorMode,
     kp: KeyPath,
@@ -85,6 +92,12 @@ def fakify(
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+
+    # assign names
+    name = "_".join(
+        str(y.key if isinstance(y, MappingKey) else y.idx) for y in kp
+    ).replace(".", "__")
+    fake._name = name
     return fake
 
 
@@ -94,7 +107,10 @@ def make_fake_params_buffers(
 ) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
     faked_params_buffers = {}
     for key, value in params_buffers.items():
-        faked_params_buffers[key] = fake_mode.from_tensor(value, static_shapes=True)
+        fake = fake_mode.from_tensor(value, static_shapes=True)
+        prefix = "p_" if isinstance(fake, torch.nn.Parameter) else "b_"
+        fake._name = prefix + key.replace(".", "_")
+        faked_params_buffers[key] = fake
     return faked_params_buffers
 
 
@@ -145,10 +161,15 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
     with fake_mode:
         original_signature = inspect.signature(nn_module.forward)
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
-        fake_args, fake_kwargs = tree_map_with_path(
-            lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
-            (args, kwargs),
+
+        combined_args = (
+            inspect.signature(nn_module.forward).bind(*args, **kwargs).arguments
         )
+        fake_combined_args = tree_map_with_path(
+            lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
+            combined_args,
+        )
+        fake_combined_args = tuple(fake_combined_args.values())
 
         from sympy import Symbol
 
@@ -171,7 +192,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
             phantom_symbols=list(phantom_symbols.values()),
             warn_only=False,
         )
-        return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
+        return fake_mode, fake_combined_args, equalities_inputs, original_signature
 
 
 def make_constraints(
