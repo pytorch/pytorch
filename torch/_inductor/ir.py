@@ -3534,11 +3534,18 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self,
         layout: Layout,
         inputs: List[IRNode],
-        choice_timings: Dict[ChoiceCaller, float],
+        choice_timings: Callable[[], Dict[ChoiceCaller, float]],
     ):
         super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
-        self.choice_timings = choice_timings
+        self._choice_timings_fn = choice_timings
+        self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
+
+    @property
+    def choice_timings(self) -> Dict[ChoiceCaller, float]:
+        if self._choice_timings is None:
+            self._choice_timings = self._choice_timings_fn()
+        return self._choice_timings
 
     @contextlib.contextmanager
     def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):

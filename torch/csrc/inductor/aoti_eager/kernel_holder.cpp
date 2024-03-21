@@ -318,6 +318,8 @@ std::shared_ptr<AOTIEagerKernelRunner> AOTIPythonKernelHolder::
 #else
     return nullptr;
 #endif
+  } else if (device_opt_.value().type() == c10::DeviceType::CPU) {
+    return std::make_shared<AOTIEagerKernelRunnerCPU>(so_path);
   } else {
     return nullptr;
   }
