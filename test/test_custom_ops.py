@@ -17,7 +17,7 @@ import torch.testing._internal.optests as optests
 import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
-from torch._custom_op.impl import custom_op, CustomOp
+from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -562,55 +562,95 @@ class TestCustomOp(CustomOpTestCaseBase):
         def blah9(x, *, y):
             pass
 
-    # Tests for the older custom_op API
-    def test_unsupported_annotation_categories(self):
+    def test_infer_schema_supported(self):
+        def a(x: Tensor) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
+
+        def b(
+            x: Tensor,
+            y: int,
+            z: bool,
+            a: float,
+            b: torch.dtype,
+            c: torch.device,
+            d: torch.types.Number,
+        ) -> Tuple[Tensor, int, float, bool]:
+            return torch.empty([]), 1, 0.1, True
+
+        self.assertExpectedInline(
+            infer_schema(b),
+            """(Tensor x, SymInt y, bool z, float a, ScalarType b, Device c, Scalar d) -> (Tensor, SymInt, float, bool)""",
+        )
+
+        def c(
+            x: Tensor,
+            y: Sequence[Tensor],
+            z: Optional[Tensor],
+            w: Sequence[Optional[Tensor]],
+        ) -> List[Tensor]:
+            return [torch.empty([])]
+
+        self.assertExpectedInline(
+            infer_schema(c),
+            """(Tensor x, Tensor[] y, Tensor? z, Tensor?[] w) -> Tensor[]""",
+        )
+
+        def d(x: Tensor) -> Tuple[List[Tensor], Tensor]:
+            return [torch.empty([])], torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d), """(Tensor x) -> (Tensor[], Tensor)"""
+        )
+
+        def e() -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(infer_schema(e), """() -> Tensor""")
+
+    def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(*args):
                 raise NotImplementedError()
 
-            del foo
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "varkwargs"):
 
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(**kwargs):
                 raise NotImplementedError()
 
-            del foo
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "must have a type annotation"):
 
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x):
                 raise NotImplementedError()
 
-            del foo
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "default value"):
 
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Optional[Tensor] = None):
                 raise NotImplementedError()
 
-            del foo
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "default value"):
 
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Optional[Tensor] = None):
                 raise NotImplementedError()
 
-            del foo
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
-            @custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
                 raise NotImplementedError()
 
-            del foo
+            infer_schema(foo)
 
     def _generate_examples(self, typ):
         if typ is int:

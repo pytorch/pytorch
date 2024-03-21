@@ -774,7 +774,7 @@ def infer_schema(prototype_function: typing.Callable) -> str:
 
     def error_fn(what):
         raise ValueError(
-            f"custom_op(...)(func): {what} " f"Got func with signature {sig})"
+            f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
 
     params = [
@@ -801,7 +801,7 @@ def parse_param(name, param, error_fn):
         error_fn(
             f"Parameter {name} has a default value; this is not supported. "
             f"If you want to use default values then create a function with "
-            f"default values that calls the CustomOp"
+            f"default values that invokes the custom op."
         )
 
     return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
@@ -814,6 +814,7 @@ def derived_types(
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
+
     if list_base:
         result.append((typing.Sequence[base_type], f"{cpp_type}[]"))  # type: ignore[valid-type]
     if optional_base_list:
