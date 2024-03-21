@@ -315,7 +315,7 @@ void TensorImpl::throw_data_ptr_access_error() const {
   }
   TORCH_CHECK(
       false,
-      "Cannot access tensor.data_ptr(). "
+      "Cannot access data pointer of Tensor that does not have it. "
       "You can use tensor.has_data_ptr() to check this. "
       "If you're using torch.compile/export/tracing, this may be because those use FakeTensors "
       "that do not have data_ptr and the Tensor is being passed to a third-party library "

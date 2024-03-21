@@ -104,6 +104,7 @@ manual_torch_name_rule_map = {
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
+    "torch._C._to_dlpack": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
@@ -291,7 +292,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._assert_async",
         "torch._assert_tensor_metadata",
         "torch._batch_norm_impl_index",
-        "torch._C._activate_cuda_trace",
+        "torch._C._activate_gpu_trace",
         "torch._C._add_cached_tensor",
         "torch._C._add_docstr",
         "torch._C._are_functorch_transforms_active",
@@ -1170,7 +1171,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._test_only_populate_upgraders",
         "torch._C._test_only_remove_entry_to_op_version_map",
         "torch._C._test_only_remove_upgraders",
-        "torch._C._to_dlpack",
         "torch._C._to_functionality_key",
         "torch._C._tracer_set_force_outplace",
         "torch._C._tracer_set_get_unique_name_fn",
@@ -2571,11 +2571,12 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.mps.set_per_process_memory_fraction",
         "torch.mps.set_rng_state",
         "torch.mps.synchronize",
-        "torch.nested._internal.nested_tensor.buffer_from_jagged",
         "torch.nested._internal.nested_tensor.get_tensor_symint",
         "torch.nested._internal.nested_tensor.is_expandable_to",
         "torch.nested._internal.nested_tensor.jagged_from_list",
         "torch.nested._internal.nested_tensor.jagged_from_tensor_and_lengths",
+        "torch.nested._internal.nested_tensor.nested_view_from_values_offsets",
+        "torch.nested._internal.nested_tensor.nested_view_from_values_offsets_lengths",
         "torch.nested.as_nested_tensor",
         "torch.nested.narrow",
         "torch.nested.nested_tensor",

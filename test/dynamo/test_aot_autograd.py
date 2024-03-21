@@ -85,7 +85,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
             def ctx():
                 return self.assertRaisesRegex(
-                    RuntimeError, "Cannot access tensor.data_ptr()"
+                    RuntimeError, "Cannot access data pointer"
                 )
 
             for f in tests:
@@ -123,7 +123,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(
-                RuntimeError, "Cannot access tensor.data_ptr()"
+                RuntimeError, "Cannot access data pointer"
             ):
                 y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
             self.assertTrue(backward_called)

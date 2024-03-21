@@ -9263,7 +9263,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         if layout == torch.sparse_csr:
             # TODO: compressed sparse tensors currently don't support data_ptr.
             # Exercising failure will allow us to widen coverage of this test once it does.
-            with self.assertRaisesRegex(RuntimeError, "Cannot access tensor.data_ptr()"):
+            with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer of Tensor"):
                 a.data_ptr()
             # While compressed sparse tensors don't have a concept of data_ptr
             # the underlying tensors do. The implementation of to appropriately forwards

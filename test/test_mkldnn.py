@@ -68,7 +68,7 @@ class TestMkldnn(TestCase):
                 else:
                     self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size() / 2)
                 self.assertRaisesRegex(RuntimeError,
-                                       "Cannot access tensor.data_ptr()",
+                                       "Cannot access data pointer of Tensor",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
             # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
@@ -95,7 +95,7 @@ class TestMkldnn(TestCase):
                     else:
                         self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_lower.element_size() * 2)
                     self.assertRaisesRegex(RuntimeError,
-                                           "Cannot access data pointer of Tensor that doesn't have storage",
+                                           "Cannot access data pointer of Tensor",
                                            lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_conversion_byte_char(self):
@@ -127,7 +127,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
                 self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
                 self.assertRaisesRegex(RuntimeError,
-                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       "Cannot access data pointer of Tensor",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_copy(self):
