@@ -223,6 +223,10 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+sudo chown -R jenkins /var/lib/jenkins/workspace
+git config --global --add safe.directory /var/lib/jenkins/workspace
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
@@ -248,7 +252,6 @@ else
   ( ! get_exit_code python setup.py clean bad_argument )
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
@@ -360,3 +363,5 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
 fi
 
 print_sccache_stats
+
+sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
