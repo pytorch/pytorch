@@ -310,7 +310,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
+        unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def set_name_hint(self, name):
         pass

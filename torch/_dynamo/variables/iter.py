@@ -86,9 +86,10 @@ class ItertoolsVariable(VariableTracker):
                 else:
                     try:
                         acc = func(tx, [acc, item], {})
-                    except Exception:
-                        raise unimplemented(  # noqa: TRY200
-                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
+                    except Exception as e:
+                        unimplemented(
+                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})",
+                            from_exc=e,
                         )
                 items.append(acc)
 
@@ -120,7 +121,7 @@ class ItertoolsVariable(VariableTracker):
                 elif isinstance(key, variables.ConstantVariable):
                     return key.as_python_constant()
                 else:
-                    raise unimplemented(
+                    unimplemented(
                         "Unsupported key type for itertools.groupby: " + str(type(key))
                     )
 
@@ -156,9 +157,10 @@ class ItertoolsVariable(VariableTracker):
                             mutable_local=MutableLocal(),
                         )
                     )
-            except Exception:
-                raise unimplemented(  # noqa: TRY200
-                    "Unexpected failure when calling itertools.groupby"
+            except Exception as e:
+                unimplemented(
+                    "Unexpected failure when calling itertools.groupby",
+                    from_exc=e,
                 )
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
         elif self.value is itertools.repeat:

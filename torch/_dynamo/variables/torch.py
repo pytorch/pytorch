@@ -615,7 +615,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and args[1].is_python_constant()
                 and args[1].as_python_constant() == -1
             ):
-                raise unimplemented(
+                unimplemented(
                     "torch.nn.functional.one_hot with data-dependent output shape"
                 )
 
@@ -711,7 +711,7 @@ To support this behavior, we need to allow const-propping tensors that store sym
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
                 log.warning(msg)
-                raise unimplemented(msg)
+                unimplemented(msg)
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
