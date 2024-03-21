@@ -19,7 +19,7 @@ namespace nn {
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.L1Loss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.L1Loss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::L1LossOptions` class to learn what
@@ -54,7 +54,7 @@ TORCH_MODULE(L1Loss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// The Kullback-Leibler divergence loss measure
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.KLDivLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.KLDivLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::KLDivLossOptions` class to learn what
@@ -89,7 +89,7 @@ TORCH_MODULE(KLDivLoss);
 
 /// Creates a criterion that measures the mean squared error (squared L2 norm)
 /// between each element in the input :math:`x` and target :math:`y`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MSELoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MSELoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MSELossOptions` class to learn what
@@ -124,7 +124,7 @@ TORCH_MODULE(MSELoss);
 
 /// Creates a criterion that measures the Binary Cross Entropy
 /// between the target and the output.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BCELoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BCELoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BCELossOptions` class to learn what
@@ -160,7 +160,7 @@ TORCH_MODULE(BCELoss);
 
 /// Creates a criterion that measures the loss given an input tensor :math:`x`
 /// and a labels tensor :math:`y` (containing 1 or -1).
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.HingeEmbeddingLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.HingeEmbeddingLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::HingeEmbeddingLossOptions` class to
@@ -199,7 +199,7 @@ TORCH_MODULE(HingeEmbeddingLoss);
 /// loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
 /// and output :math:`y` (which is a 1D tensor of target class indices, :math:`0
 /// \leq y \leq \text{x.size}(1)-1`). See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.MultiMarginLoss to learn
+/// https://pytorch.org/docs/main/nn.html#torch.nn.MultiMarginLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiMarginLossOptions` class to learn
@@ -238,7 +238,7 @@ TORCH_MODULE(MultiMarginLoss);
 /// -1. This is used for measuring whether two inputs are similar or
 /// dissimilar, using the cosine distance, and is typically used for learning
 /// nonlinear embeddings or semi-supervised learning.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.CosineEmbeddingLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.CosineEmbeddingLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CosineEmbeddingLossOptions` class to
@@ -280,7 +280,7 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// element-wise error falls below beta and an L1 term otherwise.
 /// It is less sensitive to outliers than the `MSELoss` and in some cases
 /// prevents exploding gradients (e.g. see the paper `Fast R-CNN` by Ross
-/// Girshick). See https://pytorch.org/docs/master/nn.html#torch.nn.SmoothL1Loss
+/// Girshick). See https://pytorch.org/docs/main/nn.html#torch.nn.SmoothL1Loss
 /// to learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SmoothL1LossOptions` class to learn
@@ -316,7 +316,7 @@ TORCH_MODULE(SmoothL1Loss);
 
 /// Creates a criterion that uses a squared term if the absolute
 /// element-wise error falls below delta and a delta-scaled L1 term otherwise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.HuberLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.HuberLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::HuberLossOptions` class to learn what
@@ -354,7 +354,7 @@ TORCH_MODULE(HuberLoss);
 /// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch
 /// `Tensor`) and output :math:`y` (which is a 2D `Tensor` of target class
 /// indices). See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.MultiLabelMarginLoss to
+/// https://pytorch.org/docs/main/nn.html#torch.nn.MultiLabelMarginLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiLabelMarginLossOptions` class to
@@ -392,7 +392,7 @@ TORCH_MODULE(MultiLabelMarginLoss);
 /// Creates a criterion that optimizes a two-class classification
 /// logistic loss between input tensor :math:`x` and target tensor :math:`y`
 /// (containing 1 or -1).
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.SoftMarginLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.SoftMarginLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SoftMarginLossOptions` class to learn
@@ -429,7 +429,7 @@ TORCH_MODULE(SoftMarginLoss);
 /// Creates a criterion that optimizes a multi-label one-versus-all
 /// loss based on max-entropy, between input :math:`x` and target :math:`y` of
 /// size :math:`(N, C)`. See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.MultiLabelSoftMarginLoss to
+/// https://pytorch.org/docs/main/nn.html#torch.nn.MultiLabelSoftMarginLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiLabelSoftMarginLossOptions` class
@@ -473,7 +473,7 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 /// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`,
 /// `positive examples` and `negative examples` respectively). The
 /// shapes of all input tensors should be :math:`(N, D)`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.TripletMarginLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::TripletMarginLossOptions` class to
@@ -520,7 +520,7 @@ TORCH_MODULE(TripletMarginLoss);
 /// and positive example ("positive distance") and the anchor and negative
 /// example ("negative distance").
 /// See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginWithDistanceLoss
+/// https://pytorch.org/docs/main/nn.html#torch.nn.TripletMarginWithDistanceLoss
 /// to learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::TripletMarginWithDistanceLossOptions`
@@ -563,7 +563,7 @@ TORCH_MODULE(TripletMarginWithDistanceLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CTCLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// The Connectionist Temporal Classification loss.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.CTCLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CTCLossOptions` class to learn what
@@ -603,7 +603,7 @@ TORCH_MODULE(CTCLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Negative log likelihood loss with Poisson distribution of target.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.PoissonNLLLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.PoissonNLLLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::PoissonNLLLossOptions` class to learn
@@ -641,7 +641,7 @@ TORCH_MODULE(PoissonNLLLoss);
 /// Creates a criterion that measures the loss given
 /// inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
 /// and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MarginRankingLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MarginRankingLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MarginRankingLossOptions` class to
@@ -681,7 +681,7 @@ TORCH_MODULE(MarginRankingLoss);
 
 /// The negative log likelihood loss. It is useful to train a classification
 /// problem with `C` classes.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::NLLLossOptions` class to learn what
@@ -720,7 +720,7 @@ TORCH_MODULE(NLLLoss);
 
 /// Creates a criterion that computes cross entropy loss between input and
 /// target. See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLoss to learn
+/// https://pytorch.org/docs/main/nn.html#torch.nn.CrossEntropyLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CrossEntropyLossOptions` class to
@@ -762,7 +762,7 @@ TORCH_MODULE(CrossEntropyLoss);
 /// class. This version is more numerically stable than using a plain `Sigmoid`
 /// followed by a `BCELoss` as, by combining the operations into one layer,
 /// we take advantage of the log-sum-exp trick for numerical stability.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BCEWithLogitsLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BCEWithLogitsLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BCEWithLogitsLossOptions` class to

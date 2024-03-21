@@ -13,6 +13,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import cache_dir
 
 from torch.export import Dim, export
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
-    TestCase,
 )
 
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -904,6 +904,33 @@ class AOTInductorTestsTemplate:
         self.check_model_with_multiple_inputs(
             CondModels.OuterBuffers(),
             prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_cond_non_tensor_predicates(self, dynamic):
+        inputs1 = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((15, 20), device=self.device),
+        )
+        inputs2 = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((5, 20), device=self.device),
+        )
+        inputs = (inputs1,)
+        dynamic_shapes = None
+        if dynamic:
+            inputs = (inputs1, inputs2)
+            dim0_a = Dim("s0", min=2, max=1024)
+            dim0_b = Dim("s1", min=2, max=1024)
+            dynamic_shapes = {
+                "a": {0: dim0_a, 1: None},
+                "b": {0: dim0_b, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            CondModels.WithNonTensorPredicate(),
+            inputs,
             dynamic_shapes=dynamic_shapes,
         )
 
@@ -2036,6 +2063,10 @@ CPU_TEST_FAILURES = {
     "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_cond_non_tensor_predicates_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
@@ -2227,7 +2258,7 @@ copy_tests(
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
     if HAS_CUDA or sys.platform == "darwin":

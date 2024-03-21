@@ -3,10 +3,10 @@ import itertools
 
 import torch
 
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
@@ -148,6 +148,16 @@ class CondModels:
                 return x - e
 
             return torch.cond(p, true_fn, false_fn, [c])
+
+    class WithNonTensorPredicate(torch.nn.Module):
+        def forward(self, a, b):
+            def true_fn(x, y):
+                return x.sum(0) / 3.14
+
+            def false_fn(x, y):
+                return y.sum(0) * 2.71
+
+            return torch.cond(a.size(0) > b.size(0), true_fn, false_fn, [a, b])
 
 
 class CondTests(TestCase):
@@ -315,6 +325,24 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_non_tensor_predicates(self, device, dynamic):
+        # model with a boolean predicate
+        for b_size_0 in [5, 15]:
+            torch._dynamo.reset()
+            self._run_test(
+                model=CondModels.WithNonTensorPredicate(),
+                inputs=(
+                    torch.randn(10, 20),
+                    torch.randn(b_size_0, 20),
+                ),
+                device=device,
+                dynamic=dynamic,
+                num_predicates=0,
+            )
+
+    @requires_cuda
     def test_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
@@ -399,6 +427,8 @@ class CondTests(TestCase):
             {
                 "pre_grad_custom_pass": pre_grad_pass_counter,
                 "post_grad_custom_pre_pass": post_grad_pass_counter,
+                # The above patches don't pickle
+                "fx_graph_cache": False,
             }
         ):
             self._run_test(
@@ -421,7 +451,7 @@ instantiate_parametrized_tests(CondTests)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

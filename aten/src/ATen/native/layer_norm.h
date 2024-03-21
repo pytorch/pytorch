@@ -75,7 +75,7 @@ Tensor rms_norm(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
-    double eps);
+    c10::optional<double> eps);
 
 using forward_fn = void (*)(
     const Tensor& /* X */,

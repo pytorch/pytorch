@@ -1299,13 +1299,13 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
-    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+    def val_to_cpp_arg_str(self, type_, val) -> str:
         raise NotImplementedError()
 
     def val_to_arg_str(self, s):
-        from torch.utils._triton import dtype_to_string, has_triton
+        from torch.utils._triton import dtype_to_string, has_triton_package
 
-        if has_triton():
+        if has_triton_package():
             import triton
 
         if isinstance(s, SymTypes):
@@ -1326,7 +1326,7 @@ class WrapperCodeGen(CodeGen):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
-        elif has_triton() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
+        elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
         else:
             return repr(s)
@@ -1513,8 +1513,13 @@ class WrapperCodeGen(CodeGen):
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
+        predicate = conditional.predicate.codegen_reference()
+        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
+            # move the Tensor predicate to host
+            predicate = f"{predicate}.item()"
+
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
+        self.writeline(f"if {predicate}:")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))

@@ -2,6 +2,7 @@
 #include <ATen/native/layer_norm.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
@@ -266,7 +267,7 @@ Tensor rms_norm(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
-    double eps) {
+    c10::optional<double> eps) {
 
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -281,11 +282,27 @@ Tensor rms_norm(
   }
   IntArrayRef dims_to_reduce_ref = IntArrayRef(dims_to_reduce);
 
-  auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps)));
+  auto result = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "rms_norm",
+        [&] {
+    scalar_t eps_val;
+    if (!eps.has_value()) {
+      eps_val = std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon();
+    } else {
+      eps_val = eps.value();
+    }
 
-  if (weight_opt.has_value()) {
-    result = result.mul(weight_opt.value());
-  }
+    auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)));
+
+    if (weight_opt.has_value()) {
+      result = result.mul(weight_opt.value());
+    }
+
+    return result;
+  });
 
   return result;
 
