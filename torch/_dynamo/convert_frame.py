@@ -8,7 +8,6 @@ import random
 import sys
 import threading
 import time
-import traceback
 import types
 import typing
 import weakref
@@ -17,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
 )
+from torch.utils._traceback import CapturedTraceback
 
 try:
     import numpy as np
@@ -467,11 +467,15 @@ def _compile(
         ValidationException,
     )
 
+    # Time spent compiling this frame before restarting or failing analysis
+    dynamo_time_before_restart: float = 0.0
+    restart_reasons: set[str] = set()
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     speculation_log = SpeculationLog()
+    torch._dynamo.callback_handler.run_start_callbacks()
 
     @preserve_global_state
     def transform(instructions, code_options):
@@ -528,6 +532,9 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal output
+        nonlocal dynamo_time_before_restart
+        nonlocal restart_reasons
+        last_attempt_start_time = start_time = time.time()
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
@@ -538,6 +545,10 @@ def _compile(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
                 )
+                # If restart reason is None just log the type of the exception
+                restart_reasons.add(e.restart_reason or str(type(e)))
+                # We now have a new "last attempt", reset the clock
+                last_attempt_start_time = time.time()
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
@@ -581,7 +592,7 @@ def _compile(
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
-
+        dynamo_time_before_restart = last_attempt_start_time - start_time
         assert output is not None
 
         # Tests for new code objects.
@@ -655,14 +666,14 @@ def _compile(
             code.co_firstlineno,
             skip + 2,
             # -2: omit current frame, omit contextlib decorator
-            "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
+            "".join(CapturedTraceback.extract(skip=2 + skip).format()),
         )
         # -4: -2 as above, plus trace_structured frames
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
                 "stack": structured.from_traceback(
-                    traceback.extract_stack()[: -4 - skip]
+                    CapturedTraceback.extract(skip=4 + skip).summary()
                 )
             },
         )
@@ -745,6 +756,10 @@ def _compile(
                 code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
+                restart_reasons = set()
+                # If compilation failed, the entire time is wasted
+                dynamo_time_before_restart = time.time() - start_time
+
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -768,8 +783,11 @@ def _compile(
                 fail_user_frame_lineno,
                 non_compliant_ops,
                 compliant_custom_ops,
+                restart_reasons,
+                dynamo_time_before_restart,
             )
             record_compilation_metrics(metrics)
+            torch._dynamo.callback_handler.run_end_callbacks()
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
@@ -881,9 +899,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                 skip_reason = (
                     "traced frame already"
                     if frame.f_lasti >= first_real_inst_idx(frame.f_code)
-                    else "in skipfiles"
-                    if trace_rules.check(frame.f_code)
-                    else "dynamo tracing is disabled"
+                    else (
+                        "in skipfiles"
+                        if trace_rules.check(frame.f_code)
+                        else "dynamo tracing is disabled"
+                    )
                 )
                 if not is_skipfile or config.verbose:
                     log.debug(
