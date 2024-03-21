@@ -31,6 +31,7 @@ import sympy
 import torch
 import torch._logging
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
@@ -1230,7 +1231,7 @@ class HelperFunctions:
         self._templates_seen = {}
         self.finalized_helpers = []
 
-    def add(self, template_code: str) -> str:
+    def add(self, template_code: str, *, base_name="_triton_helper_fn") -> str:
         """This accepts a function definition with the function name
         left as a format specifier e.g.
 
@@ -1247,7 +1248,7 @@ class HelperFunctions:
             # Don't duplicate existing helpers
             return existing_name
 
-        name = f"_triton_helper_fn{len(self.finalized_helpers)}"
+        name = f"{base_name}{len(self.finalized_helpers)}"
         self._templates_seen[template_code] = name
         self.finalized_helpers.append(template_code.format(name=name))
         return name
@@ -2366,9 +2367,17 @@ class TritonKernel(Kernel):
         cse = CSE(prefix="", suffix="")
         overrides = TritonOverrides(V.MockHandler())
 
+        # Build a name that changes depending on fn to workaround a triton bug
+        # where the combine_fn to reduce and scan is not hashed, and so different
+        # scan ops may collide in the triton cache.
+        # This is fixed with the latest triton pin, but not the triton-rocm pin.
+        helper_name = "_triton_helper_fn"
+
         class CSEProxy:
             def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
                 def inner(*args, **kwargs):
+                    nonlocal helper_name
+                    helper_name += f"_{name}"
                     return cse.generate(
                         helper,
                         getattr(overrides, name)(*args, **kwargs),
@@ -2381,7 +2390,7 @@ class TritonKernel(Kernel):
             outputs = ", ".join(str(output) for output in outputs)
             helper.writeline(f"return {outputs}")
 
-        return self.helper_functions.add(helper.getvalue())
+        return self.helper_functions.add(helper.getvalue(), base_name=helper_name)
 
     def scan(
         self,
@@ -3831,7 +3840,18 @@ class TritonScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
+    @preserve_rng_state()
     def benchmark_fused_nodes(self, nodes):
+        @dataclasses.dataclass
+        class LastUsageHolder:
+            n: Any
+            last_usage: Any
+
+            def __del__(self):
+                self.n.last_usage = self.last_usage
+
+        last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]
+
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = set()
@@ -3908,6 +3928,12 @@ class TritonScheduling(BaseScheduling):
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
             ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
+
+            # overhead of cloning args gives bias for fusing the kernel
+            # in the case of mutating/in-placeable second fusion
+            # TODO - would be better as a hook in triton do_bench that reset
+            # the input values between benchmarking
+            ms = ms - do_bench(lambda: wrapped_jit_function.clone_args(*args))
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
