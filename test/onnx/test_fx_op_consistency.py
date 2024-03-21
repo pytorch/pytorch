@@ -166,7 +166,8 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "_softmax_backward_data",
-        reason=onnx_test_common.reason_dynamo_does_not_support("assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)")
+        dtypes=(torch.float16,),
+        reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
