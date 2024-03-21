@@ -154,8 +154,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip(
         "_native_batch_norm_legit",
-        dtypes=(torch.float16,),
-        reason="fixme: Assertion error: result mismatch and type error",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("cpu is not supported: \
+            https://github.com/microsoft/onnxscript/pull/1289")
     ),
     skip(
         "_batch_norm_with_update",
@@ -761,10 +761,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "narrow",
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),
-    xfail(
+    skip(
         "native_batch_norm",
-        dtypes=(torch.float16,),
-        reason="fixme: https://github.com/microsoft/onnxscript/issues/1269",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("cpu is not supported: \
+            https://github.com/microsoft/onnxscript/pull/1289")
     ),
     xfail(
         "native_layer_norm",
