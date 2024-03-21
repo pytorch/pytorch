@@ -968,7 +968,6 @@ class TestPatternMatcher(TestCase):
                         return torch._subclasses.FakeTensor.from_tensor(x, mode)
                     return x
 
-                tmp = example_inputs
                 example_inputs = pytree.tree_map(remap_fake_tensor, example_inputs)
 
                 pattern = gen_pattern(

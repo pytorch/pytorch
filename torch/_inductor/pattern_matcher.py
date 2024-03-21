@@ -240,6 +240,11 @@ class PatternExpr:
 
     @abstractmethod
     def pattern_eq(self, other: Any) -> bool:
+        """
+        Compare two `PatternExpr`s and return true if they are the
+        same. Note this is NOT matching a pattern - it is comparing the pattern
+        structures (for debugging).
+        """
         return isinstance(other, self.__class__)
 
 
