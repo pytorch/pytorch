@@ -207,7 +207,7 @@ def make_constraints(
             return True
         if isinstance(x, dict):
             x = list(x.values())
-        return all(isinstance(y, _Dim) or y is None for y in x)
+        return all(isinstance(y, (_Dim, int)) or y is None for y in x)
 
     flat_dynamic_shapes, _ = tree_flatten(
         dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
