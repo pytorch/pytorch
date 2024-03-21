@@ -76,7 +76,7 @@ class TestSplitCatFxPasses(TestCase):
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
-            (list_replace, 1),
+            (list_replace, 0),
             (multi_split, 1),
             (unequal_split, 1),
             (arg_only_cm, 1),
@@ -93,6 +93,7 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["split_cat_norm"],
                 expected_split_norm_count,
+                msg=f"for {fn}",
             )
             if expected_split_norm_count > 0:
                 self.assertIn(
@@ -865,16 +866,14 @@ class TestSplitCatFxPasses(TestCase):
             (split_squeeze_stack_callmethod, 0, 1, 0, 1, 31, 2),
             (other_users, 0, 0, 0, 0, 0, 2),
             (other_users_2, 0, 0, 0, 0, 0, 2),
-            (unbind_cat_addn_args, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_addn_args, 0, 1, 1, 1, 31, 1),
             (unbind_stack_addn_args, 0, 1, 1, 1, 31, 2),
-            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31, 2),
-            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31, 1),
+            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31, 1),
             (unbind_stack_dim_mismatch, 0, 1, 1, 1, 31, 2),
-            (unbind_cat_multi_users, 0, 1, 2, 2, 31, 3),
-            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31, 3),
+            (unbind_cat_multi_users, 0, 1, 2, 2, 31, 2),
+            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31, 2),
         ]:
-            print()
-            print(fn)
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
 
@@ -882,26 +881,32 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["scmerge_split_added"],
                 expected_unbind_added,
+                msg=f"for {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_split_removed"],
                 expected_unbind_removed,
+                msg=f"for {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_cat_added"],
                 expected_cat_added,
+                msg=f"for {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_cat_removed"],
                 expected_cat_removed,
+                msg=f"for {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_split_sections_removed"],
                 expected_sections_removed,
+                msg=f"for {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["split_cat_norm"],
                 expected_unbind_normalized,
+                msg=f"for {fn}",
             )
             counters.clear()
 

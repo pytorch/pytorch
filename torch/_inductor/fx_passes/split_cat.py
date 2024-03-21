@@ -132,11 +132,17 @@ def normalize_split_base(
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["example_value"].dim()
+
+    new_args = (split_input, split_sections)
+    new_kwargs = {"dim": split_dim}
+    if split_node.args == new_args and split_node.kwargs == new_kwargs:
+        return
+
     with graph.inserting_after(split_node):
         new_split_node = graph.call_function(
             torch.split,
-            args=(split_input, split_sections),
-            kwargs={"dim": split_dim},
+            args=new_args,
+            kwargs=new_kwargs,
         )
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
@@ -241,11 +247,16 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
+    new_args = (tensors,)
+    new_kwargs = {"dim": cat_dim}
+    if cat_node.args == new_args and cat_node.kwargs == new_kwargs:
+        return
+
     with graph.inserting_after(cat_node):
         new_cat_node = graph.call_function(
             torch.cat,
-            args=(tensors,),
-            kwargs={"dim": cat_dim},
+            args=new_args,
+            kwargs=new_kwargs,
         )
     cat_node.replace_all_uses_with(new_cat_node)
     new_cat_node.meta.update(cat_node.meta)
