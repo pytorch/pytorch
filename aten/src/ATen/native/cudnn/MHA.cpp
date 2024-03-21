@@ -602,6 +602,21 @@ void run_cudnn_SDP_bprop(
        handle,
        key.pod);
    }
+   auto [mha_graph, Q, K, V, attn_scale, Seed, Offset, O, Do, Stats, Dq, Dk, Dv] = graph_and_tensors_backward_values;
+   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
+    // inputs
+   {Q, q.data_ptr()},
+   {K, k.data_ptr()},
+   {V, v.data_ptr()},
+   {O, o.data_ptr()},
+   {Do, dO.data_ptr()},
+   {Stats, softmaxstats.data_ptr()},
+   // outputs
+   {Dq, dQ.data_ptr()},
+   {Dk, dK.data_ptr()},
+   {Dv, dV.data_ptr()},
+   // pass by value
+   {attn_scale, &scaling_factor}};
 }
 
 
