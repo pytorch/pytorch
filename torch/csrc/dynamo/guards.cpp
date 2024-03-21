@@ -15,6 +15,7 @@
 #endif
 
 #include <sstream>
+#include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
 // underlying tuple and access the item. Before Python 3.12 version, the
@@ -742,7 +743,7 @@ class GuardDebugInfo {
 
   GuardDebugInfo(
       bool result,
-      std::string failed_reason,
+      const std::string& failed_reason,
       int num_guards_executed)
       : GuardDebugInfo(result, num_guards_executed) {
     verbose_code_parts.append(failed_reason);
@@ -1173,7 +1174,7 @@ class TENSOR_ALIASING : public RelationalGuard {
     return result;
   }
 
-  void reset_state() final override {
+  void reset_state() final {
     _is_first_call = true;
   }
 
@@ -1218,7 +1219,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     return true;
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
     bool result = check_nopybind(value);
 
     if (!result) {
@@ -1231,7 +1232,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     return GuardDebugInfo(true, 1);
   }
 
-  void reset_state() final override {
+  void reset_state() final {
     for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
@@ -1347,7 +1348,7 @@ class GuardAccessor {
       py::handle example_value)
       : _guard_manager(make_guard_manager(root, source, example_value)),
         _accessor_key(std::move(accessor_key)),
-        _source(source) {}
+        _source(std::move(source)) {}
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -1432,10 +1433,10 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(source) {}
+      : _root(root), _source(std::move(source)) {}
   GuardManager(const GuardManager& m) = delete;
   GuardManager& operator=(const GuardManager&) = delete;
-  virtual ~GuardManager() {}
+  virtual ~GuardManager() = default;
 
   RootGuardManager* get_root() {
     return _root;
@@ -1670,7 +1671,7 @@ class RootGuardManager : public GuardManager {
   }
 
   // Fast check function.
-  virtual bool check_nopybind(PyObject* value) override { // borrowed ref
+  bool check_nopybind(PyObject* value) override { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
     PyThreadState* _save;
@@ -1698,7 +1699,7 @@ class RootGuardManager : public GuardManager {
   }
 
   // Fast check_verbose function.
-  virtual GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
@@ -1811,14 +1812,14 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : GuardManager(root, source),
+      : GuardManager(root, std::move(source)),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
 
   GuardManager* get_key_manager(
       const py::object& key_index,
-      std::string source,
+      const std::string& source,
       py::handle example_value) {
     KeyValueManager& key_value_manager = _get_index_manager(key_index);
     if (!key_value_manager.first) {
@@ -1830,7 +1831,7 @@ class DictGuardManager : public GuardManager {
 
   GuardManager* get_value_manager(
       const py::object& key_index,
-      std::string source,
+      const std::string& source,
       py::handle example_value) {
     KeyValueManager& key_value_manager = _get_index_manager(key_index);
     if (!key_value_manager.second) {
@@ -1840,7 +1841,7 @@ class DictGuardManager : public GuardManager {
     return key_value_manager.second.get();
   }
 
-  virtual bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
     // TODO(janimesh) - Implement a fast-path using dict versions.
 
     if (Py_TYPE(obj) != _expected_type) {
@@ -1895,7 +1896,7 @@ class DictGuardManager : public GuardManager {
     return true;
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     if (Py_TYPE(obj) != _expected_type) {
       return GuardDebugInfo(false, "TYPE_MISMATCH(" + get_source() + ")", 0);
@@ -1970,7 +1971,7 @@ class DictGuardManager : public GuardManager {
 
   void fail_on_get_child_manager(
       py::object a,
-      std::string source,
+      const std::string& source,
       py::object b) {
     throw std::runtime_error("Can not add an accessor to DictGuardManager");
   }
@@ -2090,7 +2091,7 @@ class TENSOR_MATCH : public LeafGuard {
         _root_guard_manager->_local_state, THPVariable_Unpack(value));
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
