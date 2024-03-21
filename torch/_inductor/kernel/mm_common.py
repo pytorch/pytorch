@@ -147,7 +147,6 @@ def filtered_configs(
                             SPLIT_K=more_split_k,
                             num_stages=num_stages,
                             num_warps=num_warps,
-                            matrix_instr_nonkdim=matrix_instr_nonkdim,
                         )
 
 
