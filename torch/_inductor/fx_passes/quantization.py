@@ -221,12 +221,6 @@ def generate_pattern_with_binary(
 
 def generate_pattern_with_unary(computation_call, unary_post_op):
     if unary_post_op is not None:
-        if unary_post_op == aten.hardtanh.default:
-            return CallFunction(
-                aten.clamp_max,
-                CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
-                KeywordArg("max_value"),
-            )
         return CallFunction(
             unary_post_op,
             computation_call,
@@ -602,6 +596,7 @@ def _register_quantization_unary_fusion():
         _gelu_fusion_1 as _gelu_fusion_erf,
         _gelu_fusion_2 as _gelu_fusion_tanh,
         _hardswish_fusion,
+        _hardtanh_fusion,
         _silu_fusion,
     )
 
@@ -629,10 +624,13 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(
-                    get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+                _unary_fusion_pattern(
+                    _hardtanh_fusion,
+                    get_dequantize_qconv_pt2e_pattern(1),
+                    1,
+                    is_bf16,
                 ),
-                dtype=original_pattern_output_dtype,
+                dtype=torch.float32,
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
@@ -670,8 +668,11 @@ def _register_quantization_unary_fusion():
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
             ),
-            UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
-                get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+            UnaryAttr("hardtanh", [], ""): _unary_fusion_pattern(
+                _hardtanh_fusion,
+                get_dequantize_qconv_pt2e_pattern(1),
+                1,
+                is_bf16,
             ),
             UnaryAttr("hardswish", [], ""): _unary_fusion_pattern(
                 _hardswish_fusion,
