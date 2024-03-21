@@ -15,9 +15,6 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
-#include <stdexcept>
-#include <utility>
-
 namespace py = pybind11;
 
 // This makes intrusive_ptr to be available as a custom pybind11 holder type,

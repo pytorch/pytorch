@@ -77,10 +77,7 @@ void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
     TypePtr inferred_type) {
-  TypePtr mergedType;
-  bool inferred;
-  std::tie(mergedType, inferred) =
-      MergeInferredType(existing_type, inferred_type);
+  auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
@@ -1968,8 +1965,6 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
-    // TODO(84661): This warning comes before setType in symbolic_fn.
-    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),

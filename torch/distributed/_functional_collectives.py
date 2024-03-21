@@ -10,7 +10,10 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import _register_tensor_wrapper
+from ._functional_collectives_impl import (  # noqa: F401
+    _register_tensor_wrapper,
+    native_funcol_enabled,
+)
 
 try:
     from torch.utils._cxx_pytree import tree_map_only
@@ -26,9 +29,7 @@ if torch._running_with_deploy():
 
 else:
     try:
-        from torch._dynamo.external_utils import (
-            is_compiling as is_torchdynamo_compiling,
-        )
+        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
             "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
@@ -100,6 +101,7 @@ RANK_TYPES = Union[
     dist.ProcessGroup,
     DeviceMesh,
     Tuple["dist._tensor.DeviceMesh", int],
+    str,
 ]
 
 
@@ -138,7 +140,10 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    else:
+        return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
@@ -150,8 +155,14 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         group (ProcessGroup or List[int]): The process group to work on.
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        tensor = torch.ops._c10d_functional.broadcast(self, src, group_name)
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch.ops.c10d_functional.broadcast(
+            self, src, tag, rankset, group_size
+        )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -172,8 +183,20 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        tensor = torch.ops._c10d_functional.all_reduce(
+            self, reduceOp.lower(), group_name
+        )
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch.ops.c10d_functional.all_reduce(  # type: ignore[attr-defined]
+            self,
+            reduceOp,
+            tag,
+            rankset,
+            group_size,
+        )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -200,8 +223,20 @@ def all_gather_tensor(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     assert self.is_contiguous()
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
+        tensor = torch.ops._c10d_functional.all_gather_into_tensor(
+            self, group_size, group_name
+        )
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch.ops.c10d_functional.all_gather_into_tensor(  # type: ignore[attr-defined]
+            self,
+            tag,
+            rankset,
+            group_size,
+        )
     res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
@@ -235,7 +270,12 @@ def reduce_scatter_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    tag, rankset, group_size = _expand_group(group, tag)
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+
     assert (
         self.size(scatter_dim) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
@@ -243,7 +283,21 @@ def reduce_scatter_tensor(
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
 
-    tensor = torch.ops.c10d_functional.reduce_scatter_tensor(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
+            self,
+            reduceOp.lower(),
+            group_size,
+            group_name,  # type: ignore[possibly-undefined]
+        )
+    else:
+        tensor = torch.ops.c10d_functional.reduce_scatter_tensor(  # type: ignore[attr-defined]
+            self,
+            reduceOp,
+            tag,
+            rankset,  # type: ignore[possibly-undefined]
+            group_size,
+        )
     res = _maybe_wrap_tensor(tensor)
     return res
 
@@ -267,8 +321,22 @@ def all_reduce_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor_list = torch.ops.c10d_functional.all_reduce_coalesced(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
+            self,
+            reduceOp.lower(),
+            group_name,
+        )
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor_list = torch.ops.c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
+            self,
+            reduceOp,
+            tag,
+            rankset,
+            group_size,
+        )
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
@@ -291,8 +359,22 @@ def all_gather_into_tensor_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(self, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
+        tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
+            self,
+            group_size,
+            group_name,
+        )
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
+            self,
+            tag,
+            rankset,
+            group_size,
+        )
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
@@ -318,7 +400,12 @@ def reduce_scatter_tensor_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    tag, rankset, group_size = _expand_group(group, tag)
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+
     assert len(scatter_dim) == len(inputs)
     for idx, (dim, tensor) in enumerate(zip(scatter_dim, inputs)):
         assert (
@@ -328,7 +415,21 @@ def reduce_scatter_tensor_coalesced(
             tensor_list = torch.chunk(tensor, group_size, dim=dim)
             inputs[idx] = torch.cat(tensor_list)
 
-    tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(inputs, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
+            inputs,
+            reduceOp.lower(),
+            group_size,
+            group_name,  # type: ignore[possibly-undefined]
+        )
+    else:
+        tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
+            inputs,
+            reduceOp,
+            tag,
+            rankset,  # type: ignore[possibly-undefined]
+            group_size,
+        )
 
     return list(map(_maybe_wrap_tensor, tensor_list))
 
@@ -374,8 +475,32 @@ def all_to_all_single(
         assert all(
             isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
         ), input_split_sizes
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.all_to_all_single(self, output_split_sizes, input_split_sizes, tag, rankset, group_size)  # type: ignore[attr-defined]
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
+        if output_split_sizes is None or input_split_sizes is None:
+            assert output_split_sizes is None and input_split_sizes is None, (
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
+            output_split_sizes = [self.shape[0] // group_size] * group_size
+            input_split_sizes = output_split_sizes
+        tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+            self,
+            output_split_sizes,
+            input_split_sizes,
+            group_name,
+        )
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch.ops.c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+            self,
+            output_split_sizes,
+            input_split_sizes,
+            tag,
+            rankset,
+            group_size,
+        )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -421,10 +546,9 @@ class AsyncCollectiveTensor(torch.Tensor):
         return _maybe_wrap_tensor(tensor)
     """
     elem: torch.Tensor
+    completed: bool
 
-    __slots__ = ["elem"]
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
+    __slots__ = ["elem", "completed"]
 
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
@@ -439,13 +563,14 @@ class AsyncCollectiveTensor(torch.Tensor):
             requires_grad=False,
         )
         r.elem = elem
+        r.completed = False
         return r
 
     def __tensor_flatten__(self):
         return ["elem"], None
 
     def tolist(self):
-        wait_tensor(self.elem)
+        self.trigger_wait()
         return self.elem.tolist()
 
     @staticmethod
@@ -455,12 +580,14 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self):
-        wait_tensor(self.elem)
+        self.trigger_wait()
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
-        wait_tensor(self.elem)
-        return self
+        if not self.completed:
+            wait_tensor(self.elem)
+            self.completed = True
+        return self.elem
 
     def wait(self) -> torch.Tensor:
         wait_tensor(self.elem)
@@ -485,7 +612,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
             if not is_view_op:
-                wait_tensor(e.elem)
+                e.trigger_wait()
             return e.elem
 
         def wrap(e: torch.Tensor):
@@ -569,7 +696,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
             group.ndim == 1
         ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         # TODO: it should run collective in the whole mesh instead of dim 0
-        tag, rankset = group._dim_group_infos[0]
+        tag, rankset, _ = group._dim_group_infos[0]
         group_size = len(rankset)
     elif isinstance(group, tuple):
         if (
@@ -579,7 +706,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         ):
             dmesh = group[0]
             dim = group[1]
-            tag, rankset = dmesh._dim_group_infos[dim]
+            tag, rankset, _ = dmesh._dim_group_infos[dim]
             group_size = len(rankset)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
@@ -589,6 +716,44 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         )
 
     return (tag, rankset, group_size)
+
+
+def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
+    """
+    Given group in RANK_TYPES, return the group name.
+    """
+    # `tag` will be deprecated. See details in:
+    # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
+    if isinstance(group, dist.ProcessGroup):
+        return group.group_name
+    elif isinstance(group, str):
+        return group
+    elif isinstance(group, DeviceMesh):
+        assert (
+            group.ndim == 1
+        ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        return group._dim_group_infos[0][2]
+    elif isinstance(group, tuple):
+        if (
+            len(group) == 2
+            and isinstance(group[0], DeviceMesh)
+            and isinstance(group[1], int)
+        ):
+            dmesh = group[0]
+            dim = group[1]
+            return dmesh._dim_group_infos[dim][2]
+        else:
+            raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
+    elif isinstance(group, list):
+        if not is_torchdynamo_compiling():
+            warnings.warn(
+                "The combination of ranks + tag as process group "
+                "identifier has been deprecated. Please switch to "
+                "using ProcessGroup, DeviceMesh, or group name instead."
+            )
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
+    else:
+        raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
 
 def _are_we_tracing() -> bool:
@@ -656,6 +821,10 @@ def _all_reduce_coalesced_meta(self, *args):
 
 
 def _all_reduce__meta(inp, *args):
+    return inp
+
+
+def _broadcast__meta(inp, *args):
     return inp
 
 
@@ -773,6 +942,8 @@ if not torch._running_with_deploy():
         "Meta",
     )
     _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+    _c10_lib_impl.impl("broadcast", _broadcast_meta, "Meta")
+    _c10_lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 else:
     warnings.warn(
         "PyTorch Distributed functional collectives do not work with torch::deploy."
@@ -819,6 +990,18 @@ def reduce_scatter_tensor_inplace(
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
 
+REDUCE_OP_TO_STR = {
+    dist.ReduceOp.SUM: "sum",
+    dist.ReduceOp.AVG: "avg",
+    dist.ReduceOp.PRODUCT: "product",
+    dist.ReduceOp.MIN: "min",
+    dist.ReduceOp.MAX: "max",
+    dist.ReduceOp.BAND: "band",
+    dist.ReduceOp.BOR: "bor",
+    dist.ReduceOp.BXOR: "bxor",
+}
+
+
 def all_reduce_inplace(
     tensor: torch.Tensor,
     op: str = "sum",
@@ -833,9 +1016,58 @@ def all_reduce_inplace(
     return tensor.copy_(all_reduce(tensor, op, group, tag))
 
 
+def all_to_all_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    output_split_sizes=None,
+    input_split_sizes=None,
+    group=None,
+    async_op=False,
+    tag: str = "",
+):
+    assert (
+        not async_op
+    ), "Can't remap async version of inplace op to functional collective"
+    return output.copy_(
+        all_to_all_single(input, output_split_sizes, input_split_sizes, group, tag)
+    )
+
+
+def all_gather_inplace(
+    tensor_list: List[torch.Tensor],
+    tensor: torch.Tensor,
+    group=None,
+    async_op=False,
+    tag: str = "",
+):
+    assert (
+        not async_op
+    ), "Can't remap async version of inplace op to functional collective"
+    assert all(
+        t.size(0) == tensor.size(0) for t in tensor_list
+    ), "Remapping variable size all_gather is not yet supported"
+
+    output = all_gather_tensor(tensor, 0, group, tag)
+
+    # Use aten.slice instead of aten.split because the latter causes
+    # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
+    output_splits = []
+    offset = 0
+    for t in tensor_list:
+        output_splits.append(output[offset : offset + t.size(0)])
+        offset += t.size(0)
+    for dst, src in zip(tensor_list, output_splits):
+        dst.copy_(src)
+    return tensor_list
+
+
 from torch.distributed.distributed_c10d import (
+    _all_gather_base as legacy_all_gather_base,
+    _reduce_scatter_base as legacy_reduce_scatter_base,
+    all_gather as legacy_all_gather,
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
+    all_to_all_single as legacy_all_to_all_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -845,4 +1077,8 @@ traceable_collective_remaps = {
     legacy_allgather: all_gather_tensor_inplace,
     legacy_reducescatter: reduce_scatter_tensor_inplace,
     legacy_allreduce: all_reduce_inplace,
+    legacy_all_to_all_single: all_to_all_inplace,
+    legacy_all_gather: all_gather_inplace,
+    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
+    legacy_all_gather_base: all_gather_tensor_inplace,
 }

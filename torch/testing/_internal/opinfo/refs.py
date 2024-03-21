@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     OpInfo,

@@ -126,6 +126,15 @@ class Test(torch.jit.ScriptModule):
         return r
 
     @torch.jit.script_method
+    def conv3d(self, x: Tensor, w: Tensor, toChannelsLast: bool) -> Tensor:
+        r = torch.nn.functional.conv3d(x, w)
+        if toChannelsLast:
+            r = r.contiguous(memory_format=torch.channels_last_3d)
+        else:
+            r = r.contiguous()
+        return r
+
+    @torch.jit.script_method
     def contiguous(self, x: Tensor) -> Tensor:
         return x.contiguous()
 

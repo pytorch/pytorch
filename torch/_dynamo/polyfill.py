@@ -1,7 +1,11 @@
+# mypy: ignore-errors
+
 """
 Python polyfills for common builtins.
 """
 import math
+
+import torch
 
 
 def all(iterator):
@@ -18,7 +22,7 @@ def any(iterator):
     return False
 
 
-def index(iterator, item, start=0, end=-1):
+def index(iterator, item, start=0, end=None):
     for i, elem in enumerate(list(iterator))[start:end]:
         if item == elem:
             return i
@@ -33,3 +37,11 @@ def repeat(item, count):
 
 def radians(x):
     return math.pi / 180.0 * x
+
+
+def accumulate_grad(x, new_grad):
+    new_grad = torch.clone(new_grad)
+    if x.grad is None:
+        x.grad = new_grad
+    else:
+        x.grad.add_(new_grad)

@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -15,7 +16,7 @@ namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 template <> class Vectorized<double> {
 private:
@@ -139,6 +140,9 @@ public:
   }
   Vectorized<double> acos() const {
     return Vectorized<double>(Sleef_acosd4_u10(values));
+  }
+  Vectorized<double> acosh() const {
+    return Vectorized<double>(Sleef_acoshd4_u10(values));
   }
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind4_u10(values));

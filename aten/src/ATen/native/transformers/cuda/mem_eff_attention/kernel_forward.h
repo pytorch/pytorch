@@ -65,9 +65,10 @@ constexpr int getWarpsPerSmFw() {
 }
 static CUTLASS_DEVICE float atomicMaxFloat(float* addr, float value) {
   // source: https://stackoverflow.com/a/51549250
-  return (value >= 0)
-      ? __int_as_float(atomicMax((int*)addr, __float_as_int(value)))
-      : __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
+  return !signbit(value)
+             ? __int_as_float(atomicMax((int *)addr, __float_as_int(value)))
+             : __uint_as_float(
+                   atomicMin((unsigned int *)addr, __float_as_uint(value)));
 }
 } // namespace
 

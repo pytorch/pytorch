@@ -28,8 +28,6 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
-#include <tuple>
-#include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;

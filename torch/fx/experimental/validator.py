@@ -699,7 +699,7 @@ def bisect(shape_env):
         shape_env.graph.lint()
         return check_shapeenv_fails(shape_env, events[number].tracked_fakes)
 
-    last_exception = check_shapeenv_fails(shape_env, shape_env.snapshot_tracked_fakes())
+    last_exception = check_shapeenv_fails(shape_env, shape_env._snapshot_tracked_fakes())
 
     if not last_exception:
         # We don't actually fail due to a produce_guards call.

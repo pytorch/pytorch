@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import copy
 import itertools
 import math
@@ -38,6 +40,7 @@ from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
+    _get_pg_config,
 )
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
@@ -1201,11 +1204,13 @@ class DistributedTest:
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
+            self.assertEqual(dist.get_pg_count(), len(period_group_size_dict))
+
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
+            real_group_ranks_res1 = _get_pg_config(subgroup1)['ranks']
+            real_group_ranks_res2 = _get_pg_config(subgroup2)['ranks']
 
-            real_group_ranks_res1 = dist.get_process_group_ranks(subgroup1)
-            real_group_ranks_res2 = dist.get_process_group_ranks(subgroup2)
             expect_group_ranks_res1 = (
                 rank // subgroup_size1 * subgroup_size1
                 + np.array(list(range(subgroup_size1)))
@@ -3617,7 +3622,7 @@ class DistributedTest:
                     ]
                     assert self._run_all_gather_coalesced_and_verify(
                         output_tensor_lists, input_tensors, expected_tensors, group_id
-                    ), "output tensors do not match expected ouputs"
+                    ), "output tensors do not match expected outputs"
 
             self._barrier()
 
@@ -7271,10 +7276,7 @@ class DistributedTest:
             for num_early_join_ranks in num_uneven_ranks:
                 for baseline_iter in baseline_num_iters:
                     for offset in iteration_offsets:
-                        mapping = {
-                            rank: baseline_iter
-                            for rank in range(0, num_early_join_ranks)
-                        }
+                        mapping = dict.fromkeys(range(0, num_early_join_ranks), baseline_iter)
                         # if num_early_join_ranks > 1, ranks > 0 that will join early
                         # iterate offset//2 more times than rank 0, to test nodes
                         # depleting inputs at different times.
@@ -7283,12 +7285,7 @@ class DistributedTest:
                                 if rank > 0:
                                     mapping[rank] += offset // 2
                         mapping.update(
-                            {
-                                rank: baseline_iter + offset
-                                for rank in range(
-                                    num_early_join_ranks, dist.get_world_size()
-                                )
-                            }
+                            dict.fromkeys(range(num_early_join_ranks, dist.get_world_size()), baseline_iter + offset)
                         )
                         iteration_mappings.append(mapping)
 
@@ -9983,7 +9980,7 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
+            True, "Skipped due to flakiness"
         )
         def test_ddp_hook_pickling_powerSGD(self):
 

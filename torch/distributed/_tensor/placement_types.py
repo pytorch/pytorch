@@ -95,6 +95,8 @@ class Shard(Placement):
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
+        if pad_size == 0:
+            return tensor
         pad = [0, 0] * (tensor.ndim - self.dim)
         pad[-1] = pad_size
         return torch.nn.functional.pad(tensor, pad)
@@ -104,14 +106,16 @@ class Shard(Placement):
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
+        if pad_size == 0:
+            return tensor
         return tensor.narrow(
             self.dim,
             start=0,
             length=tensor.size(self.dim) - pad_size,
         )
 
+    @staticmethod
     def _local_shard_size_on_dim(
-        self,
         size_on_dim: int,
         num_chunks: int,
         rank: int,
@@ -121,25 +125,22 @@ class Shard(Placement):
         returns the local shard size and offset on a given tensor dim
         """
         # Compute the chunk size inline with ``torch.chunk``
+        if size_on_dim % num_chunks == 0:
+            full_chunk_size = size_on_dim // num_chunks
+            return full_chunk_size, full_chunk_size * rank if return_offset else -1
+
+        # uneven sharding case
         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+        shard_starting_idx = full_chunk_size * rank
 
-        # Compute chunk size for each chunk on the dimension.
-        chunk_sizes = [
-            max(
-                min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx,
-                0,
+        if size_on_dim < shard_starting_idx:
+            return 0, size_on_dim if return_offset else -1
+        else:
+            local_shard_size = (
+                min(size_on_dim, shard_starting_idx + full_chunk_size)
+                - shard_starting_idx
             )
-            for idx in range(num_chunks)
-        ]
-        local_shard_size = chunk_sizes[rank]
-
-        local_offset_on_dim = -1
-        if return_offset:
-            # Return global tensor dim size of current dimension if for empty shard
-            # to represent the end of the corresponding tensor dim.
-            local_offset_on_dim = sum(chunk_sizes[:rank])
-
-        return (local_shard_size, local_offset_on_dim)
+            return local_shard_size, shard_starting_idx if return_offset else -1
 
     def _shard_tensor(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -200,57 +201,64 @@ class Shard(Placement):
         )
 
         if is_padded:
-            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])
+            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])  # type: ignore[possibly-undefined]
         return output
 
     def _to_replicate_tensor(
         self,
         local_tensor: torch.Tensor,
-        size: torch.Size,
         mesh: DeviceMesh,
         mesh_dim: int,
+        current_logical_shape: List[int],
     ) -> torch.Tensor:
         """
         This function all_gather all shards and return a tensor that
         is replicated on the previously sharded mesh dimension
         """
-        my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
+        # check if it's uneven, so we need to pad input tensor before all_gather
+        local_shape = list(local_tensor.size())
 
-        if my_coordinate is None:
-            # if rank is not part of mesh, we simply return local_tensor,
-            # which should be an empty tensor
-            return local_tensor
+        logical_dim_size = current_logical_shape[self.dim]
+        is_padded = logical_dim_size % num_chunks != 0
 
-        # check if it needs to pad input tensor before all_gather
-        full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
-        chunk_sizes = [
-            max(
-                min(size[self.dim], full_chunk_size * (idx + 1))
-                - full_chunk_size * idx,
-                0,
-            )
-            for idx in range(num_chunks)
-        ]
-        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
-        is_padded = size[self.dim] % num_chunks != 0
-
-        pad_size = pad_sizes[my_coordinate[mesh_dim]]
-        if pad_size > 0:
+        if is_padded:
+            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
+            pad_size = full_chunk_size - local_shape[self.dim]
             local_tensor = self._pad_tensor(local_tensor, pad_size)
-        local_tensor = local_tensor.contiguous()
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
 
         result = funcol.all_gather_tensor(
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
         )
-
-        # Unpad the tensor if the input tensor was padded
         if is_padded:
-            full_pad_size = sum(pad_sizes)
-            result = self._unpad_tensor(result, full_pad_size)
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
+            result = self._unpad_tensor(result, unpad_size)
         return result
+
+    def _replicate_to_shard(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_index: int,
+    ) -> torch.Tensor:
+        """
+        transform from replicated tensor to a sharded tensor on
+        the current rank, which would perform a local chunk
+        """
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+        shards, _ = self._split_tensor(
+            local_tensor,
+            num_chunks,
+            with_padding=False,
+            contiguous=False,
+        )
+        return shards[shard_index].clone()
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
@@ -314,23 +322,23 @@ class Replicate(Placement):
 
 @dataclass(frozen=True)
 class _Partial(Placement):
-    # This is a default partial placement with element-wise reduce op
-    # when doing reduction it follows the contract of `_to_replicate`
-    # and `_to_shard` to do the reduction and convert the local tensor
-    # to the corresponding state (replicate or shard)
-    #
+    # This is a default _Partial placement with element-wise reduce op
+    # _Partial define three contracts:
+    # 1. _reduce_value: reduce the value of the tensor on the mesh dimension
+    # 2. _reduce_shard_value: reduce_scatter the value of the tensor on the mesh dimension
+    # 3. _partition_value: partition the value of a replicated tensor on the mesh dimension
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
     reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
 
-    def _to_replicate(
+    def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         return funcol.all_reduce(
             tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
         )
 
-    def _to_shard(
+    def _reduce_shard_value(
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
@@ -340,6 +348,20 @@ class _Partial(Placement):
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
+
+    def _partition_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        # _partition_value is the conjugate operation of _reduce_value
+        # - i.e. _partition_value on a sum reduce op is just a divison operation
+        # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
+        # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
+        # different operation
+        assert (
+            self.reduce_op == c10d.ReduceOp.SUM
+        ), "only support replicate to PartialSUM for now!"
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+        return tensor / num_chunks
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _Partial):
@@ -583,3 +605,16 @@ class DTensorSpec:
         return True if the current DTensorSpec replicates on all mesh dims (devices)
         """
         return all(placement.is_replicate() for placement in self.placements)
+
+    def shallow_copy_with_tensor_meta(
+        self, tensor_meta: Optional[TensorMeta]
+    ) -> "DTensorSpec":
+        """
+        Shallow copy the DTensorSpec with a new tensor_meta.
+        """
+        assert tensor_meta is not None, "shallow copy with no tensor_meta!"
+        return DTensorSpec(
+            self.mesh,
+            self.placements,
+            tensor_meta=tensor_meta,
+        )

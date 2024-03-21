@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
+import sys
 import unittest
 from typing import Any, Optional, Tuple, Type
 
@@ -649,24 +650,26 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         # Extract the conv weight and bias nodes
         def get_conv_weight_and_bias(conv_node: torch.fx.Node):
             weight_dq_node = conv_node.args[1]
-            weight_q_node = weight_dq_node.args[0]
-            weight_node = weight_q_node.args[0]
+            qweight_node = weight_dq_node.args[0]
             bias_node = conv_node.args[2]
-            assert isinstance(weight_node, torch.fx.Node)
+            assert isinstance(qweight_node, torch.fx.Node)
             assert isinstance(bias_node, torch.fx.Node)
-            return (weight_node, bias_node)
+            return (qweight_node, bias_node)
 
-        first_conv_weight, first_conv_bias = get_conv_weight_and_bias(first_conv)
-        second_conv_weight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+        first_conv_qweight, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        second_conv_qweight, second_conv_bias = get_conv_weight_and_bias(second_conv)
 
         # Assert that each set of conv, conv weight, and conv bias are in the same partition
         def get_source_fn(node: torch.fx.Node):
             # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
             return node.meta["source_fn_stack"][0][0]
 
-        self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_weight))
+        # we don't preserve this is quantized weight currently since it's folded
+        # but user can attach "quantization_tag" to the node and it will be preserved
+        # self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_qweight))
+        # self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_qweight))
+
         self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_bias))
-        self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_weight))
         self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_bias))
 
         # Assert that different sets of convs and relus have different partitions
@@ -703,15 +706,15 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             bias_dq.target,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         )
-        weight_q = weight_dq.args[0]
-        bias_q = bias_dq.args[0]
+        weight_getattr = weight_dq.args[0]
+        bias_getattr = bias_dq.args[0]
         self.assertEqual(
-            weight_q.target,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            weight_getattr.op,
+            "get_attr",
         )
         self.assertEqual(
-            bias_q.target,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            bias_getattr.op,
+            "get_attr",
         )
 
         # Assert that bias scale = weight scale * input scale
@@ -745,28 +748,26 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             weight_dq.target,
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
         )
-        weight_q = weight_dq.args[0]
+        weight_getattr = weight_dq.args[0]
         self.assertEqual(
-            weight_q.target,
-            torch.ops.quantized_decomposed.quantize_per_channel.default,
+            weight_getattr.op,
+            "get_attr",
         )
 
-        # Assert that args for the weight's quantize and dequantize ops
+        # Assert that args for the weight's dequantize ops
         # are copied correctly after subgraph rewriting
-        (q_axis, q_qmin, q_qmax, q_dtype) = weight_q.args[3:]
         (dq_axis, dq_qmin, dq_qmax, dq_dtype) = weight_dq.args[3:]
-        self.assertEqual(q_axis, 0)
         self.assertEqual(dq_axis, 0)
-        self.assertEqual(q_qmin, 0)
         self.assertEqual(dq_qmin, 0)
-        self.assertEqual(q_qmax, 2**31 - 1)
         self.assertEqual(dq_qmax, 2**31 - 1)
-        self.assertEqual(q_dtype, torch.int32)
         self.assertEqual(dq_dtype, torch.int32)
 
 
 # TODO: enable this in the next PR
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 1
     example_inputs = (torch.randn(1, 3, 5),)
@@ -775,6 +776,9 @@ class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestQuantizePT2EQAT_ConvBn2d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 2
     example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -902,6 +906,9 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestQuantizePT2EQATModels(PT2EQATTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
@@ -975,7 +982,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         for name, child in model.named_children():
             if isinstance(child, torch.fx.GraphModule):
                 torch.ao.quantization.move_exported_model_to_eval(child)
-                converted_child = convert_pt2e(child, fold_quantize=True)
+                converted_child = convert_pt2e(child)
                 setattr(model, name, converted_child)
             else:
                 self._convert_qat_linears(child)
@@ -1012,7 +1019,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             # 3 x linear: 1 for act, 1 for output
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 9,
+            ): 8,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 9,

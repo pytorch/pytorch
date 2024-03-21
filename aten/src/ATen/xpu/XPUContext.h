@@ -1,6 +1,8 @@
 #pragma once
 
+#include <ATen/Context.h>
 #include <c10/xpu/XPUFunctions.h>
+#include <c10/xpu/XPUStream.h>
 
 namespace at::xpu {
 

@@ -70,13 +70,13 @@ def forward(self, arg0_1, arg1_1):
         eager_mod = M()
         ep = torch.export.export(eager_mod, (inp,), strict=True)
 
-        graph_res_1, graph_res_2 = ep(inp)
+        graph_res_1, graph_res_2 = ep.module()(inp)
         eager_res_1, eager_res_2 = eager_mod(inp)
 
         self.assertTrue(torch.allclose(graph_res_2, eager_res_2))
         self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
-        graph_res_1, graph_res_2 = ep(inp)
+        graph_res_1, graph_res_2 = ep.module()(inp)
         eager_res_1, eager_res_2 = eager_mod(inp)
 
         self.assertTrue(torch.allclose(graph_res_2, eager_res_2))

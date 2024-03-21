@@ -86,10 +86,7 @@ static void addc_mul_div_out_mps(const Tensor& self,
       cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_scalar),
     };
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 

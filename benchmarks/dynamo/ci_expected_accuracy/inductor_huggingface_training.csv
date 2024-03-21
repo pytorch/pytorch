@@ -6,11 +6,11 @@ AlbertForMaskedLM,pass,4
 
 
 
-AlbertForQuestionAnswering,pass,4
+AlbertForQuestionAnswering,pass,5
 
 
 
-AllenaiLongformerBase,pass,8
+AllenaiLongformerBase,pass,9
 
 
 
@@ -22,11 +22,11 @@ BartForConditionalGeneration,pass,24
 
 
 
-BertForMaskedLM,pass,4
+BertForMaskedLM,pass,5
 
 
 
-BertForQuestionAnswering,pass,4
+BertForQuestionAnswering,pass,5
 
 
 
@@ -42,15 +42,15 @@ BlenderbotSmallForConditionalGeneration,pass,24
 
 
 
-CamemBert,pass,4
+CamemBert,pass,5
 
 
 
-DebertaForMaskedLM,pass,4
+DebertaForMaskedLM,pass,5
 
 
 
-DebertaForQuestionAnswering,pass,4
+DebertaForQuestionAnswering,pass,5
 
 
 
@@ -62,15 +62,15 @@ DebertaV2ForQuestionAnswering,eager_1st_run_OOM,0
 
 
 
-DistilBertForMaskedLM,pass,4
+DistilBertForMaskedLM,pass,5
 
 
 
-DistilBertForQuestionAnswering,pass,4
+DistilBertForQuestionAnswering,pass,5
 
 
 
-DistillGPT2,pass,4
+DistillGPT2,pass,5
 
 
 
@@ -78,23 +78,23 @@ ElectraForCausalLM,pass,4
 
 
 
-ElectraForQuestionAnswering,pass,4
+ElectraForQuestionAnswering,pass,5
 
 
 
-GPT2ForSequenceClassification,pass,6
+GPT2ForSequenceClassification,pass,7
 
 
 
-GoogleFnet,pass,4
+GoogleFnet,pass,5
 
 
 
-LayoutLMForMaskedLM,pass,4
+LayoutLMForMaskedLM,pass,5
 
 
 
-LayoutLMForSequenceClassification,pass,6
+LayoutLMForSequenceClassification,pass,7
 
 
 
@@ -110,15 +110,15 @@ MBartForConditionalGeneration,pass,24
 
 
 
-MT5ForConditionalGeneration,pass,4
+MT5ForConditionalGeneration,pass,5
 
 
 
-MegatronBertForCausalLM,pass,4
+MegatronBertForCausalLM,pass,5
 
 
 
-MegatronBertForQuestionAnswering,pass,4
+MegatronBertForQuestionAnswering,pass,5
 
 
 
@@ -150,11 +150,11 @@ PegasusForConditionalGeneration,pass,23
 
 
 
-RobertaForCausalLM,pass,4
+RobertaForCausalLM,pass,5
 
 
 
-RobertaForQuestionAnswering,pass,4
+RobertaForQuestionAnswering,pass,5
 
 
 
@@ -162,11 +162,11 @@ Speech2Text2ForCausalLM,pass,12
 
 
 
-T5ForConditionalGeneration,pass,4
+T5ForConditionalGeneration,pass,5
 
 
 
-T5Small,pass,4
+T5Small,pass,5
 
 
 
@@ -178,8 +178,8 @@ XGLMForCausalLM,pass,12
 
 
 
-XLNetLMHeadModel,pass,4
+XLNetLMHeadModel,pass,5
 
 
 
-YituTechConvBert,pass,4
+YituTechConvBert,pass,5

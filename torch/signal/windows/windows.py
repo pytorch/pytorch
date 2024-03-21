@@ -163,14 +163,18 @@ def exponential(
 
 @_add_docstr(
     r"""
-Computes a window with a simple cosine waveform.
-Also known as the sine window.
+Computes a window with a simple cosine waveform, following the same implementation as SciPy.
+This window is also known as the sine window.
 
 The cosine window is defined as follows:
 
 .. math::
-    w_n = \cos{\left(\frac{\pi n}{M} - \frac{\pi}{2}\right)} = \sin{\left(\frac{\pi n}{M}\right)}
-    """,
+    w_n = \sin\left(\frac{\pi (n + 0.5)}{M}\right)
+
+This formula differs from the typical cosine window formula by incorporating a 0.5 term in the numerator,
+which shifts the sample positions. This adjustment results in a window that starts and ends with non-zero values.
+
+""",
     r"""
 
 {normalization}

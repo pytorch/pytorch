@@ -1,13 +1,12 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-import io
-
 import tempfile
 
 from typing import Mapping, Tuple
 
 import onnx
+import onnx.inliner
 import pytorch_test_common
 import torch
 import transformers  # type: ignore[import]
@@ -256,8 +255,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 namespace="aten", op_name="add", overload="Tensor"
             )
         )
-        # TODO: Replace this example with a torch custom op when overload is supported
-        # Currently, torch only supports custom op with namespace and op_name
+
         aten_add_Tensor = registration.OpName.from_name_parts(
             namespace="aten", op_name="add", overload="Tensor"
         )
@@ -363,11 +361,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             node: onnx.NodeProto,
             value_infos: Mapping[str, onnx.ValueInfoProto],
             local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
-            prefix: str = "",
+            function_id: str = "",
         ):
             for output in node.output:
-                output_prefix = f"{prefix}/{output}" if prefix else output
-                self.assertIn(output_prefix, value_infos)
+                name = f"{function_id}/{output}" if function_id else output
+                self.assertIn(name, value_infos)
             if node.domain.startswith("pkg.onnxscript.torch_lib"):
                 # No shape info available for values inside torchlib functions.
                 return
@@ -375,11 +373,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 function := local_functions.get((node.domain, node.op_type))
             ) is not None:
                 for node in function.node:
-                    node_prefix = (
-                        f"{prefix}/{function.name}" if prefix else function.name
-                    )
+                    function_id = f"{function.domain}::{function.name}"
                     _assert_node_outputs_has_value_info(
-                        node, value_infos, local_functions, node_prefix
+                        node, value_infos, local_functions, function_id
                     )
 
         type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
@@ -462,7 +458,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         # Variant 1: Save ONNX proto using Model's state_dict()
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             model_state_dict = Model().state_dict()  # Create a state_dict for testing
-            onnx_program.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
+            onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
             assert (
                 len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
             ), "Initializers must be present after loading it from model_state_dict"
@@ -476,9 +472,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             torch.save(
                 Model().state_dict(), tmp_checkpoint_file.name
             )  # Create checkpoint file for testing
-            onnx_program.save(
-                tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
-            )
+            onnx_program.save(tmp_onnx_file.name, model_state=tmp_checkpoint_file.name)
             assert (
                 len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
             ), "Initializers must be present after loading it from model_state_dict"
@@ -622,17 +616,22 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 x,
             )
 
-    def test_aten_linalg_vector_norm_with_reducel2(self):
-        class Net(nn.Module):
-            def forward(self, x):
-                x = F.normalize(x)
-                return x
+    def test_aten_div_no_opmath_type_promotion(self):
+        class Model(torch.nn.Module):
+            def forward(self, input):
+                return input / 2
 
-        f = io.BytesIO()
-        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
-        onnx_model = onnx.load_from_string(f.getvalue())
-        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
-        self.assertTrue("ReduceL2" in onnx_nodes)
+        model = Model()
+        input = torch.randn(3, 5, requires_grad=True, dtype=torch.float16)
+
+        model_proto = torch.onnx.dynamo_export(model, input).model_proto
+        model_proto = onnx.inliner.inline_local_functions(model_proto)
+        div_node = next(
+            node for node in model_proto.graph.node if node.op_type == "Div"
+        )
+        # The input of Div node should be the input of the model,
+        # with no Cast node in between.
+        self.assertEqual(div_node.input[0], model_proto.graph.input[0].name)
 
     def test_exported_program_as_input_with_model_signature(self):
         class Model(torch.nn.Module):
@@ -648,6 +647,64 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
         self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
+
+    @common_utils.parametrize(
+        "float8_type",
+        [
+            common_utils.subtest(
+                torch.float8_e5m2,
+                name="torch_float8_e5m2",
+            ),
+            common_utils.subtest(
+                torch.float8_e5m2fnuz,
+                name="torch_float8_e5m2fnuz",
+            ),
+            common_utils.subtest(
+                torch.float8_e4m3fn,
+                name="torch_float8_e4m3fn",
+            ),
+            common_utils.subtest(
+                torch.float8_e4m3fnuz,
+                name="torch_float8_e4m3fnuz",
+            ),
+        ],
+    )
+    def test_float8_support(self, float8_type):
+        class Float8Module(torch.nn.Module):
+            def forward(self, input: torch.Tensor):
+                input = input.to(float8_type)
+                return input + torch.tensor(1.0, dtype=float8_type)
+
+        _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
+
+    def test_checkpoint_cast(self):
+        model_id = "openai/whisper-large-v3"
+        feature_extractor = transformers.WhisperFeatureExtractor(feature_size=128)
+        batch = 4
+
+        with torch.onnx.enable_fake_mode() as ctx:
+            model = transformers.AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id, low_cpu_mem_usage=False, use_safetensors=False
+            )
+            input = {
+                "input_features": torch.randn(
+                    (
+                        batch,
+                        feature_extractor.feature_size,
+                        feature_extractor.nb_max_frames,
+                    )
+                ),
+                "decoder_input_ids": torch.tensor([[1, 1]]) * 8001,
+                "return_dict": False,
+            }
+
+        export_options = torch.onnx.ExportOptions(fake_context=ctx)
+        onnx_program = torch.onnx.dynamo_export(
+            model, **input, export_options=export_options
+        )
+        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+            onnx_program.save(tmp_onnx_file.name)
+            onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
 
 
 if __name__ == "__main__":

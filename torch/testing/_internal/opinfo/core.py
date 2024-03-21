@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import collections.abc
 import math
@@ -448,7 +450,7 @@ class AliasInfo:
 #   the operator's output (when given the input, args, and kwargs) to the
 #   portion of the output to gradcheck. For example, consider an operator
 #   like torch.linalg.slogdet
-#   (https://pytorch.org/docs/master/generated/torch.linalg.slogdet.html).
+#   (https://pytorch.org/docs/main/generated/torch.linalg.slogdet.html).
 #   This operator returns a tuple of two tensors, but the first tensor
 #   cannot be backwarded through. Its "output_process_fn_grad" filters
 #   this output tuple to just the second argument, which we can call backward
@@ -771,6 +773,9 @@ class OpInfo:
     # Whether the operation has a varargs variant
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
+
+    # Whether the operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize: bool = True
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)

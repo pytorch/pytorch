@@ -199,10 +199,10 @@ def xfail_dynamic_fx_test(
     model_type: Optional[TorchModelType] = None,
     reason: Optional[str] = None,
 ):
-    """Skip dynamic exporting test.
+    """Xfail dynamic exporting test.
 
     Args:
-        reason: The reason for skipping dynamic exporting test.
+        reason: The reason for xfailing dynamic exporting test.
         model_type (TorchModelType): The model type to xfail dynamic exporting test for.
             When None, model type is not used to skip dynamic tests.
 

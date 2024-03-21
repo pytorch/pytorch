@@ -492,6 +492,18 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
+  m.def(
+      "get_interpreter_stack", []() -> c10::optional<std::vector<Interpreter>> {
+        const auto& stack = getDynamicLayerStack();
+        if (stack.empty()) {
+          return c10::nullopt;
+        }
+        std::vector<Interpreter> result;
+        for (auto i : stack) {
+          result.push_back(i.interpreter());
+        }
+        return result;
+      });
   m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
