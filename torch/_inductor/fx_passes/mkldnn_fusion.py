@@ -911,6 +911,12 @@ if torch._C._has_mkldnn:
         Check if the node is supported for MKLDNN linear.
         """
         linear_node = match.output_node()
+        # mkldnn linear only supports beta=1or0 and alpha=1
+        if linear_node.target == aten.addmm.default:
+            alpha = linear_node.kwargs.get("alpha", 1.0)
+            beta = linear_node.kwargs.get("beta", 1.0)
+            if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
+                return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
         if linear_node.args[weight_idx].op != "get_attr":
@@ -1093,7 +1099,14 @@ if torch._C._has_mkldnn:
                 graph.erase_node(lstm_node)
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
+            CallFunction(
+                aten.addmm.default,
+                Arg(),
+                Arg(),
+                Arg(),
+                beta=KeywordArg("beta"),
+                alpha=KeywordArg("alpha"),
+            ),
             extra_check=_is_packable_linear,
         )
         @register_freezing_graph_pattern(
@@ -1104,7 +1117,15 @@ if torch._C._has_mkldnn:
             graph = match.graph
             linear_node = match.output_node()
             input = args[0] if linear_node.target == aten.mm.default else args[1]
-            bias = None if linear_node.target == aten.mm.default else args[0]
+            bias = (
+                None
+                if linear_node.target == aten.mm.default
+                or (
+                    linear_node.target == aten.addmm.default
+                    and linear_node.kwargs.get("beta", 1.0) == 0.0
+                )
+                else args[0]
+            )
             weight = args[1] if linear_node.target == aten.mm.default else args[2]
             with graph.inserting_before(linear_node):
                 transpose_weight_node = graph.create_node(
