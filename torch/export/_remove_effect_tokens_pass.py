@@ -4,47 +4,12 @@ from typing import List
 import torch
 from torch._higher_order_ops.effects import with_effects
 from .exported_program import ExportedProgram
-from .graph_signature import (
-    InputKind,
-    InputSpec,
-    OutputKind,
-    OutputSpec,
-    TensorArgument,
-    TokenArgument,
-)
+from .graph_signature import InputKind, InputSpec, OutputKind, OutputSpec, TokenArgument
 
 
-def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
-    """
-    Removes the existance of tokens from the exported program, including:
-    - Removes the input and output tokens
-    - Replaces with_effects(token, func, args) with just func(args)
-
-    This function does an inplace modification on the given ExportedProgram.
-    """
-    num_tokens: int = 0
-    input_token_names: List[str] = []
-    new_input_specs: List[InputSpec] = []
-    for inp in ep.graph_signature.input_specs:
-        if inp.kind == InputKind.TOKEN:
-            num_tokens += 1
-            assert isinstance(inp.arg, TokenArgument)
-            input_token_names.append(inp.arg.name)
-        else:
-            new_input_specs.append(inp)
-
-    num_out_tokens: int = 0
-    new_output_specs: List[OutputSpec] = []
-    output_token_names: List[OutputSpec] = []
-    for out in ep.graph_signature.output_specs:
-        if out.kind == OutputKind.TOKEN:
-            num_out_tokens += 1
-            output_token_names.append(out.arg.name)
-        else:
-            new_output_specs.append(out)
-
-    assert num_tokens == num_out_tokens
-
+def _remove_effect_tokens_from_graph_helper(
+    ep, num_tokens, input_token_names, output_token_names
+):
     output_node = None
     with_effect_nodes: List[torch.fx.Node] = []
     for module in ep.graph_module.modules():
@@ -98,16 +63,6 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
                 assert user.args[1] == 1
                 user.replace_all_uses_with(new_node)
 
-                # If any of the users are in the output node, we need to udpate the
-                # output spec
-                for spec in new_output_specs:
-                    if (
-                        isinstance(spec.arg, TensorArgument)
-                        and spec.arg.name == user.name
-                    ):
-                        spec.arg.name = new_node.name
-                        break
-
             new_node.meta["val"] = node.meta["val"][1]
         elif len(func._schema.returns) > 1:
             # If the function has more than 1 return then since we got rid of
@@ -133,9 +88,47 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
         assert inp_token.name in input_token_names
         ep.graph.erase_node(inp_token)
 
+    ep.graph.eliminate_dead_code()
+
+
+def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
+    """
+    Removes the existance of tokens from the exported program, including:
+    - Removes the input and output tokens
+    - Replaces with_effects(token, func, args) with just func(args)
+
+    This function does an inplace modification on the given ExportedProgram.
+    """
+    num_tokens: int = 0
+    input_token_names: List[str] = []
+    new_input_specs: List[InputSpec] = []
+    for inp in ep.graph_signature.input_specs:
+        if inp.kind == InputKind.TOKEN:
+            num_tokens += 1
+            assert isinstance(inp.arg, TokenArgument)
+            input_token_names.append(inp.arg.name)
+        else:
+            new_input_specs.append(inp)
+
+    num_out_tokens: int = 0
+    new_output_specs: List[OutputSpec] = []
+    output_token_names: List[OutputSpec] = []
+    for out in ep.graph_signature.output_specs:
+        if out.kind == OutputKind.TOKEN:
+            num_out_tokens += 1
+            output_token_names.append(out.arg.name)
+        else:
+            new_output_specs.append(out)
+
     # Update graph signature
     ep.graph_signature.input_specs = new_input_specs
     ep.graph_signature.output_specs = new_output_specs
 
-    ep.graph.eliminate_dead_code()
+    assert num_tokens == num_out_tokens
+
+    with ep.graph_module._set_replace_hook(ep.graph_signature.get_replace_hook()):
+        _remove_effect_tokens_from_graph_helper(
+            ep, num_tokens, input_token_names, output_token_names
+        )
+
     return ep
