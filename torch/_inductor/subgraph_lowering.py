@@ -87,7 +87,7 @@ class TracingOpsHandler(WrapperHandler[T]):
 
     def output(self, *args):
         return self.tracer.create_node(
-            "output", "output", tuple(self.tracer.create_arg(a) for a in args), {}
+            "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )
 
 
@@ -117,12 +117,14 @@ def lower_pointwise_subgraph(subgraph: ir.Subgraph, inputs: List[InputDescriptor
     trace_ops = SimpleCSEHandler(TracingOpsHandler(tracer, len(inputs)))
 
     outputs = pw_subgraph.graph_outputs
+    assert len(outputs) == 1
+    outputs = outputs[0]
 
     with V.set_ops_handler(trace_ops):
         output_irs = []
 
         for out_var in outputs:
-            assert isinstance(out_var, ir.TensorBox)
+            assert isinstance(out_var, ir.TensorBox), type(out_var)
             assert out_var.get_size() == []
             assert isinstance(out_var.data, ir.StorageBox)
             assert isinstance(out_var.data.data, ir.Pointwise)
