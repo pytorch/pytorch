@@ -27,6 +27,7 @@ def test_shared_pinned_ipc(
     t0 = time.monotonic()
 
     for idx in range(100):
+        print(idx)
 
         event = torch.cuda.Event(blocking=True, interprocess=True)
         with torch.cuda.stream(torch.cuda.Stream()):
