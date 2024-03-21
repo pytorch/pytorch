@@ -1312,10 +1312,10 @@ void int8_gemm(
 #if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
-  cudaDataType_t scaleType = CUDA_R_32I;
+  cudaDataType_t scaleType = HIPTOLT(CUDA_R_32I);
 
   cudaDataType_t abType = CUDA_R_8I;
-  cudaDataType_t cType = CUDA_R_32I;
+  cudaDataType_t cType = HIPTOLT(CUDA_R_32I);
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -1328,16 +1328,35 @@ void int8_gemm(
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-
   // cublas team: alpha and beta need to be the same dtype as of scaleType
   at::opmath_type<int32_t> alpha_val = 1;
   int32_t beta_val = 0;
-/////////////////////////////////////////
+
+#ifdef USE_ROCM
+  CuBlasLtMatmulPreference preference;
   size_t workspaceSize = _getWorkspaceSize();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
-/////////////////////////////////////////////
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Cdesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  if (returnedResult == 0) {
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  }
+#endif
+  
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -1355,7 +1374,11 @@ void int8_gemm(
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
+#ifdef USE_ROCM
+      &heuristicResult.algo,
+#else
       nullptr, // Heuristics don't seem to work for int8
+#endif
 #ifdef USE_ROCM
       workspace.mutable_get(),
 #else
