@@ -628,9 +628,10 @@ def proxy_args_kwargs(args, kwargs):
         from .exc import unimplemented
         from .variables.base import typestr
 
-        raise unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        ) from e
+        unimplemented(
+            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            from_exc=e,
+        )
 
 
 @dataclasses.dataclass
@@ -1211,7 +1212,7 @@ def wrap_fake_exception(fn):
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
-        raise unimplemented(msg) from e
+        unimplemented(msg, from_exc=e)
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -1808,7 +1809,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 
-            raise unimplemented(make_error_message(e)) from e
+            unimplemented(make_error_message(e), from_exc=e)
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
