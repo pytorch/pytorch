@@ -6,7 +6,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 set(FT_DIR csrc)
-file(GLOB_RECURSE FT_SOURCES ${FT_DIR}/*.cpp)
+file(GLOB_RECURSE FT_SOURCES ${FT_DIR}/*.cpp ${FT_DIR}/*.c)
 
 add_library(${PROJECT_NAME} MODULE ${FT_SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
