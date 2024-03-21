@@ -999,7 +999,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(IndexError, lambda: nt[2])
         self.assertRaises(IndexError, lambda: nt[-3])
         self.assertRaises(NotImplementedError, lambda: nt[:])
-        self.assertRaises(NotImplementedError, lambda: nt[...])
+        self.assertEqual(nt[...], nt)
         # tuple of indices: only support integer in the batch dimension
         #                 + all possible indexing in the original tensor dimensions
         self.assertEqual(nt[0, 0, 0], x0[0, 0])
