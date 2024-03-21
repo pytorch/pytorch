@@ -10,8 +10,7 @@
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
-namespace torch {
-namespace dynamo {
+namespace torch::dynamo {
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 void initDynamoBindings(PyObject* torch) {
@@ -50,5 +49,4 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
 }
 
-} // namespace dynamo
-} // namespace torch
+} // namespace torch::dynamo
