@@ -815,12 +815,21 @@ def derived_types(
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
+    def derived_seq_types(typ):
+        return [
+            typing.Sequence[typ],  # type: ignore[valid-type]
+            typing.List[typ],  # type: ignore[valid-type]
+        ]
+
     if list_base:
-        result.append((typing.Sequence[base_type], f"{cpp_type}[]"))  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(base_type):
+            result.append((seq_typ, f"{cpp_type}[]"))  # type: ignore[valid-type]
     if optional_base_list:
-        result.append((typing.Sequence[typing.Optional[base_type]], f"{cpp_type}?[]"))  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(typing.Optional[base_type]):
+            result.append((seq_typ, f"{cpp_type}?[]"))  # type: ignore[valid-type]
     if optional_list_base:
-        result.append((typing.Optional[typing.Sequence[base_type]], f"{cpp_type}[]?"))  # type: ignore[valid-type]
+        for seq_typ in derived_seq_types(base_type):  # type: ignore[valid-type]
+            result.append((typing.Optional[seq_typ], f"{cpp_type}[]?"))  # type: ignore[valid-type]
     return result
 
 
@@ -853,6 +862,9 @@ SUPPORTED_RETURN_TYPES = {
 
 
 def parse_return(annotation, error_fn):
+    if annotation is None:
+        return "()"
+
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES.keys():
