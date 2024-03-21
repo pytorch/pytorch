@@ -1,4 +1,3 @@
-#include <c10/util/variant.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <ATen/ExpandUtils.h>
@@ -437,9 +436,9 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
     if (vec.empty()) {
       return BufList(); // Return arbitrarily typed vector
-    } else if (c10::get_if<BufHandle>(&vec[0])) {
+    } else if (std::get_if<BufHandle>(&vec[0])) {
       return convertVecArgValue<BufHandle>(vec);
-    } else if (c10::get_if<int64_t>(&vec[0])) {
+    } else if (std::get_if<int64_t>(&vec[0])) {
       return convertVecArgValue<int64_t>(vec);
     }
     throw unsupported_dtype();
@@ -608,7 +607,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
       argInputs.emplace_back(toArg(inp));
     }
     // handle optional bias
-    if (c10::get_if<ArgNone>(&argInputs[2])) {
+    if (std::get_if<ArgNone>(&argInputs[2])) {
       Dtype dtype = outputType ? Dtype(*outputType) : kFloat;
       std::vector<ExprHandle> biasShape;
       biasShape.push_back(outputShape[1]);

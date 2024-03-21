@@ -79,8 +79,7 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
 
   uintptr_t page_start_ptr =
       ((reinterpret_cast<uintptr_t>(ptr)) & ~(getpagesize() - 1));
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions)
+  // NOLINTNEXTLINE(*-conversions)
   ptrdiff_t offset = reinterpret_cast<uintptr_t>(ptr) - page_start_ptr;
   // Avoid extra dynamic allocation and NUMA api calls
   AT_ASSERT(

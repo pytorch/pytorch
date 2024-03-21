@@ -23,7 +23,7 @@ __all__ = [
 
 
 class EventList(list):
-    """A list of Events (for pretty printing)"""
+    """A list of Events (for pretty printing)."""
 
     def __init__(self, *args, **kwargs):
         use_cuda = kwargs.pop("use_cuda", True)
@@ -67,7 +67,8 @@ class EventList(list):
             self.extend(new_evts)
 
     def _populate_cpu_children(self):
-        """Populates child events into each underlying FunctionEvent object.
+        """Populate child events into each underlying FunctionEvent object.
+
         One event is a child of another if [s1, e1) is inside [s2, e2). Where
         s1 and e1 would be start and end of the child event's interval. And
         s2 and e2 start and end of the parent event's interval
@@ -78,7 +79,6 @@ class EventList(list):
         If for any reason two intervals intersect only partially, this function
         will not record a parent child relationship between then.
         """
-
         # Some events can be async (i.e. start and end on different threads),
         # since it's generally undefined how to attribute children ranges to
         # async ranges, we do not use them when calculating nested ranges and stats
@@ -176,7 +176,7 @@ class EventList(list):
         header=None,
         top_level_events_only=False,
     ):
-        """Prints an EventList as a nicely formatted table.
+        """Print an EventList as a nicely formatted table.
 
         Args:
             sort_by (str, optional): Attribute used to sort entries. By default
@@ -207,7 +207,7 @@ class EventList(list):
         )
 
     def export_chrome_trace(self, path):
-        """Exports an EventList as a Chrome tracing tools file.
+        """Export an EventList as a Chrome tracing tools file.
 
         The checkpoint can be later loaded and inspected under ``chrome://tracing`` URL.
 
@@ -253,7 +253,7 @@ class EventList(list):
                         '"pid": "CPU functions", '
                         f'"id": {next_id}, '
                         f'"cat": "cpu_to_{device_name}", '
-                        '"args": {{}}}}, '
+                        '"args": {}}, '
                     )
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
@@ -351,7 +351,7 @@ class EventList(list):
 
 
 def _format_time(time_us):
-    """Defines how to format time in FunctionEvent"""
+    """Define how to format time in FunctionEvent."""
     US_IN_SECOND = 1000.0 * 1000.0
     US_IN_MS = 1000.0
     if time_us >= US_IN_SECOND:
@@ -362,7 +362,7 @@ def _format_time(time_us):
 
 
 def _format_time_share(time_us, total_time_us):
-    """Defines how to format time in FunctionEvent"""
+    """Define how to format time in FunctionEvent."""
     if total_time_us == 0:
         assert time_us == 0, f"Expected time_us == 0 but got {time_us}"
         return "NaN"
@@ -370,7 +370,7 @@ def _format_time_share(time_us, total_time_us):
 
 
 def _format_memory(nbytes):
-    """Returns a formatted memory size string"""
+    """Return a formatted memory size string."""
     KB = 1024
     MB = 1024 * KB
     GB = 1024 * MB
@@ -423,6 +423,9 @@ class Interval:
         self.end = end
 
     def elapsed_us(self):
+        r"""
+        Returns the length of the interval
+        """
         return self.end - self.start
 
 
@@ -453,6 +456,7 @@ class FunctionEvent(FormattedTimesMixin):
         node_id=-1,
         device_type=DeviceType.CPU,
         device_index=0,
+        device_resource_id=None,
         is_legacy=False,
         flops=None,
         trace_name=None,
@@ -482,6 +486,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.sequence_nr: int = sequence_nr
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
+        self.device_resource_id: int = (
+            thread if device_resource_id is None else device_resource_id
+        )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
 
@@ -501,7 +508,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_children.append(child)
 
     def set_cpu_parent(self, parent):
-        """Set the immediate CPU parent of type FunctionEvent
+        """Set the immediate CPU parent of type FunctionEvent.
 
         One profiling FunctionEvent should have only one CPU parent such that
         the child's range interval is completely inside the parent's. We use
@@ -770,17 +777,20 @@ class StringTable(defaultdict):
 
 
 class MemRecordsAcc:
-    """Acceleration structure for accessing mem_records in interval"""
+    """Acceleration structure for accessing mem_records in interval."""
 
     def __init__(self, mem_records):
         self._mem_records = mem_records
-        self._start_uses = []
-        self._indices = []
+        self._start_uses: List[int] = []
+        self._indices: List[int] = []
         if len(mem_records) > 0:
             tmp = sorted([(r[0].start_us(), i) for i, r in enumerate(mem_records)])
-            self._start_uses, self._indices = zip(*tmp)
+            self._start_uses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
     def in_interval(self, start_us, end_us):
+        r"""
+        Return all records in the given interval
+        """
         start_idx = bisect.bisect_left(self._start_uses, start_us)
         end_idx = bisect.bisect_right(self._start_uses, end_us)
         for i in range(start_idx, end_idx):
@@ -843,7 +853,7 @@ def _build_table(
     profile_memory=False,
     top_level_events_only=False,
 ):
-    """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
+    """Print a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
 
@@ -1142,7 +1152,7 @@ def _build_table(
             if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append(f"{evt.flops * flops_scale:8.3f}")
+                row_values.append(f"{evt.flops * flops_scale:8.3f}")  # type: ignore[possibly-undefined]
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:

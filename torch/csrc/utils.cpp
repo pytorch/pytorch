@@ -220,7 +220,7 @@ void THPPointer<THPStorage>::free() {
 
 void storage_fill(const at::Storage& self, uint8_t value) {
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t.fill_(value);
 }
 
@@ -229,7 +229,7 @@ void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t[idx].fill_(value);
 }
 
@@ -238,14 +238,13 @@ uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   return self_t[idx].item<uint8_t>();
 }
 
 template class THPPointer<THPStorage>;
 
-namespace torch {
-namespace gdb {
+namespace torch::gdb {
 /* ~~~ misc debugging utilities ~~~
  *
  * torch::gdb::* functions are NOT meant to be called by general pytorch code,
@@ -319,11 +318,9 @@ std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
   return ss.str();
 }
 
-} // namespace gdb
-} // namespace torch
+} // namespace torch::gdb
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 
 bool type_caster<at::Tensor>::load(handle src, bool) {
   PyObject* obj = src.ptr();
@@ -437,5 +434,4 @@ handle type_caster<at::ArrayRef<c10::SymNode>>::cast(
   return t.release();
 }
 
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail

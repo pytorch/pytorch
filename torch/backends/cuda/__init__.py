@@ -1,6 +1,5 @@
 import contextlib
-import sys
-from enum import IntEnum
+import warnings
 
 from typing import Union
 
@@ -16,21 +15,28 @@ __all__ = [
     "cufft_plan_cache",
     "matmul",
     "SDPBackend",
+    "SDPAParams",
+    "enable_cudnn_sdp",
+    "cudnn_sdp_enabled",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
     "mem_efficient_sdp_enabled",
     "math_sdp_enabled",
     "enable_math_sdp",
+    "can_use_flash_attention",
+    "can_use_efficient_attention",
     "sdp_kernel",
 ]
 
 
 def is_built():
-    r"""Returns whether PyTorch is built with CUDA support.  Note that this
-    doesn't necessarily mean CUDA is available; just that if this PyTorch
-    binary were run a machine with working CUDA drivers and devices, we
-    would be able to use it."""
+    r"""
+    Return whether PyTorch is built with CUDA support.
+
+    Note that this doesn't necessarily mean CUDA is available; just that if this PyTorch
+    binary were run on a machine with working CUDA drivers and devices, we would be able to use it.
+    """
     return torch._C._has_cuda
 
 
@@ -52,8 +58,9 @@ class cuFFTPlanCacheAttrContextProp:
 
 class cuFFTPlanCache:
     r"""
-    Represents a specific plan cache for a specific `device_index`. The
-    attributes `size` and `max_size`, and method `clear`, can fetch and/ or
+    Represent a specific plan cache for a specific `device_index`.
+
+    The attributes `size` and `max_size`, and method `clear`, can fetch and/ or
     change properties of the C++ cuFFT plan cache.
     """
 
@@ -76,8 +83,7 @@ class cuFFTPlanCache:
 
 class cuFFTPlanCacheManager:
     r"""
-    Represents all cuFFT plan caches. When indexed with a device object/index,
-    this object returns the `cuFFTPlanCache` corresponding to that device.
+    Represent all cuFFT plan caches, return the cuFFTPlanCache for a given device when indexed.
 
     Finally, this object, when used directly as a `cuFFTPlanCache` object (e.g.,
     setting the `.max_size`) attribute, the current device's cuFFT plan cache is
@@ -121,7 +127,7 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
-        raise AssertionError("Unknown attribute " + name)
+        raise AttributeError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
         if name == "allow_tf32":
@@ -130,7 +136,7 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
-        raise AssertionError("Unknown attribute " + name)
+        raise AttributeError("Unknown attribute " + name)
 
 
 _LinalgBackends = {
@@ -145,6 +151,8 @@ def preferred_linalg_library(
     backend: Union[None, str, torch._C._LinalgBackend] = None
 ) -> torch._C._LinalgBackend:
     r"""
+    Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
+
     .. warning:: This flag is experimental and subject to change.
 
     When PyTorch runs a CUDA linear algebra operation it often uses the cuSOLVER or MAGMA libraries,
@@ -183,7 +191,6 @@ def preferred_linalg_library(
     * :func:`torch.linalg.svd`
     * :func:`torch.linalg.svdvals`
     """
-
     if backend is None:
         pass
     elif isinstance(backend, str):
@@ -200,18 +207,11 @@ def preferred_linalg_library(
     return torch._C._get_linalg_preferred_backend()
 
 
-class SDPBackend(IntEnum):
-    r"""Enum class for the scaled dot product attention backends.
+from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
-    .. warning:: This class is in beta and subject to change.
-
-    This class needs to stay aligned with the enum defined in:
-    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
-    """
-    ERROR = -1
-    MATH = 0
-    FLASH_ATTENTION = 1
-    EFFICIENT_ATTENTION = 2
+# Set the __module__ attribute
+SDPAParams.__module__ = "torch.backends.cuda"
+SDPAParams.__name__ = "SDPAParams"
 
 
 def flash_sdp_enabled():
@@ -268,11 +268,70 @@ def enable_math_sdp(enabled: bool):
     torch._C._set_sdp_use_math(enabled)
 
 
+def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:
+    r"""Check if FlashAttention can be utilized in scaled_dot_product_attention.
+
+    Args:
+        params: An instance of SDPAParams containing the tensors for query,
+                key, value, an optional attention mask, dropout rate, and
+                a flag indicating if the attention is causal.
+        debug: Whether to logging.warn debug information as to why FlashAttention could not be run.
+            Defaults to False.
+
+    Returns:
+        True if FlashAttention can be used with the given parameters; otherwise, False.
+
+    Note:
+        This function is dependent on a CUDA-enabled build of PyTorch. It will return False
+        in non-CUDA environments.
+    """
+    return torch._C._can_use_flash_attention(params, debug)
+
+
+def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool:
+    r"""Check if efficient_attention can be utilized in scaled_dot_product_attention.
+
+    Args:
+        params: An instance of SDPAParams containing the tensors for query,
+                key, value, an optional attention mask, dropout rate, and
+                a flag indicating if the attention is causal.
+        debug: Whether to logging.warn with information as to why efficient_attention could not be run.
+            Defaults to False.
+
+    Returns:
+        True if efficient_attention can be used with the given parameters; otherwise, False.
+
+    Note:
+        This function is dependent on a CUDA-enabled build of PyTorch. It will return False
+        in non-CUDA environments.
+    """
+    return torch._C._can_use_mem_efficient_attention(params, debug)
+
+
+def cudnn_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether cuDNN scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_cudnn_sdp_enabled()
+
+
+def enable_cudnn_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables cuDNN scaled dot product attention.
+    """
+    torch._C._set_sdp_use_cudnn(enabled)
+
+
 @contextlib.contextmanager
 def sdp_kernel(
     enable_flash: bool = True,
     enable_math: bool = True,
     enable_mem_efficient: bool = True,
+    enable_cudnn: bool = True,
 ):
     r"""
     .. warning:: This flag is beta and subject to change.
@@ -280,18 +339,32 @@ def sdp_kernel(
     This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
-    previous_flash: bool = flash_sdp_enabled()
-    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
-    previous_math: bool = math_sdp_enabled()
-    try:
-        enable_flash_sdp(enable_flash)
-        enable_mem_efficient_sdp(enable_mem_efficient)
-        enable_math_sdp(enable_math)
-        yield {}
-    finally:
-        enable_flash_sdp(previous_flash)
-        enable_mem_efficient_sdp(previous_mem_efficient)
-        enable_math_sdp(previous_math)
+    warnings.warn(
+        (
+            "torch.backends.cuda.sdp_kernel() "
+            "is deprecated. In the future, this context manager will be removed. "
+            "Please see, torch.nn.attention.sdpa_kernel() for the new context manager, with updated "
+            "signature."
+        ),
+        FutureWarning,
+    )
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+
+    backend_list = []
+    if enable_flash:
+        backend_list.append(SDPBackend.FLASH_ATTENTION)
+    if enable_mem_efficient:
+        backend_list.append(SDPBackend.EFFICIENT_ATTENTION)
+    if enable_math:
+        backend_list.append(SDPBackend.MATH)
+    if enable_cudnn:
+        backend_list.append(SDPBackend.CUDNN_ATTENTION)
+
+    with sdpa_kernel(backend_list) as context:
+        try:
+            yield context
+        finally:
+            pass
 
 
 cufft_plan_cache = cuFFTPlanCacheManager()

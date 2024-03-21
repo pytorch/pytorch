@@ -1,7 +1,5 @@
 import os
 
-import pathlib
-
 import torch
 
 from torch.jit._serialization import validate_map_location
@@ -9,8 +7,7 @@ from torch.jit._serialization import validate_map_location
 
 def _load_for_lite_interpreter(f, map_location=None):
     r"""
-    Load a :class:`LiteScriptModule`
-    saved with :func:`torch.jit._save_for_lite_interpreter`
+    Load a :class:`LiteScriptModule` saved with :func:`torch.jit._save_for_lite_interpreter`.
 
     Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
@@ -38,7 +35,7 @@ def _load_for_lite_interpreter(f, map_location=None):
         # Load all tensors to the original device
         torch.jit.mobile._load_for_lite_interpreter(buffer)
     """
-    if isinstance(f, str):
+    if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):
             raise ValueError(f"The provided filename {f} does not exist")
         if os.path.isdir(f):
@@ -46,8 +43,8 @@ def _load_for_lite_interpreter(f, map_location=None):
 
     map_location = validate_map_location(map_location)
 
-    if isinstance(f, (str, pathlib.Path)):
-        cpp_module = torch._C._load_for_lite_interpreter(f, map_location)
+    if isinstance(f, (str, os.PathLike)):
+        cpp_module = torch._C._load_for_lite_interpreter(os.fspath(f), map_location)
     else:
         cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
             f.read(), map_location
@@ -75,15 +72,13 @@ class LiteScriptModule:
 
 
 def _export_operator_list(module: LiteScriptModule):
-    r"""
-    return a set of root operator names (with overload name) that are used by any method
-    in this mobile module.
-    """
+    r"""Return a set of root operator names (with overload name) that are used by any method in this mobile module."""
     return torch._C._export_operator_list(module._c)
 
 
 def _get_model_bytecode_version(f_input) -> int:
-    r"""
+    r"""Take a file-like object to return an integer.
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -93,7 +88,6 @@ def _get_model_bytecode_version(f_input) -> int:
             will show in the log.
 
     Example:
-
     .. testcode::
 
         from torch.jit.mobile import _get_model_bytecode_version
@@ -102,20 +96,21 @@ def _get_model_bytecode_version(f_input) -> int:
         version = _get_model_bytecode_version("path/to/model.ptl")
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
-        return torch._C._get_model_bytecode_version(str(f_input))
+    if isinstance(f_input, (str, os.PathLike)):
+        return torch._C._get_model_bytecode_version(os.fspath(f_input))
     else:
         return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
 
 
 def _get_mobile_model_contained_types(f_input) -> int:
-    r"""
+    r"""Take a file-like object and return a set of string, like ("int", "Optional").
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -133,20 +128,21 @@ def _get_mobile_model_contained_types(f_input) -> int:
         type_list = _get_mobile_model_contained_types("path/to/model.ptl")
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
-        return torch._C._get_mobile_model_contained_types(str(f_input))
+    if isinstance(f_input, (str, os.PathLike)):
+        return torch._C._get_mobile_model_contained_types(os.fspath(f_input))
     else:
         return torch._C._get_mobile_model_contained_types_from_buffer(f_input.read())
 
 
 def _backport_for_mobile(f_input, f_output, to_version):
-    r"""
+    r"""Take a input string containing a file name (file-like object) and a new destination to return a boolean.
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -155,16 +151,18 @@ def _backport_for_mobile(f_input, f_output, to_version):
     Returns:
         success: A boolean. If backport success, return true, otherwise false
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if (isinstance(f_input, (str, pathlib.Path))) and (
-        isinstance(f_output, (str, pathlib.Path))
+    if (isinstance(f_input, (str, os.PathLike))) and (
+        isinstance(f_output, (str, os.PathLike))
     ):
-        return torch._C._backport_for_mobile(str(f_input), str(f_output), to_version)
+        return torch._C._backport_for_mobile(
+            os.fspath(f_input), os.fspath(f_output), to_version
+        )
     else:
         return torch._C._backport_for_mobile_from_buffer(
             f_input.read(), str(f_output), to_version
@@ -172,20 +170,21 @@ def _backport_for_mobile(f_input, f_output, to_version):
 
 
 def _backport_for_mobile_to_buffer(f_input, to_version):
-    r"""
+    r"""Take a string containing a file name (file-like object).
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
-        return torch._C._backport_for_mobile_to_buffer(str(f_input), to_version)
+    if isinstance(f_input, (str, os.PathLike)):
+        return torch._C._backport_for_mobile_to_buffer(os.fspath(f_input), to_version)
     else:
         return torch._C._backport_for_mobile_from_buffer_to_buffer(
             f_input.read(), to_version
@@ -193,9 +192,9 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
 
 
 def _get_model_ops_and_info(f_input):
-    r"""
-    A function to retrieve the root (top level) operators of a model and their corresponding
-    compatibility info. These root operators can call other operators within them (traced ops), and
+    r"""Retrieve the root (top level) operators of a model and their corresponding compatibility info.
+
+    These root operators can call other operators within them (traced ops), and
     a root op can call many different traced ops depending on internal code paths in the root op.
     These traced ops are not returned by this function. Those operators are abstracted into the
     runtime as an implementation detail (and the traced ops themselves can also call other operators)
@@ -221,13 +220,13 @@ def _get_model_ops_and_info(f_input):
         ops_and_info = _get_model_ops_and_info("path/to/model.ptl")
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
-    if isinstance(f_input, (str, pathlib.Path)):
-        return torch._C._get_model_ops_and_info(str(f_input))
+    if isinstance(f_input, (str, os.PathLike)):
+        return torch._C._get_model_ops_and_info(os.fspath(f_input))
     else:
         return torch._C._get_model_ops_and_info(f_input.read())

@@ -56,8 +56,7 @@ namespace {
   const int MODE_MAX = 2;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
@@ -71,16 +70,16 @@ static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
 
 namespace {
 
-std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
+std::pair<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> promoteIndicesAndOffsets(
     const Tensor& indices,
     const Tensor& offsets) {
   const auto commonType =
       promoteTypes(offsets.scalar_type(), indices.scalar_type());
   return {
-      indices.scalar_type() == commonType ? indices
-                                          : indices.toType(commonType),
-      offsets.scalar_type() == commonType ? offsets
-                                          : offsets.toType(commonType)};
+      indices.scalar_type() == commonType ? c10::MaybeOwned<Tensor>::borrowed(indices)
+                                          : c10::MaybeOwned<Tensor>::owned(indices.toType(commonType)),
+      offsets.scalar_type() == commonType ? c10::MaybeOwned<Tensor>::borrowed(offsets)
+                                          : c10::MaybeOwned<Tensor>::owned(offsets.toType(commonType))};
 }
 
 // Determines if we can use a fast implementation for index_select_add, which
@@ -234,7 +233,7 @@ index_select_add(
       offsets_data = offsets_include_last.data();
     }
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     auto kernel_16bit_index_t = fbgemm_kernel_cache
         ? fbgemm_kernel_cache
               ->getCallback</* has_weight */ false, index_t, uint16_t>(ddim)
@@ -245,7 +244,8 @@ index_select_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -607,7 +607,7 @@ index_select_scale_add(
     auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     if constexpr (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
           reinterpret_cast<const fbgemm::bfloat16*>(scale_data),
@@ -629,7 +629,8 @@ index_select_scale_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -1209,8 +1210,9 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
   TORCH_CHECK(weight.dim() == 2,
       "weight has to be a 2D Tensor, but got Tensor of dimension ",
       weight.dim());
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   Tensor output = at::empty(
@@ -1330,8 +1332,8 @@ void _embedding_bag_cpu_out(
     at::Tensor& bag_size,
     at::Tensor* p_max_indices,
     const at::Tensor& weight,
-    const at::Tensor& indices,
-    const at::Tensor& offsets,
+    const at::Tensor& indices_,
+    const at::Tensor& offsets_,
     const bool /* scale_grad_by_freq */,
     const int64_t mode,
     const bool /* sparse */,
@@ -1339,6 +1341,9 @@ void _embedding_bag_cpu_out(
     const bool include_last_offset,
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
   at::native::check_arguments(
       weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
@@ -1409,8 +1414,9 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
   checkContiguous("embedding_bag", indices_arg);
@@ -1665,8 +1671,10 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.sizes()[1];
 
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
+
   AT_ASSERT(indices.dim() == 1);
   auto num_samples = indices.size(0);
 
@@ -1780,6 +1788,5 @@ Tensor _embedding_bag_sparse_backward_symint(
   }
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
-}
 }
 } // namespace at::native

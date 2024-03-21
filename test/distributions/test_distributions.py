@@ -50,7 +50,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
                                  Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
-                                 HalfCauchy, HalfNormal, Independent, Kumaraswamy,
+                                 HalfCauchy, HalfNormal, Independent, InverseGamma, Kumaraswamy,
                                  LKJCholesky, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
@@ -530,7 +530,17 @@ def _get_examples():
             {'probs': torch.tensor([0.3], requires_grad=True)},
             {'probs': 0.3},
             {'logits': torch.tensor([0.], requires_grad=True)},
-        ])
+        ]),
+        Example(InverseGamma, [
+            {
+                'concentration': torch.randn(2, 3).exp().requires_grad_(),
+                'rate': torch.randn(2, 3).exp().requires_grad_(),
+            },
+            {
+                'concentration': torch.randn(1).exp().requires_grad_(),
+                'rate': torch.randn(1).exp().requires_grad_(),
+            },
+        ]),
     ]
 
 def _get_bad_examples():
@@ -788,7 +798,17 @@ def _get_bad_examples():
             {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
             {'probs': torch.tensor([-0.5], requires_grad=True)},
             {'probs': 1.00001},
-        ])
+        ]),
+        Example(InverseGamma, [
+            {
+                'concentration': torch.tensor([0., 0.], requires_grad=True),
+                'rate': torch.tensor([-1., -100.], requires_grad=True),
+            },
+            {
+                'concentration': torch.tensor([1., 1.], requires_grad=True),
+                'rate': torch.tensor([0., 0.], requires_grad=True),
+            }
+        ]),
     ]
 
 
@@ -871,6 +891,7 @@ class TestDistributions(DistributionsTestCase):
                                 num_samples=10000, failure_rate=1e-3):
         """Runs a Chi2-test for the support, but ignores tail instead of combining"""
         torch_samples = torch_dist.sample((num_samples,)).squeeze()
+        torch_samples = torch_samples.float() if torch_samples.dtype == torch.bfloat16 else torch_samples
         torch_samples = torch_samples.cpu().numpy()
         unique, counts = np.unique(torch_samples, return_counts=True)
         pmf = ref_dist.pmf(unique)
@@ -1129,6 +1150,9 @@ class TestDistributions(DistributionsTestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, p), [p])
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
+
+    test_binomial_half = set_default_dtype(torch.float16)(test_binomial)
+    test_binomial_bfloat16 = set_default_dtype(torch.bfloat16)(test_binomial)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
@@ -1443,11 +1467,15 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
-        for rate in [0.1, 1.0, 5.0]:
-            self._check_sampler_discrete(Poisson(rate),
-                                         scipy.stats.poisson(rate),
-                                         f'Poisson(lambda={rate})',
-                                         failure_rate=1e-3)
+        saved_dtype = torch.get_default_dtype()
+        for dtype in [torch.float, torch.double, torch.bfloat16, torch.half]:
+            torch.set_default_dtype(dtype)
+            for rate in [0.1, 1.0, 5.0]:
+                self._check_sampler_discrete(Poisson(rate),
+                                             scipy.stats.poisson(rate),
+                                             f'Poisson(lambda={rate})',
+                                             failure_rate=1e-3)
+        torch.set_default_dtype(saved_dtype)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -1717,6 +1745,33 @@ class TestDistributions(DistributionsTestCase):
             self._check_sampler_sampler(HalfNormal(std),
                                         scipy.stats.halfnorm(scale=std),
                                         f'HalfNormal(scale={std})')
+
+    @set_default_dtype(torch.double)
+    def test_inversegamma(self):
+        alpha = torch.randn(2, 3).exp().requires_grad_()
+        beta = torch.randn(2, 3).exp().requires_grad_()
+        alpha_1d = torch.randn(1).exp().requires_grad_()
+        beta_1d = torch.randn(1).exp().requires_grad_()
+        self.assertEqual(InverseGamma(alpha, beta).sample().size(), (2, 3))
+        self.assertEqual(InverseGamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(InverseGamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(InverseGamma(alpha_1d, beta_1d).sample().size(), (1,))
+        self.assertEqual(InverseGamma(0.5, 0.5).sample().size(), ())
+        self.assertEqual(InverseGamma(0.5, 0.5).sample((1,)).size(), (1,))
+
+        self._gradcheck_log_prob(InverseGamma, (alpha, beta))
+
+        dist = InverseGamma(torch.ones(4), torch.ones(2, 1, 1))
+        log_prob = dist.log_prob(torch.ones(3, 1))
+        self.assertEqual(log_prob.shape, (2, 3, 4))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_inversegamma_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for concentration, rate in product([2, 5], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(InverseGamma(concentration, rate),
+                                        scipy.stats.invgamma(concentration, scale=rate),
+                                        'InverseGamma()')
 
     @set_default_dtype(torch.double)
     def test_lognormal(self):
@@ -3993,6 +4048,12 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.tensor_sample_2)
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_mixture_same_family_mean_shape(self):
+        mix_distribution = Categorical(torch.ones([3, 1, 3]))
+        component_distribution = Normal(torch.zeros([3, 3, 3]), torch.ones([3, 3, 3]))
+        gmm = MixtureSameFamily(mix_distribution, component_distribution)
+        self.assertEqual(len(gmm.mean.shape), 2)
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
@@ -4026,6 +4087,7 @@ class TestKL(DistributionsTestCase):
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         halfnormal = pairwise(HalfNormal, [1.0, 2.0, 1.0, 2.0])
+        inversegamma = pairwise(InverseGamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
@@ -4085,6 +4147,7 @@ class TestKL(DistributionsTestCase):
             (gumbel, normal),
             (halfnormal, halfnormal),
             (independent, independent),
+            (inversegamma, inversegamma),
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
@@ -4764,6 +4827,10 @@ class TestAgainstScipy(DistributionsTestCase):
             (
                 HalfNormal(positive_var2),
                 scipy.stats.halfnorm(scale=positive_var2)
+            ),
+            (
+                InverseGamma(positive_var, positive_var2),
+                scipy.stats.invgamma(positive_var, scale=positive_var2)
             ),
             (
                 Laplace(random_var, positive_var2),

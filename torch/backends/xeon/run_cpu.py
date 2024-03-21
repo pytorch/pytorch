@@ -1,5 +1,6 @@
 """
 This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable Processors with optimal configurations.
+
 Single instance inference, multi-instance inference are enabled.
 
 Note: term "instance" here doesn't refer to a cloud instance. This script is executed as a single process. It invokes
@@ -132,7 +133,11 @@ from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
 from typing import Dict, List
 
-from torch.distributed.elastic.multiprocessing import start_processes, Std
+from torch.distributed.elastic.multiprocessing import (
+    DefaultLogsSpecs,
+    start_processes,
+    Std,
+)
 
 format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
@@ -140,9 +145,7 @@ logger = logging.getLogger(__name__)
 
 
 class _CPUinfo:
-    """
-    Get CPU information, such as cores list and NUMA information.
-    """
+    """Get CPU information, such as cores list and NUMA information."""
 
     def __init__(self, test_input=""):
         self.cpuinfo = []
@@ -229,7 +232,9 @@ class _CPUinfo:
 
     def numa_aware_check(self, core_list):
         """
-        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce performance.
+        Check whether all cores in core_list are in the same NUMA node.
+
+        Cross NUMA will reduce performance.
         We strongly advice to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
@@ -254,9 +259,7 @@ instance. Alternatively, please use --skip-cross-node-cores knob.",
 
 
 class _Launcher:
-    r"""
-    Class for launcher
-    """
+    r"""Class for launcher."""
 
     msg_lib_notfound = f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
 or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or \
@@ -266,9 +269,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
         self.cpuinfo = _CPUinfo()
 
     def add_lib_preload(self, lib_type):
-        """
-        Enable TCMalloc/JeMalloc/intel OpenMP
-        """
+        """Enable TCMalloc/JeMalloc/intel OpenMP."""
         library_paths = []
         if "CONDA_PREFIX" in os.environ:
             library_paths.append(f"{os.environ['CONDA_PREFIX']}/lib")
@@ -311,6 +312,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                 env=os.environ,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                check=False,
             )
             if r.returncode == 0:
                 numactl_available = True
@@ -323,6 +325,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
     ):
         """
         Enable TCMalloc/JeMalloc with LD_PRELOAD and set configuration for JeMalloc.
+
         By default, PTMalloc will be used for PyTorch, but TCMalloc and JeMalloc can get better
         memory reuse and reduce page fault to improve performance.
         """
@@ -404,6 +407,7 @@ Value applied: %s. Value ignored: %s",
     ):
         """
         Set multi-thread configuration and enable Intel openMP and TCMalloc/JeMalloc.
+
         By default, GNU openMP and PTMalloc are used in PyTorch. but Intel openMP and TCMalloc/JeMalloc are better alternatives
         to get performance benefit.
         """
@@ -666,8 +670,7 @@ won't take effect even if it is set explicitly."
             entrypoint=entrypoint,
             args=launch_args,
             envs=launch_envs,
-            log_dir=args.log_path,
-            tee=launch_tee,
+            logs_specs=DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
         )
         ctx.wait()
 
@@ -815,7 +818,8 @@ def _add_kmp_iomp_params(parser):
 
 def create_args(parser=None):
     """
-    Helper function parsing the command line options
+    Parse the command line options.
+
     @retval ArgumentParser
     """
     parser.add_argument(

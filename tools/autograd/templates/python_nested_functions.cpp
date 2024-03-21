@@ -14,7 +14,7 @@
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/device_lazy_init.h"
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -40,7 +40,7 @@ using at::DimnameList;
 
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // generated forward declarations start here
 
@@ -78,4 +78,4 @@ void initNestedFunctions(PyObject* module) {
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

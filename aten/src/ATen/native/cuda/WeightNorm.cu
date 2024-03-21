@@ -345,9 +345,9 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   // sends the unpacked g.data() as the argument.  In other words, we expect "g" is a bare Tensor here.
 
   // norms is only needed to stash for backward.
-  // g.scalar_type() may be at::ScalarType::Double, Float, or Half.
-  // If Half, stash norms as float.
-  at::ScalarType AccType = g.scalar_type() == at::ScalarType::Half ?
+  // g.scalar_type() may be at::ScalarType::Double, Float, or Half or BFloat16
+  // If Half or BFloat16, stash norms as float.
+  at::ScalarType AccType = g.scalar_type() == at::ScalarType::Half || g.scalar_type() == at::ScalarType::BFloat16 ?
                            at::ScalarType::Float : g.scalar_type();
   // Will this create norms on the same device as g, regardless of what the thread's default
   // current device is?  I believe so, because Type::* functions are DeviceGuard()ed.
@@ -364,8 +364,8 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (v.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2
+      (kBFloat16, kHalf, v.scalar_type(),
        "weight_norm_fwd_first_dim_kernel",
        [&]
        {
@@ -395,8 +395,8 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (v.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2
+      (kBFloat16, kHalf, v.scalar_type(),
        "weight_norm_fwd_last_dim_kernel",
        [&]
        {
@@ -453,8 +453,8 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (saved_v.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2
+      (kBFloat16, kHalf, saved_v.scalar_type(),
        "weight_norm_bwd_first_dim_kernel",
        [&]
        {
@@ -486,8 +486,8 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (saved_v.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2
+      (kBFloat16, kHalf, saved_v.scalar_type(),
        "weight_norm_bwd_last_dim_kernel",
        [&]
        {

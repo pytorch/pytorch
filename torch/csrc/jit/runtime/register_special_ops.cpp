@@ -2,6 +2,7 @@
 #include <torch/library.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
@@ -18,8 +19,7 @@
 #include <regex>
 #include <sstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -292,19 +292,22 @@ RegisterOperators reg({
           aliasAnalysisFromSchema()),
 
     DEFINE_TORCH_TENSOR_OP(
-        float,
-        double,
-        at::native::scalar_tensor(
-            scalar_val,
-            typeMetaToScalarType(c10::get_default_dtype()),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory*/))
-        DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
+        bool,
+        bool,
+        at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+        DEFINE_TORCH_TENSOR_OP(
+            float,
+            double,
+            at::native::scalar_tensor(
+                scalar_val,
+                typeMetaToScalarType(c10::get_default_dtype()),
+                c10::nullopt /* layout */,
+                at::kCPU,
+                c10::nullopt /* pin_memory*/))
             DEFINE_TORCH_TENSOR_OP(
-                bool,
-                bool,
-                at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                int,
+                int64_t,
+                at::scalar_to_tensor(scalar_val))
                 DEFINE_TORCH_TENSOR_OP(
                     complex,
                     c10::complex<double>,
@@ -393,7 +396,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
+            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b, Generator? generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -403,13 +406,16 @@ RegisterOperators reg({
           double a;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
+          c10::optional<at::Generator> generator =
+              pop(stack).toOptional<at::Generator>();
+
           pop(stack, tensor, a, b);
-          push(stack, tensor.uniform_(a, b));
+          push(stack, tensor.uniform_(a, b, generator));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)"),
+            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std, Generator? generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -419,8 +425,11 @@ RegisterOperators reg({
           double mean;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
+          c10::optional<at::Generator> generator =
+              pop(stack).toOptional<at::Generator>();
+
           pop(stack, tensor, mean, std);
-          push(stack, tensor.normal_(mean, std));
+          push(stack, tensor.normal_(mean, std, generator));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
@@ -463,5 +472,4 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
 });
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

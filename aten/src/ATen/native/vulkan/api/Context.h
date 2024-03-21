@@ -1,16 +1,20 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
+
+#include <ATen/native/vulkan/api/vk_api.h>
 
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -164,40 +168,35 @@ class Context final {
     }
   }
 
- private:
-  DescriptorSet submit_compute_prologue(
-      CommandBuffer&,
+  DescriptorSet get_descriptor_set(const ShaderInfo&, const utils::uvec3&);
+
+  void register_shader_dispatch(
+      const DescriptorSet&,
+      PipelineBarrier&,
       const ShaderInfo&,
       const utils::uvec3&);
 
-  void submit_compute_epilogue(
-      CommandBuffer&,
-      const DescriptorSet&,
-      const PipelineBarrier&,
-      const utils::uvec3&);
-
- public:
   template <class S, class D>
-  void submit_copy(
-      const PipelineBarrier&,
+  bool submit_copy(
+      PipelineBarrier&,
       const S&,
       const D&,
       const api::utils::uvec3&,
       const api::utils::uvec3&,
       const api::utils::uvec3&,
-      const VkFence fence_handle);
+      VkFence fence_handle);
 
   template <typename... Arguments>
-  void submit_compute_job(
+  bool submit_compute_job(
       const ShaderInfo&,
-      const PipelineBarrier&,
+      PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
-      const VkFence fence_handle,
+      VkFence fence_handle,
       Arguments&&...);
 
   void submit_cmd_to_gpu(
-      const VkFence fence_handle = VK_NULL_HANDLE,
+      VkFence fence_handle = VK_NULL_HANDLE,
       const bool final_use = false);
 
   void flush();
@@ -206,6 +205,7 @@ class Context final {
 class UniformParamsBuffer final {
  private:
   Context* context_p_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
@@ -214,6 +214,7 @@ class UniformParamsBuffer final {
   template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
       : context_p_(context_p),
+        nbytes_(sizeof(block)),
         vulkan_buffer_(
             context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
@@ -232,26 +233,43 @@ class UniformParamsBuffer final {
   VulkanBuffer& buffer() {
     return vulkan_buffer_;
   }
+
+  template <typename Block>
+  void update(const Block& block) {
+    if (sizeof(block) != nbytes_) {
+      VK_THROW(
+          "Attempted to update UniformParamsBuffer with data of different size");
+    }
+    // Fill the uniform buffer with data in block
+    {
+      MemoryMap mapping(vulkan_buffer_, MemoryAccessType::WRITE);
+      Block* data_ptr = mapping.template data<Block>();
+
+      *data_ptr = block;
+    }
+  }
 };
 
 class StorageBuffer final {
  private:
   Context* context_p_;
-  c10::ScalarType dtype_;
+  ScalarType dtype_;
   size_t numel_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
   StorageBuffer(
       Context* context_p,
-      const c10::ScalarType dtype,
+      const ScalarType dtype,
       const size_t numel,
       const bool gpuonly = false)
       : context_p_(context_p),
         dtype_(dtype),
         numel_(numel),
+        nbytes_(element_size(dtype_) * numel_),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            c10::elementSize(dtype_) * numel_,
+            nbytes_,
             gpuonly)) {}
 
   StorageBuffer(const StorageBuffer&) = delete;
@@ -264,12 +282,20 @@ class StorageBuffer final {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
-  inline c10::ScalarType dtype() {
+  inline ScalarType dtype() {
     return dtype_;
   }
 
   inline VulkanBuffer& buffer() {
     return vulkan_buffer_;
+  }
+
+  inline size_t numel() {
+    return numel_;
+  }
+
+  inline size_t nbytes() {
+    return nbytes_;
   }
 };
 
@@ -281,12 +307,37 @@ Context* context();
 
 namespace detail {
 
+inline void arg_is_empty(bool& any_is_empty, const VulkanBuffer& buffer) {
+  // bool(buffer) will evaluate to false if no memory has been allocated
+  any_is_empty = any_is_empty || !buffer;
+}
+
+inline void arg_is_empty(bool& any_is_empty, const VulkanImage& image) {
+  // bool(image) will evaluate to false if no memory has been allocated
+  any_is_empty = any_is_empty || !image;
+}
+
+/*
+  Reports if any VulkanBuffer or VulkanImage argument in a variadic argument
+  list does not have any memory associated with it.
+ */
+template <typename... Arguments>
+inline bool any_arg_is_empty(Arguments&&... arguments) {
+  bool any_is_empty = false;
+  VK_UNUSED const int _[]{
+      0,
+      (arg_is_empty(any_is_empty, std::forward<Arguments>(arguments)), 0)...,
+  };
+
+  return any_is_empty;
+}
+
 template <size_t... Indices, typename... Arguments>
 inline void bind(
     DescriptorSet& descriptor_set,
-    const std::index_sequence<Indices...>,
+    const std::index_sequence<Indices...>&,
     Arguments&&... arguments) {
-  C10_UNUSED const int _[]{
+  VK_UNUSED const int _[]{
       0,
       (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
@@ -351,15 +402,34 @@ inline void record_copy<VulkanBuffer, VulkanImage>(
       source, destination, copy_range, src_offset, dst_offset);
 }
 
+/*
+  Records a GPU data copy into the current command buffer. If the number of
+  submit_*_job calls exceeds the configured frequency, or if a fence is
+  provided, then the command buffer is submitted to the GPU for execution.
+  Returns a bool indicating whether or not the function call resulted in a GPU
+  queue submission.
+ */
 template <class S, class D>
-inline void Context::submit_copy(
-    const PipelineBarrier& pipeline_barrier,
+inline bool Context::submit_copy(
+    PipelineBarrier& pipeline_barrier,
     const S& source,
     const D& destination,
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
+  // If any of the provided arguments does not have memory associated with it,
+  // then exit early as there is no work to be done. However, if a fence has
+  // been passed the command buffer is not empty, then the current command
+  // buffer must still be submitted so that the fence can be signaled.
+  if (!source || !destination) {
+    if (fence_handle != VK_NULL_HANDLE && submit_count_ > 0) {
+      submit_cmd_to_gpu(fence_handle);
+      return true;
+    }
+    return false;
+  }
+
   // Serialize recording to the shared command buffer. Do not initialize with a
   // mutex just yet, since in some cases it will be externally managed.
   std::unique_lock<std::mutex> cmd_lock;
@@ -393,17 +463,38 @@ inline void Context::submit_copy(
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
+    return true;
   }
+  return false;
 }
 
+/*
+  Records a compute shader dispatch into the current command buffer. If the
+  number of submit_*_job calls exceeds the configured frequency, or if a fence
+  is provided, then the command buffer is submitted to the GPU for execution.
+  Returns a bool indicating whether or not the function call resulted in a GPU
+  queue submission.
+ */
 template <typename... Arguments>
-inline void Context::submit_compute_job(
+inline bool Context::submit_compute_job(
     const ShaderInfo& shader,
-    const PipelineBarrier& pipeline_barrier,
+    PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
-    const VkFence fence_handle,
+    VkFence fence_handle,
     Arguments&&... arguments) {
+  // If any of the provided arguments does not have memory associated with it,
+  // then exit early as there is no work to be done. However, if a fence has
+  // been passed the command buffer is not empty, then the current command
+  // buffer must still be submitted so that the fence can be signaled.
+  if (detail::any_arg_is_empty(arguments...)) {
+    if (fence_handle != VK_NULL_HANDLE && submit_count_ > 0) {
+      submit_cmd_to_gpu(fence_handle);
+      return true;
+    }
+    return false;
+  }
+
   // Serialize recording to the shared command buffer. Do not initialize with a
   // mutex just yet, since in some cases it will be externally managed.
   std::unique_lock<std::mutex> cmd_lock;
@@ -433,23 +524,16 @@ inline void Context::submit_compute_job(
 
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set =
-      submit_compute_prologue(cmd_, shader, local_work_group_size);
+      get_descriptor_set(shader, local_work_group_size);
 
   detail::bind(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
 
-  // Adjust the global workgroup size based on the output tile size
-  const utils::uvec3 effective_global_wg = {
-      utils::div_up(global_work_group.data[0u], shader.out_tile_size.data[0u]),
-      utils::div_up(global_work_group.data[1u], shader.out_tile_size.data[1u]),
-      utils::div_up(global_work_group.data[2u], shader.out_tile_size.data[2u]),
-  };
-
   // Factor out template parameter independent code to minimize code bloat.
-  submit_compute_epilogue(
-      cmd_, descriptor_set, pipeline_barrier, effective_global_wg);
+  register_shader_dispatch(
+      descriptor_set, pipeline_barrier, shader, global_work_group);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   if (enable_op_profiling_) {
@@ -461,7 +545,10 @@ inline void Context::submit_compute_job(
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
+    return true;
   }
+
+  return false;
 }
 
 } // namespace api

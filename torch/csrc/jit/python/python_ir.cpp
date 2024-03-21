@@ -259,31 +259,26 @@ void initPythonIRBindings(PyObject* module_) {
              const std::string& onnx_file_path,
              const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
-            std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
-            RawDataExportMap export_map;
-            SymbolDimMap symbol_map;
-            bool val_use_external_data_format = false;
-            NodeNameMap onnx_node_names;
-            std::tie(
-                model_proto,
-                export_map,
-                symbol_map,
-                val_use_external_data_format,
-                onnx_node_names) =
-                export_onnx(
-                    g,
-                    initializers,
-                    onnx_opset_version,
-                    dynamic_axes,
-                    defer_weight_export,
-                    operator_export_type,
-                    strip_doc_string,
-                    keep_initializers_as_inputs,
-                    custom_opsets,
-                    add_node_names,
-                    val_use_external_data_format,
-                    onnx_file_path,
-                    node_attr_to_name);
+            auto
+                [model_proto,
+                 export_map,
+                 symbol_map,
+                 val_use_external_data_format,
+                 onnx_node_names] =
+                    export_onnx(
+                        g,
+                        initializers,
+                        onnx_opset_version,
+                        dynamic_axes,
+                        defer_weight_export,
+                        operator_export_type,
+                        strip_doc_string,
+                        keep_initializers_as_inputs,
+                        custom_opsets,
+                        add_node_names,
+                        false,
+                        onnx_file_path,
+                        node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -1012,6 +1007,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &StringType::get);
   py::class_<DeviceObjType, Type, DeviceObjTypePtr>(m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  // TODO(antoniojkim): Add GeneratorType to the public API once its been added
+  //                    to the public documentation
+  py::class_<GeneratorType, Type, GeneratorTypePtr>(m, "_GeneratorType")
+      .def_static("get", &GeneratorType::get);
   py::class_<StreamObjType, Type, StreamObjTypePtr>(m, "StreamObjType")
       .def_static("get", &StreamObjType::get);
   py::class_<PyObjectType, Type, PyObjectTypePtr>(m, "PyObjectType")

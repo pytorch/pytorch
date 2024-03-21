@@ -106,11 +106,11 @@ categories = (
 
 
 topics = [
-    "bc_breaking",
-    "deprecations",
-    "new_features",
+    "bc breaking",
+    "deprecation",
+    "new features",
     "improvements",
-    "bug_fixes",
+    "bug fixes",
     "performance",
     "docs",
     "devs",

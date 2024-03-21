@@ -62,7 +62,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   at::assert_no_internal_overlap(self);
   TORCH_CHECK(
       self.scalar_type() == source.scalar_type(),
-      "masked_scatter_: expected self and source to have same dtypes but got",
+      "masked_scatter_: expected self and source to have same dtypes but got ",
       self.scalar_type(),
       " and ",
       source.scalar_type());

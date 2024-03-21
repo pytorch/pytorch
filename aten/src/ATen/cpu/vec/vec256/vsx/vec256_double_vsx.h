@@ -225,6 +225,9 @@ class Vectorized<double> {
   Vectorized<double> atan() const {
      return {Sleef_atand2_u10(_vec0), Sleef_atand2_u10(_vec1)};
   }
+  Vectorized<double> atanh() const {
+     return {Sleef_atanhd2_u10(_vec0), Sleef_atanhd2_u10(_vec1)};
+  }
   Vectorized<double> atan2(const Vectorized<double>& b) const {
      return {Sleef_atan2d2_u10(_vec0, b._vec0), Sleef_atan2d2_u10(_vec1, b._vec1)};
   }
@@ -245,6 +248,9 @@ class Vectorized<double> {
   }
   Vectorized<double> expm1() const {
      return {Sleef_expm1d2_u10(_vec0), Sleef_expm1d2_u10(_vec1)};
+  }
+  Vectorized<double> C10_ALWAYS_INLINE exp_u20() const {
+     return exp();
   }
 
   Vectorized<double> lgamma() const __ubsan_ignore_undefined__ {
@@ -364,6 +370,10 @@ class Vectorized<double> {
     return map(calc_i0e);
   }
 
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
+  }
+
   Vectorized<double> _nor() const {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
@@ -372,6 +382,19 @@ class Vectorized<double> {
     auto x = *this;
     auto ret = (x == x);
     return ret._nor();
+  }
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   DEFINE_MEMBER_OP(operator==, double, vec_cmpeq)

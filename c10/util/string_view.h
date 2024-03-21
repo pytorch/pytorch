@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -40,7 +42,7 @@ class basic_string_view final {
 
   static constexpr size_type npos = size_type(-1);
 
-  constexpr basic_string_view() noexcept : begin_(nullptr), size_(0) {}
+  constexpr basic_string_view() noexcept : begin_(nullptr) {}
 
   explicit constexpr basic_string_view(const_pointer str, size_type count)
       : begin_(str), size_(count) {}
@@ -484,6 +486,7 @@ class basic_string_view final {
   }
 
   template <class Condition>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
     if (pos + 1 <= size()) {
@@ -497,6 +500,7 @@ class basic_string_view final {
   }
 
   template <class Condition>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   constexpr size_type find_last_if_(size_type pos, Condition&& condition)
       const noexcept {
     // Write it iteratively. This is faster.
@@ -580,7 +584,7 @@ inline std::basic_ostream<CharT>& operator<<(
 template <class CharT>
 constexpr inline void swap(
     basic_string_view<CharT>& lhs,
-    basic_string_view<CharT>& rhs) {
+    basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
 
@@ -592,7 +596,7 @@ namespace std {
 template <class CharT>
 struct hash<::c10::basic_string_view<CharT>> {
   size_t operator()(::c10::basic_string_view<CharT> x) const {
-    // The standard says that std""string_view hashing must do the same as
+    // The standard says that std::string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
     // up to the implementer. So, to be conformant, we need to re-use and
     // existing STL type's hash function. The std::string fallback is probably

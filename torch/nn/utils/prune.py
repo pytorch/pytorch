@@ -1,6 +1,4 @@
-r"""
-Pruning methods
-"""
+r"""Pruning methods."""
 import numbers
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -15,13 +13,15 @@ class BasePruningMethod(ABC):
     Provides a skeleton for customization requiring the overriding of methods
     such as :meth:`compute_mask` and :meth:`apply`.
     """
+
     _tensor_name: str
 
     def __call__(self, module, inputs):
-        r"""Multiplies the mask (stored in ``module[name + '_mask']``)
+        r"""Multiply the mask into original tensor and store the result.
+
+        Multiplies the mask (stored in ``module[name + '_mask']``)
         into the original tensor (stored in ``module[name + '_orig']``)
-        and stores the result into ``module[name]`` by using
-        :meth:`apply_mask`.
+        and stores the result into ``module[name]`` by using :meth:`apply_mask`.
 
         Args:
             module (nn.Module): module containing the tensor to prune
@@ -31,7 +31,8 @@ class BasePruningMethod(ABC):
 
     @abstractmethod
     def compute_mask(self, t, default_mask):
-        r"""Computes and returns a mask for the input tensor ``t``.
+        r"""Compute and returns a mask for the input tensor ``t``.
+
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a random mask to
         apply on top of the ``default_mask`` according to the specific pruning
@@ -50,8 +51,8 @@ class BasePruningMethod(ABC):
         pass
 
     def apply_mask(self, module):
-        r"""Simply handles the multiplication between the parameter being
-        pruned and the generated mask.
+        r"""Simply handles the multiplication between the parameter being pruned and the generated mask.
+
         Fetches the mask and the original tensor from the module
         and returns the pruned version of the tensor.
 
@@ -71,7 +72,9 @@ class BasePruningMethod(ABC):
 
     @classmethod
     def apply(cls, module, name, *args, importance_scores=None, **kwargs):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -197,8 +200,9 @@ class BasePruningMethod(ABC):
         return method
 
     def prune(self, t, default_mask=None, importance_scores=None):
-        r"""Computes and returns a pruned version of input tensor ``t``
-        according to the pruning rule specified in :meth:`compute_mask`.
+        r"""Compute and returns a pruned version of input tensor ``t``.
+
+        According to the pruning rule specified in :meth:`compute_mask`.
 
         Args:
             t (torch.Tensor): tensor to prune (of same dimensions as
@@ -226,10 +230,11 @@ class BasePruningMethod(ABC):
         return t * self.compute_mask(importance_scores, default_mask=default_mask)
 
     def remove(self, module):
-        r"""Removes the pruning reparameterization from a module. The pruned
-        parameter named ``name`` remains permanently pruned, and the parameter
-        named ``name+'_orig'`` is removed from the parameter list. Similarly,
-        the buffer named ``name+'_mask'`` is removed from the buffers.
+        r"""Remove the pruning reparameterization from a module.
+
+        The pruned parameter named ``name`` remains permanently pruned,
+        and the parameter named ``name+'_orig'`` is removed from the parameter list.
+        Similarly, the buffer named ``name+'_mask'`` is removed from the buffers.
 
         Note:
             Pruning itself is NOT undone or reversed!
@@ -254,6 +259,7 @@ class BasePruningMethod(ABC):
 
 class PruningContainer(BasePruningMethod):
     """Container holding a sequence of pruning methods for iterative pruning.
+
     Keeps track of the order in which pruning methods are applied and handles
     combining successive pruning calls.
 
@@ -274,7 +280,7 @@ class PruningContainer(BasePruningMethod):
                 self.add_pruning_method(method)
 
     def add_pruning_method(self, method):
-        r"""Adds a child pruning ``method`` to the container.
+        r"""Add a child pruning ``method`` to the container.
 
         Args:
             method (subclass of BasePruningMethod): child pruning method
@@ -304,8 +310,8 @@ class PruningContainer(BasePruningMethod):
         return self._pruning_methods[idx]
 
     def compute_mask(self, t, default_mask):
-        r"""Applies the latest ``method`` by computing the new partial masks
-        and returning its combination with the ``default_mask``.
+        r"""Apply the latest ``method`` by computing the new partial masks and returning its combination with the ``default_mask``.
+
         The new partial mask should be computed on the entries or channels
         that were not zeroed out by the ``default_mask``.
         Which portions of the tensor ``t`` the new mask will be calculated from
@@ -332,7 +338,8 @@ class PruningContainer(BasePruningMethod):
         """
 
         def _combine_masks(method, t, mask):
-            r"""
+            r"""Combine the masks from all pruning methods and returns a new mask.
+
             Args:
                 method (a BasePruningMethod subclass): pruning method
                     currently being applied.
@@ -401,9 +408,7 @@ class PruningContainer(BasePruningMethod):
 
 
 class Identity(BasePruningMethod):
-    r"""Utility pruning method that does not prune any units but generates the
-    pruning parametrization with a mask of ones.
-    """
+    r"""Utility pruning method that does not prune any units but generates the pruning parametrization with a mask of ones."""
 
     PRUNING_TYPE = "unstructured"
 
@@ -413,7 +418,9 @@ class Identity(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -466,7 +473,9 @@ class RandomUnstructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -483,8 +492,7 @@ class RandomUnstructured(BasePruningMethod):
 
 
 class L1Unstructured(BasePruningMethod):
-    r"""Prune (currently unpruned) units in a tensor by zeroing out the ones
-    with the lowest L1-norm.
+    r"""Prune (currently unpruned) units in a tensor by zeroing out the ones with the lowest L1-norm.
 
     Args:
         amount (int or float): quantity of parameters to prune.
@@ -524,7 +532,9 @@ class L1Unstructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount, importance_scores=None):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -568,7 +578,8 @@ class RandomStructured(BasePruningMethod):
         self.dim = dim
 
     def compute_mask(self, t, default_mask):
-        r"""Computes and returns a mask for the input tensor ``t``.
+        r"""Compute and returns a mask for the input tensor ``t``.
+
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a random mask to
         apply on top of the ``default_mask`` by randomly zeroing out channels
@@ -631,7 +642,9 @@ class RandomStructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount, dim=-1):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -650,8 +663,7 @@ class RandomStructured(BasePruningMethod):
 
 
 class LnStructured(BasePruningMethod):
-    r"""Prune entire (currently unpruned) channels in a tensor based on their
-    L\ ``n``-norm.
+    r"""Prune entire (currently unpruned) channels in a tensor based on their L\ ``n``-norm.
 
     Args:
         amount (int or float): quantity of channels to prune.
@@ -674,7 +686,8 @@ class LnStructured(BasePruningMethod):
         self.dim = dim
 
     def compute_mask(self, t, default_mask):
-        r"""Computes and returns a mask for the input tensor ``t``.
+        r"""Compute and returns a mask for the input tensor ``t``.
+
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a mask to apply on
         top of the ``default_mask`` by zeroing out the channels along the
@@ -744,7 +757,9 @@ class LnStructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount, n, dim, importance_scores=None):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -790,7 +805,9 @@ class CustomFromMask(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, mask):
-        r"""Adds the forward pre-hook that enables pruning on the fly and
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
 
@@ -803,7 +820,9 @@ class CustomFromMask(BasePruningMethod):
 
 
 def identity(module, name):
-    r"""Applies pruning reparametrization to the tensor corresponding to the
+    r"""Apply pruning reparametrization without pruning any units.
+
+    Applies pruning reparametrization to the tensor corresponding to the
     parameter called ``name`` in ``module`` without actually pruning any
     units. Modifies module in place (and also return the modified module)
     by:
@@ -836,7 +855,9 @@ def identity(module, name):
 
 
 def random_unstructured(module, name, amount):
-    r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
+    r"""Prune tensor by removing random (currently unpruned) units.
+
+    Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified ``amount`` of (currently unpruned) units
     selected at random.
     Modifies module in place (and also return the modified module) by:
@@ -871,7 +892,9 @@ def random_unstructured(module, name, amount):
 
 
 def l1_unstructured(module, name, amount, importance_scores=None):
-    r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
+    r"""Prune tensor by removing units with the lowest L1-norm.
+
+    Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified `amount` of (currently unpruned) units with the
     lowest L1-norm.
     Modifies module in place (and also return the modified module)
@@ -913,7 +936,9 @@ def l1_unstructured(module, name, amount, importance_scores=None):
 
 
 def random_structured(module, name, amount, dim):
-    r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
+    r"""Prune tensor by removing random channels along the specified dimension.
+
+    Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified ``amount`` of (currently unpruned) channels
     along the specified ``dim`` selected at random.
     Modifies module in place (and also return the modified module)
@@ -952,7 +977,9 @@ def random_structured(module, name, amount, dim):
 
 
 def ln_structured(module, name, amount, n, dim, importance_scores=None):
-    r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
+    r"""Prune tensor by removing channels with the lowest L\ ``n``-norm along the specified dimension.
+
+    Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified ``amount`` of (currently unpruned) channels
     along the specified ``dim`` with the lowest L\ ``n``-norm.
     Modifies module in place (and also return the modified module)
@@ -998,8 +1025,8 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
 
 def global_unstructured(parameters, pruning_method, importance_scores=None, **kwargs):
     r"""
-    Globally prunes tensors corresponding to all parameters in ``parameters``
-    by applying the specified ``pruning_method``.
+    Globally prunes tensors corresponding to all parameters in ``parameters`` by applying the specified ``pruning_method``.
+
     Modifies modules in place by:
 
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
@@ -1117,10 +1144,9 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
 
 
 def custom_from_mask(module, name, mask):
-    r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
-    by applying the pre-computed mask in ``mask``.
-    Modifies module in place (and also return the modified module)
-    by:
+    r"""Prune tensor corresponding to parameter called ``name`` in ``module`` by applying the pre-computed mask in ``mask``.
+
+    Modifies module in place (and also return the modified module) by:
 
     1) adding a named buffer called ``name+'_mask'`` corresponding to the
        binary mask applied to the parameter ``name`` by the pruning method.
@@ -1151,9 +1177,9 @@ def custom_from_mask(module, name, mask):
 
 
 def remove(module, name):
-    r"""Removes the pruning reparameterization from a module and the
-    pruning method from the forward hook. The pruned
-    parameter named ``name`` remains permanently pruned, and the parameter
+    r"""Remove the pruning reparameterization from a module and the pruning method from the forward hook.
+
+    The pruned parameter named ``name`` remains permanently pruned, and the parameter
     named ``name+'_orig'`` is removed from the parameter list. Similarly,
     the buffer named ``name+'_mask'`` is removed from the buffers.
 
@@ -1181,7 +1207,9 @@ def remove(module, name):
 
 
 def is_pruned(module):
-    r"""Check whether ``module`` is pruned by looking for
+    r"""Check if a module is pruned by looking for pruning pre-hooks.
+
+    Check whether ``module`` is pruned by looking for
     ``forward_pre_hooks`` in its modules that inherit from the
     :class:`BasePruningMethod`.
 
@@ -1208,7 +1236,7 @@ def is_pruned(module):
 
 
 def _validate_pruning_amount_init(amount):
-    r"""Validation helper to check the range of amount at init.
+    r"""Validate helper to check the range of amount at init.
 
     Args:
         amount (int or float): quantity of parameters to prune.
@@ -1240,7 +1268,9 @@ def _validate_pruning_amount_init(amount):
 
 
 def _validate_pruning_amount(amount, tensor_size):
-    r"""Validation helper to check that the amount of parameters to prune
+    r"""Validate that the pruning amount is meaningful wrt to the size of the data.
+
+    Validation helper to check that the amount of parameters to prune
     is meaningful wrt to the size of the data (`tensor_size`).
 
     Args:
@@ -1262,7 +1292,9 @@ def _validate_pruning_amount(amount, tensor_size):
 
 
 def _validate_structured_pruning(t):
-    r"""Validation helper to check that the tensor to be pruned is multi-
+    r"""Validate that the tensor to be pruned is at least 2-Dimensional.
+
+    Validation helper to check that the tensor to be pruned is multi-
     dimensional, such that the concept of "channels" is well-defined.
 
     Args:
@@ -1281,7 +1313,9 @@ def _validate_structured_pruning(t):
 
 
 def _compute_nparams_toprune(amount, tensor_size):
-    r"""Since amount can be expressed either in absolute value or as a
+    r"""Convert the pruning amount from a percentage to absolute value.
+
+    Since amount can be expressed either in absolute value or as a
     percentage of the number of units/channels in a tensor, this utility
     function converts the percentage to absolute value to standardize
     the handling of pruning.
@@ -1305,7 +1339,8 @@ def _compute_nparams_toprune(amount, tensor_size):
 
 
 def _validate_pruning_dim(t, dim):
-    r"""
+    r"""Validate that the pruning dimension is within the bounds of the tensor dimension.
+
     Args:
         t (torch.Tensor): tensor representing the parameter to prune
         dim (int): index of the dim along which we define channels to prune
@@ -1315,7 +1350,9 @@ def _validate_pruning_dim(t, dim):
 
 
 def _compute_norm(t, n, dim):
-    r"""Compute the L_n-norm across all entries in tensor `t` along all dimension
+    r"""Compute the L_n-norm of a tensor along all dimensions except for the specified dimension.
+
+    The L_n-norm will be computed across all entries in tensor `t` along all dimension
     except for the one identified by dim.
     Example: if `t` is of shape, say, 3x2x4 and dim=2 (the last dim),
     then norm will have Size [4], and each entry will represent the

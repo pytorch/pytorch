@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
@@ -17,11 +16,9 @@ at::Tensor& to_copy_out(
     bool non_blocking,
     bool copy_strides,
     c10::optional<MemoryFormat> memory_format);
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
@@ -186,5 +183,4 @@ bool sr_schema_check(
 
 bool sr_schema_check_kind(torch::jit::Node* node, c10::Symbol node_kind);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

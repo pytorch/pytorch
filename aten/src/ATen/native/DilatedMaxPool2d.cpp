@@ -11,12 +11,10 @@
 #else
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool2d_with_indices_native.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
-namespace at {
-namespace meta {
-using namespace native;
+namespace at::meta {
+using namespace at::native;
 TORCH_META_FUNC(max_pool2d_with_indices)
 (const Tensor& input,
 IntArrayRef kernel_size,
@@ -157,9 +155,9 @@ const Tensor& indices) {
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format),
              input.has_names() ? input.names() : DimnameList{});
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_out_cpu)
 (const Tensor& input,
@@ -214,5 +212,4 @@ const Tensor& gradInput) {
 DEFINE_DISPATCH(max_pool2d_kernel);
 DEFINE_DISPATCH(max_pool2d_backward_kernel);
 
-} // at::native
 } // at

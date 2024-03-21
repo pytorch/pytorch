@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import torch
-
 from typing import (
     Callable,
+    cast,
     Collection,
     List,
     Mapping,
@@ -11,13 +10,12 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
 )
-from torch.distributed.checkpoint.metadata import (
-    STATE_DICT_TYPE,
-)
+
+import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 PATH_ITEM = Union[str, int]
 OBJ_PATH = Tuple[PATH_ITEM, ...]
@@ -41,11 +39,13 @@ def traverse_state_dict(
 ) -> None:
     """
     Invoke ``visitor`` for each value recursively in ``state_dict``.
+
     Traversal is short-circuited when if finds a collection for which ``keep_visiting_tensors`` evaluates
     to false for all elements.
     By default, all collections with at least one ``torch.Tensor`` element are traversed.
     Visitor takes a path argument that is a tuple of the keys used to reach it.
     """
+
     # a value is terminal if it has no other containers values inside it
     def _is_terminal(value: STATE_DICT_ITEM) -> bool:
         values: Collection[STATE_DICT_ITEM]
@@ -80,9 +80,7 @@ def traverse_state_dict(
 def set_element(
     root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: STATE_DICT_ITEM
 ) -> None:
-    """
-    Set ``value`` in ``root_dict`` along the ``path`` object path.
-    """
+    """Set ``value`` in ``root_dict`` along the ``path`` object path."""
     cur_container = cast(CONTAINER_TYPE, root_dict)
 
     def extend_list(lst: List[STATE_DICT_ITEM], idx: int) -> None:
@@ -116,9 +114,7 @@ def get_element(
     path: OBJ_PATH,
     default_value: Optional[T] = None,
 ) -> Optional[T]:
-    """
-    Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found.
-    """
+    """Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found."""
     cur_value = cast(CONTAINER_TYPE, root_dict)
     for part in path:
         if type(part) is int:
@@ -163,7 +159,8 @@ def print_tensor(
     print_fun: Callable[[str], None] = print,
 ) -> None:
     """
-    Callback that can be used with traverse_state_dict to print its content.
+    Use this callback with traverse_state_dict to print its content.
+
     By default the content is printed using the builtin ``print`` but this can
     be change by passing a different ``print_fun` callable.
     """

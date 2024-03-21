@@ -221,7 +221,7 @@ class NLLLoss2d(NLLLoss):
                  reduce=None, reduction: str = 'mean') -> None:
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
-                      "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+                      "https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss for more details.")
         super().__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
@@ -660,7 +660,7 @@ class BCEWithLogitsLoss(_Loss):
     :math:`p_c > 1` increases the recall, :math:`p_c < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
-    then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
+    then ``pos_weight`` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains :math:`3\times 100=300` positive examples.
 
     Examples::
@@ -671,6 +671,12 @@ class BCEWithLogitsLoss(_Loss):
         >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         >>> criterion(output, target)  # -log(sigmoid(1.5))
         tensor(0.20...)
+
+    In the above example, the ``pos_weight`` tensor's elements correspond to the 64 distinct classes
+    in a multi-label binary classification scenario. Each element in ``pos_weight`` is designed to adjust the
+    loss function based on the imbalance between negative and positive samples for the respective class.
+    This approach is useful in datasets with varying levels of class imbalance, ensuring that the loss
+    calculation accurately accounts for the distribution in each class.
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
@@ -1106,7 +1112,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-            If given, has to be a Tensor of size `C`
+            If given, has to be a Tensor of size `C` and floating point dtype
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -1506,6 +1512,10 @@ class TripletMarginLoss(_Loss):
     def __init__(self, margin: float = 1.0, p: float = 2., eps: float = 1e-6, swap: bool = False, size_average=None,
                  reduce=None, reduction: str = 'mean'):
         super().__init__(size_average, reduce, reduction)
+        if margin <= 0:
+            raise ValueError(
+                f"TripletMarginLoss: expected margin to be greater than 0, got {margin} instead"
+            )
         self.margin = margin
         self.p = p
         self.eps = eps
@@ -1621,6 +1631,10 @@ class TripletMarginWithDistanceLoss(_Loss):
     def __init__(self, *, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
         super().__init__(size_average=None, reduce=None, reduction=reduction)
+        if margin <= 0:
+            raise ValueError(
+                f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
+            )
         self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = \
             distance_function if distance_function is not None else PairwiseDistance()
         self.margin = margin

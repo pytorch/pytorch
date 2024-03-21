@@ -21,8 +21,7 @@
 #include <ATen/ops/thnn_conv2d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -61,7 +60,7 @@ static Tensor compute_columns2d(
     int64_t col = is_channels_last ?
         kernel_height * kernel_width * n_input_plane : output_height * output_width;
     columns = at::empty({batch_size, row, col}, input.options());
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu", [&]{
       auto input_a = input.accessor<scalar_t, 4>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
@@ -404,8 +403,8 @@ void slow_conv2d_backward_out_cpu_template(
   grad_input.zero_();
   TORCH_CHECK(grad_input.is_contiguous(memory_format), "slow_conv2d: grad_input must be contiguous");
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
     auto grad_output_a = grad_output.accessor<scalar_t, 4>();
     auto grad_input_a = grad_input.accessor<scalar_t, 4>();
     auto weight_a = weight.accessor<scalar_t, 2>();
@@ -518,8 +517,8 @@ static void slow_conv2d_backward_weight_out_cpu_template(
 
   const int64_t batch_size = input.size(0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_weight", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu_grad_weight", [&] {
     auto grad_output_a = grad_output.accessor<scalar_t, 4>();
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto finput_a = finput.accessor<scalar_t, 3>();
@@ -588,7 +587,7 @@ Tensor& slow_conv2d_forward_out_cpu(
   }
   TORCH_CHECK(output.is_contiguous(memory_format), "slow_conv2d output tensor must be contiguous");
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu", [&]{
     auto input_a = input.accessor<scalar_t, 4>();
     auto output_a = output.accessor<scalar_t, 4>();
     auto finput_a = finput.accessor<scalar_t, 3>();
@@ -743,5 +742,4 @@ Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   return at::_slow_conv2d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

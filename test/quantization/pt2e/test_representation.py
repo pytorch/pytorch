@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import sys
+import unittest
 from typing import Any, Dict, Tuple
 
 import torch
@@ -20,6 +22,9 @@ from torch.testing._internal.common_quantization import (
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestPT2ERepresentation(QuantizationTestCase):
     def _test_representation(
         self,
@@ -29,7 +34,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
         fixed_output_tol: float = None,
-        output_scale_idx: int = 3,
+        output_scale_idx: int = 2,
     ) -> torch.nn.Module:
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -253,9 +258,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 ): 0,
             }
             non_ref_node_occurrence = {
+                # quantize_per_channel is folded
                 ns.call_function(
                     torch.ops.quantized_decomposed.quantize_per_channel.default
-                ): 1,
+                ): 0,
                 ns.call_function(
                     torch.ops.quantized_decomposed.dequantize_per_channel.default
                 ): 1,

@@ -158,6 +158,11 @@ function install_torchvision() {
   fi
 }
 
+function install_tlparse() {
+  pip_install --user "tlparse==0.3.7"
+  PATH="$(python -m site --user-base)/bin:$PATH"
+}
+
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)
@@ -169,13 +174,6 @@ function install_torchrec_and_fbgemm() {
   # See https://github.com/pytorch/pytorch/issues/106971
   CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
-}
-
-function install_numpy_pytorch_interop() {
-  local commit
-  commit=$(get_pinned_commit numpy_pytorch_interop)
-  # TODO: --no-use-pep517 will result in failure.
-  pip_install --user "git+https://github.com/Quansight-Labs/numpy_pytorch_interop.git@${commit}"
 }
 
 function clone_pytorch_xla() {

@@ -46,6 +46,20 @@ class TORCH_API Unpickler {
         type_parser_(type_parser),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
+  Unpickler(
+      std::function<size_t(char*, size_t)> reader,
+      TypeResolver type_resolver,
+      c10::ArrayRef<at::Tensor> tensor_table,
+      ObjLoader obj_loader,
+      TypeParserT type_parser = defaultTypeParser)
+      : reader_(std::move(reader)),
+        tensor_table_(tensor_table),
+        type_resolver_(std::move(type_resolver)),
+        obj_loader_(std::move(obj_loader)),
+        use_storage_device_(false),
+        type_parser_(type_parser),
+        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

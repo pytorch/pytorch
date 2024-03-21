@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 import torch.fx
+import torch.utils._pytree as pytree
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
@@ -45,19 +46,48 @@ def aot_compile(
     """
     from .compile_fx import compile_fx_aot
 
-    result = compile_fx_aot(
+    # We will serialize the pytree info into the .so as constant strings
+    in_spec = None
+    out_spec = None
+    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+        codegen = gm.graph._codegen
+        gm.graph._codegen = torch.fx.graph.CodeGen()
+        gm.recompile()
+
+        if codegen.pytree_info.in_spec is not None:
+            in_spec = codegen.pytree_info.in_spec
+        if codegen.pytree_info.out_spec is not None:
+            out_spec = codegen.pytree_info.out_spec
+
+    else:
+        if hasattr(gm, "_in_spec"):
+            in_spec = gm._in_spec
+        if hasattr(gm, "_out_spec"):
+            out_spec = gm._out_spec
+
+    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
+    serialized_out_spec = (
+        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
+    )
+
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
+
+    return compile_fx_aot(
         gm,
         example_inputs,
         config_patches=options,
     )
-
-    # AOTInductor returns result as a string, not callable
-    # Maybe this check is not neded?
-    if callable(result):
-        result = result()
-
-    lib_path = result[0] if isinstance(result, (list, tuple)) else result
-    return lib_path
 
 
 def list_mode_options(
@@ -108,7 +138,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+    current_config: Dict[str, Any] = config.shallow_copy_dict()
 
     return list(current_config.keys())
 

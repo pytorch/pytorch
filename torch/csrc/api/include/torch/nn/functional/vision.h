@@ -63,17 +63,17 @@ inline Tensor grid_sample(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t mode_enum, padding_mode_enum;
 
-  if (c10::get_if<enumtype::kBilinear>(&mode)) {
+  if (std::holds_alternative<enumtype::kBilinear>(mode)) {
     mode_enum = 0;
-  } else if (c10::get_if<enumtype::kNearest>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kNearest>(mode)) {
     mode_enum = 1;
   } else { /// mode == 'bicubic'
     mode_enum = 2;
   }
 
-  if (c10::get_if<enumtype::kZeros>(&padding_mode)) {
+  if (std::holds_alternative<enumtype::kZeros>(padding_mode)) {
     padding_mode_enum = 0;
-  } else if (c10::get_if<enumtype::kBorder>(&padding_mode)) {
+  } else if (std::holds_alternative<enumtype::kBorder>(padding_mode)) {
     padding_mode_enum = 1;
   } else { /// padding_mode == 'reflection'
     padding_mode_enum = 2;
@@ -95,7 +95,7 @@ inline Tensor grid_sample(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.grid_sample
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.grid_sample
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GridSampleFuncOptions`

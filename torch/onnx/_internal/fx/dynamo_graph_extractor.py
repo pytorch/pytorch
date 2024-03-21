@@ -22,6 +22,7 @@ from typing import (
 )
 
 import torch._dynamo
+import torch.export as torch_export
 import torch.fx
 import torch.onnx
 from torch.onnx._internal import _beartype, exporter, io_adapter
@@ -40,7 +41,11 @@ class _PyTreeExtensionContext:
 
     def __enter__(self):
         for class_type, (flatten_func, unflatten_func) in self._extensions.items():
-            pytree._register_pytree_node(class_type, flatten_func, unflatten_func)
+            pytree._private_register_pytree_node(
+                class_type,
+                flatten_func,
+                unflatten_func,
+            )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -93,8 +98,11 @@ class _PyTreeExtensionContext:
         # All 'ModelOutput' subclasses are defined under module 'modeling_outputs'.
         named_model_output_classes = inspect.getmembers(
             modeling_outputs,
-            lambda x: inspect.isclass(x)
-            and issubclass(x, modeling_outputs.ModelOutput),
+            lambda x: (
+                inspect.isclass(x)
+                and issubclass(x, modeling_outputs.ModelOutput)
+                and x is not modeling_outputs.ModelOutput
+            ),
         )
 
         for _, class_type in named_model_output_classes:
@@ -122,10 +130,16 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
             pytree_extension_context or _PyTreeExtensionContext()
         )
 
-    def apply(self, model_outputs: Any) -> Sequence[Any]:
+    def apply(
+        self,
+        model_outputs: Any,
+        model: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
+    ) -> Sequence[Any]:
         """Flatten the model outputs, under the context of pytree extension."""
         with self._pytree_extension_context:
-            return super().apply(model_outputs)
+            return super().apply(model_outputs, model=model)
 
 
 def _wrap_model_with_output_adapter(
@@ -151,7 +165,7 @@ def _wrap_model_with_output_adapter(
     # Preserve original function signature.
     @functools.wraps(model_func)
     def wrapped(*args, **kwargs):
-        return output_adapter.apply(model_func(*args, **kwargs))
+        return output_adapter.apply(model_func(*args, **kwargs), model=model)
 
     return wrapped
 
@@ -208,6 +222,23 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Export FX graph to ONNX ModelProto.
         self.input_adapter.append_step(
-            io_adapter.FlattenInputWithTreeSpecValidationStep()
+            io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
-        return graph_module  # type: ignore[return-value]
+
+        updated_model_args = self.input_adapter.apply(
+            *model_args, model=model, **model_kwargs
+        )
+
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+
+    @_beartype.beartype
+    def pre_export_passes(
+        self,
+        options: exporter.ResolvedExportOptions,
+        original_model: Union[torch.nn.Module, Callable],
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ):
+        return exporter.common_pre_export_passes(
+            options, original_model, fx_module, fx_module_args
+        )

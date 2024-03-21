@@ -137,14 +137,30 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
   }
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << std::boolalpha << "torch::nn::BatchNorm" << D << "d("
+           << this->options.num_features() << ", "
+           << "eps=" << this->options.eps() << ", "
+           << "momentum=";
+
+    if (this->options.momentum().has_value()) {
+      stream << this->options.momentum().value();
+    } else {
+      stream << "None";
+    }
+
+    stream << ", "
+           << "affine=" << this->options.affine() << ", "
+           << "track_running_stats=" << this->options.track_running_stats()
+           << ")";
+  }
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm1d
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn
@@ -174,7 +190,7 @@ TORCH_MODULE(BatchNorm1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn
@@ -204,7 +220,7 @@ TORCH_MODULE(BatchNorm2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn

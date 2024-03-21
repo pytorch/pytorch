@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <torch/library.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/MaxPooling.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -702,6 +703,7 @@ Tensor quantized_max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  check_max_pool1d(qx, kernel_size, stride, padding, dilation, ceil_mode);
   // (C, L) -> (C, 1, L) => kSqueezeDim = 1
   // (N, C, L) -> (N, C, 1, L) => kSqueezeDim = 2
   const int32_t kSqueezeDim = qx.dim() - 1;
@@ -726,7 +728,7 @@ template <uint32_t kSpatialDim>
 class QMaxPool_arr_args final {
  public:
   static Tensor run(
-      Tensor qx,
+      const Tensor& qx,
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,

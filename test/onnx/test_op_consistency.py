@@ -52,25 +52,26 @@ OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # TODO: Directly modify DecorateInfo in each OpInfo in ob_db when all ops are enabled.
 # Ops to be tested for numerical consistency between onnx and pytorch
+# TODO: https://github.com/pytorch/pytorch/issues/102211
 TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
         # "atleast_1d",  # How to support list input?
-        # "atleast_2d",  # How to support list input?
-        # "atleast_3d",  # How to support list input?
+        # "atleast_2d",
+        # "atleast_3d",
         "broadcast_to",
         "ceil",
         "expand",
         "flatten",
         "hstack",
         "logical_not",
-        # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "logit",
         "nn.functional.scaled_dot_product_attention",
         "repeat",
         "round",
-        # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
-        # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "scatter_add",
+        # "scatter_reduce",
         "sqrt",
         "stft",
         "t",
@@ -100,7 +101,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "atan2", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atan")
     ),
-    xfail("atan2", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    xfail(
+        "atan2", dtypes=[torch.float64],
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])
+    ),
     xfail(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
@@ -269,7 +273,9 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
-        allowed_dtypes=onnx_test_common.TESTED_DTYPES,
+        allowed_dtypes=onnx_test_common.INT_TYPES
+        + onnx_test_common.FLOAT_TYPES
+        + onnx_test_common.BOOL_TYPES,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""

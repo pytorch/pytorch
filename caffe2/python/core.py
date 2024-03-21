@@ -1645,7 +1645,7 @@ class Net:
             return do_set(self.GivenTensorInt64Fill)
         elif array.dtype == str:
             return do_set(self.GivenTensorStringFill)
-        elif array.dtype == np.bool:
+        elif array.dtype == bool:
             return do_set(self.GivenTensorBoolFill)
         else:
             return do_set(self.GivenTensorFill)
@@ -2011,15 +2011,8 @@ class Net:
         self._recreate_lookup_tables = True
 
     def _RecreateLookupTables(self):
-        self._op_outputs = set()
-        for op in self._net.op:
-            for o in op.output:
-                self._op_outputs.add(o)
-
-        self._external_input_map = set()
-        for inp in self._net.external_input:
-            self._external_input_map.add(inp)
-
+        self._op_outputs = {o for op in self._net.op for o in op.output}
+        self._external_input_map = {inp for inp in self._net.external_input}
         self._recreate_lookup_tables = False
 
     def AddGradientOperators(self, ys, skip=0):

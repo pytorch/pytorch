@@ -118,8 +118,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   explicit SequentialImpl(std::initializer_list<NamedAnyModule> named_modules) {
     modules_.reserve(named_modules.size());
     for (const auto& named_module : named_modules) {
-      push_back(
-          std::move(named_module.name()), std::move(named_module.module()));
+      push_back(named_module.name(), named_module.module());
     }
   }
 
@@ -385,8 +384,7 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
   /// It enables the following use case:
   /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
   Sequential(std::initializer_list<NamedAnyModule> named_modules)
-      : ModuleHolder(
-            std::make_shared<SequentialImpl>(std::move(named_modules))) {}
+      : ModuleHolder(std::make_shared<SequentialImpl>(named_modules)) {}
 };
 } // namespace nn
 } // namespace torch

@@ -14,8 +14,6 @@ RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
                                .def(torch::init<std::string, int64_t>());
 }
 
-constexpr size_t WorkerInfo::MAX_NAME_LEN;
-
 WorkerInfo::WorkerInfo(std::string name, int64_t id)
     : WorkerInfo(std::move(name), (worker_id_t)id) {
   TORCH_CHECK(

@@ -11,25 +11,26 @@ T = TypeVar("T")
 MAX_RAW_TENSOR_SIZE = 16
 
 class InflatableArg(NamedTuple):
-    """ Helper type for bundled inputs.
+    """Helper type for bundled inputs.
 
-        'value' is the compressed/deflated input that is stored in the model. Value
-        must be of the same type as the argument to the function that it is a deflated
-        input for.
+    'value' is the compressed/deflated input that is stored in the model. Value
+    must be of the same type as the argument to the function that it is a deflated
+    input for.
 
-        'fmt' is a formatable code string that is executed to inflate the compressed data into
-        the appropriate input. It can use 'value' as an input to the format str. It must result
-        in a value of the same type as 'value'.
+    'fmt' is a formatable code string that is executed to inflate the compressed data into
+    the appropriate input. It can use 'value' as an input to the format str. It must result
+    in a value of the same type as 'value'.
 
-        'fmt_fn' is a formatable function code string that is executed to inflate the compressed
-        data into the appropriate input. It must result in a value of the same type as 'value'.
-        The function name should be the formatable part of the string.
+    'fmt_fn' is a formatable function code string that is executed to inflate the compressed
+    data into the appropriate input. It must result in a value of the same type as 'value'.
+    The function name should be the formatable part of the string.
 
     Note: Only top level InflatableArgs can be inflated. i.e. you cannot place
     an inflatable arg inside of some other structure. You should instead create
     an inflatable arg such that the fmt code string returns the full structure
     of your input.
     """
+
     value: Any
     fmt: str = "{}"
     fmt_fn: str = ""
@@ -42,8 +43,9 @@ def bundle_inputs(
         *,
         _receive_inflate_expr: Optional[List[str]] = None,
 ) -> torch.jit.ScriptModule:
-    """Creates and returns a copy of the specified model with inputs attached. The original model is
-    not mutated or changed in any way.
+    """Create and return a copy of the specified model with inputs attached.
+
+    The original model is not mutated or changed in any way.
 
     Models with bundled inputs can be invoked in a uniform manner by
     benchmarking and code coverage tools.
@@ -115,10 +117,10 @@ def bundle_inputs(
     # Fortunately theres a function in _recursive that does exactly that conversion.
     cloned_module = wrap_cpp_module(clone)
     if isinstance(inputs, dict):
-        assert(isinstance(info, dict) or info is None)
+        assert isinstance(info, dict) or info is None
         augment_many_model_functions_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     else:
-        assert(isinstance(info, list) or info is None)
+        assert isinstance(info, list) or info is None
         augment_model_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     return cloned_module
 
@@ -129,7 +131,7 @@ def augment_model_with_bundled_inputs(
         info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
         skip_size_check=False,
 ) -> None:
-    """ Add bundled sample inputs to a model for the forward function.
+    """Add bundled sample inputs to a model for the forward function.
 
     Models with bundled inputs can be invoked in a uniform manner by
     benchmarking and code coverage tools.
@@ -159,7 +161,6 @@ def augment_model_with_bundled_inputs(
       - `inputs` is a list of inputs of form List[Tuple[Any, ...]]. A list of tuples where the elements
         of each tuple are the args that make up one input.
     """
-
     if not isinstance(model, torch.jit.ScriptModule):
         raise Exception("Only ScriptModule is supported.")
 

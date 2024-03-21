@@ -152,7 +152,7 @@ def to_underlying_dtype(qdtype):
         torch.int16: torch.int16,
         torch.int32: torch.int32,
     }
-    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + str(qdtype)
     return DTYPE_MAPPING[qdtype]
 
 def get_qparam_dict(observer_or_fake_quant):
@@ -663,12 +663,12 @@ def get_fqn_to_example_inputs(
         return orig_module_call(self, *args, **kwargs)
 
     orig_module_call = torch.nn.Module.__call__
-    torch.nn.Module.__call__ = _patched_module_call
+    torch.nn.Module.__call__ = _patched_module_call  # type: ignore[method-assign]
     try:
         model(*example_inputs)
     finally:
         # restore the module call even if there is an exception
-        torch.nn.Module.__call__ = orig_module_call
+        torch.nn.Module.__call__ = orig_module_call  # type: ignore[method-assign]
     return fqn_to_example_inputs
 
 __all__ = [

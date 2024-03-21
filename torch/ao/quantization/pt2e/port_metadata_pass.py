@@ -3,7 +3,6 @@ from typing import Optional
 
 import torch
 from torch._export.error import InternalError
-from torch._export.pass_base import _ExportPassBase
 
 from torch.ao.quantization.pt2e.utils import (
     _filter_sym_size_users,
@@ -13,7 +12,7 @@ from torch.ao.quantization.pt2e.utils import (
 
 from torch.ao.quantization.quantizer import QuantizationSpecBase
 
-from torch.fx.passes.infra.pass_base import PassResult
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +85,7 @@ def _port_metadata_for_input_quant_nodes(
         if len(choose_qparam_users) != 2:
             raise InternalError(f"Expecting exactly two user for {choose_qparams_node}")
         scale_node = choose_qparam_users.pop()
-        dynamic_q_node = list(scale_node.users.keys())[0]
+        dynamic_q_node = next(iter(scale_node.users.keys()))
         dynamic_q_node_users = _filter_sym_size_users(dynamic_q_node)
         if len(dynamic_q_node_users) > 1:
             raise InternalError(f"Expecting single user for {dynamic_q_node}")
@@ -98,6 +97,19 @@ def _port_metadata_for_input_quant_nodes(
         q_node, dq_node = _find_q_dq_node_for_user(input_node, node)
         if q_node is None or dq_node is None:
             return
+        # add metadata for all the node between q_node and get_attr node
+        # if the q_node can be traced back to get_attr node
+        q_to_get_attr_nodes = [q_node]
+        q_node_input = q_node.args[0]
+        while isinstance(q_node_input, torch.fx.Node) and q_node_input.op not in [
+            "placeholder",
+            "get_attr",
+        ]:
+            q_to_get_attr_nodes.append(q_node_input)
+            q_node_input = q_node_input.args[0]
+        if isinstance(q_node_input, torch.fx.Node) and q_node_input.op == "get_attr":
+            for n in q_to_get_attr_nodes:
+                _add_metadata(n, q_node_input)
         _add_metadata(dq_node, node)
 
 
@@ -120,7 +132,7 @@ def _port_metadata_for_output_quant_nodes(
     _add_metadata(q_node, node)
 
 
-class PortNodeMetaForQDQ(_ExportPassBase):
+class PortNodeMetaForQDQ(PassBase):
     """
     Port metadata for nodes added by quantization flow.
     For static quant these are:
@@ -156,7 +168,7 @@ class PortNodeMetaForQDQ(_ExportPassBase):
           - [Q-> [DQ -> Conv -> Q] -> DQ -> [AvgPool] -> Q -> [DQ -> Linear -> Q] -> DQ]
           - Note DQ and Q nodes around AvgPool do not inherit metadata from AvgPool because
             AvgPool was not supposed to be quantized. Metadata porting relies on quantization_annotation
-            on the nodes (in this case AvgPool node) to conclude if the the node or patter was
+            on the nodes (in this case AvgPool node) to conclude if the node or patter was
             supposed to be quantized. And subsequntly decide if the preceding Q, if any, should
             inherit metadata from AvgPool.
       - Dynamically quantized patterns:

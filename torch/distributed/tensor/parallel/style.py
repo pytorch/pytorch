@@ -1,348 +1,491 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
+from functools import partial
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.tensor.parallel._utils import (
-    _prepare_input_validate,
-    _prepare_output_validate,
-    _PrepareInputType,
-    _PrepareOutputType,
-)
+import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate, Shard, distribute_tensor, distribute_module
+
 
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
-    "ColwiseParallel",
-    "PairwiseParallel",
     "SequenceParallel",
-    "make_input_replicate_1d",
-    "make_input_reshard_replicate",
-    "make_input_shard_1d",
-    "make_input_shard_1d_last_dim",
-    "make_sharded_output_tensor",
-    "make_output_replicate_1d",
-    "make_output_reshard_tensor",
-    "make_output_tensor",
-    "make_output_shard_1d",
+    "ColwiseParallel",
+    "PrepareModuleInput",
+    "PrepareModuleOutput",
 ]
 
 
 class ParallelStyle(ABC):
     """
-    The parallel style user wants the module or submodule to be parallelized.
-    Users can extend this class to build their own parallel style with customized input/output preparations.
-    """
+    The parallel style contract defines how the module or submodule should be parallelized.
 
-    _prepare_input: _PrepareInputType
-    _prepare_output: _PrepareOutputType
+    It only defines the ``apply`` method for ``parallelize_module`` to use, this allows maximum
+    flexibility for different kind of style implementations.
+    """
 
     @abstractmethod
-    def __init__(self, _prepare_input, _prepare_output) -> None:
-        self._prepare_input = _prepare_input  # type: ignore[assignment, misc]
-        self._prepare_output = _prepare_output  # type: ignore[assignment, misc]
-
-
-class PairwiseParallel(ParallelStyle):
-    """
-    PairwiseParallel concatenate colwise and rowwise styles as a fixed
-    pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
-    We assume both input and output need to be replicate DTensors.
-
-    .. warning::
-        PairwiseParallel does not support ``nn.MultiheadAttention``,
-        ``nn.Transformer`` well at this moment. One workaround is to apply
-        ``ColwiseParallel`` and ``RowwiseParallel`` to the components of
-        transformer. We recommend to use ``PairwiseParallel`` only
-        for even-number-layer MLP for now.
-    """
-
-    def __init__(self, _prepare_input=None, _prepare_output=None) -> None:
-        _prepare_input = (
-            make_input_replicate_1d if _prepare_input is None else _prepare_input
-        )
-        _prepare_output = (
-            make_output_tensor if _prepare_output is None else _prepare_output
-        )
-        super().__init__(_prepare_input, _prepare_output)
-
-
-class SequenceParallel(PairwiseParallel):
-    """
-    SequenceParallel concatenate colwise and rowwise styles as a fixed
-    pair together with sequence parallel like what Megatron-LM Sequence parallel
-    (https://arxiv.org/pdf/2205.05198.pdf) is doing.
-    We assume both input and output need to be sharded DTensors.
-
-    .. warning::
-        SequenceParallel does not support ``nn.MultiheadAttention``,
-        ``nn.Transformer`` well at this moment. One workaround is to apply
-        ``ColwiseParallel`` and ``RowwiseParallel`` to the components of
-        transformer. We recommend to use ``SequenceParallel`` only
-        for even-number-layer MLP for now.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_reshard_replicate, make_output_reshard_tensor)
-
-
-@_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_input_shard_1d(
-    input: Union[torch.Tensor, DTensor],
-    device_mesh: Optional[DeviceMesh] = None,
-    dim: int = 0,
-) -> DTensor:
-    """
-    Shard input tensor on ``dim`` over an 1-D device mesh. This function will be used in ParallelStyle.
-
-    Args:
-        input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
-            Single tensor will be sharded on dimension ``dim``
-            over the 1-D :class:`DeviceMesh`.
-        device_mesh (:class:`DeviceMesh`, optional):
-            The 1-D device mesh where ``input`` will be sharded.
-            If no :class:`DeviceMesh` is passed and ``input`` is a :class:`DTensor`,
-            `input.device_mesh` will be used.
-            If :class:`DeviceMesh` is not 1-D, an exception will be thrown.
-            Default: ``None``
-        dim (int, optional): The sharding dimension of ``input`` tensor.
-            Default: 0
-
-    Returns:
-        A :class:`DTensor` sharded on dimension ``dim`` over ``device_mesh``.
-    """
-    shard_spec = [Shard(dim)]
-    if isinstance(input, DTensor):
-        return input.redistribute(device_mesh, shard_spec)
-    elif isinstance(input, torch.Tensor):
-        return DTensor.from_local(input, device_mesh, shard_spec, run_check=False)
-    else:
-        raise RuntimeError(
-            "Tensor parallel module expects torch.Tensor or DTensor input but"
-            f" received {type(input)}!"
-        )
-
-
-@_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_input_shard_1d_last_dim(
-    input: Union[torch.Tensor, DTensor],
-    device_mesh: Optional[DeviceMesh] = None,
-) -> DTensor:
-    """
-    Wrapper func of ``make_input_shard_1d`` with ``dim`` = -1.
-
-    Args:
-        input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
-            This single tensor will be sharded on the last dimension
-            over the 1-D :class:`DeviceMesh`.
-        device_mesh (:class:`DeviceMesh`, optional):
-            The 1-D device mesh where ``input`` will be sharded.
-            If no :class:`DeviceMesh` is passed and ``input`` is a :class:`DTensor`,
-            `input.device_mesh` will be used.
-            If :class:`DeviceMesh` is not 1-D, an exception will be thrown.
-            Default: ``None``
-
-    Returns:
-        A :class:`DTensor` sharded on the last dimension over ``device_mesh``.
-    """
-    return make_input_shard_1d(input, device_mesh, dim=input.dim() - 1)  # type: ignore[call-arg]
-
-
-@_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_input_reshard_replicate(
-    input: torch.Tensor,
-    device_mesh: DeviceMesh,
-) -> DTensor:
-    """
-    To construct a Sharded DTensor from a tensor on different ranks
-    and then convert to a replicate DTensor.
-
-    Args:
-        input (:class:`torch.Tensor`):
-            The input tensor on each rank which consists of a global DTensor
-            sharded on dimension ``0`` over the 1-D :class:`DeviceMesh`
-            and then the sharded DTensor is converted to a replicate DTensor.
-        device_mesh (:class:`DeviceMesh`, optional):
-            The 1-D device mesh where ``input`` will be sharded.
-            If :class:`DeviceMesh` is not 1-D, an exception will be thrown.
-            Default: ``None``
-
-    Returns:
-        A :class:`DTensor` sharded on dimension ``0`` over ``device_mesh``
-            and then converted to replicate.
-    """
-    return make_input_replicate_1d(  # type: ignore[call-arg]
-        make_input_shard_1d(input, device_mesh, dim=0), device_mesh  # type: ignore[call-arg]
-    )
-
-
-@_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_input_replicate_1d(
-    input: Union[torch.Tensor, DTensor],
-    device_mesh: Optional[DeviceMesh] = None,
-) -> DTensor:
-    """
-    Replicate input tensor over an 1-D device mesh. This function will be used in ParallelStyle.
-
-    Args:
-        input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
-            This input tensor will be replicated over the 1-D :class:`DeviceMesh`.
-        device_mesh (:class:`DeviceMesh`, optional):
-            The 1-D device mesh where ``input`` will be replicated.
-            If no :class:`DeviceMesh` is passed and ``input`` is a :class:`DTensor`,
-            ``input.device_mesh`` will be used.
-            If :class:`DeviceMesh` is not 1-D, an exception will be thrown.
-            Default: ``None``
-
-    Returns:
-        A :class:`DTensor` replicated over ``device_mesh``.
-    """
-    replicate = [Replicate()]
-    if isinstance(input, DTensor):
-        return input.redistribute(device_mesh, replicate)
-    elif isinstance(input, torch.Tensor):
-        return DTensor.from_local(input, device_mesh, replicate, run_check=False)
-    else:
-        raise RuntimeError(
-            "Tensor parallel module expects torch.Tensor or DTensor input but"
-            f" received {type(input)}!"
-        )
-
-
-@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_output_shard_1d(
-    output: DTensor, device_mesh: Optional[DeviceMesh] = None, dim: int = 0
-) -> DTensor:
-    """
-    Convert Output DTensor to a sharded DTensor. This will be used in ParallelStyle.
-
-    Args:
-        output (:class:`DTensor`):
-            Output of module to be converted.
-        device_mesh (:class:`DeviceMesh`, optional):
-            Object needed to shard the output and it needs to be a 1D ``device_mesh``
-            and we will throw exceptions if a non-1D ``device_mesh`` is passed in.
-            If no ``device_mesh`` is passed in, we will reuse the one from output.
-            Default: ``None``
-        dim (int): Sharding dim for output. Default: 0
-
-    Return:
-        A :class:`DTensor` object sharded on the given dim.
-    """
-
-    return output.redistribute(device_mesh, [Shard(dim)])
-
-
-@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_output_replicate_1d(
-    output: DTensor, device_mesh: Optional[DeviceMesh] = None
-) -> DTensor:
-    """
-    Convert Output DTensor to a replicated DTensor. This will be used in ParallelStyle.
-
-    Args:
-        output (:class:`DTensor`):
-            Output of module to be converted.
-        device_mesh (:class:`DeviceMesh`, optional):
-            Object needed to replicate the output and it needs to be a 1D ``device_mesh``
-            and we will throw exceptions if a non-1D ``device_mesh`` is passed in.
-            If no ``device_mesh`` is passed in, we will reuse the one from output.
-            Default: ``None``
-
-    Return:
-        A :class:`DTensor` object made replicate.
-    """
-
-    return output.redistribute(device_mesh, [Replicate()])
-
-
-@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_output_tensor(
-    output: DTensor, device_mesh: Optional[DeviceMesh] = None
-) -> torch.Tensor:
-    """
-    Convert Output DTensor to a replicated DTensor first and then convert it to Tensor.
-
-    Args:
-        output (:class:`DTensor`):
-            Output of module to be converted.
-        device_mesh (:class:`DeviceMesh`, optional):
-            Object which is needed to replicate the output and it needs to be
-            a 1D ``device_mesh`` and we will throw exceptions if a non-1D
-            ``device_mesh`` is passed in. If no ``device_mesh`` is passed in,
-            we will reuse the one from output.
-            Default: ``None``
-
-    Return:
-        A :class:`torch.Tensor` object converted from output DTensor.
-    """
-
-    return make_output_replicate_1d(  # type: ignore[attr-defined]
-        output, device_mesh
-    ).to_local()  # type: ignore[call-arg]
-
-
-@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_sharded_output_tensor(
-    output: DTensor, _device_mesh: Optional[DeviceMesh] = None
-) -> torch.Tensor:
-    """
-    Convert sharded Output DTensor to torch.Tensor.
-
-    Args:
-        output (:class:`DTensor`):
-            Output of module to be converted.
-
-    Return:
-        A :class:`torch.Tensor` object converted from output DTensor.
-
-    ``_device_mesh`` is not needed and is just kept to match with
-        the signature in its callsite in ``distribute_module``.
-    """
-
-    return output.to_local()  # type: ignore[call-arg]
-
-
-@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
-def make_output_reshard_tensor(
-    output: DTensor,
-    device_mesh: Optional[DeviceMesh] = None,
-) -> torch.Tensor:
-    """
-    Convert Output DTensor to a sharded DTensor and return the local tensor.
-
-    Args:
-        output (:class:`DTensor`):
-            Output of module to be converted.
-        device_mesh (:class:`DeviceMesh`, optional):
-            Object needed to shard the output and it needs to be a 1D ``device_mesh``
-            and we will throw exceptions if a non-1D ``device_mesh`` is passed in.
-            If no ``device_mesh`` is passed in, we will reuse the one from output.
-            Default: ``None``
-
-    Return:
-        A :class:`torch.Tensor` object converted from output DTensor.
-    """
-
-    return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined]
-
-
-class RowwiseParallel(ParallelStyle):
-    """
-    Partitioning the row of a module.
-    We assume the input to be a sharded :class:`DTensor` and output to be a :class:`torch.Tensor`.
-    """
-
-    def __init__(self, _prepare_input=make_input_shard_1d_last_dim, _prepare_output=make_output_tensor) -> None:
-        super().__init__(_prepare_input, _prepare_output)
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        ...
 
 
 class ColwiseParallel(ParallelStyle):
     """
-    Partitioning the column of a tensor or module.
-    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`torch.Tensor`.
+    Partition a compatible nn.Module in a column-wise fashion. Currently supports nn.Linear and nn.Embedding.
+    Users can compose it together with RowwiseParallel to achieve the sharding of more complicated modules.
+    (i.e. MLP, Attention)
+
+    Keyword Args:
+        input_layouts (Placement, optional):
+            The DTensor layout of input tensor for the nn.Module, this is used to annotate the input tensor to
+            become a DTensor. If not specified, we assume the input tensor to be replicated.
+        output_layouts (Placement, optional):
+            The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
+            with the user desired layout. If not specified, the output tensor is sharded on the last dimension.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: True.
+    Returns:
+        A :class:`ParallelStyle` object that represents Colwise sharding of the nn.Module.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> m = Model(...)  # m is a nn.Module that contains a "w1" nn.Linear submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "w1" Linear will be converted to Replicated DTensor
+        >>> # and the output of "w1" will return :class:`torch.Tensor` that shards on the last dim.
+        >>>
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w1": ColwiseParallel()})
+        >>> ...
+
+    .. note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
+        specified, if there're operators that require specific tensor shape (i.e. before the paired ``RowwiseParallel``),
+        keep in mind that if the output is sharded the operator might need to be adjusted to the sharded size.
     """
 
-    def __init__(self, _prepare_input=make_input_replicate_1d, _prepare_output=make_sharded_output_tensor) -> None:
-        super().__init__(_prepare_input, _prepare_output)
+    def __init__(
+        self,
+        *,
+        input_layouts: Optional[Placement] = None,
+        output_layouts: Optional[Placement] = None,
+        use_local_output: bool = True
+    ):
+        super().__init__()
+        self.input_layouts = (input_layouts or Replicate(), )
+        self.output_layouts = (output_layouts or Shard(-1), )
+        # colwise linear runtime sharding (desired sharding):
+        # 1. requires replicate input
+        # 2. shard output on last dim
+        self.desired_input_layouts = (Replicate(), )
+        self.use_local_output = use_local_output
+
+    @staticmethod
+    def _prepare_input_fn(input_layouts, desired_input_layouts, mod, inputs, device_mesh):
+        # TODO: figure out dynamo support for instance method and switch this to instance method
+
+        # annotate module input placements/sharding with input_layouts
+        input_tensor = inputs[0]
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
+
+        # transform the input layouts to the desired layouts of ColwiseParallel
+        if input_layouts != desired_input_layouts:
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts, async_op=True)
+        return input_tensor
+
+    def _partition_linear_fn(self, name, module, device_mesh):
+        # colwise shard weight/bias to Shard(0), weight be Shard(0)
+        # means Colwise as Linear is input * weight^T + bias, where
+        # weight would become Shard(1)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
+            )
+            module.register_parameter(name, dist_param)
+
+    def _partition_embedding_fn(self, name, module, device_mesh):
+        # colwise shard embedding.weight is straight forward as Shard(1)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(1)])
+            )
+            module.register_parameter(name, dist_param)
+
+    @staticmethod
+    def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
+        # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        # back to local tensor
+        return outputs.to_local() if use_local_output else outputs
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Linear):
+            partition_fn = self._partition_linear_fn
+        elif isinstance(module, nn.Embedding):
+            partition_fn = self._partition_embedding_fn
+        else:
+            raise NotImplementedError("ColwiseParallel currently only support nn.Linear and nn.Embedding!")
+
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn,
+            partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
+            partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
+        )
+
+
+class RowwiseParallel(ParallelStyle):
+    """
+    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
+    Users can compose it with ColwiseParallel to achieve the sharding of more complicated modules.
+    (i.e. MLP, Attention)
+
+    Keyword Args:
+        input_layouts (Placement, optional):
+            The DTensor layout of input tensor for the nn.Module, this is used to annotate the input tensor to
+            become a DTensor. If not specified, we assume the input tensor to be sharded on the last dimension.
+        output_layouts (Placement, optional):
+            The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
+            with the user desired layout. If not specified, the output tensor is replicated.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: True.
+    Returns:
+        A :class:`ParallelStyle` object that represents Rowwise sharding of the nn.Module.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> m = Model(...)  # m is a nn.Module that contains a "w2" nn.Linear submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "w2" Linear will be converted to DTensor that shards on the last dim
+        >>> # and the output of "w2" will return a replicated :class:`torch.Tensor`.
+        >>>
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w2": RowwiseParallel()}),
+        >>> ...
+    """
+
+    def __init__(
+        self,
+        *,
+        input_layouts: Optional[Placement] = None,
+        output_layouts: Optional[Placement] = None,
+        use_local_output: bool = True
+    ):
+        super().__init__()
+        self.input_layouts = (input_layouts or Shard(-1), )
+        self.output_layouts = (output_layouts or Replicate(), )
+        self.use_local_output = use_local_output
+
+    @staticmethod
+    def _prepare_input_fn(input_layouts, desired_input_layouts, mod, inputs, device_mesh):
+        input_tensor = inputs[0]
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
+
+        if input_layouts != desired_input_layouts:
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts, async_op=True)
+        return input_tensor
+
+    def _partition_linear_fn(self, name, module, device_mesh):
+        # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
+        # means Rowwise as nn.Linear is input * weight^T + bias, where
+        # weight would become Shard(0)
+        module.register_parameter("weight", nn.Parameter(
+            distribute_tensor(module.weight, device_mesh, [Shard(1)])
+        ))
+        if module.bias is not None:
+            module.register_parameter("bias", nn.Parameter(
+                distribute_tensor(module.bias, device_mesh, [Replicate()])
+            ))
+
+    def _partition_embedding_fn(self, name, module, device_mesh):
+        # rowwise shard embedding.weight is Shard(0)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
+            )
+            module.register_parameter(name, dist_param)
+
+    @staticmethod
+    def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
+        # Rowwise sharding produces partial output, depending on output layouts:
+        # 1. to replicate -> allreduce
+        # 2. to shard -> reduce_scatter
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        # back to local tensor if use_local_output is True
+        return outputs.to_local() if use_local_output else outputs
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Linear):
+            partition_fn = self._partition_linear_fn
+            # rowwise linear runtime sharding requires input tensor shard on last dim
+            self.desired_input_layouts: Tuple[Placement, ...] = (Shard(-1), )
+        elif isinstance(module, nn.Embedding):
+            partition_fn = self._partition_embedding_fn
+            # rowwise embedding runtime sharding requires input tensor replicated
+            self.desired_input_layouts = (Replicate(), )
+        else:
+            raise NotImplementedError("RowwiseParallel currently only support nn.Linear and nn.Embedding!")
+
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn,
+            partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
+            partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
+        )
+
+
+class SequenceParallel(ParallelStyle):
+    """
+    SequenceParallel replicates a compatible ``nn.Module`` parameters and runs the sharded computation with
+    input sharded on the sequence dimension. This currently supports ``nn.LayerNorm``, ``nn.Dropout``, and the
+    `RMSNorm python implementation <https://github.com/facebookresearch/llama/blob/main/llama/model.py#L34>`__
+
+    This style implements the operation that is described in the paper
+    `Reducing Activation Recomputation in Large Transformer Models <https://arxiv.org/abs/2205.05198>`__
+
+    Both the input and output of the ``nn.Module`` will be sharded on the sequence dimension.
+
+    Keyword Args:
+        sequence_dim (int, optional):
+            The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
+            become a DTensor that is sharded on the sequence dimension, default: 1.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
+    Returns:
+        A :class:`ParallelStyle` object that represents Sequence Parallel of the ``nn.Module``.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, SequenceParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> m = Model(...)  # m is a nn.Module that contains a "norm" nn.LayerNorm submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "norm" will be converted to DTensor that shards on the sequence dim
+        >>> # and the output of "norm" will return a sharded on sequence dimension :class:`DTensor`.
+        >>>
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"norm": SequenceParallel()}),
+        >>> ...
+
+    .. note:: SequenceParallel style assumes ones initialization if there are weights in the nn.Module (i.e.
+        ``nn.LayerNorm`` or ``RMSNorm``, and they by default have ones initialization). If you have custom
+        inits for the weights on those modules, you need to broadcast the weights before/after parallelizing
+        to ensure that they are replicated.
+    """
+    def __init__(
+        self,
+        *,
+        sequence_dim: int = 1,
+        use_local_output: bool = False
+    ):
+        super().__init__()
+        self.sequence_dim = sequence_dim
+        self.use_local_output = use_local_output
+
+    def _replicate_module_fn(self, name: str, module: nn.Module, device_mesh: DeviceMesh):
+        for p_name, param in module.named_parameters():
+            # simple replication with fixed ones_ init from LayerNorm/RMSNorm, which allow
+            # us to simply just use from_local
+            replicated_param = torch.nn.Parameter(
+                DTensor.from_local(param, device_mesh, [Replicate()], run_check=False)
+            )
+            module.register_parameter(p_name, replicated_param)
+
+    @staticmethod
+    def _prepare_input_fn(sequence_dim, mod, inputs, device_mesh):
+        input_tensor = inputs[0]
+        if isinstance(input_tensor, DTensor):
+            return inputs
+        elif isinstance(input_tensor, torch.Tensor):
+            return DTensor.from_local(input_tensor, device_mesh, [Shard(sequence_dim)], run_check=False)
+        else:
+            raise ValueError(f"expecting input of {mod} to be a torch.Tensor or DTensor, but got {input_tensor}")
+
+    @staticmethod
+    def _prepare_output_fn(use_local_output, mod, outputs, device_mesh):
+        return outputs.to_local() if use_local_output else outputs
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        return distribute_module(
+            module,
+            device_mesh,
+            self._replicate_module_fn,
+            partial(self._prepare_input_fn, self.sequence_dim),
+            partial(self._prepare_output_fn, self.use_local_output),
+        )
+
+
+class PrepareModuleInput(ParallelStyle):
+    """
+    Configure the nn.Module's inputs to convert the input tensors of the nn.Module to DTensors at runtime according to
+    ``input_layouts``, and perform layout redistribution according to the ``desired_input_layouts``.
+
+    Keyword Args:
+        input_layouts (Union[Placement, Tuple[Placement]]):
+            The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
+            DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, ``None`` need to be specified
+            as a placeholder.
+        desired_input_layouts (Union[Placement, Tuple[Placement]]):
+            The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module inputs, default: False.
+    Returns:
+        A :class:`ParallelStyle` object that prepares the sharding layouts of the nn.Module's inputs.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
+        >>> # and then redistributed to Replicated DTensor.
+        >>> parallelize_module(
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
+        >>>     parallelize_plan={
+        >>>         "attn": PrepareModuleInput(
+        >>>             input_layouts=(Shard(0), None, None, ...),
+        >>>             desired_input_layouts=(Replicate(), None, None, ...)
+        >>>         ),
+        >>>     }
+        >>> )
+    """
+
+    def __init__(
+        self,
+        *,
+        input_layouts: Union[Placement, Tuple[Placement]],
+        desired_input_layouts: Union[Placement, Tuple[Placement]],
+        use_local_output: bool = False
+    ):
+        self.input_layouts = (input_layouts,) if isinstance(input_layouts, Placement) else input_layouts
+        self.desired_input_layouts = \
+            (desired_input_layouts,) if isinstance(desired_input_layouts, Placement) else desired_input_layouts
+        self.use_local_output = use_local_output
+        assert len(self.input_layouts) == len(self.desired_input_layouts), \
+            "input_layouts and desired_input_layouts should have same length!"
+
+    def _prepare_input_fn(self, inputs, device_mesh):
+        prepared_inputs = []
+        if not isinstance(inputs, tuple):
+            inputs = (inputs,)
+        if len(inputs) != len(self.input_layouts):
+            raise ValueError("module inputs and input_layouts should have same length!")
+
+        for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
+            if input_layout is not None:
+                if isinstance(inp, DTensor):
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert inp.placements[0] == input_layout
+                    dt_inp = inp
+                else:
+                    dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
+                if input_layout != desired_layout:
+                    dt_inp = dt_inp.redistribute(placements=(desired_layout,))
+                prepared_inputs.append(dt_inp.to_local() if self.use_local_output else dt_inp)
+            else:
+                prepared_inputs.append(inp)
+        return tuple(prepared_inputs)
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+        return module
+
+
+class PrepareModuleOutput(ParallelStyle):
+    """
+    Configure the nn.Module's outputs to convert the output tensors of the nn.Module to DTensors at runtime according to
+    ``output_layouts``, and perform layout redistribution according to the ``desired_output_layouts``.
+
+    Keyword Args:
+        output_layouts (Union[Placement, Tuple[Placement]]):
+            The DTensor layouts of output tensors for the nn.Module, this is used to convert the output tensors to
+            DTensors if they are :class:`torch.Tensor`. If some outputs are not torch.Tensor or no need to convert to DTensors,
+            ``None`` need to be specified as a placeholder.
+        desired_output_layouts (Union[Placement, Tuple[Placement]]):
+            The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
+            have the desired DTensor layouts.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
+    Returns:
+        A ParallelStyle object that prepares the sharding layouts of the nn.Module's outputs.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # According to the style specified below, the output of the TransformerBlock will be converted to Replicated DTensor
+        >>> # and then redistributed to Sharded DTensor.
+        >>> parallelize_module(
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
+        >>>     parallelize_plan = PrepareModuleOutput(
+        >>>         output_layouts=Replicate(),
+        >>>         desired_output_layouts=Shard(0)
+        >>>     )
+        >>> )
+    """
+    def __init__(
+        self,
+        *,
+        output_layouts: Union[Placement, Tuple[Placement]],
+        desired_output_layouts: Union[Placement, Tuple[Placement]],
+        use_local_output: bool = True
+    ):
+        self.output_layouts = (output_layouts,) if isinstance(output_layouts, Placement) else output_layouts
+        self.desired_output_layouts = \
+            (desired_output_layouts,) if isinstance(desired_output_layouts, Placement) else desired_output_layouts
+        self.use_local_output = use_local_output
+        assert len(self.output_layouts) == len(self.desired_output_layouts), \
+            "output_layouts and desired_output_layouts should have same length!"
+
+    def _prepare_out_fn(self, outputs, device_mesh):
+        prepared_outputs = []
+        if not isinstance(outputs, tuple):
+            outputs = (outputs,)
+        if len(outputs) != len(self.output_layouts):
+            raise ValueError("module outputs and output_layouts should have same length!")
+        for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
+            if out_layout is not None:
+                if isinstance(out, DTensor):
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert out.placements[0] == out_layout
+                    dt_out = out
+                else:
+                    dt_out = DTensor.from_local(out, device_mesh, (out_layout,), run_check=False)
+
+                if out_layout != desired_out_layout:
+                    dt_out = dt_out.redistribute(placements=(desired_out_layout,))
+                prepared_outputs.append(dt_out.to_local() if self.use_local_output else dt_out)
+            else:
+                prepared_outputs.append(out)
+        if len(prepared_outputs) == 1:
+            return prepared_outputs[0]
+        else:
+            return tuple(prepared_outputs)
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
+        return module

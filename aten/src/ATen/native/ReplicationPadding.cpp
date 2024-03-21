@@ -20,13 +20,12 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(replication_pad1d) (
   const Tensor& input, IntArrayRef paddingSize  // no out argument!
 ) {
+  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
 
   int64_t dimw = 1;
   int64_t dimslices = 0;
@@ -87,6 +86,7 @@ TORCH_META_FUNC(replication_pad1d_backward) (
 TORCH_META_FUNC(replication_pad2d) (
   const Tensor& input, IntArrayRef paddingSize
 ) {
+  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
   int64_t pad_t = paddingSize[2];
@@ -126,6 +126,7 @@ TORCH_META_FUNC(replication_pad2d) (
 TORCH_META_FUNC(replication_pad3d) (
   const Tensor& input, IntArrayRef paddingSize
 ) {
+  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int64_t pleft = paddingSize[0];
   int64_t pright = paddingSize[1];
   int64_t ptop = paddingSize[2];
@@ -170,9 +171,9 @@ TORCH_META_FUNC(replication_pad3d) (
   }
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -355,5 +356,4 @@ DEFINE_DISPATCH(replication_pad2d_backward_kernel);
 DEFINE_DISPATCH(replication_pad3d_kernel);
 DEFINE_DISPATCH(replication_pad3d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

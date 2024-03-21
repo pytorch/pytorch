@@ -152,13 +152,10 @@
 
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
-namespace c10 {} // namespace c10
-namespace c10 {
-namespace cuda {}
-} // namespace c10
-namespace c10 {
-namespace hip {}
-} // namespace c10
+namespace c10 {}
+namespace c10::cuda {}
+namespace c10::hip {}
+namespace c10::xpu {}
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
@@ -170,11 +167,9 @@ using namespace c10;
 namespace at {
 using namespace c10;
 }
-namespace at {
-namespace cuda {
+namespace at::cuda {
 using namespace c10::cuda;
-}
-} // namespace at
+} // namespace at::cuda
 
 // WARNING!!! THIS IS A GIANT HACK!!!
 // This line means you cannot simultaneously include c10/hip
@@ -184,11 +179,13 @@ using namespace c10::cuda;
 // from at::cuda.  This namespace makes that happen.  When
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
-namespace at {
-namespace cuda {
+namespace at::cuda {
 using namespace c10::hip;
-}
-} // namespace at
+} // namespace at::cuda
+
+namespace at::xpu {
+using namespace c10::xpu;
+} // namespace at::xpu
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -237,13 +234,6 @@ using namespace c10::hip;
 #endif
 
 #define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
-
-// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
-#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
-#define C10_FALLTHROUGH [[fallthrough]]
-#else
-#define C10_FALLTHROUGH
-#endif
 
 #include <cstdint>
 
@@ -333,7 +323,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || \
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__FreeBSD__) || \
     (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
@@ -356,13 +346,21 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-#define CUDA_KERNEL_ASSERT(cond)                                                                 \
-  if (C10_UNLIKELY(!(cond))) {                                                                   \
-    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+#define CUDA_KERNEL_ASSERT(cond)                 \
+  if (C10_UNLIKELY(!(cond))) {                   \
+    (void)(_wassert(                             \
+               _CRT_WIDE(#cond),                 \
+               _CRT_WIDE(__FILE__),              \
+               static_cast<unsigned>(__LINE__)), \
+           0);                                   \
   }
-#define SYCL_KERNEL_ASSERT(cond)                                                                 \
-  if (C10_UNLIKELY(!(cond))) {                                                                   \
-    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+#define SYCL_KERNEL_ASSERT(cond)                 \
+  if (C10_UNLIKELY(!(cond))) {                   \
+    (void)(_wassert(                             \
+               _CRT_WIDE(#cond),                 \
+               _CRT_WIDE(__FILE__),              \
+               static_cast<unsigned>(__LINE__)), \
+           0);                                   \
   }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
@@ -374,9 +372,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (                                                                       \
-    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS))
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
 __host__ __device__
@@ -393,18 +389,14 @@ __host__ __device__
         unsigned int line,
         const char* function) noexcept __attribute__((__noreturn__));
 
-#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS)
-// ROCm supports __assert_fail only as a device side function.
-__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
-    const char* assertion,
-    const char* file,
-    unsigned int line,
-    const char* function);
-#endif // defined(__HIP_ARCH__) || defined(__HIP__)
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
+// ROCm disable kernel assert by default
+#if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
+#define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
@@ -415,6 +407,7 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__
 
 #ifdef __APPLE__
@@ -435,16 +428,6 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
 #else
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
-#endif
-
-// Portable determination of whether type T is trivially copyable.
-// Warning: __has_trivial_copy for GCC may not always detect the non-POD
-// correctly. For example, T = std::unique_ptr may evaluate to true and be
-// treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
-#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
-#else
-#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
 #if defined(__CUDA_ARCH__)

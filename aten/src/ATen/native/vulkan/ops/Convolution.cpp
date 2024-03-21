@@ -1,9 +1,10 @@
-#include <ATen/native/ConvUtils.h>
-#include <ATen/native/utils/ParamUtils.h>
 
 #include <ATen/Context.h>
 
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Copy.h>
@@ -13,6 +14,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/dequantize.h>
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
 #include <ATen/ops/quantize_per_tensor.h>
@@ -292,7 +294,8 @@ static api::ShaderInfo get_shader(
 
   if (quantized) {
     if (transposed) {
-      TORCH_CHECK(false, "Quantized TConv not supported!");
+      shader = VK_KERNEL(quantized_conv_transpose2d);
+      return shader;
     }
 
     switch (method) {
@@ -317,23 +320,23 @@ static api::ShaderInfo get_shader(
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_LOOKUP_KERNEL(conv2d);
+      shader = VK_KERNEL(conv2d);
       break;
     case Conv2dDepthwise:
       shader = VK_KERNEL(conv2d_dw);
       if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
           kernel_size[3] == 3) {
         // 1x1 refers to the output tile size
-        shader = VK_KERNEL(conv2d_dw_3x3);
+        shader = VK_KERNEL(conv2d_dw_output_tile_3x3);
       }
       if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
           kernel_size[3] == 5) {
         // 1x1 refers to the output tile size
-        shader = VK_KERNEL(conv2d_dw_5x5);
+        shader = VK_KERNEL(conv2d_dw_output_tile_5x5);
       }
       break;
     case Conv2dPointwise:
-      shader = VK_LOOKUP_KERNEL(conv2d_pw);
+      shader = VK_KERNEL(conv2d_pw_output_tile_2x2);
       break;
   }
   return shader;
@@ -382,11 +385,11 @@ void record_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -467,11 +470,11 @@ void record_quantized_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -506,13 +509,15 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-    const Tensor& weight_arg,
+    const Tensor& weight_inp,
     const bool transposed,
     const bool quantized,
     const Conv2dMethod conv_method) {
-  if (weight_arg.is_vulkan()) {
-    return convert(weight_arg);
+  if (weight_inp.is_vulkan()) {
+    return convert(weight_inp);
   }
+
+  const Tensor weight_arg = quantized ? at::dequantize(weight_inp) : weight_inp;
 
   const Tensor weight = transposed
       ? at::permute(weight_arg, {1, 0, 2, 3}).contiguous()
@@ -527,16 +532,10 @@ vTensor pack_weights(
 
   vTensor v_weight{
       api::context(),
-      weight_rearranged.sizes(),
-      weight_arg.scalar_type(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
+      weight_rearranged.sizes().vec(),
+      convert_dtype(weight_rearranged.scalar_type()),
+      api::StorageType::TEXTURE_2D,
   };
-
-  if (quantized) {
-    v_weight.set_is_quantized();
-    v_weight.set_scale(weight_arg.q_scale());
-    v_weight.set_zero_point(weight_arg.q_zero_point());
-  }
 
   pack_cpu_to_vulkan(weight_rearranged, v_weight);
 
@@ -548,20 +547,20 @@ vTensor pack_biases(
     const Tensor& weight,
     const bool transposed,
     const bool quantized) {
-  at::Tensor bias_rearranged = conv2d::rearrange_bias(bias, weight, transposed);
+  at::Tensor bias_arg = conv2d::rearrange_bias(bias, weight, transposed);
+  at::Tensor bias_rearranged =
+      (quantized &&
+       (bias_arg.scalar_type() == kQUInt8 || bias_arg.scalar_type() == kQInt8 ||
+        bias_arg.scalar_type() == kQInt32))
+      ? at::dequantize(bias_arg)
+      : bias_arg;
 
   vTensor v_bias{
       api::context(),
-      bias_rearranged.sizes(),
-      bias_rearranged.scalar_type(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
+      bias_rearranged.sizes().vec(),
+      convert_dtype(bias_rearranged.scalar_type()),
+      api::StorageType::TEXTURE_2D,
   };
-
-  if (quantized && bias->scalar_type() != c10::kFloat) {
-    v_bias.set_is_quantized();
-    v_bias.set_scale(bias_rearranged.q_scale());
-    v_bias.set_zero_point(bias_rearranged.q_zero_point());
-  }
 
   pack_cpu_to_vulkan(bias_rearranged, v_bias);
 
@@ -835,6 +834,132 @@ Tensor quantized_convolution(
 
 } // namespace
 
+namespace conv1d {
+
+vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
+  Tensor weight = weight_arg;
+
+  if (weight.is_cpu()) {
+    weight = weight.vulkan();
+  }
+
+  TORCH_CHECK(weight.is_vulkan(), "Weight must be on Vulkan device!");
+
+  vTensor v_weight = convert(weight);
+  if (v_weight.gpu_memory_layout() ==
+      api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED) {
+    v_weight = packing::convert_image_channels_packed_to_width_packed(v_weight);
+  }
+
+  TORCH_CHECK(
+      v_weight.gpu_memory_layout() == api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      "After packing, the v_weight must be in TENSOR_WIDTH_PACKED format");
+
+  return v_weight;
+}
+
+/*
+ * This is a full implementation. For algorithm details, refer to the shader
+ * kernel code.
+ */
+Tensor run_conv1d_context_impl(
+    const Tensor& input_arg,
+    const Tensor& weight_arg,
+    const c10::optional<Tensor>& bias_arg_opt,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  api::Context* const context = api::context();
+  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  const Tensor weight =
+      weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+
+  const IntArrayRef& input_sizes = input.sizes();
+  const IntArrayRef& weight_sizes = weight.sizes();
+
+  int32_t in_channels = static_cast<int32_t>(input_sizes[1]);
+  int32_t out_channels = static_cast<int32_t>(weight_sizes[0]);
+  int32_t kernel_size = static_cast<int32_t>(weight_sizes[2]);
+
+  Tensor bias;
+  if (bias_arg_opt) {
+    if (bias_arg_opt->is_vulkan()) {
+      bias = bias_arg_opt.value();
+    } else {
+      bias = bias_arg_opt.value().vulkan();
+    }
+  } else {
+    bias = at::zeros({out_channels}).vulkan();
+  }
+
+  TORCH_CHECK(input.dim() == 3, "input must be a 3-dim tensor");
+  TORCH_CHECK(weight.dim() == 3, "weight must be a 3-dim tensor");
+  TORCH_CHECK(
+      in_channels % groups == 0, "in_channels must be divisible by groups");
+  TORCH_CHECK(
+      out_channels % groups == 0, "out_channels must be divisible by groups");
+
+  const vTensor& v_input = convert(input);
+  const vTensor& v_weight = convert(weight);
+  const vTensor& v_bias = convert(bias);
+
+  vTensor v_output{
+      context,
+      conv_output_size(input_sizes, weight_sizes, padding, stride, dilation),
+      v_input.dtype(),
+  };
+
+  const struct Block final {
+    int32_t in_length;
+    int32_t kernel_size;
+    int32_t stride;
+    int32_t padding;
+    int32_t dilation;
+    int32_t in_group_size;
+    int32_t out_group_size;
+    int32_t batch_size;
+  } block{
+      static_cast<int32_t>(input_sizes[2]),
+      kernel_size,
+      static_cast<int32_t>(stride[0]),
+      static_cast<int32_t>(padding[0]),
+      static_cast<int32_t>(dilation[0]),
+      static_cast<int32_t>(in_channels / groups),
+      static_cast<int32_t>(out_channels / groups),
+      static_cast<int32_t>(input_sizes[0]),
+  };
+
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader descriptor
+      VK_KERNEL(conv1d),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      {1, static_cast<uint32_t>(out_channels), 1},
+      // local work group size
+      {1, 1, 1},
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_bias.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
+
+  return convert(v_output);
+}
+
+} // namespace conv1d
+
 Conv2dPackedContext::Conv2dPackedContext(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
@@ -1001,13 +1126,36 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       output_max));
 }
 
+c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /* transposed = */ true,
+      /* quantized = */ true,
+      output_padding,
+      groups,
+      output_min,
+      output_max));
+}
+
 Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,
     double scale,
     int64_t zero_point) {
   api::Context* const context = api::context();
-
   // Validate input tensor is a Vulkan tensor, then convert to vTensor
   TORCH_CHECK(input_arg.is_vulkan(), "Input tensor must be Vulkan!");
   const vTensor& v_input = convert(input_arg);
@@ -1022,11 +1170,6 @@ Tensor run_conv2d_context_impl(
 
   Tensor bias =
       conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor();
-  if (quantized && bias.scalar_type() == c10::kFloat) {
-    bias = at::quantize_per_tensor(
-        bias, v_weight.get_scale() * v_input.get_scale(), 0, c10::kQInt32);
-    conv_context->set_val(Conv2dPackedContext::Packed::Bias, bias);
-  }
 
   const vTensor& v_bias = convert(bias);
 
@@ -1080,7 +1223,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   if (quantized) {
@@ -1250,8 +1393,94 @@ Tensor conv2d_clamp_run(
   return context->run(input);
 }
 
+Conv1dPackedContext::Conv1dPackedContext(
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const IntArrayRef dilation_arg,
+    const int64_t groups)
+    : unpacked_{c10::AnyType::get()} {
+  packed_.reserve(Packed::NumArgs);
+  packed_.emplace_back(
+      convert(conv1d::pack_weights_using_width_packing(weight.vulkan())));
+  packed_.emplace_back(bias->vulkan());
+  packed_.emplace_back(stride_arg);
+  packed_.emplace_back(padding_arg);
+  packed_.emplace_back(dilation_arg);
+  packed_.emplace_back(safe_downcast<int32_t>(groups));
+
+  compute_shader_ = VK_KERNEL(conv1d);
+
+  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+    unpacked_.emplace_back(stride_arg.vec());
+    unpacked_.emplace_back(padding_arg.vec());
+    unpacked_.emplace_back(dilation_arg.vec());
+    unpacked_.emplace_back(safe_downcast<int32_t>(groups));
+  }
+}
+
+Conv1dPackedContext Conv1dPackedContext::pack(c10::impl::GenericList unpacked) {
+  return Conv1dPackedContext(
+      unpacked.get(Unpacked::Weight).toTensor(),
+      get_optional_tensor(unpacked, Unpacked::Bias),
+      unpacked.get(Unpacked::Stride).toIntVector(),
+      unpacked.get(Unpacked::Padding).toIntVector(),
+      unpacked.get(Unpacked::Dilation).toIntVector(),
+      unpacked.get(Unpacked::Groups).toInt());
+}
+
+c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups) {
+  return c10::make_intrusive<Conv1dPackedContext>(
+      Conv1dPackedContext(weight, bias, stride, padding, dilation, groups));
+}
+
+Tensor convolution1d(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const int64_t groups) {
+  Conv1dPackedContext conv1d_context =
+      Conv1dPackedContext(weight, bias, stride, padding, dilation, groups);
+
+  return run_conv1d_context(
+      input, c10::make_intrusive<Conv1dPackedContext>(conv1d_context));
+}
+
+Tensor run_conv1d_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv1dPackedContext>& context) {
+  const Tensor weight =
+      context->get_val(Conv1dPackedContext::Packed::Weight).toTensor();
+  const c10::optional<Tensor>& bias_opt =
+      context->get_val(Conv1dPackedContext::Packed::Bias).toTensor();
+  const auto stride =
+      context->get_val(Conv1dPackedContext::Packed::Stride).toIntVector();
+  const auto padding =
+      context->get_val(Conv1dPackedContext::Packed::Padding).toIntVector();
+  const auto dilation =
+      context->get_val(Conv1dPackedContext::Packed::Dilation).toIntVector();
+  const auto groups =
+      context->get_val(Conv1dPackedContext::Packed::Groups).toInt();
+  return conv1d::run_conv1d_context_impl(
+      input, weight, bias_opt, stride, padding, dilation, groups);
+}
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("convolution_overrideable", convolution);
+  m.impl(TORCH_SELECTIVE_NAME("aten::conv1d"), TORCH_FN(convolution1d));
 }
 
 } // namespace ops

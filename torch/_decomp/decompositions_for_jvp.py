@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import torch
 import torch._decomp
 from torch import Tensor
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
 decomposition_table = torch._decomp.decomposition_table
 decomposition_table_for_jvp: Dict[torch._ops.OperatorBase, Callable] = {}
@@ -62,6 +63,12 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
     else:
         raise RuntimeError(f"could not find decomposition for {decomp}")
     decomp_fn = decomposition_table_used[decomp]
+
+    # `out_wrapper` extends a decompositions signature with
+    # an `out` parameter. However jit will use the unwrapped function's
+    # signature instead so we need to unwrap here to prevent an error
+    decomp_fn = _maybe_remove_out_wrapper(decomp_fn)
+
     if use_python:
         decomp_fn = torch.jit.ignore(decomp_fn)
         sig = inspect.signature(decomp_fn)
@@ -284,6 +291,34 @@ def native_batch_norm_backward(
     return (grad_input, grad_weight, grad_bias)
 
 
+@register_decomposition_for_jvp(aten.batch_norm_backward)
+def batch_norm_backward(
+    grad_out: Tensor,
+    input: Tensor,
+    weight: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
+    update: bool,
+    eps: float,
+    output_mask: List[bool],
+    reserve: Tensor,
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    return native_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        update,
+        eps,
+        output_mask,
+    )
+
+
 _register_jit_decomposition_for_jvp(torch.ops.aten.trace.default, use_python=True)
 _register_jit_decomposition_for_jvp(torch.ops.aten.nll_loss_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.nll_loss2d_backward.default)
@@ -293,3 +328,4 @@ _register_jit_decomposition_for_jvp(torch.ops.aten.log_sigmoid_forward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.native_layer_norm_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.native_batch_norm_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.cudnn_batch_norm_backward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.batch_norm_backward.default)

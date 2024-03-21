@@ -9,10 +9,7 @@ install_ubuntu() {
   #   "$UBUNTU_VERSION" == "18.04"*
   # instead of
   #   "$UBUNTU_VERSION" == "18.04"
-  if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
-    cmake3="cmake=3.10*"
-    maybe_libiomp_dev="libiomp-dev"
-  elif [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
+  if [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
     cmake3="cmake=3.16*"
     maybe_libiomp_dev=""
   elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
@@ -23,7 +20,9 @@ install_ubuntu() {
     maybe_libiomp_dev="libiomp-dev"
   fi
 
-  if [[ "$CLANG_VERSION" == 12 ]]; then
+  if [[ "$CLANG_VERSION" == 15 ]]; then
+    maybe_libomp_dev="libomp-15-dev"
+  elif [[ "$CLANG_VERSION" == 12 ]]; then
     maybe_libomp_dev="libomp-12-dev"
   elif [[ "$CLANG_VERSION" == 10 ]]; then
     maybe_libomp_dev="libomp-10-dev"
@@ -62,6 +61,7 @@ install_ubuntu() {
     ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
+    libjemalloc2 \
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
@@ -75,6 +75,7 @@ install_ubuntu() {
     libtool \
     vim \
     unzip \
+    gpg-agent \
     gdb
 
   # Should resolve issues related to various apt package repository cert issues
@@ -152,7 +153,7 @@ wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make -j6
+make -j$[$(nproc) - 2]
 sudo make install
 cd ../../
 rm -rf valgrind_build

@@ -86,6 +86,10 @@ std::string opTypeToString(OpType opType) {
       return "UNKNOWN";
     case OpType::_REDUCE_SCATTER_BASE:
       return "_REDUCE_SCATTER_BASE";
+    case OpType::COALESCED:
+      return "COALESCED";
+    case OpType::_ALLREDUCE_SPARSE:
+      return "_ALLREDUCE_SPARSE";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
@@ -163,6 +167,18 @@ void ProcessGroup::setGroupName(const std::string& name) {
   for (auto& kv : deviceTypeToBackend_) {
     kv.second->setGroupName(name);
   }
+}
+
+void ProcessGroup::enableCollectivesTiming() {
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->enableCollectivesTiming();
+  }
+}
+
+void ProcessGroup::release_resources() {
+  store_.reset();
+  deviceTypeToBackend_.clear();
+  backendTypeToBackend_.clear();
 }
 
 } // namespace c10d

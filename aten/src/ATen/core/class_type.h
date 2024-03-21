@@ -6,12 +6,12 @@
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 struct CompilationUnit;
 struct Function;
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
 
 namespace c10 {
 
@@ -207,7 +207,7 @@ struct TORCH_API ClassType : public NamedType {
   // it is unsafe to maintain uses of the old type of the attribute,
   // and any code that works on the attribute is now invalid.
   // Only newly created code is valid again.
-  void unsafeChangeAttributeType(const std::string& name, TypePtr new_ty);
+  void unsafeChangeAttributeType(const std::string& name, const TypePtr& new_ty);
 
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
@@ -390,8 +390,7 @@ struct TORCH_API ClassType : public NamedType {
       std::string doc_string = "",
       std::vector<std::string> unresolved_class_attributes = {});
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    (void)printer; // Suppress unused variable warning
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }

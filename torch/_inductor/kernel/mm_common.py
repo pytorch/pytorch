@@ -7,6 +7,8 @@ import sympy
 import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
+
+from .. import config as inductor_config
 from ..utils import ceildiv as cdiv, next_power_of_2
 
 log = logging.getLogger(__name__)
@@ -31,9 +33,30 @@ def filtered_configs(
     # it's safer to use at least [32, 32] block size for int8/uint8
     # tensors
     min_block_size = 32 if has_int8_tensor else 16
-    m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), min_block_size)
-    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), min_block_size)
-    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), min_block_size)
+    m = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
+    n = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
+    k = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+            )
+        ),
+        min_block_size,
+    )
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
@@ -42,15 +65,50 @@ def filtered_configs(
         block_k = max(min(block_k, k), min_block_size)
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
-        if (block_m, block_n, block_k, num_stages, num_warps) not in used:
-            used.add((block_m, block_n, block_k, num_stages, num_warps))
-            yield triton_config(
-                BLOCK_M=block_m,
-                BLOCK_N=block_n,
-                BLOCK_K=block_k,
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
+        if torch.version.hip:
+            for matrix_instr_nonkdim in [0, 16]:
+                if matrix_instr_nonkdim != 0 and (
+                    block_m % matrix_instr_nonkdim != 0
+                    or block_n % matrix_instr_nonkdim != 0
+                ):
+                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                    continue
+                if (
+                    block_m,
+                    block_n,
+                    block_k,
+                    num_stages,
+                    num_warps,
+                    matrix_instr_nonkdim,
+                ) not in used:
+                    used.add(
+                        (
+                            block_m,
+                            block_n,
+                            block_k,
+                            num_stages,
+                            num_warps,
+                            matrix_instr_nonkdim,
+                        )
+                    )
+                    yield triton_config(
+                        BLOCK_M=block_m,
+                        BLOCK_N=block_n,
+                        BLOCK_K=block_k,
+                        num_stages=num_stages,
+                        num_warps=num_warps,
+                        matrix_instr_nonkdim=matrix_instr_nonkdim,
+                    )
+        else:
+            if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
+                used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
+                yield triton_config(
+                    BLOCK_M=block_m,
+                    BLOCK_N=block_n,
+                    BLOCK_K=block_k,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                )
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
@@ -137,7 +195,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
     """
     Common options to matmul triton templates.
     """
@@ -146,10 +204,14 @@ def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
         == config.kwargs["BLOCK_K"]
     )
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        not inductor_config.force_same_precision
+        or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
+    )
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
-        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
@@ -192,9 +254,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))  # type: ignore[attr-defined]
+            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
         if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))  # type: ignore[attr-defined]
-        return V.ops.add(acc, bias)  # type: ignore[attr-defined]
+            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
+        return V.ops.add(acc, bias)
 
     return epilogue

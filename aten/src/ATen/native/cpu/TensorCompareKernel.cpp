@@ -59,7 +59,7 @@ static inline void compare_base_kernel_core(
     .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
     .add_output(result1)
     .add_output(result2)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   iter.for_each(loop, /* grain_size */ 1);
@@ -185,7 +185,7 @@ static void aminmax_kernel(
     return;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "aminmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -320,13 +320,13 @@ static void isin_default_kernel_cpu(
 
   auto iter = TensorIteratorConfig()
     .add_output(out)
-    .add_input(promoted_elements)
+    .add_const_input(promoted_elements)
     .check_all_same_dtype(false)
     .build();
   // Dispatch based on promoted type.
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
-      const auto* test_element_data = test_elements_flat.data_ptr<scalar_t>();
+      const auto* test_element_data = test_elements_flat.const_data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {
         if (element_val == *(test_element_data + test_elements_stride * j)) {
           return !invert;

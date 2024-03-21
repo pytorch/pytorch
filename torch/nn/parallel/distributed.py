@@ -11,18 +11,22 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Type
+from typing import Any, Callable, List, Optional, Tuple, Type
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
-
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.hooks import RemovableHandle
 
 RPC_AVAILABLE = False
 if dist.is_available():
-    from torch.distributed.distributed_c10d import _get_default_group, ReduceOp
+    from torch.distributed.distributed_c10d import (
+        _get_default_group,
+        _rank_not_in_group,
+        ReduceOp,
+    )
     from torch.distributed.utils import (
         _alloc_storage,
         _cast_forward_inputs,
@@ -89,9 +93,7 @@ class _MixedPrecision:
 
 
 def _cast_buffers(mixed_precision_config, root_module):
-    """
-    Casts buffers to the given ``buffer_dtype``.
-    """
+    """Casts buffers to the given ``buffer_dtype``."""
     for buf in root_module.buffers():
         if hasattr(buf, "_ddp_ignored") and buf._ddp_ignored:
             continue
@@ -100,9 +102,7 @@ def _cast_buffers(mixed_precision_config, root_module):
 
 
 def _setup_mixed_precision_params(mixed_precision_config, root_module):
-    """
-    Creates and frees storage for the mixed precision parameters.
-    """
+    """Create and free storage for the mixed precision parameters."""
     for param in root_module.parameters():
         # Do not setup mixed precision for DDP ignored parameters.
         if hasattr(param, "_ddp_ignored") and param._ddp_ignored:
@@ -140,9 +140,7 @@ def _tree_unflatten_with_rref(output, treespec, output_is_rref):
 
 
 def _find_tensors(obj):
-    r"""
-    Recursively find all tensors contained in the specified object.
-    """
+    r"""Recursively find all tensors contained in the specified object."""
     if RPC_AVAILABLE and isinstance(obj, RRef):
         # If the current node is the owner of the RRef, unwrap it and try to
         # find Tensors.
@@ -152,12 +150,12 @@ def _find_tensors(obj):
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
-        return itertools.chain(*map(_find_tensors, obj))
+        return itertools.chain.from_iterable(map(_find_tensors, obj))
     if isinstance(obj, dict):
-        return itertools.chain(*map(_find_tensors, obj.values()))
+        return itertools.chain.from_iterable(map(_find_tensors, obj.values()))
     if is_dataclass(obj):
-        return itertools.chain(
-            *map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
+        return itertools.chain.from_iterable(
+            map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
         )
 
     return []
@@ -174,7 +172,7 @@ def _dump_DDP_relevant_env_vars():
         "GLOO_SOCKET_IFNAME",
         "GLOO_DEVICE_TRANSPORT",
         "NCCL_SOCKET_IFNAME",
-        "NCCL_BLOCKING_WAIT",
+        "TORCH_NCCL_BLOCKING_WAIT",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
         "NCCL_IB_DISABLE",
@@ -212,7 +210,7 @@ def _dump_DDP_relevant_env_vars():
         "NCCL_COLLNET_ENABLE",
         "NCCL_TOPO_FILE",
         "NCCL_TOPO_DUMP_FILE",
-        "NCCL_ASYNC_ERROR_HANDLING",
+        "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     ]
     formatted_output = ""
     for var in relevant_env_vars:
@@ -270,9 +268,7 @@ class _DDPSink(Function):
 
 class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
-        """
-        Sets config variables for internal usage.
-        """
+        """Set config variables for internal usage."""
         assert isinstance(ddp, DistributedDataParallel), (
             "DDP join hook requires passing in a DistributedDataParallel "
             "instance as the state"
@@ -284,10 +280,7 @@ class _DDPJoinHook(JoinHook):
         super().__init__()
 
     def main_hook(self):
-        """
-        Shadows the DDP collective communication operations in the forward and
-        backward passes.
-        """
+        """Shadow the DDP collective communication operations in the forward and backward passes."""
         ddp = self.ddp
         # Buckets are rebuilt only once during a training period
         ddp.reducer._rebuild_buckets()
@@ -299,9 +292,9 @@ class _DDPJoinHook(JoinHook):
         ddp._check_and_sync_module_buffers()
 
         # Check if need to sync in the backward pass
-        work = ddp._check_global_requires_backward_grad_sync(is_joined_rank=True)
-        work.wait()
-        should_sync_backwards = work.result()[0].item() != 0
+        should_sync_backwards = ddp._check_global_requires_backward_grad_sync(
+            is_joined_rank=True
+        )
         # Forward parameter sync is disabled in the next iteration if we
         # are skipping gradient sync this iteration, so set
         # `require_forward_param_sync` accordingly
@@ -321,16 +314,12 @@ class _DDPJoinHook(JoinHook):
         ddp.reducer._push_all_rebuilt_params()
 
     def post_hook(self, is_last_joiner: bool):
-        """
-        Syncs the final model to ensure that the model is the same across all
-        processes.
-        """
+        """Sync the final model to ensure that the model is the same across all processes."""
         self.ddp._sync_final_model(is_last_joiner)
 
 
 class DistributedDataParallel(Module, Joinable):
-    r"""Implements distributed data parallelism that is based on
-    ``torch.distributed`` package at the module level.
+    r"""Implement distributed data parallelism based on ``torch.distributed`` at module level.
 
     This container provides data parallelism by synchronizing gradients
     across each model replica. The devices to synchronize across are
@@ -456,9 +445,12 @@ class DistributedDataParallel(Module, Joinable):
 
     .. note::
         DistributedDataParallel currently offers limited support for gradient
-        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
-        expected when there are no unused parameters in the model and each layer
-        is checkpointed at most once (make sure you are not passing
+        checkpointing with :meth:`torch.utils.checkpoint`.
+        If the checkpoint is done with use_reentrant=False (recommended), DDP
+        will work as expected without any limitations.
+        If, however, the checkpoint is done with use_reentrant=True (the default),
+        DDP will work as expected when there are no unused parameters in the model
+        and each layer is checkpointed at most once (make sure you are not passing
         `find_unused_parameters=True` to DDP). We currently do not support the
         case where a layer is checkpointed multiple times, or when there unused
         parameters in the checkpointed model.
@@ -625,7 +617,7 @@ class DistributedDataParallel(Module, Joinable):
     """
 
     # used to track whether the given thread is inside ddp forward for torchdynamo purposes
-    _active_ddp_module = None
+    _active_ddp_module: Optional["DistributedDataParallel"] = None
 
     def __init__(
         self,
@@ -643,6 +635,7 @@ class DistributedDataParallel(Module, Joinable):
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
+        device_mesh=None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -655,6 +648,34 @@ class DistributedDataParallel(Module, Joinable):
                 "delay_all_reduce_named_params and param_to_hook_all_reduce "
                 "need to be set at the same time.",
             )
+
+        if process_group and device_mesh is not None:
+            raise RuntimeError(
+                "Cannot specify both process_group and device_mesh arguments."
+            )
+        elif process_group is None and device_mesh is None:
+            self.process_group = _get_default_group()
+        elif device_mesh is None:
+            self.process_group = process_group
+        else:
+            if device_mesh.ndim != 1:
+                raise RuntimeError(
+                    f"Only 1D device mesh is supported, but got {device_mesh}."
+                )
+            self.device_mesh = device_mesh
+            self.process_group = device_mesh.get_group(mesh_dim=0)
+            from torch.distributed.device_mesh import _mesh_resources
+
+            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+                # TODO: This is a temporary work around to enable DDP + TP.
+                # We should do the logic in DDP so that the 2D implementation is
+                # sound and the state_dict works out of the box.
+                # This has to be done before check UninitializedParameter.
+                from torch.distributed.tensor.parallel.ddp import (
+                    _pre_dp_module_transform,
+                )
+
+                _pre_dp_module_transform(module)
 
         self._delay_all_reduce_params = []
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
@@ -700,7 +721,7 @@ class DistributedDataParallel(Module, Joinable):
                 f"the same type of devices, but input module parameters locate in {distinct_device_types}.",
             )
 
-        self.device_type = list(distinct_device_types)[0]
+        self.device_type = next(iter(distinct_device_types))
 
         if (
             device_ids is None
@@ -730,15 +751,10 @@ class DistributedDataParallel(Module, Joinable):
 
             self.output_device = _get_device_index(output_device, True)
 
-        if process_group is None:
-            self.process_group = _get_default_group()
-        else:
-            self.process_group = process_group
-
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self._module_parameters)[0].device
+        self.device = next(iter(self._module_parameters)).device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
@@ -782,7 +798,6 @@ class DistributedDataParallel(Module, Joinable):
         if len(self._delay_all_reduce_params) != 0:
             self._register_delay_all_reduce_hook(
                 bucket_cap_mb=bucket_cap_mb,
-                process_group=self.process_group,
                 param_to_hook_all_reduce=param_to_hook_all_reduce,
                 device_ids=device_ids,
             )
@@ -812,6 +827,8 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
+        self._comm_hooks: List[Tuple[Callable, object]] = []
+
         if self.mixed_precision is not None:
             _setup_mixed_precision_params(self.mixed_precision, self.module)
             _cast_buffers(self.mixed_precision, self.module)
@@ -861,10 +878,68 @@ class DistributedDataParallel(Module, Joinable):
 
         self._lazy_init_ran = False
 
+        # Register the AccumulateGrad post hooks if optimize_ddp is
+        # True. The hooks will be deregistered if compiled_autograd is not
+        # enabled.
+        self._accum_grad_hooks: List[RemovableHandle] = []
+        optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
+        self._use_python_reducer = optimize_ddp in (
+            "python_reducer",
+            "python_reducer_without_compiled_forward",
+        )
+        if self._use_python_reducer:
+            torch._inductor.config._fuse_ddp_communication = True
+            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
+        self._force_to_disable_cpp_reducer = (
+            optimize_ddp == "python_reducer_without_compiled_forward"
+        )
+        if self._use_python_reducer:
+            self._register_accum_grad_hook()
+
+    def _register_accum_grad_hook(self):
+        import torch.distributed._functional_collectives as fcol
+
+        def compiled_accum_grad_hook(
+            param,
+            *,
+            param_index: int,
+        ):
+            if not self.require_backward_grad_sync:
+                return
+
+            if param.grad is None:
+                return
+
+            if self._comm_hooks:
+                for hook, state in self._comm_hooks:
+                    hook(state, (param.grad, param))
+            else:
+                gradient = param.grad / self.process_group.size()
+                gradient = fcol.all_reduce(gradient, "sum", self.process_group)
+                param.grad.copy_(gradient)
+
+        for index, param in enumerate(self._module_parameters):
+            self._accum_grad_hooks.append(
+                param.register_post_accumulate_grad_hook(
+                    functools.partial(
+                        compiled_accum_grad_hook,
+                        param_index=index,
+                    )
+                )
+            )
+
+    def _delayed_all_reduce_hook(self, grad):
+        world_size = dist.get_world_size(self.process_group)
+
+        self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
+        _ = dist.all_reduce(
+            self._delay_grad_buffer, group=self.process_group, async_op=True
+        )
+        return grad
+
     def _register_delay_all_reduce_hook(
         self,
         bucket_cap_mb,
-        process_group,
         param_to_hook_all_reduce,
         device_ids,
     ):
@@ -877,19 +952,10 @@ class DistributedDataParallel(Module, Joinable):
 
         # 2. Broadcast the parameters
         detached_params = [p.detach() for p in self._delay_all_reduce_params]
-        dist._broadcast_coalesced(process_group, detached_params, bucket_cap_mb, 0)
+        dist._broadcast_coalesced(self.process_group, detached_params, bucket_cap_mb, 0)
 
         # 3. Hook all reduce to the specified parameter
-        world_size = dist.get_world_size(process_group)
-
-        def _delayed_all_reduce(grad):
-            self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
-            _ = dist.all_reduce(
-                self._delay_grad_buffer, group=process_group, async_op=True
-            )
-            return grad
-
-        param_to_hook_all_reduce.register_hook(_delayed_all_reduce)
+        param_to_hook_all_reduce.register_hook(self._delayed_all_reduce_hook)
 
         # 4. Build tensor views for gradients
         offset = 0
@@ -924,6 +990,7 @@ class DistributedDataParallel(Module, Joinable):
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
         if any(hasattr(p, "_in_backward_optimizers") for p in self._module_parameters):
+            torch._C._log_api_usage_once("ddp.optimizer_in_backward")
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
@@ -954,7 +1021,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _fire_reducer_autograd_hook(self, idx, *unused):
         """
-        Fires the reducer's autograd hook to allreduce params in a Reducer bucket.
+        Fire the reducer's autograd hook to allreduce params in a Reducer bucket.
+
         Note that this is only used during mixed precision training as the
         Reducer's hooks installed during construction time would not be called
         as we're working in the low precision parameter setting.
@@ -963,6 +1031,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _root_copy_hook(self, *args: Any, **kwargs: Any) -> None:
         """
+        For DDP mixed precision, put low precision copies on separate stream and create events to wait for them.
+
         When training with DDP mixed precision, this root pre-forward hook kicks
         off low precision copies on a separate stream and creates respective
         events to wait for them.
@@ -1005,10 +1075,7 @@ class DistributedDataParallel(Module, Joinable):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """
-        Before carrying out computation, wait on the appropriate event to ensure
-        low precision copies have finished.
-        """
+        """Before carrying out computation, wait on the appropriate event to ensure low precision copies have finished."""
         try:
             event = self._submodule_to_event[module].popleft()
         except IndexError:
@@ -1044,6 +1111,8 @@ class DistributedDataParallel(Module, Joinable):
         static_graph,
     ):
         """
+        DDP init helper function to manage parameters, grad hooks, logging, and SyncBatchNorm.
+
         Initialization helper function that does the following:
         (1) bucketing the parameters for reductions
         (2) resetting the bucketing states
@@ -1216,6 +1285,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _assign_modules_buffers(self):
         """
+        Assign self.module.named_buffers to self.modules_buffers.
+
         Assigns module buffers to self.modules_buffers which are then used to
         broadcast across ranks when broadcast_buffers=True. Note that this
         must be called every time buffers need to be synced because buffers can
@@ -1270,9 +1341,7 @@ class DistributedDataParallel(Module, Joinable):
         return param_index_to_param_fqn
 
     def _get_parameters(self, m, recurse=True):
-        """
-        Returns a generator of module parameters
-        """
+        """Return a generator of module parameters."""
 
         def model_parameters(m):
             ps = (
@@ -1282,8 +1351,8 @@ class DistributedDataParallel(Module, Joinable):
             )
             yield from ps
 
-        for m in m.modules() if recurse else [m]:
-            yield from model_parameters(m)
+        for mod in m.modules() if recurse else [m]:
+            yield from model_parameters(mod)
 
     def _check_default_group(self):
         pickle_not_supported = False
@@ -1306,8 +1375,9 @@ class DistributedDataParallel(Module, Joinable):
     @contextmanager
     def no_sync(self):
         r"""
-        A context manager to disable gradient synchronizations across DDP
-        processes. Within this context, gradients will be accumulated on module
+        Context manager to disable gradient synchronizations across DDP processes.
+
+        Within this context, gradients will be accumulated on module
         variables, which will later be synchronized in the first
         forward-backward pass exiting the context.
 
@@ -1333,9 +1403,7 @@ class DistributedDataParallel(Module, Joinable):
 
     @classmethod
     def _get_active_ddp_module(cls):
-        """
-        TorchDynamo needs to know whether DDP is currently active, and access the DDP module in order to cooperatively optimize it.
-        """
+        """`TorchDynamo` requires DDP's status and module for cooperative optimization."""
         return cls._active_ddp_module
 
     # note, this ctxmgr function is marked 'skip' in torchdynamo, so dynamo only kicks in
@@ -1351,8 +1419,11 @@ class DistributedDataParallel(Module, Joinable):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        with self._inside_ddp_forward():
+        if self._use_python_reducer:
             return self.module(*inputs, **kwargs)  # type: ignore[index]
+        else:
+            with self._inside_ddp_forward():
+                return self.module(*inputs, **kwargs)  # type: ignore[index]
 
     def _clear_grad_buffer(self):
         # Making param.grad points to the grad buffers before backward is based on the
@@ -1381,9 +1452,24 @@ class DistributedDataParallel(Module, Joinable):
         self._setup_in_backward_optimizers()
         self._lazy_init_ran = True
 
+    def _should_disable_cpp_reducer(self) -> bool:
+        return self._use_python_reducer and (
+            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+        )
+
     def _pre_forward(self, *inputs, **kwargs):
-        if not self._lazy_init_ran:
+        if self._should_disable_cpp_reducer():
+            return inputs, kwargs
+
+        # Disable the python reducer if compiled_autograd is not enabled.
+        if self._accum_grad_hooks:
+            for index, h in enumerate(self._accum_grad_hooks):
+                h.remove()
+            self._accum_grad_hooks.clear()
+
+        if not self._lazy_init_ran and not torch._utils.is_compiling():
             self._lazy_init()
+
         if self._delay_all_reduce_all_params:
             return inputs, kwargs
 
@@ -1447,9 +1533,12 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
     def _post_forward(self, output):
+        if self._should_disable_cpp_reducer():
+            return output
+
         if self._delay_all_reduce_all_params:
             self._clear_grad_buffer()
-            return
+            return output
 
         # sync params according to location (before/after forward) user
         # specified as part of hook, if hook was specified.
@@ -1550,7 +1639,18 @@ class DistributedDataParallel(Module, Joinable):
         work = dist.all_reduce(
             requires_sync_tensor, group=self.process_group, async_op=True
         )
-        return work
+
+        # (kwen2501) This if condition is a plain translation of previous
+        # behavior, i.e. in the `is_joined_rank=False` case, `work.wait()`
+        # is not called and it doesn't care about the result. I am guessing
+        # that it just wants to fire a matching all-reduce and does not want
+        # the main stream to wait.
+        if is_joined_rank:
+            work.wait()
+            should_sync_backwards = requires_sync_tensor.item() != 0
+            return should_sync_backwards
+        else:
+            return None  # Return value is not/should not be used.
 
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.
@@ -1611,9 +1711,7 @@ class DistributedDataParallel(Module, Joinable):
         throw_on_early_termination: bool = False,
     ):
         r"""
-        A context manager to be used in conjunction with an instance of
-        :class:`torch.nn.parallel.DistributedDataParallel` to be
-        able to train with uneven inputs across participating processes.
+        Context manager for training with uneven inputs across processes in DDP.
 
         This context manager will keep track of already-joined DDP processes,
         and "shadow" the forward and backward passes by inserting collective
@@ -1717,9 +1815,7 @@ class DistributedDataParallel(Module, Joinable):
         **kwargs,
     ):
         r"""
-        Returns the DDP join hook, which enables training on uneven inputs by
-        shadowing the collective communications in the forward and backward
-        passes.
+        DDP join hook enables training on uneven inputs by mirroring communications in forward and backward passes.
 
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
@@ -1759,13 +1855,12 @@ class DistributedDataParallel(Module, Joinable):
         comm_hook_location=_BufferCommHookLocation.POST_FORWARD,
     ):
         r"""
-        Allows custom registration of hooks that define how buffer are
-        synchronized across ranks. The hook takes in an optional state
-        and is passed in a Dict[str, Tensor] corresponding to buffer names
-        and the buffers, and can run arbitrary reductions on buffers as
-        opposed to DDP's default broadcast from rank 0. This is useful for
-        example if a counter needs to be summed or averaged across ranks
-        every iteration.
+        Allow custom registration of hooks that define how buffer are synchronized across ranks.
+
+        The hook takes in an optional state and is passed in a Dict[str, Tensor]
+        corresponding to buffer names and the buffers, and can run arbitrary reductions
+        on buffers as opposed to DDP's default broadcast from rank 0. This is useful for
+        example if a counter needs to be summed or averaged across ranks every iteration.
 
         Args:
             state (Any): Optional state that is passed to the hook.
@@ -1799,9 +1894,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def register_comm_hook(self, state: object, hook: Callable):
         r"""
-        Registers a communication hook which is an enhancement that provides a
-        flexible hook to users where they can specify how DDP aggregates gradients
-        across multiple workers.
+        Register communication hook for user-defined DDP aggregation of gradients across multiple workers.
 
         This hook would be very useful for researchers to try out new ideas. For
         example, this hook can be used to implement several algorithms like GossipGrad
@@ -1875,14 +1968,22 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
+        if hook.__name__ in ["bf16_compress_hook", "fp16_compress_hook"]:
+            # If we pass None, then the hook will try to get the world size
+            # by calling `dist.group.WORLD.size()`, which causes compilation
+            # errors. So we pre-decode the process group and pass it to the
+            # hook.
+            if state is None:
+                state = dist.group.WORLD
         assert self.logger is not None
         self.logger._set_comm_hook_name(hook.__qualname__)
+        self._comm_hooks.append((hook, state))
         dist._register_comm_hook(self.reducer, state, hook)
 
     def _register_builtin_comm_hook(self, comm_hook_type):
         r"""
-        Registers a built-in communication hook that specifies how DDP
-        aggregates gradients across multiple workers.
+        Register a built-in communication hook that specifies how DDP aggregates gradients across multiple workers.
+
         The built-in hooks aim to provide efficient C++ implementations for certain hooks,
         which might not be as efficient if implemented in Python using a Python communication hook.
 
@@ -1908,6 +2009,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
         r"""
+        Register an optimizer in DDP to optimize parameter immediately after its gradient reduction.
+
         Registers an optimizer with DDP such that the optimization for a
         parameter will run immediately when that parameter's gradient is
         finished with reduction, instead of waiting for all parameters'
@@ -2054,9 +2157,10 @@ class DistributedDataParallel(Module, Joinable):
         self, bufs=None, bucket_size=None, authoritative_rank=0
     ):
         """
-        Broadcasts buffers from rank 0 to rest of workers. If bufs, bucket_size
-        are None, default values self.modules_buffers and
-        self.broadcast_bucket_size are used instead.
+        Broadcasts buffers from rank 0 to rest of workers.
+
+        If bufs, bucket_size are None, default values self.modules_buffers
+        and self.broadcast_bucket_size are used instead.
         """
         if bufs is None:
             bufs = self.modules_buffers
@@ -2121,9 +2225,7 @@ class DistributedDataParallel(Module, Joinable):
 
     @staticmethod
     def _get_data_parallel_params(module, named_params=False):
-        """
-        Returns a generator of parameters managed by a given DDP unit.
-        """
+        """Return a generator of parameters managed by a given DDP unit."""
         for param in (
             module.parameters() if not named_params else module.named_parameters()
         ):
@@ -2135,8 +2237,9 @@ class DistributedDataParallel(Module, Joinable):
         module, params_and_buffers_to_ignore
     ):
         """
-        Sets parameters and buffers to be ignored by DDP. Expected format for
-        parameters is the fully qualified name: {module_name}.{param_name}, and
+        Set parameters and buffers to be ignored by DDP.
+
+        Expected format for parameters is the fully qualified name: {module_name}.{param_name}, and
         similarly, {module_name}.{buffer_name} for buffers. For example:
         params_to_ignore = []
         # NB: model here is vanilla PyTorch module, not yet wrapped with DDP.
@@ -2164,6 +2267,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _get_ddp_logging_data(self):
         r"""
+        Return a dictionary of logging data for debugging and analysis.
+
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
         for debugging and analysis. The logging data includes DistributedDataParallel
@@ -2178,6 +2283,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _set_ddp_runtime_logging_sample_rate(self, sample_rate):
         r"""
+        Set sample_rate of collecting runtime stats.
+
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
         first 10 iterations, after 10 iterations runtime stats will be
@@ -2196,6 +2303,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def _set_static_graph(self):
         """
+        Set static graph for DDP.
+
         It is recommended to set static graph in the DDP constructor, which will
         call this private API internally.
         """
@@ -2220,15 +2329,12 @@ class DistributedDataParallel(Module, Joinable):
             )
 
     def _remove_autograd_hooks(self):
-        """
-        Removes autograd hooks registered by the reducer on the model parameters.
-        """
+        """Remove autograd hooks registered by the reducer on the model parameters."""
         self.reducer._remove_autograd_hooks()
 
     def _check_reducer_finalized(self):
         """
-        Checks if the reducer has processed all buckets and finalized the backward
-        appropriately.
+        Check if the reducer has processed all buckets and finalized the backward appropriately.
 
         It is useful to call this method after calling .backward() in your training loop
         in order to avoid subsequent hard to debug errors down the road due to the
@@ -2238,3 +2344,22 @@ class DistributedDataParallel(Module, Joinable):
 
     def _set_sparse_metadata(self, global_unique_ids):
         self.reducer._set_sparse_metadata(global_unique_ids)
+
+    def _update_process_group(self, new_process_group):
+        """
+        Dynamically updates the process group for DDP so that we can shrink/expand DDP
+        world size without having to reinitialize DDP.
+
+        NOTE: If you are using custom communications hooks via, register_comm_hook,
+        you need to update the process groups for those hooks separately.
+        """
+        # Force a rebuild of buckets for a new process group. This ensures all ranks
+        # are synchronized in terms of when they will rebuild buckets and also
+        # re-evaluates previous assumptions of buckets given the world size might have
+        # changed.
+        self._has_rebuilt_buckets = False
+        self.reducer._reset_state()
+
+        if not _rank_not_in_group(new_process_group):
+            self.process_group = new_process_group
+            self.reducer._update_process_group(new_process_group)

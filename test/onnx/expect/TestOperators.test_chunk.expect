@@ -5,12 +5,12 @@ graph {
   node {
     input: "onnx::Shape_0"
     output: "onnx::Gather_1"
-    name: "Shape_0"
+    name: "Shape_6"
     op_type: "Shape"
   }
   node {
     output: "onnx::Gather_2"
-    name: "Constant_1"
+    name: "Constant_7"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -26,7 +26,7 @@ graph {
     input: "onnx::Gather_1"
     input: "onnx::Gather_2"
     output: "onnx::Add_3"
-    name: "Gather_2"
+    name: "Gather_8"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -36,7 +36,7 @@ graph {
   }
   node {
     output: "onnx::Slice_4"
-    name: "Constant_3"
+    name: "Constant_9"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -50,7 +50,7 @@ graph {
   }
   node {
     output: "onnx::Add_5"
-    name: "Constant_4"
+    name: "Constant_10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -66,12 +66,12 @@ graph {
     input: "onnx::Add_3"
     input: "onnx::Add_5"
     output: "onnx::Div_6"
-    name: "Add_5"
+    name: "Add_11"
     op_type: "Add"
   }
   node {
     output: "onnx::Div_7"
-    name: "Constant_6"
+    name: "Constant_12"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -87,12 +87,12 @@ graph {
     input: "onnx::Div_6"
     input: "onnx::Div_7"
     output: "onnx::Mul_8"
-    name: "Div_7"
+    name: "Div_13"
     op_type: "Div"
   }
   node {
     output: "onnx::Mul_9"
-    name: "Constant_8"
+    name: "Constant_14"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -108,7 +108,7 @@ graph {
     input: "onnx::Mul_8"
     input: "onnx::Mul_9"
     output: "onnx::Slice_10"
-    name: "Mul_9"
+    name: "Mul_15"
     op_type: "Mul"
   }
   node {
@@ -117,12 +117,12 @@ graph {
     input: "onnx::Slice_10"
     input: "onnx::Gather_2"
     output: "11"
-    name: "Slice_10"
+    name: "Slice_16"
     op_type: "Slice"
   }
   node {
     output: "onnx::Mul_12"
-    name: "Constant_11"
+    name: "Constant_17"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -138,7 +138,7 @@ graph {
     input: "onnx::Mul_8"
     input: "onnx::Mul_12"
     output: "onnx::Slice_13"
-    name: "Mul_12"
+    name: "Mul_18"
     op_type: "Mul"
   }
   node {
@@ -147,7 +147,7 @@ graph {
     input: "onnx::Slice_13"
     input: "onnx::Gather_2"
     output: "14"
-    name: "Slice_13"
+    name: "Slice_19"
     op_type: "Slice"
   }
   name: "main_graph"

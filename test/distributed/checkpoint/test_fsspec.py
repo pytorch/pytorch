@@ -9,23 +9,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.checkpoint._fsspec_filesystem import (
-    FsspecReader,
-    FsspecWriter,
-)
-from torch.distributed.checkpoint.optimizer import (
-    load_sharded_optimizer_state_dict,
-)
+from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
+from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
@@ -182,9 +171,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
             return list(iter(opt.state.values()))[idx]
 
         # Adam lazily creates its state
-        self.assertEqual(
-            opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"]
-        )
+        self.assertEqual(opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"])
         self.assertEqual(
             opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
         )

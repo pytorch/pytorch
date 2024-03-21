@@ -2,8 +2,7 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * An implementation of DeviceGuardImplInterface which delegates
@@ -17,6 +16,10 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   VirtualGuardImpl(const DeviceGuardImplInterface* impl) : impl_(impl) {}
 
   // Copying and moving is OK!
+  VirtualGuardImpl(const VirtualGuardImpl&) = default;
+  VirtualGuardImpl& operator=(const VirtualGuardImpl&) = default;
+  VirtualGuardImpl(VirtualGuardImpl&&) noexcept = default;
+  VirtualGuardImpl& operator=(VirtualGuardImpl&&) noexcept = default;
 
   DeviceType type() const override {
     return impl_->type();
@@ -85,5 +88,4 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   const DeviceGuardImplInterface* impl_ = nullptr;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

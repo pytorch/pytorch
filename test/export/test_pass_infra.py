@@ -1,30 +1,33 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
+import copy
 import unittest
-from typing import List
 
 import torch
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
-from torch._export.constraints import constrain_as_value
-from torch._export.pass_base import _ExportPassBase
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
+from torch.export import export
+from torch.fx.passes.infra.pass_base import PassResult
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPassInfra(TestCase):
     def test_export_pass_base(self) -> None:
-        def f(x: torch.Tensor) -> List[torch.Tensor]:
-            y = torch.cat([x, x])
-            return torch.ops.aten.tensor_split.sections(y, 2)
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = torch.cat([x, x])
+                return torch.ops.aten.tensor_split.sections(y, 2)
 
-        class NullPass(_ExportPassBase):
+        f = Foo()
+
+        class NullPass(_ExportPassBaseDeprecatedDoNotUse):
             pass
 
         ep = export(f, (torch.ones(3, 2),))
         old_nodes = ep.graph.nodes
 
-        ep = ep._transform(NullPass())
+        ep = ep._transform_do_not_use(NullPass())
         new_nodes = ep.graph.nodes
 
         for node in new_nodes:
@@ -38,6 +41,7 @@ class TestPassInfra(TestCase):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -46,12 +50,12 @@ class TestPassInfra(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    constrain_as_value(b, min=2, max=5)
+                    torch._constrain_as_value(b, min=2, max=5)
                     return x - y
 
                 def false_fn(x, y):
                     c = y.item()
-                    constrain_as_value(c, min=2, max=5)
+                    torch._constrain_as_value(c, min=2, max=5)
                     return x + y
 
                 ret = control_flow.cond(pred, true_fn, false_fn, [x, y])
@@ -60,7 +64,7 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y))._transform(_ExportPassBase())
+        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
 
     def test_node_name_stability(self) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
@@ -91,7 +95,7 @@ class TestPassInfra(TestCase):
         ep_before = export(m, inps)
 
         # No op transformation that doesn't perform any meaningful changes to node
-        ep_after = ep_before._transform(_ExportPassBase())
+        ep_after = ep_before._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
 
         for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
             self.assertEqual(before_node.name, after_node.name)
@@ -121,7 +125,7 @@ class TestPassInfra(TestCase):
         input_tensor1 = torch.tensor(5.0)
         input_tensor2 = torch.tensor(6.0)
 
-        ep_before = torch._export.export(my_module, (input_tensor1, input_tensor2))
+        ep_before = torch.export.export(my_module, (input_tensor1, input_tensor2))
         from torch.fx.passes.infra.pass_base import PassResult
 
         def modify_input_output_pass(gm):
@@ -131,7 +135,7 @@ class TestPassInfra(TestCase):
             gm.recompile()
             return PassResult(gm, True)
 
-        ep_after = ep_before._transform(modify_input_output_pass)
+        ep_after = ep_before._transform_do_not_use(modify_input_output_pass)
         new_signature = ep_after.graph_signature
 
         for node_name in new_signature.user_outputs:
@@ -140,6 +144,45 @@ class TestPassInfra(TestCase):
         old_signature = ep_before.graph_signature
         self.assertNotEqual(new_signature.user_outputs, old_signature.user_outputs)
 
+    def test_replace_hook_basic(self) -> None:
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
+
+            def forward(self, x1, x2):
+                # Use the parameter, buffers, and both inputs in the forward method
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
+                return output
+
+        my_module = CustomModule()
+        inputs = (torch.tensor(6.0), torch.tensor(7.0))
+        ep_before = export(my_module, inputs)
+
+        def replace_pass(gm):
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    node.name = node.name + "_modified"
+            gm.recompile()
+            return PassResult(gm, True)
+
+        gm = copy.deepcopy(ep_before.graph_module)
+        sig = copy.deepcopy(ep_before.graph_signature)
+
+        with gm._set_replace_hook(sig.get_replace_hook()):
+            replace_pass(gm)
+
+        for node_name in sig.user_outputs:
+            self.assertTrue("_modified" in node_name)
+
+        old_signature = ep_before.graph_signature
+        self.assertNotEqual(sig.user_outputs, old_signature.user_outputs)
 
 if __name__ == '__main__':
     run_tests()

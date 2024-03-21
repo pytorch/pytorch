@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
 import logging
@@ -11,7 +12,17 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import multiprocessing
@@ -42,6 +53,27 @@ class Pong:
     pass
 
 
+@contextlib.contextmanager
+def set_cuda_visible_device(device: Optional[int]):
+    """
+    Context manager to set the CUDA_VISIBLE_DEVICES environment variable to the
+    specified single device. If device is None, don't manipulate the environment.
+    """
+    if device is None:
+        yield
+        return
+
+    current = os.environ.get(CUDA_VISIBLE_DEVICES)
+    os.environ[CUDA_VISIBLE_DEVICES] = str(device)
+    try:
+        yield
+    finally:
+        if current is None:
+            del os.environ[CUDA_VISIBLE_DEVICES]
+        else:
+            os.environ[CUDA_VISIBLE_DEVICES] = current
+
+
 @dataclasses.dataclass
 class TuningProcess:
     """
@@ -57,16 +89,16 @@ class TuningProcess:
 
     @staticmethod
     def process_main(
-        device: Optional[int],
         request_queue: Queue[Any],
         response_queue: Queue[Any],
     ) -> None:
         """
         Entry point for the child process.
         """
-        log.debug("Entering TuningProcess child main: %s", device)
-        if device is not None:
-            os.environ[CUDA_VISIBLE_DEVICES] = str(device)
+        log.debug(
+            "Entering TuningProcess child. Visible devices = %s",
+            os.environ.get(CUDA_VISIBLE_DEVICES),
+        )
         try:
             TuningProcess.workloop(request_queue, response_queue)
         except Exception as ex:
@@ -122,13 +154,13 @@ class TuningProcess:
         self.process = ctx.Process(
             target=self.process_main,
             args=(
-                self.device,
                 self.request_queue,
                 self.response_queue,
             ),
         )
         assert self.process is not None
-        self.process.start()
+        with set_cuda_visible_device(self.device):
+            self.process.start()
 
     def put(self, obj: Any) -> None:
         """
@@ -195,7 +227,7 @@ class TuningProcessPool:
             return
 
         devices = self.get_device_list()
-        log.debug("Device list: %s", devices)
+        log.debug("Sub-process autotune device list: %s", devices)
 
         # Launch the child processes and push a msg to "warm up"
         self.processes = queue.Queue()
@@ -221,9 +253,9 @@ class TuningProcessPool:
             EXIT_HANDLER_REGISTERED = True
             import atexit
 
-            atexit.register(lambda: self.terminate())
+            atexit.register(self.terminate)
 
-    def get_device_list(self) -> List[Optional[int]]:
+    def get_device_list(self) -> Sequence[Optional[int]]:
         """
         Gather the list of devices to be used in the pool.
         """
@@ -237,7 +269,7 @@ class TuningProcessPool:
         if CUDA_VISIBLE_DEVICES in os.environ:
             devices = [int(d) for d in os.environ[CUDA_VISIBLE_DEVICES].split(",")]
             assert len(devices) <= count
-            return devices  # type: ignore[return-value]
+            return devices
 
         return list(range(count))
 
@@ -291,7 +323,7 @@ class TuningProcessPool:
 
         results = {}
 
-        # Use a ThreadExecutorPool to spread the work across the subproccesses and
+        # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
         for choice, result in zip(choices, self.executor.map(self.target, choices)):
             results[choice] = result
@@ -309,15 +341,15 @@ LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
 class TensorMeta:
     device: torch.device
     dtype: torch.dtype
-    sizes: List[int]
-    strides: List[int]
+    sizes: torch._prims_common.ShapeType
+    strides: torch._prims_common.StrideType
     offset: int
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
-        if isinstance(irnodes, (tuple, list)):
+        if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
@@ -332,9 +364,18 @@ class TensorMeta:
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(node.get_size()),
-            strides=V.graph.sizevars.size_hints(node.get_stride()),
-            offset=V.graph.sizevars.size_hint(node.get_layout().offset),
+            sizes=V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            strides=V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            offset=V.graph.sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -352,6 +393,9 @@ class BenchmarkRequest:
     """
     Only handle triton template benchmark for now. The extern kernel benchmark
     can be done inside the same process since they usually don't cause crash.
+
+    Important: Instances of this class and subclasses have to be serializable
+    across process boundaries. Do not put CUDA Tensors in here!
     """
 
     def __init__(
@@ -359,7 +403,7 @@ class BenchmarkRequest:
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
     ):
         # the kernel name defined in the module
         self.kernel_name = kernel_name
@@ -399,25 +443,25 @@ class BenchmarkRequest:
             output_tensor = self.output_tensor_meta.to_tensor()
 
         if debug:
-            create_tensor_elapse = time.time() - start_ts
+            create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
 
         if debug:
-            load_elapse = time.time() - start_ts
+            load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         out = do_bench(fn)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:
-            bench_elapse = time.time() - start_ts
+            bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
                 str(self),
-                load_elapse,
-                create_tensor_elapse,
+                load_elapse,  # type: ignore[possibly-undefined]
+                create_tensor_elapse,  # type: ignore[possibly-undefined]
                 bench_elapse,
             )
         self.cleanup_run_fn()
@@ -442,17 +486,21 @@ class TestBenchmarkRequest(BenchmarkRequest):
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
         grid: List[int],
         num_stages: int,
         num_warps: int,
+        matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -460,6 +508,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.grid = grid
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.matrix_instr_nonkdim = matrix_instr_nonkdim
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -472,29 +521,54 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
+        extra_args = list(self.extra_args)
 
-        return functools.partial(
-            run_method,
-            *input_tensors,
-            output_tensor,
-            *self.extra_args,
-            grid=self.grid,
-            num_stages=self.num_stages,
-            num_warps=self.num_warps,
-            stream=torch.cuda.current_stream().cuda_stream,
-        )
+        # Newer version of triton add warmup argument to JITFunction.run.
+        # This code handles backward-compatibility.
+        warmup_arg = {}
+        import inspect
+
+        if "warmup" in inspect.signature(run_method).parameters:
+            warmup_arg["warmup"] = False
+
+        if torch.version.hip and self.matrix_instr_nonkdim != 0:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
+                matrix_instr_nonkdim=self.matrix_instr_nonkdim,
+            )
+        else:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
+            )
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
 class CUDABenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
         source_code: str,
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
@@ -505,6 +579,13 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+
+    def precompile(self):
+        # Prepopulate CUDACodeCache
+        # may happen in separate Threadpool
+        log.debug("Precompiling %s", self)
+        CUDACodeCache.load(self.source_code, "so")
+        log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor

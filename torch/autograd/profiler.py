@@ -89,6 +89,7 @@ def _run_on_profiler_stop():
 
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
+
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
     only report runtime of PyTorch functions.
@@ -374,8 +375,9 @@ class profile:
 
     @property
     def self_cpu_time_total(self):
-        """Returns total time spent on CPU obtained as a sum of
-        all self times across all the events.
+        """Returns total time spent on CPU.
+
+        The total time is a sum of all self times across all the events.
         """
         self._check_finish()
         assert self.function_events is not None
@@ -467,9 +469,10 @@ class profile:
                 sequence_nr=kineto_event.sequence_nr(),
                 device_type=kineto_event.device_type(),
                 device_index=kineto_event.device_index(),
+                device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
             )
-            max_evt_id = fe.id if fe.id > max_evt_id else max_evt_id
+            max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
                 if self.use_device:
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
@@ -552,9 +555,9 @@ class profile:
 
 
 class record_function(_ContextDecorator):
-    """Context manager/function decorator that adds a label to a block of
-    Python code (or function) when running autograd profiler. It is
-    useful when tracing the code profile.
+    """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
+
+    It is useful when tracing the code profile.
 
     Args:
         name (str): Label assigned to the block of code.
@@ -622,13 +625,12 @@ class record_function(_ContextDecorator):
             torch.ops.profiler._record_function_exit(record)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
-        """
-        _call_end_callbacks_on_future is meant to be used for profiling async
-        calls that return a future. Calling this function will extend recording
-        beyond this scope, until the future is satisfied. It is useful for profiling
-        the end to end time of asynchronous calls. This function should only be called
-        once to attach the callback onto the future, and will throw if called multiple
-        times.
+        """Use for profiling async calls that return a future.
+
+        Calling this function will extend recording beyond this scope, until the future is
+        satisfied. It is useful for profiling the end to end time of asynchronous calls.
+        This function should only be called once to attach the callback onto the future, and
+        will throw if called multiple times.
 
         Args:
             fut: (torch._C.Future): future for which to schedule
@@ -860,7 +862,7 @@ class emit_nvtx:
 
 
 def load_nvprof(path):
-    """Opens an nvprof trace file and parses autograd annotations.
+    """Open an nvprof trace file and parses autograd annotations.
 
     Args:
         path (str): path to nvprof trace
@@ -875,6 +877,9 @@ class EnforceUnique:
         self.seen = set()
 
     def see(self, *key):
+        r"""
+        Observe a key and raise an error if it is seen multiple times.
+        """
         if key in self.seen:
             raise RuntimeError("duplicate key: " + str(key))
         self.seen.add(key)
@@ -949,6 +954,7 @@ def parse_nvprof_trace(path):
 
 class KinetoStepTracker:
     """Provides an abstraction for incrementing the step count globally.
+
     Previously, we only had one place to mark that a step() has occurred
     in the program via pytorch profiler step(). We will now add step hooks
     in the Optimizer class https://github.com/pytorch/pytorch/issues/88446
@@ -960,23 +966,27 @@ class KinetoStepTracker:
 
     We fix this by adding a layer of abstraction before calling step()
     to the kineto library. The idea is to maintain steps per requester in a dict:
-    ```
-    {
-       "ProfilerStep": 100,  # triggered by profiler step() call
-       "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
-       "Optimizer2Step": 100,
-    }
-    ```
+
+    .. code-block::
+
+        {
+           "ProfilerStep": 100,  # triggered by profiler step() call
+           "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
+           "Optimizer2Step": 100,
+        }
+
     To figure out the global step count just take the max of dict values (100).
 
     If one of the count increments the max will go up.
-    ```
-    {
-       "ProfilerStep": 100,
-       "Optimizer1Step": 101,   # Optimizer1 got incremented first say
-       "Optimizer2Step": 100,
-    }
-    ```
+
+    .. code-block::
+
+        {
+           "ProfilerStep": 100,
+           "Optimizer1Step": 101,   # Optimizer1 got incremented first say
+           "Optimizer2Step": 100,
+        }
+
     Then global step count is 101
     We only call the kineto step() function when global count increments.
 
@@ -984,23 +994,29 @@ class KinetoStepTracker:
     for now. The result could be incorrect increments of the step count.
     """
 
-    _current_step = -1
+    _current_step = 0
     _step_dict: Dict[str, int] = defaultdict(int)
 
     @classmethod
     def init_step_count(cls, requester: str):
+        r"""
+        Initialize for a given requester.
+        """
         cls._step_dict[requester] = cls._current_step
 
     @classmethod
     def erase_step_count(cls, requester: str) -> bool:
+        r"""
+        Remove a given requester.
+        """
         return cls._step_dict.pop(requester, None) is not None
 
     @classmethod
     def increment_step(cls, requester: str) -> int:
         """Increments the step count for the requester.
+
         Additionally if the max over all step counts has incremented then
-        trigger the _kineto_step()
-        returns global step count
+        trigger the _kineto_step() returns global step count
         """
         if requester not in cls._step_dict:
             cls.init_step_count(requester)
@@ -1021,4 +1037,7 @@ class KinetoStepTracker:
 
     @classmethod
     def current_step(cls) -> int:
+        r"""
+        Get the latest step for any requester
+        """
         return cls._current_step

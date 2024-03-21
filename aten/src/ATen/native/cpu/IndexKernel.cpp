@@ -54,11 +54,12 @@ template <typename scalar_t, typename func_t>
 void cpu_take_put_kernel(
     TensorIterator& iter,
     const TensorBase& indexed,
+    bool is_indexed_data_mutated,
     const func_t& f,
     bool serial_execution=false) {
   // This kernel follows the same strategy as `cpu_index_kernel`
   // Even though the indexed_tensor is const, we modify it through the data_ptr
-  // This is a bit dirty, but otherwise it would be necessary to innecessarily add tensor
+  // This is a bit dirty, but otherwise it would be necessary to unnecessarily add tensor
   // with zero strides to `iter` which would not be much better
 
   // When launch the parallel version, set a relative small grain size less than the INTERNAL::GRAIN_SIZE
@@ -70,7 +71,9 @@ void cpu_take_put_kernel(
   const auto numel = indexed.numel();
   const auto offset_indexed = IndexToOffset(indexed);
 
-  auto* indexed_data = indexed.data_ptr<scalar_t>();
+  auto* indexed_data = is_indexed_data_mutated ?
+   indexed.data_ptr<scalar_t>()
+   : const_cast<scalar_t*>(indexed.const_data_ptr<scalar_t>());
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
@@ -115,21 +118,21 @@ void put_kernel(
       bool use_parallel_for = (!is_deterministic) && (
         (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
       if (use_parallel_for && iter.dtype() == ScalarType::Float) {
-        cpu_take_put_kernel<float>(iter, self,
+        cpu_take_put_kernel<float>(iter, self, true,
             [](float& iterated, float* indexed, const int64_t idx) {
                 cpu_atomic_add_float(indexed+idx, iterated);
               });
       } else {
         // TODO: investigate parallelization of the accumulate kernel.
         // Unlike the non-accumulate case, this needs to be thread-safe.
-        cpu_take_put_kernel<scalar_t>(iter, self,
+        cpu_take_put_kernel<scalar_t>(iter, self, true,
             [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
                 indexed[idx] += iterated;
               },
             /*serial_execution=*/true);
       }
     } else {
-      cpu_take_put_kernel<scalar_t>(iter, self,
+      cpu_take_put_kernel<scalar_t>(iter, self, true,
           [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
               indexed[idx] = iterated;
             });
@@ -142,8 +145,8 @@ void take_kernel(
   const TensorBase & input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_cpu", [&] {
-      cpu_take_put_kernel<scalar_t>(iter, input,
-          [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
+      cpu_take_put_kernel<scalar_t>(iter, input, false,
+          [](scalar_t& iterated, const scalar_t* indexed, const int64_t idx) {
               iterated = indexed[idx];
             });
     });
@@ -332,7 +335,7 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
 template <typename scalar_t>
 void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   std::ptrdiff_t source_cntr = 0;
-  scalar_t* source_ptr = source.data_ptr<scalar_t>();
+  const scalar_t* source_ptr = source.const_data_ptr<scalar_t>();
   auto numel = source.numel();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -744,11 +747,11 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       // Special cases:
       // a) channels last hflip on (N, C, H, W) and outer_stride(=dtype_size * C) in [2, 16]
       // b) flip dim=-2 on (N, ..., M, C) and outer_stride(=dtype_size * C) in [2, 16]
-      auto output_strides = iter.strides(0);
-      auto input_strides = iter.strides(1);
-      auto c = -output_strides[1];
+      auto output_strides_2 = iter.strides(0);
+      auto input_strides_2 = iter.strides(1);
+      auto c = -output_strides_2[1];
       if (c >= 2 && c <= 16 &&
-          c == input_strides[1] &&
+          c == input_strides_2[1] &&
           c == iter.element_size(0) * iter.shape()[0]  // checks if dim=1 is contiguous as well
       ) {
         return cpu_hflip_channels_last_vec(iter);

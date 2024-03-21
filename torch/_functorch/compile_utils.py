@@ -1,7 +1,10 @@
+# mypy: ignore-errors
+
 
 import torch
 import torch.fx as fx
 from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 
@@ -25,7 +28,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     hash_env = {}  # map from hash to a node in the new graph
     token_map = {}  # map from hash to token
     for n in fx_g.nodes:
-        # The placeholder, output, and get_attr nodes are copied to the new grpah without change
+        # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
         if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
             new_node = new_graph.node_copy(n, lambda x: env[x])
@@ -51,7 +54,9 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                      "kwargs": kwargs, "kwargs_spec": kwargs_spec}
 
             # hash substituted args to a number, do not hash specs because specs are not hashable
-            hash_arg = hash((args, kwargs))
+            # We need to add type into hash to avoid situations like:
+            # hash((primals_2, 1.0)) == hash((primals_2, 1))
+            hash_arg = hash((tuple((a, type(a)) for a in args), tuple((a, type(a)) for a in kwargs)))
             hash_val = (n.target, hash_arg)
 
             # check if a node has a substitute and can be eliminated
@@ -88,5 +93,5 @@ def get_placeholders(graph):
 def get_outputs(graph):
     for node in graph.nodes:
         if node.op == 'output':
-            return tree_flatten(node.args[0])[0]
+            return pytree.tree_leaves(node.args[0])
     raise AssertionError("No output node found")

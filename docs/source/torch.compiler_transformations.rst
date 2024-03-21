@@ -406,7 +406,7 @@ The
 class is used by the partitioner to determine if a specific node in the
 graph belongs in the partition. This is done by overriding the
 ``is_node_supported`` function. You can chain multiple
-``OperatorSuppportBase`` by using
+``OperatorSupportBase`` by using
 ```chain`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#L150>`__\ (which
 returns False if any of the OperatorSupportBase return False) and
 ```any_chain`` <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/operator_support.py#L164>`__

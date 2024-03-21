@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -19,22 +20,144 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
+// TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
+#ifdef AT_USE_NV_CVT_INTRINSICS
+#include <cuda_fp8.h>
+#endif
+
 namespace at::native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
 
+void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
+  ScalarType dtype = iter.dtype(0);
+  ScalarType other_dtype = iter.dtype(1);
+  if (dtype == kFloat8_e4m3fn) {
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+             return Float8_e4m3fn(value);
+         });
+         break;
+      default:
+        gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
+        break;
+    }
+  } else if (dtype == kFloat8_e5m2) {
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+             return Float8_e5m2(value);
+#endif
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+             return Float8_e5m2(value);
+#endif
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_NOSAT, __NV_E5M2);
+             return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+             return Float8_e5m2(value);
+#endif
+         });
+         break;
+      default:
+         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2 x) { return x; });
+         break;
+    }
+  } else if (dtype == kFloat8_e4m3fnuz) {
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+             return Float8_e4m3fnuz(value);
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+             return Float8_e4m3fnuz(value);
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+             return Float8_e4m3fnuz(value);
+         });
+         break;
+      default:
+        gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fnuz x) { return x; });
+        break;
+    }
+  } else if (dtype == kFloat8_e5m2fnuz) {
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+             return Float8_e5m2fnuz(value);
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+             return Float8_e5m2fnuz(value);
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+             return Float8_e5m2fnuz(value);
+         });
+         break;
+      default:
+         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2fnuz x) { return x; });
+         break;
+    }
+  } else {
+    TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
+  }
+}
+
+// TODO: We probably can use the opaque type trick to avoid creating duplicate
+// kernels for equivalent bit lengths
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   if (isQIntType(dtype)) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(
-        kHalf, kBool, kBFloat16, kComplexHalf, kFloat8_e4m3fn, kFloat8_e5m2, dtype, "copy_", [&] {
-          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+  } else if (dtype == kFloat8_e5m2 || dtype == kFloat8_e4m3fn || dtype == kFloat8_e5m2fnuz || dtype == kFloat8_e4m3fnuz) {
+     float8_copy_kernel_cuda(iter);
+  } else if (isBitsType(dtype)) {
+    TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
+      "bits types to different bits types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
+    AT_DISPATCH_BIT_TYPES(dtype, "copy_", [&] {
+      gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+  } else {
+    AT_DISPATCH_V2(
+        dtype, "copy_", AT_WRAP([&] {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kHalf, kBool, kBFloat16, kComplexHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   }
 }
 
@@ -179,9 +302,11 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     Tensor src_contig;
 
     // If non_blocking is true - type conversions are performed on the GPU
-    // for CPU-GPU copies, otherwise type conversions are performed on the CPU.
-    // Type conversions are performed on the src device for GPU-GPU copies.
-    if (iter.device_type(0) == kCUDA || non_blocking) {
+    // For blocking transfers conversions are performed on CPU to avoid allocating
+    // extra GPU memory
+    // for GPU-GPU transfers conversions are performed on the source device
+    auto conversion_device = non_blocking ? kCUDA : kCPU;
+    if (iter.device_type(1) == conversion_device) {
       dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {

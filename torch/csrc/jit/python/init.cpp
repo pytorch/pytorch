@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -144,6 +143,12 @@ bool loadPythonClasses() {
   // PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
+}
+
+static bool opAllowsNumbersAsTensors(c10::Symbol symbol) {
+  return symbol.is_prims() || symbol.is_nvprims() ||
+      (symbol.is_aten() &&
+       torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 }
 
 c10::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
@@ -752,61 +757,69 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_nvfuser_skip_node_kind",
-          // Args:
-          //     `op_name`: Symbol of op;
-          //     `flip`: flag indicating whether to flip the given op in the
-          //             skip list.
-          // Returns:
-          //     a bool flag indicating if `op_name` was already in the skip
-          //     list.
           [](const std::string& op_name, bool flip = true) {
-            return fuser::cuda::skipNode(op_name, flip);
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_skip_node_kind is deprecated and a no-op");
           })
-      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
-      .def("_jit_nvfuser_can_be_enabled", &fuser::cuda::canBeEnabled)
+      .def(
+          "_jit_set_nvfuser_enabled",
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_enabled is deprecated and a no-op");
+          })
+      .def(
+          "_jit_nvfuser_can_be_enabled",
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_can_be_enabled is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_single_node_mode",
-          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_single_node_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_single_node_mode",
-          []() { return fuser::cuda::getSingletonFusion(); })
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_single_node_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_horizontal_mode",
-          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_horizontal_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_horizontal_mode",
-          []() { return fuser::cuda::getHorizontalFusion(); })
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_horizontal_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_guard_mode",
-          [](bool profiling_flag) {
-            bool oldState = fuser::cuda::getCudaFusionGuardMode();
-            fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
-            return oldState;
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_guard_mode is deprecated and a no-op");
           })
-      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
+      .def(
+          "_jit_nvfuser_enabled",
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_enabled is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_set_comparison_callback",
-          [](bool run_fallback, py::function fn) {
-            // If set, then the callback will be run after each nvfuser fusion
-            // group is executed. Can be used for testing accuracy.
-            // If run_fallback == True, then a fallback will be run and
-            // unfused_outputs will be nonempty, showing the result if the
-            // fusion didn't take place. Otherwise, unfused_outputs will
-            // be empty
-            auto fn_ptr = std::make_shared<py::function>(fn);
-            auto callback_lambda = [fn_ptr](
-                                       const Stack& fused_outputs,
-                                       const Stack& unfused_outputs,
-                                       const std::string& graph_ir) {
-              py::gil_scoped_acquire acquire{};
-              (*fn_ptr)(fused_outputs, unfused_outputs, graph_ir);
-            };
-            setCudaFuserComparisonCallback({run_fallback, callback_lambda});
+          [](bool, py::function) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_clear_comparison_callback",
           []() {
-            setCudaFuserComparisonCallback({false, nullptr});
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_clear_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_set_profiling_mode",
@@ -1231,6 +1244,16 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
+          "expect_size",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_size(file, line);
+          })
+      .def(
+          "guard_size_oblivious",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_size_oblivious(file, line);
+          })
+      .def(
           "has_hint",
           [](c10::SymNode a) {
             return a->has_hint();
@@ -1253,9 +1276,35 @@ void initJITBindings(PyObject* module) {
       .def(
           "__str__",
           [](c10::SymNode a) { return a->str(); })
-      .def("__repr__", [](c10::SymNode a) {
-        return a->str();
-      });
+      .def(
+          "__repr__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "is_constant",
+          [](const c10::SymNode& node){
+            return node->is_constant();
+          })
+      .def(
+          "is_nested_int",
+          [](const c10::SymNode& node) {
+            return node->is_nested_int();
+          })
+      .def(
+          "is_symbolic",
+          [](const c10::SymNode& node) {
+            return node->is_symbolic();
+          })
+      .def(
+          "nested_int",
+          [](const c10::SymNode& node) {
+            return node->nested_int();
+          })
+      .def(
+          "nested_int_coeff",
+          [](const c10::SymNode& node) {
+            return node->nested_int_coeff();
+          });
+
   // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1334,6 +1383,7 @@ void initJITBindings(PyObject* module) {
           if (size == 0) {
             return size;
           }
+          py::gil_scoped_acquire acquire;
           auto memory_view = py::memoryview::from_memory(
               reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(memory_view));
@@ -1347,18 +1397,50 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
-      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
+             size_t size) {
+            // Since we don't know where the data come from, we cannot
+            // release the GIL in this overload
+            return self.writeRecord(name, data, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             py::bytes data,
+             size_t size) {
+            // It is not clear from the doc but according to CPython own code,
+            // it is ok to use the result of PyBytes_AsString without the GIL
+            // being held
+            // https://github.com/python/cpython/blob/e2a3e4b7488aff6fdc704a0f258bc315e96c1d6e/Objects/stringlib/join.h#L67
+            const char* data_str = PyBytes_AsString(data.ptr());
+            py::gil_scoped_release release;
+            return self.writeRecord(name, data_str, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             c10::Storage data,
+             size_t size) {
+            // Reading Tensor data is always ok without the GIL held
+            py::gil_scoped_release release;
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data.data()), size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
              uintptr_t data,
              size_t size) {
+            TORCH_WARN_ONCE(
+                "write_record(): Passing Storage by data pointer is deprecated and will be an error in ",
+                "the future, please pass the Storage object instead.");
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           })
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
@@ -1421,6 +1503,7 @@ void initJITBindings(PyObject* module) {
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
           int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
+          Py_DECREF(res);
           if (i > 0) {
             return i;
           }
@@ -1452,9 +1535,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
-            at::DataPtr data;
-            size_t size = 0;
-            std::tie(data, size) = self.getRecord(key);
+            auto [data, size] = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(
@@ -1553,10 +1634,7 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               auto func =
@@ -1589,35 +1667,39 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_jit_resolve_packet",
+      [](const char* op_name, py::args args, py::kwargs kwargs) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
+          ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
+          const auto overloads = getAllSortedOperatorsFor(symbol);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
+          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          auto result = overload->schema().overload_name();
+          if (result == "") {
+            result = "default";
+          }
+          return result;
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& unsortedOps = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+          const auto sortedOps = getAllSortedOperatorsFor(symbol);
+          if (sortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
 
-          // Depending on the order of registration, aten or jit ops may be
-          // registered first. This sorting is helpful in cases where
-          // deterministic (i.e. not dependent on build config) behavior is
-          // desired; e.g. torch.ops.aten.* uses this function, and tries to
-          // find the "first" op that matches input args. Without the sorting,
-          // the "first" op may change depending on registration order.
-          std::vector<std::shared_ptr<Operator>> sortedOps;
-          sortedOps.reserve(unsortedOps.size());
-          std::copy_if(
-              unsortedOps.begin(),
-              unsortedOps.end(),
-              std::back_inserter(sortedOps),
-              [](const std::shared_ptr<Operator>& op) {
-                return op->isC10Op();
-              });
-          std::copy_if(
-              unsortedOps.begin(),
-              unsortedOps.end(),
-              std::back_inserter(sortedOps),
-              [](const std::shared_ptr<Operator>& op) {
-                return !op->isC10Op();
-              });
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
@@ -1631,10 +1713,7 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
 
           auto func = py::cpp_function(
               [sortedOps, symbol, allow_numbers_as_tensors](
@@ -1786,6 +1865,13 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def(
+          "__repr__",
           [](FunctionSchema& self) {
             std::stringstream ss;
             ss << self;

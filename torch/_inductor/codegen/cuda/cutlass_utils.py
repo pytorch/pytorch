@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
     for cutlass_module in cutlass_modules:
         content = content.replace(
-            f"from {cutlass_module} import ", f"from cutlass_{cutlass_module} import "
+            f"from {cutlass_module} import ",
+            f"from cutlass_library.{cutlass_module} import ",
         )
     return content
 
@@ -36,7 +37,7 @@ def _gen_cutlass_file(
     dst_full_path = os.path.abspath(
         os.path.join(
             dst_dir,
-            f"cutlass_{file_name}" if file_name != "__init__.py" else file_name,
+            file_name,
         )
     )
     with open(dst_full_path, "w") as f:
@@ -49,34 +50,31 @@ def try_import_cutlass() -> bool:
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
-    cutlass_py_full_path = os.path.join(
-        inductor_cuda_config.cutlass_dir, "tools/library/scripts"
+    cutlass_py_full_path = os.path.abspath(
+        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
-        os.path.join(cache_dir(), "torch_cutlass_script")
+        os.path.join(cache_dir(), "torch_cutlass_library")
     )
+    dst_link = os.path.join(tmp_cutlass_py_full_path, "cutlass_library")
 
     if os.path.isdir(cutlass_py_full_path):
-        cutlass_file_names = [
-            file_name
-            for file_name in os.listdir(cutlass_py_full_path)
-            if file_name.endswith(".py")
-        ]
-        cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-        if not os.path.isdir(tmp_cutlass_py_full_path):
-            os.mkdir(tmp_cutlass_py_full_path)
-        for file_name in cutlass_file_names:
-            _gen_cutlass_file(
-                file_name,
-                cutlass_module_names,
-                cutlass_py_full_path,
-                tmp_cutlass_py_full_path,
-            )
-        sys.path.append(tmp_cutlass_py_full_path)
+        if tmp_cutlass_py_full_path not in sys.path:
+            if os.path.exists(dst_link):
+                assert os.path.islink(
+                    dst_link
+                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
+                    cutlass_py_full_path
+                ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
+            else:
+                os.makedirs(tmp_cutlass_py_full_path, exist_ok=True)
+                os.symlink(cutlass_py_full_path, dst_link)
+            sys.path.append(tmp_cutlass_py_full_path)
         try:
-            import cutlass_generator  # type: ignore[import]  # noqa: F401
-            import cutlass_library  # type: ignore[import]  # noqa: F401
-            import cutlass_manifest  # type: ignore[import]  # noqa: F401
+            import cutlass_library.generator  # noqa: F401
+            import cutlass_library.library  # noqa: F401
+            import cutlass_library.manifest  # noqa: F401
 
             return True
 
@@ -121,9 +119,10 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
-    kernel_filter_file = None
-    selected_kernel_list = None
-    interface_dir = None
+    # TODO: these three look dead?
+    kernel_filter_file: None = None
+    selected_kernel_list: None = None
+    interface_dir: None = None
     filter_by_cc = True
     disable_full_archs_compilation = False
 
@@ -136,18 +135,14 @@ class CUTLASSArgs:
 
 
 @functools.lru_cache(None)
-def gen_ops() -> List[Any]:
-    """
-    Generates all supported CUTLASS operations.
-    """
+def _gen_ops_cached(arch, version) -> List[Any]:
+    # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_generator  # type: ignore[import]
-    import cutlass_manifest  # type: ignore[import]
+    import cutlass_library.generator as cutlass_generator
+    import cutlass_library.manifest as cutlass_manifest
 
-    arch = get_cuda_arch()
-    version = get_cuda_version()
     if arch is None or version is None:
         log.error(
             "Cannot detect cuda arch %s or cuda version %s. "
@@ -172,42 +167,71 @@ def gen_ops() -> List[Any]:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
             ) from e
-
     return manifest.operations
 
 
+def gen_ops() -> List[Any]:
+    """
+    Generates all supported CUTLASS operations.
+    """
+    arch = get_cuda_arch()
+    version = get_cuda_version()
+    return _gen_ops_cached(arch, version)
+
+
 def dtype_match(
-    torch_dtype: torch.dtype,
-    cutlass_dtype: "cutlass_library.DataType",  # type: ignore[name-defined]
+    torch_dtype: Optional[torch.dtype],
+    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library  # type: ignore[import]
+    import cutlass_library
 
     if torch_dtype == torch.float:
         return (
-            cutlass_dtype == cutlass_library.DataType.f32
-            or cutlass_dtype == cutlass_library.DataType.tf32
+            cutlass_dtype == cutlass_library.library.DataType.f32
+            or cutlass_dtype == cutlass_library.library.DataType.tf32
         )
     elif torch_dtype == torch.half:
-        return cutlass_dtype == cutlass_library.DataType.f16
+        return cutlass_dtype == cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
-        return cutlass_dtype == cutlass_library.DataType.bf16
+        return cutlass_dtype == cutlass_library.library.DataType.bf16
+    elif torch_dtype == torch.int8:
+        return cutlass_dtype == cutlass_library.library.DataType.s8
+    elif torch_dtype == torch.uint8:
+        return cutlass_dtype == cutlass_library.library.DataType.u8
+    elif torch_dtype == torch.int32:
+        return cutlass_dtype == cutlass_library.library.DataType.s32
     else:
         return False
 
 
-def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
+def get_accumulator_dtype(
+    input_torch_dtypes: List[torch.dtype],
+) -> Optional[torch.dtype]:
     """
-    Given a list of input torch dtypes, returns the inferred accumulator torch dtype.
+    Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
 
-    if len(input_torch_dtypes) == 0:
+    if len(input_torch_dtypes) != 2:
         return None
-    torch_dtype = input_torch_dtypes[0]
-    for dtype in input_torch_dtypes[1:]:
-        if torch_dtype != dtype:
-            raise RuntimeError(f"Unmatched input dtypes: {torch_dtype=}, {dtype=}")
+
+    torch_dtype = None
+    if input_torch_dtypes[0] == input_torch_dtypes[1]:
+        torch_dtype = input_torch_dtypes[0]
+    else:
+        size0 = torch.tensor([], dtype=input_torch_dtypes[0]).element_size()
+        size1 = torch.tensor([], dtype=input_torch_dtypes[1]).element_size()
+        if size0 > size1:
+            dtype0, dtype1 = input_torch_dtypes
+        else:
+            dtype1, dtype0 = input_torch_dtypes
+        if dtype0 in [torch.half, torch.bfloat16] and dtype1 in [
+            torch.int8,
+            torch.uint8,
+        ]:
+            torch_dtype = dtype0
+
     if torch_dtype == torch.half:
         if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
             return torch_dtype
@@ -215,7 +239,9 @@ def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
             return torch.float
     if torch_dtype in {torch.bfloat16, torch.float}:
         return torch.float
-    raise NotImplementedError(f"Unsupported data type: {input_torch_dtypes=}")
+    if torch_dtype == torch.int8:
+        return torch.int32
+    raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
 
 def get_alignments(torch_dtype: torch.dtype) -> List[int]:
@@ -227,6 +253,10 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     if torch_dtype in (torch.half, torch.bfloat16):
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
+        return [4, 2, 1]
+    elif torch_dtype in (torch.uint8, torch.int8):
+        return [16, 8, 4, 2]
+    elif torch_dtype == torch.int32:
         return [4, 2, 1]
     else:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")

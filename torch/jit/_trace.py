@@ -1,4 +1,4 @@
-"""Tracing
+"""Tracing.
 
 This module contains functionality to support the JIT's tracing frontend, notably:
     * torch.jit.trace
@@ -7,6 +7,7 @@ This module contains functionality to support the JIT's tracing frontend, notabl
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import contextlib
 
 import copy
@@ -25,6 +26,8 @@ from torch._jit_internal import (
     get_callable_argument_names,
     is_scripting,
 )
+
+from torch._utils_internal import log_torchscript_usage
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
 
@@ -198,9 +201,10 @@ def _time(trace_name, name, time=True):
 
 def verify(model, args, loss_fn=torch.sum, devices=None):
     """
-    Verify that a JIT compiled model has the same behavior as its uncompiled
-    version along with its backwards pass.  If your model returns multiple
-    outputs, you must also specify a `loss_fn` to produce a loss for which
+    Verify that a JIT compiled model has the same behavior as its uncompiled version along with its backwards pass.
+
+    If your model returns multiple outputs,
+    you must also specify a `loss_fn` to produce a loss for which
     the backwards will be computed.
 
     This function has side-effects (e.g., it executes your model / saves and loads
@@ -253,7 +257,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         if assert_compiled:
             hits = compiled_fn.hits
         out = model(*args)
-        if assert_compiled and compiled_fn.hits == hits:
+        if assert_compiled and compiled_fn.hits == hits:  # type: ignore[possibly-undefined]
             raise RuntimeError("failed to use the compiled function")
         if not isinstance(out, tuple):
             out = (out,)
@@ -279,7 +283,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         assert model.has_trace_for(*args)
 
     if is_module:
-        model.load_state_dict(saved_state)
+        model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
     compiled_outs, compiled_grads = run_fwd_bwd(args, assert_compiled=True)
 
     _verify_equal(uncompiled_outs, compiled_outs)
@@ -538,6 +542,20 @@ def _check_trace(
                                 atol=default_tolerances(orig, ref)[1],
                                 equal_nan=True,
                             )
+                        elif getattr(orig, "is_nested", None) or getattr(
+                            ref, "is_nested", None
+                        ):
+                            assert getattr(orig, "is_nested", None) == getattr(
+                                ref, "is_nested", None
+                            )
+                            for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
+                                torch.testing.assert_close(
+                                    t_orig.double(),
+                                    t_ref.double(),
+                                    rtol=check_tolerance,
+                                    atol=default_tolerances(t_orig, t_ref)[1],
+                                    equal_nan=True,
+                                )
                         else:
                             torch.testing.assert_close(
                                 orig.double(),
@@ -583,6 +601,7 @@ class TracerWarning(Warning):
         warnings.filterwarnings(
             "ignore", category=TracerWarning, module="torch.(?!jit)"
         )
+        warnings.filterwarnings("ignore", "torch::jit::fuser::cuda")
 
 
 # We ignore the tracer warnings coming form inside the library, because all our shape
@@ -635,10 +654,11 @@ def trace(
     example_kwarg_inputs=None,
     _store_inputs=True,
 ):
-    """
-    Trace a function and return an executable  or :class:`ScriptFunction`
-    that will be optimized using just-in-time compilation. Tracing is ideal for
-    code that operates only on ``Tensor``\\s and lists, dictionaries, and
+    r"""
+    Trace a function and return an executable  or :class:`ScriptFunction` that will be optimized using just-in-time compilation.
+
+    Tracing is ideal for code that operates only on
+    ``Tensor``\\s and lists, dictionaries, and
     tuples of ``Tensor``\\s.
 
     Using `torch.jit.trace` and `torch.jit.trace_module`, you can turn an
@@ -786,6 +806,8 @@ def trace(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
 
+    log_torchscript_usage("trace")
+
     if isinstance(func, torch.jit.ScriptModule):
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it
         # would result in an error.
@@ -928,8 +950,9 @@ def trace_module(
     _store_inputs=True,
 ):
     """
-    Trace a module and return an executable :class:`ScriptModule` that will be optimized
-    using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
+    Trace a module and return an executable :class:`ScriptModule` that will be optimized using just-in-time compilation.
+
+    When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
     method names to example inputs to trace (see the ``inputs``) argument below.
 
@@ -1113,9 +1136,10 @@ def trace_module(
 
 
 def is_tracing():
-    """
-    Returns ``True`` in tracing (if a function is called during the tracing of
-    code with ``torch.jit.trace``) and ``False`` otherwise.
+    """Return a boolean value.
+
+    Returns ``True`` in tracing (if a function is called during the
+    tracing of code with ``torch.jit.trace``) and ``False`` otherwise.
     """
     if is_scripting():
         return False
@@ -1252,7 +1276,8 @@ def _get_trace_graph(
     return_inputs=False,
     _return_inputs_states=False,
 ):
-    """
+    """Return a tuple on tracing a function or model.
+
     .. warning::
         This function is internal-only and should only be used by the ONNX
         exporter. If you are trying to get a graph through tracing, please go

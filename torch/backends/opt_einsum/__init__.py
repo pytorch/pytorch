@@ -14,12 +14,12 @@ except ImportError:
 
 @_lru_cache
 def is_available() -> bool:
-    r"""Returns a bool indicating if opt_einsum is currently available."""
+    r"""Return a bool indicating if opt_einsum is currently available."""
     return _opt_einsum is not None
 
 
 def get_opt_einsum() -> Any:
-    r"""Returns the opt_einsum package if opt_einsum is currently available, else None."""
+    r"""Return the opt_einsum package if opt_einsum is currently available, else None."""
     return _opt_einsum
 
 

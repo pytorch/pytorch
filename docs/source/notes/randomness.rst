@@ -127,7 +127,7 @@ deterministic implementation will be used::
 
 Furthermore, if you are using CUDA tensors, and your CUDA version is 10.2 or greater, you
 should set the environment variable `CUBLAS_WORKSPACE_CONFIG` according to CUDA documentation:
-`<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
+`<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
 
 CUDA convolution determinism
 ----------------------------
@@ -143,6 +143,22 @@ CUDA RNN and LSTM
 -----------------
 In some versions of CUDA, RNNs and LSTM networks may have non-deterministic behavior.
 See :meth:`torch.nn.RNN` and :meth:`torch.nn.LSTM` for details and workarounds.
+
+Filling uninitialized memory
+----------------------------
+Operations like :meth:`torch.empty` and :meth:`torch.Tensor.resize_` can return
+tensors with uninitialized memory that contain undefined values. Using such a
+tensor as an input to another operation is invalid if determinism is required,
+because the output will be nondeterministic. But there is nothing to actually
+prevent such invalid code from being run. So for safety,
+:attr:`torch.utils.deterministic.fill_uninitialized_memory` is set to ``True``
+by default, which will fill the uninitialized memory with a known value if
+:code:`torch.use_deterministic_algorithms(True)` is set. This will to prevent
+the possibility of this kind of nondeterministic behavior.
+
+However, filling uninitialized memory is detrimental to performance. So if your
+program is valid and does not use uninitialized memory as the input to an
+operation, then this setting can be turned off for better performance.
 
 DataLoader
 ..........

@@ -44,6 +44,8 @@ private:
       const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, at::opmath_type<Dtype> beta,\
       Dtype *c, int64_t ldc
 
+#define CUDABLAS_GEMM_ARGS(Dtype) transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc
+
 template <typename Dtype>
 inline void gemm(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   AT_ERROR("at::cuda::blas::gemm: not implemented for ", typeid(Dtype).name());
@@ -62,7 +64,25 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+template <typename Dtype>
+inline void gemm_internal(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::gemm_internal: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double));
+template <>
+void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float));
+template <>
+void gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+template <>
+void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+template <>
+void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
+template <>
+void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
+
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 enum GEMMAndBiasActivationEpilogue {
   None,
   RELU,
@@ -115,13 +135,14 @@ void scaled_gemm(
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
-    const void* bias,
+    const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
     const void* result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr);
+    void* amax_ptr,
+    bool use_fast_accum);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
@@ -129,6 +150,9 @@ void scaled_gemm(
       const Dtype *a, int64_t lda, int64_t stridea,                                           \
       const Dtype *b, int64_t ldb, int64_t strideb,                                           \
       at::opmath_type<Dtype> beta, Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
+
+#define CUDABLAS_BGEMM_ARGS(Dtype) \
+  transa, transb, m, n, k, alpha, a, lda, stridea, b, ldb, strideb, beta, c, ldc, stridec, num_batches
 
 template <typename Dtype>
 inline void bgemm(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
@@ -148,7 +172,25 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 
-#if defined(USE_ROCM) && ROCM_VERSION <= 55000
+template <typename Dtype>
+inline void bgemm_internal(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::bgemm_internal: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void bgemm_internal<double>(CUDABLAS_BGEMM_ARGTYPES(double));
+template <>
+void bgemm_internal<float>(CUDABLAS_BGEMM_ARGTYPES(float));
+template <>
+void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
+template <>
+void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
+template <>
+void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
+template <>
+void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+
+#if defined(USE_ROCM) && ROCM_VERSION <= 50500
 // ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \

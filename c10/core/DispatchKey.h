@@ -2,7 +2,9 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 
@@ -17,7 +19,7 @@ namespace c10 {
 // a DispatchKeySet. The bits in the DispatchKeySet are split between the bottom
 // ~12 "BackendComponent" bits, while the remaining upper bits are assigned to
 // functionalities. When we encounter a functionality bit that is known to be
-// customizeable per-backend, then we also look at the lower BackendComponent
+// customizable per-backend, then we also look at the lower BackendComponent
 // bits and take the highest bit to determine which backend's implementation to
 // use.
 
@@ -55,6 +57,7 @@ namespace c10 {
   _(Dense, )                             \
   _(Quantized, Quantized)                \
   _(Sparse, Sparse)                      \
+  _(SparseCsr, SparseCsr)                \
   _(NestedTensor, NestedTensor)          \
   _(AutogradFunctionality, Autograd)
 
@@ -215,9 +218,7 @@ enum class DispatchKey : uint16_t {
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,
 
-  // TODO: Make SparseCsr a functionality key
-  SparseCsrCPU,
-  SparseCsrCUDA,
+  SparseCsr,
 
   NestedTensor,
 
@@ -546,7 +547,8 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 
 constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense || k == DispatchKey::Quantized ||
-      k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality ||
+      k == DispatchKey::Sparse || k == DispatchKey::SparseCsr ||
+      k == DispatchKey::AutogradFunctionality ||
       k == DispatchKey::NestedTensor) {
     return true;
   } else {
@@ -634,6 +636,12 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (
+      k >= DispatchKey::StartOfSparseCsrBackends &&
+      k <= DispatchKey::EndOfSparseCsrBackends) {
+    return static_cast<BackendComponent>(
+        static_cast<uint8_t>(k) -
+        static_cast<uint8_t>(DispatchKey::StartOfSparseCsrBackends));
+  } else if (
       k >= DispatchKey::StartOfNestedTensorBackends &&
       k <= DispatchKey::EndOfNestedTensorBackends) {
     return static_cast<BackendComponent>(
@@ -660,6 +668,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Quantized;
   } else if (k <= DispatchKey::EndOfSparseBackends) {
     return DispatchKey::Sparse;
+  } else if (k <= DispatchKey::EndOfSparseCsrBackends) {
+    return DispatchKey::SparseCsr;
   } else if (k <= DispatchKey::EndOfNestedTensorBackends) {
     return DispatchKey::NestedTensor;
   } else if (k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
@@ -690,6 +700,11 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
         static_cast<uint8_t>(DispatchKey::StartOfSparseBackends) +
         static_cast<uint8_t>(backend_k));
   }
+  if (functionality_k == DispatchKey::SparseCsr) {
+    return static_cast<DispatchKey>(
+        static_cast<uint8_t>(DispatchKey::StartOfSparseCsrBackends) +
+        static_cast<uint8_t>(backend_k));
+  }
   if (functionality_k == DispatchKey::Quantized) {
     return static_cast<DispatchKey>(
         static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) +
@@ -714,6 +729,7 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
 namespace torch {
 // Expose the constant, but not the TYPE (DispatchKey is an implementation
 // detail!)
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::kAutograd;
 } // namespace torch
 

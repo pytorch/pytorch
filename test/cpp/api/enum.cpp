@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
+#include <variant>
 
 #include <test/cpp/api/support.h>
 
@@ -13,7 +14,7 @@
   }
 
 TEST(EnumTest, AllEnums) {
-  c10::variant<
+  std::variant<
       torch::enumtype::kLinear,
       torch::enumtype::kConv1D,
       torch::enumtype::kConv2D,

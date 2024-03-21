@@ -2,21 +2,12 @@
 
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
-
+#include <ATen/core/Generator.h>
 #include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <functional>
 #include <memory>
-
-namespace at {
-class Context;
-}
-
-// We use forward declaration here instead of #include <ATen/dlpack.h> to avoid
-// leaking DLPack implementation detail to every project that includes `ATen/Context.h`, which in turn
-// would lead to a conflict when linked with another project using DLPack (for example TVM)
-struct DLDevice_;
 
 namespace at {
 
@@ -48,23 +39,32 @@ struct TORCH_API XPUHooksInterface {
         XPU_HELP);
   }
 
-  virtual Device getATenDeviceFromDLPackDevice(
-      const DLDevice_& dl_device,
-      void* data) const {
-    TORCH_CHECK(
-        false,
-        "Cannot get XPU device without Intel Extension for Pytorch. ",
-        XPU_HELP);
+  virtual int32_t getGlobalIdxFromDevice(const Device& device) const {
+    TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
-  virtual DLDevice_& getDLPackDeviceFromATenDevice(
-      DLDevice_& dl_device,
-      const Device& aten_device,
-      void* data) const {
-    TORCH_CHECK(
-        false,
-        "Cannot get XPU DL device without Intel Extension for Pytorch. ",
-        XPU_HELP);
+  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
+  }
+
+  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
+  }
+
+  virtual DeviceIndex getNumGPUs() const {
+    return 0;
+  }
+
+  virtual DeviceIndex current_device() const {
+    TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
+  }
+
+  virtual Device getDeviceFromPtr(void* /*data*/) const {
+    TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
+  }
+
+  virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
   }
 };
 

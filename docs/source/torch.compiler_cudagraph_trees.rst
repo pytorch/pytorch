@@ -42,7 +42,7 @@ Like Graph Callables, CUDA Graph Trees use a single memory pool across all graph
 
 .. code-block:: python
 
-    @torch.compile
+    @torch.compile(mode="reduce-overhead")
     def foo(x):
         # GRAPH 1
         y = x * x * x
@@ -57,12 +57,12 @@ Like Graph Callables, CUDA Graph Trees use a single memory pool across all graph
         # GRAPH 4
         return z * torch.rand_like(z)
 
-        # the first run warms up each graph, which does things like CuBlas or Triton benchmarking
-        foo(torch.arange(0, 10), device="cuda")
-        # The second run does a CUDA Graph recording, and replays it
-        foo(torch.arange(0, 10), device="cuda")
-        # Finally we hit the optimized, CUDA Graph replay path
-        foo(torch.arange(0, 10), device="cuda")
+    # the first run warms up each graph, which does things like CuBlas or Triton benchmarking
+    foo(torch.arange(0, 10, device="cuda"))
+    # The second run does a CUDA Graph recording, and replays it
+    foo(torch.arange(0, 10, device="cuda"))
+    # Finally we hit the optimized, CUDA Graph replay path
+    foo(torch.arange(0, 10, device="cuda"))
 
 
 In this example, there are two separate paths that we make through the function: 1 -> 2 -> 4, or 1 -> 3 -> 4.
@@ -80,7 +80,7 @@ Graph 1 gets replayed, and then we hit Graph 3, which we have not yet recorded. 
 
 First, we would hit the optimized, CUDAGraph.replay() path that we have already recorded in graph 1. Then we would hit Graph 3. Just as before, we will need to warm up the graph once before recording. On the warmup run, the memory addresses are not fixed, so graph 4 will also fallback to the inductor, non-cudagraph invocation.
 
-The second time we hit graph 3 we are warmed up and ready to record. We record graph 2 and then record graph 4 again since the input memory addresses have changed. This creates a tree of CUDA Graph recordings. A CUDA Graph Tree!
+The second time we hit graph 3 we are warmed up and ready to record. We record graph 3 and then record graph 4 again since the input memory addresses have changed. This creates a tree of CUDA Graph recordings. A CUDA Graph Tree!
 
 ::
 
@@ -101,6 +101,7 @@ Let’s say we are benchmarking running inference with the following code:
 
     import torch
 
+    @torch.compile(mode="reduce-overhead")
     def my_model(x):
         y = torch.matmul(x, x)
         return y
@@ -108,8 +109,11 @@ Let’s say we are benchmarking running inference with the following code:
     x = torch.randn(10, 10)
     y1 = my_model(x)
     y2 = my_model(x)
+    print(y1)
+    # RuntimeError: Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run.
 
-In the Separate CUDA Graph implementation, the output from the first invocation will be overwritten by the second invocation. Similarly, in CUDA Graph Trees, naively, the live output of the first run would force a dependency between the first run and the second run, and we would never hit the optimized cudagraph replay invocation. CUDA Graph Trees will ignore outputs from a previous run of torch.compile and not force a memory dependency. In training, we will not ignore outputs from a previous run of torch.compile if we have pending backwards that have not been invoked. TODO - add API to increment generation manually, error on access of prior storage
+
+In the Separate CUDA Graph implementation, the output from the first invocation will be overwritten by the second invocation. In CUDA Graph Trees, we don’t want to add unintended dependencies between iterations that would cause us to not hit the hot path, nor do we want we want to prematurely free memory from a prior invocation. Our heuristics are in inference we start a new iteration on each invocation for torch.compile, and in training we do the same so long as there is not a pending backward that has not been invoked. If those heuristics are wrong, you can mark the start of a new iteration with torch.compiler.mark_step_begin(), or clone tensors of a prior iteration (outside of torch.compile) before you begin the next run.
 
 Comparisons
 -----------

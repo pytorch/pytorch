@@ -17,6 +17,8 @@ namespace ops {
 
 namespace utils {
 
+using namespace api::utils;
+
 /*
  * This function formats an input tensor in NCHW layout to NC4HW layout such
  * that the buffer of the formatted tensor can be directly copied into a GPU
@@ -80,7 +82,8 @@ Tensor create_staging_tensor(const vTensor& v_in) {
   // the staging tensor matches the number of bytes in the image texture. Refer
   // to comments for api::vk_format()
   return at::empty(
-      {NC4, H, W, 4}, at::device(at::kCPU).dtype(v_in.texture_dtype()));
+      {NC4, H, W, 4},
+      at::device(at::kCPU).dtype(convert_dtype(v_in.texture_dtype())));
 }
 
 /*
@@ -214,7 +217,7 @@ void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
   pack_buffer_to_vtensor(staging, v_self, pipeline_barrier);
 }
 
-void pack_vtensor_to_staging(
+bool pack_vtensor_to_staging(
     vTensor& v_self,
     api::VulkanBuffer& staging,
     const VkFence fence_handle) {
@@ -222,11 +225,11 @@ void pack_vtensor_to_staging(
   api::PipelineBarrier pipeline_barrier{};
 
   if (v_self.storage_type() == api::StorageType::BUFFER) {
-    packing::record_buffer_to_nchw_op(
+    return packing::record_buffer_to_nchw_op(
         context, v_self, staging, pipeline_barrier, fence_handle);
   } else {
     api::ShaderInfo compute_shader = packing::get_image_to_nchw_shader(v_self);
-    packing::record_image_to_nchw_op(
+    return packing::record_image_to_nchw_op(
         context,
         compute_shader,
         v_self,
@@ -311,6 +314,68 @@ std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
   }
 
   return out;
+}
+
+api::utils::vec4 extract_texel(const Tensor& input, const ivec3& pos) {
+  api::Context* const context = api::context();
+
+  TORCH_CHECK(input.is_vulkan());
+  const vTensor& v_input = convert(input);
+
+  api::PipelineBarrier pipeline_barrier{};
+
+  std::vector<int64_t> output_size{1, 1, 1};
+
+  // x, y, z, w all using a single element tensor. We intend to pull
+  // (0, 0, 0).x from each tensor. This allows us to isolate the effect
+  // of most packing mechanism.
+  api::ScalarType dtype = convert_dtype(input.scalar_type());
+  vTensor v_outputs_x{context, output_size, dtype};
+  vTensor v_outputs_y{context, output_size, dtype};
+  vTensor v_outputs_z{context, output_size, dtype};
+  vTensor v_outputs_w{context, output_size, dtype};
+
+  const struct Block final {
+    ivec3 pos;
+  } block{
+      pos,
+  };
+
+  api::UniformParamsBuffer params(context, block);
+
+  context->submit_compute_job(
+      VK_KERNEL(extract_texel),
+      pipeline_barrier,
+      {1, 1, 1},
+      {1, 1, 1},
+      VK_NULL_HANDLE,
+      v_outputs_x.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_outputs_y.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_outputs_z.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_outputs_w.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      params.buffer());
+
+  vec4 rv = {
+      convert(v_outputs_x).cpu().data_ptr<float>()[0],
+      convert(v_outputs_y).cpu().data_ptr<float>()[0],
+      convert(v_outputs_z).cpu().data_ptr<float>()[0],
+      convert(v_outputs_w).cpu().data_ptr<float>()[0],
+  };
+
+  return rv;
 }
 
 } // namespace utils

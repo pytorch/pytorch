@@ -20,12 +20,14 @@ from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
+from torch.utils._import_utils import import_dill
 from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
     set_default_load_endianness, LoadEndianness
 
-from torch.testing._internal.common_utils import IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, \
-    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, \
-    parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
+    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -33,11 +35,8 @@ from torch.testing._internal.common_dtype import all_types_and_complex_and
 # the actual blame, see this revision
 # https://github.com/pytorch/pytorch/blame/9a2691f2fc948b9792686085b493c61793c2de30/test/test_torch.py
 
-if TEST_DILL:
-    import dill
-    HAS_DILL_AT_LEAST_0_3_1 = check_module_version_greater_or_equal(dill, (0, 3, 1))
-else:
-    HAS_DILL_AT_LEAST_0_3_1 = False
+dill = import_dill()
+HAS_DILL_AT_LEAST_0_3_1 = dill is not None and check_module_version_greater_or_equal(dill, (0, 3, 1))
 
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
@@ -786,7 +785,8 @@ class serialization_method:
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
-    def _test_serialization_new_format_old_format_compat(self, device, weights_only):
+    @parametrize("weights_only", (True, False))
+    def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
         def test(f_new, f_old):
@@ -800,14 +800,10 @@ class TestBothSerialization(TestCase):
             x_old_load = torch.load(f_old, weights_only=weights_only)
             self.assertEqual(x_old_load, x_new_load)
 
-        with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
-            test(f_new, f_old)
-
-    def test_serialization_new_format_old_format_compat(self, device):
-        self._test_serialization_new_format_old_format_compat(device, False)
-
-    def test_serialization_new_format_old_format_compat_safe(self, device):
-        self._test_serialization_new_format_old_format_compat(device, True)
+        with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
+            with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
+                test(f_new, f_old)
+            self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -3901,9 +3897,10 @@ class TestSerialization(TestCase, SerializationMixin):
         finally:
             set_default_load_endianness(current_load_endian)
 
+    @parametrize('path_type', (str, pathlib.Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading(self, weights_only):
+    def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3914,6 +3911,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 return self.fc2(self.fc1(input))
 
         with TemporaryFileName() as f:
+            f = path_type(f)
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True, weights_only=weights_only)
@@ -3950,6 +3948,22 @@ class TestSerialization(TestCase, SerializationMixin):
             result = torch.load(f, mmap=True)
             for v in result.values():
                 self.assertTrue(v.is_cuda)
+
+    @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
+    @parametrize('weights_only', (True, False))
+    def test_serialization_dtype(self, dtype, weights_only):
+        """ Tests that newer dtypes can be serialized using `_rebuild_tensor_v3` """
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.arange(0.0, 100.0).to(dtype=dtype)
+            torch.save({'x': x, 'even': x[0::2], 'odd': x[1::2]}, f)
+            f.seek(0)
+            y = torch.load(f, weights_only=weights_only)
+            self.assertEqual(y['x'], x)
+            # Check that views are actually views
+            y['odd'][0] = torch.tensor(0.25, dtype=dtype)
+            y['even'][0] = torch.tensor(-0.25, dtype=dtype)
+            self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

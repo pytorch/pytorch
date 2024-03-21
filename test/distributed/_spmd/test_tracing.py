@@ -46,7 +46,7 @@ class TraceDeviceMeshTestBase:
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -71,7 +71,7 @@ class TraceDeviceMeshTestBase:
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -98,7 +98,7 @@ class TraceDeviceMeshTestBase:
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -129,7 +129,7 @@ class TraceDeviceMeshTestBase:
         # each rank have its own tensor, all_gather gives a big tensor
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -256,7 +256,7 @@ def ddm_backward(grad: torch.Tensor) -> torch.Tensor:
     return grad
 
 
-dummy_lib = torch.library.Library("dummy", "DEF")
+dummy_lib = torch.library.Library("dummy", "DEF")  # noqa: TOR901
 dummy_lib.define("ddm(Tensor x) -> Tensor")
 dummy_lib.impl("ddm", ddm, "CompositeExplicitAutograd")
 dummy_lib.define("ddm_backward(Tensor x) -> Tensor")
@@ -669,7 +669,7 @@ class TraceTrainStepTest(DTensorTestBase):
         train_step(mod, opt, inp)
         for node in train_step._compiled_obj.gm.graph.nodes:
             if node.target == torch.ops.aten.expand.default:
-                # backward grad expandion op should match local batch size
+                # backward grad expansion op should match local batch size
                 # instead of global batch size.
                 self.assertEqual(node.args[1], [2, 10])
 

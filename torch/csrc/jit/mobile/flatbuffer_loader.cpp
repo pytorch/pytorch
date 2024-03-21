@@ -291,16 +291,18 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
-  TORCH_CHECK(ivalues != nullptr, "Corrupted ivalues field")
   TORCH_CHECK(
-      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field")
+      ivalues && module->object_types(),
+      "Parsing flatbuffer module: Corrupted ivalues/object_types field");
+  TORCH_CHECK(
+      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field");
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
 
   mobile_ivalue_size_ = module_->mobile_ivalue_size();
-  if (mobile_ivalue_size_ == 0) {
+  if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {
     mobile_ivalue_size_ = ivalues->size();
   }
 
@@ -753,8 +755,6 @@ mobile::Module parse_and_initialize_mobile_module(
     c10::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
-  TORCH_CHECK(
-      mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
   // TODO(T128189662): If not copying, enforce that data is aligned to
   // kFlatbufferDataAlignmentBytes, and add unit tests.
 
@@ -827,24 +827,18 @@ mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<c10::Device> device,
     ExtraFilesMap* extra_files) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(
       std::move(data), size, device, extra_files);
 }
 
 uint64_t get_bytecode_version(std::istream& in) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return get_bytecode_version_from_bytes(data.get());
 }
 
 uint64_t get_bytecode_version(const std::string& filename) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return get_bytecode_version_from_bytes(data.get());
 }
 
@@ -893,9 +887,7 @@ mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return parse_and_initialize_mobile_module(
       std::move(data), size, device, extra_files);
 }

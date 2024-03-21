@@ -8,7 +8,7 @@ import inspect
 import logging
 from types import ModuleType
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set
+from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
 
 import torch
 import torch._ops
@@ -69,17 +69,6 @@ class TypePromotionSnapshot:
     """Expected output dtype of the node."""
 
 
-@_beartype.beartype
-def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
-    """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
-    val = node.meta.get("val", None)
-    if not isinstance(val, fake_tensor.FakeTensor):
-        raise RuntimeError(
-            f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
-        )
-    return val
-
-
 class TypePromotionRule(abc.ABC):
     """Base class for type promotion rule per 'torch.ops.{namespace}.{op_name}'."""
 
@@ -138,6 +127,12 @@ class TypePromotionRule(abc.ABC):
 class ElementwiseTypePromotionRule(TypePromotionRule):
     """Defines how to perform elementwise type promotion for 'torch.ops.{namespace}.{op_name}'."""
 
+    _USE_OPMATH: bool = False
+    """Whether to use opmath to compute the promoted input dtype.
+    If used, upcasts will be inserted everywhere for lower precision models.
+    Set to False and have torchlib handle upcasts in op implementation internally.
+    """
+
     def __init__(
         self,
         namespace: str,
@@ -180,6 +175,22 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
     def __hash__(self) -> int:
         return f"{type(self)}:{self.namespace}.{self.op_name}".__hash__()
 
+    def _consolidate_input_dtype(
+        self, computed_dtype: torch.dtype, result_dtype: torch.dtype
+    ) -> torch.dtype:
+        """
+        Although opmath is the right thing to do to retain on-par precision, it inserts
+        upcasts everywhere in the graph. This is particularly hard for backend to optimize
+        since there is no way to differentiate between inserted upcasts and model code
+        casts. Hence we consolidate the input dtype to the result dtype to avoid this.
+        """
+        if not self._USE_OPMATH and self.promotion_kind in (
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        ):
+            return result_dtype
+        return computed_dtype
+
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
@@ -195,14 +206,17 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *_pytree.tree_flatten(candidate_args)[0],
-            *_pytree.tree_flatten(candidate_kwargs)[0],
+            *_pytree.arg_tree_leaves(*candidate_args.values(), **candidate_kwargs),
             type_promotion_kind=self.promotion_kind,
         )
 
+        consolidated_input_dtype = self._consolidate_input_dtype(
+            computed_dtype, result_dtype
+        )
+
         return TypePromotionSnapshot(
-            {i: computed_dtype for i in candidate_args.keys()},
-            {name: computed_dtype for name in candidate_kwargs.keys()},
+            dict.fromkeys(candidate_args.keys(), consolidated_input_dtype),
+            dict.fromkeys(candidate_kwargs.keys(), consolidated_input_dtype),
             result_dtype,
         )
 
@@ -910,6 +924,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -1641,7 +1658,7 @@ class InsertTypePromotion(_pass.Transform):
     metadata, specifically the fake tensor stored under node.meta["val"], and ensure it
     reflects the latest changes.
 
-    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/master/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
+    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/main/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
     """
 
     def __init__(
@@ -1655,7 +1672,21 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
-    def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
+    def _fetch_fake_args(
+        self,
+    ) -> Sequence[
+        Optional[
+            Union[
+                fake_tensor.FakeTensor,
+                float,
+                int,
+                bool,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+            ]
+        ]
+    ]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.
@@ -1664,12 +1695,14 @@ class InsertTypePromotion(_pass.Transform):
         for node in self.module.graph.nodes:
             if node.op == "placeholder":
                 try:
-                    fake_tensor = _fake_tensor_from_node_val(node)
+                    # Meta value can be torch.Tensor, int, float, bool,
+                    # torch.SymInt, torch.SymFloat, torch.SymBool.
+                    meta_value = _val = node.meta.get("val", None)
                 except RuntimeError as e:
                     if not node.users:
                         # If the placeholder is not used, we can safely ignore it and put
                         # None as placeholder.
-                        fake_tensor = None
+                        meta_value = None
                     else:
                         raise RuntimeError(
                             "Cannot fetch symbolic fake args from fx graph. "
@@ -1677,7 +1710,7 @@ class InsertTypePromotion(_pass.Transform):
                             "Otherwise the pass will produce inaccurate dynamic shape. "
                         ) from e
 
-                fake_args.append(fake_tensor)
+                fake_args.append(meta_value)
         return fake_args
 
     @_beartype.beartype

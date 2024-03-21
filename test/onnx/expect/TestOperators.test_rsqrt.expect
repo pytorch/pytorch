@@ -5,12 +5,12 @@ graph {
   node {
     input: "onnx::Sqrt_0"
     output: "onnx::Div_1"
-    name: "Sqrt_0"
+    name: "Sqrt_1"
     op_type: "Sqrt"
   }
   node {
     output: "onnx::Div_2"
-    name: "Constant_1"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -25,7 +25,7 @@ graph {
     input: "onnx::Div_2"
     input: "onnx::Div_1"
     output: "3"
-    name: "Div_2"
+    name: "Div_3"
     op_type: "Div"
   }
   name: "main_graph"

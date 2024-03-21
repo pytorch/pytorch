@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <cstdint>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;

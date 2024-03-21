@@ -18,8 +18,8 @@ namespace functional {
 /// F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
 /// ```
 struct TORCH_API GridSampleFuncOptions {
-  typedef c10::variant<enumtype::kBilinear, enumtype::kNearest> mode_t;
-  typedef c10::
+  typedef std::variant<enumtype::kBilinear, enumtype::kNearest> mode_t;
+  typedef std::
       variant<enumtype::kZeros, enumtype::kBorder, enumtype::kReflection>
           padding_mode_t;
 

@@ -1,72 +1,24 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
-#include <c10/core/ScalarTypeToTypeMeta.h>
+#define PRINT_FIELD(struct, field) #field << ": " << struct.field << std::endl
+
+std::ostream& operator<<(std::ostream& out, VmaTotalStatistics stats) {
+  VmaDetailedStatistics total_stats = stats.total;
+  out << "VmaTotalStatistics: " << std::endl;
+  out << "  " << PRINT_FIELD(total_stats.statistics, blockCount);
+  out << "  " << PRINT_FIELD(total_stats.statistics, allocationCount);
+  out << "  " << PRINT_FIELD(total_stats.statistics, blockBytes);
+  out << "  " << PRINT_FIELD(total_stats.statistics, allocationBytes);
+  return out;
+}
+
+#undef PRINT_FIELD
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-
-//
-// Utility Functions
-//
-
-/*
- * This function is used to determine what image format to use for a given
- * dtype.
- *
- * TODO: enable proper format selection between kFloat and kHalf.
- *
- * Context: due to limitations of the shader compilation system, at the moment
- * it is not possible to support both 32 bit and 16 bit float formats since
- * shaders will have to specify the format qualifier of texture inputs. Right
- * now, shaders are compiled with either rgba16f or rgba32f qualifiers depending
- * on whether USE_VULKAN_FP16_INFERENCE is set. Therefore, textures must be
- * always created with the corresponding VkFormat. Consequently, kHalf tensors
- * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
- */
-VkFormat vk_format(const at::ScalarType dtype) {
-  switch (dtype) {
-    case c10::kBool:
-      return VK_FORMAT_R8G8B8A8_SINT;
-    case kFloat:
-#ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-#else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif /* USE_VULKAN_FP16_INFERENCE */
-    case c10::kQUInt8:
-      return VK_FORMAT_R8G8B8A8_UINT;
-    case c10::kQInt8:
-      return VK_FORMAT_R8G8B8A8_SINT;
-    case c10::kQInt32:
-      return VK_FORMAT_R32G32B32A32_SINT;
-
-    default:
-      TORCH_CHECK(
-          false, "Vulkan vk_format(): no corresponding format for dtype");
-  }
-}
-
-/*
- * This function is used to map a texture format to a corresponding
- * c10::ScalarType. It is primarily used to set the data type of a
- * StorageBuffer object that will receive copied data from a texture.
- */
-c10::ScalarType c10_scalartype(const VkFormat image_format) {
-  switch (image_format) {
-    case VK_FORMAT_R32G32B32A32_SFLOAT:
-      return c10::kFloat;
-    case VK_FORMAT_R16G16B16A16_SFLOAT:
-      return c10::kHalf;
-    case VK_FORMAT_R8G8B8A8_UINT:
-      return c10::kQUInt8;
-
-    default:
-      TORCH_CHECK(false, "vulkan c10_scalartype(): Unknown VkFormat.");
-  }
-}
 
 //
 // MemoryBarrier
@@ -83,91 +35,159 @@ MemoryBarrier::MemoryBarrier(
       } {}
 
 //
+// MemoryAllocation
+//
+
+MemoryAllocation::MemoryAllocation()
+    : memory_requirements{},
+      create_info{},
+      allocator(VK_NULL_HANDLE),
+      allocation(VK_NULL_HANDLE) {}
+
+MemoryAllocation::MemoryAllocation(
+    VmaAllocator vma_allocator,
+    const VkMemoryRequirements& mem_props,
+    const VmaAllocationCreateInfo& create_info)
+    : memory_requirements(mem_props),
+      create_info(create_info),
+      allocator(vma_allocator),
+      allocation(VK_NULL_HANDLE) {
+  VK_CHECK(vmaAllocateMemory(
+      allocator, &memory_requirements, &create_info, &allocation, nullptr));
+}
+
+MemoryAllocation::MemoryAllocation(MemoryAllocation&& other) noexcept
+    : memory_requirements(other.memory_requirements),
+      create_info(other.create_info),
+      allocator(other.allocator),
+      allocation(other.allocation) {
+  other.allocation = VK_NULL_HANDLE;
+}
+
+MemoryAllocation& MemoryAllocation::operator=(
+    MemoryAllocation&& other) noexcept {
+  VmaAllocation tmp_allocation = allocation;
+
+  memory_requirements = other.memory_requirements;
+  create_info = other.create_info;
+  allocator = other.allocator;
+  allocation = other.allocation;
+
+  other.allocation = tmp_allocation;
+
+  return *this;
+}
+
+MemoryAllocation::~MemoryAllocation() {
+  if (VK_NULL_HANDLE != allocation) {
+    vmaFreeMemory(allocator, allocation);
+  }
+}
+
+//
 // VulkanBuffer
 //
 
 VulkanBuffer::VulkanBuffer()
-    : memory_properties_{},
-      buffer_properties_{},
+    : buffer_properties_{},
       allocator_(VK_NULL_HANDLE),
-      allocation_(VK_NULL_HANDLE),
+      memory_{},
+      owns_memory_(false),
       handle_(VK_NULL_HANDLE) {}
 
 VulkanBuffer::VulkanBuffer(
-    const VmaAllocator vma_allocator,
+    VmaAllocator vma_allocator,
     const VkDeviceSize size,
-    const VulkanBuffer::MemoryProperties& mem_props)
-    : memory_properties_(mem_props),
-      buffer_properties_({
+    const VmaAllocationCreateInfo& allocation_create_info,
+    const VkBufferUsageFlags usage,
+    const bool allocate_memory)
+    : buffer_properties_({
           size,
           0u,
           size,
+          usage,
       }),
       allocator_(vma_allocator),
-      allocation_(VK_NULL_HANDLE),
+      memory_{},
+      owns_memory_(allocate_memory),
       handle_(VK_NULL_HANDLE) {
+  // Only allocate memory if the buffer has non-zero size
+  if (size == 0) {
+    return;
+  }
+
   const VkBufferCreateInfo buffer_create_info{
       VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, // sType
       nullptr, // pNext
       0u, // flags
       size, // size
-      memory_properties_.buffer_usage, // usage
+      buffer_properties_.buffer_usage, // usage
       VK_SHARING_MODE_EXCLUSIVE, // sharingMode
       0u, // queueFamilyIndexCount
       nullptr, // pQueueFamilyIndices
   };
 
-  // TODO: enable creation with a custom pool
-  VmaAllocationCreateInfo alloc_create_info{
-      memory_properties_.create_flags, // flags
-      memory_properties_.memory_usage, // usage
-      memory_properties_.required_mem_flags, // requiredFlags
-      memory_properties_.preferred_mem_flags, // preferredFlags
-      0u, // memoryTypeBits
-      VK_NULL_HANDLE, // pool
-      nullptr, // pUserData
-      0.5f, // priority
-  };
+  memory_.create_info = allocation_create_info;
 
-  VK_CHECK(vmaCreateBuffer(
-      allocator_,
-      &buffer_create_info,
-      &alloc_create_info,
-      &handle_,
-      &allocation_,
-      nullptr));
+  if (allocate_memory) {
+    VK_CHECK(vmaCreateBuffer(
+        allocator_,
+        &buffer_create_info,
+        &allocation_create_info,
+        &handle_,
+        &(memory_.allocation),
+        nullptr));
+  } else {
+    VmaAllocatorInfo allocator_info{};
+    vmaGetAllocatorInfo(allocator_, &allocator_info);
+    VK_CHECK(vkCreateBuffer(
+        allocator_info.device, &buffer_create_info, nullptr, &handle_));
+  }
 }
 
 VulkanBuffer::VulkanBuffer(VulkanBuffer&& other) noexcept
-    : memory_properties_(other.memory_properties_),
-      buffer_properties_(other.buffer_properties_),
+    : buffer_properties_(other.buffer_properties_),
       allocator_(other.allocator_),
-      allocation_(other.allocation_),
+      memory_(std::move(other.memory_)),
+      owns_memory_(other.owns_memory_),
       handle_(other.handle_) {
-  other.allocation_ = VK_NULL_HANDLE;
   other.handle_ = VK_NULL_HANDLE;
 }
 
 VulkanBuffer& VulkanBuffer::operator=(VulkanBuffer&& other) noexcept {
-  const VmaAllocation tmp_allocation = allocation_;
-  const VkBuffer tmp_buffer = handle_;
+  VkBuffer tmp_buffer = handle_;
+  bool tmp_owns_memory = owns_memory_;
 
-  memory_properties_ = other.memory_properties_;
   buffer_properties_ = other.buffer_properties_;
   allocator_ = other.allocator_;
-  allocation_ = other.allocation_;
+  memory_ = std::move(other.memory_);
+  owns_memory_ = other.owns_memory_;
   handle_ = other.handle_;
 
-  other.allocation_ = tmp_allocation;
   other.handle_ = tmp_buffer;
+  other.owns_memory_ = tmp_owns_memory;
 
   return *this;
 }
 
 VulkanBuffer::~VulkanBuffer() {
   if (VK_NULL_HANDLE != handle_) {
-    vmaDestroyBuffer(allocator_, handle_, allocation_);
+    if (owns_memory_) {
+      vmaDestroyBuffer(allocator_, handle_, memory_.allocation);
+    } else {
+      vkDestroyBuffer(this->device(), handle_, nullptr);
+    }
+    // Prevent the underlying memory allocation from being freed; it was either
+    // freed by vmaDestroyBuffer, or this resource does not own the underlying
+    // memory
+    memory_.allocation = VK_NULL_HANDLE;
   }
+}
+
+VkMemoryRequirements VulkanBuffer::get_memory_requirements() const {
+  VkMemoryRequirements memory_requirements;
+  vkGetBufferMemoryRequirements(this->device(), handle_, &memory_requirements);
+  return memory_requirements;
 }
 
 //
@@ -180,7 +200,9 @@ MemoryMap::MemoryMap(const VulkanBuffer& buffer, const uint8_t access)
       allocation_(buffer.allocation()),
       data_(nullptr),
       data_len_{buffer.mem_size()} {
-  VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
+  if (allocation_) {
+    VK_CHECK(vmaMapMemory(allocator_, allocation_, &data_));
+  }
 }
 
 MemoryMap::MemoryMap(MemoryMap&& other) noexcept
@@ -194,22 +216,25 @@ MemoryMap::MemoryMap(MemoryMap&& other) noexcept
 }
 
 MemoryMap::~MemoryMap() {
-  if (C10_UNLIKELY(!data_)) {
+  if (!data_) {
     return;
   }
 
-  if (access_ & MemoryAccessType::WRITE) {
-    // Call will be ignored by implementation if the memory type this allocation
-    // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
-    // we want. Don't check the result here as the destructor cannot throw.
-    vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE);
-  }
+  if (allocation_) {
+    if (access_ & MemoryAccessType::WRITE) {
+      // Call will be ignored by implementation if the memory type this
+      // allocation belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is
+      // the behavior we want. Don't check the result here as the destructor
+      // cannot throw.
+      vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE);
+    }
 
-  vmaUnmapMemory(allocator_, allocation_);
+    vmaUnmapMemory(allocator_, allocation_);
+  }
 }
 
 void MemoryMap::invalidate() {
-  if (access_ & MemoryAccessType::READ) {
+  if (access_ & MemoryAccessType::READ && allocation_) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
@@ -251,7 +276,7 @@ bool operator==(
 }
 
 ImageSampler::ImageSampler(
-    const VkDevice device,
+    VkDevice device,
     const ImageSampler::Properties& props)
     : device_(device), handle_(VK_NULL_HANDLE) {
   const VkSamplerCreateInfo sampler_create_info{
@@ -284,7 +309,7 @@ ImageSampler::ImageSampler(ImageSampler&& other) noexcept
 }
 
 ImageSampler::~ImageSampler() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroySampler(device_, handle_, nullptr);
@@ -292,8 +317,15 @@ ImageSampler::~ImageSampler() {
 
 size_t ImageSampler::Hasher::operator()(
     const ImageSampler::Properties& props) const {
-  return c10::get_hash(
-      props.filter, props.mipmap_mode, props.address_mode, props.border_color);
+  size_t seed = 0;
+  seed = utils::hash_combine(seed, std::hash<VkFilter>()(props.filter));
+  seed = utils::hash_combine(
+      seed, std::hash<VkSamplerMipmapMode>()(props.mipmap_mode));
+  seed = utils::hash_combine(
+      seed, std::hash<VkSamplerAddressMode>()(props.address_mode));
+  seed =
+      utils::hash_combine(seed, std::hash<VkBorderColor>()(props.border_color));
+  return seed;
 }
 
 void swap(ImageSampler& lhs, ImageSampler& rhs) noexcept {
@@ -312,12 +344,12 @@ void swap(ImageSampler& lhs, ImageSampler& rhs) noexcept {
 //
 
 VulkanImage::VulkanImage()
-    : memory_properties_{},
-      image_properties_{},
+    : image_properties_{},
       view_properties_{},
       sampler_properties_{},
       allocator_(VK_NULL_HANDLE),
-      allocation_(VK_NULL_HANDLE),
+      memory_{},
+      owns_memory_(false),
       handles_{
           VK_NULL_HANDLE,
           VK_NULL_HANDLE,
@@ -326,26 +358,36 @@ VulkanImage::VulkanImage()
       layout_{} {}
 
 VulkanImage::VulkanImage(
-    const VmaAllocator vma_allocator,
-    const VkDevice device,
-    const MemoryProperties& mem_props,
+    VmaAllocator vma_allocator,
+    const VmaAllocationCreateInfo& allocation_create_info,
     const ImageProperties& image_props,
     const ViewProperties& view_props,
     const SamplerProperties& sampler_props,
     const VkImageLayout layout,
-    const VkSampler sampler)
-    : memory_properties_(mem_props),
-      image_properties_(image_props),
+    VkSampler sampler,
+    const bool allocate_memory)
+    : image_properties_(image_props),
       view_properties_(view_props),
       sampler_properties_(sampler_props),
       allocator_(vma_allocator),
-      allocation_(VK_NULL_HANDLE),
+      memory_{},
+      owns_memory_{allocate_memory},
       handles_{
           VK_NULL_HANDLE,
           VK_NULL_HANDLE,
           sampler,
       },
       layout_(layout) {
+  VmaAllocatorInfo allocator_info{};
+  vmaGetAllocatorInfo(allocator_, &allocator_info);
+
+  // If any dims are zero, then no memory will be allocated for the image.
+  if (image_props.image_extents.width == 0 ||
+      image_props.image_extents.height == 0 ||
+      image_props.image_extents.depth == 0) {
+    return;
+  }
+
   const VkImageCreateInfo image_create_info{
       VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, // sType
       nullptr, // pNext
@@ -357,34 +399,88 @@ VulkanImage::VulkanImage(
       1u, // arrayLayers
       VK_SAMPLE_COUNT_1_BIT, // samples
       VK_IMAGE_TILING_OPTIMAL, // tiling
-      memory_properties_.image_usage, // usage
+      image_properties_.image_usage, // usage
       VK_SHARING_MODE_EXCLUSIVE, // sharingMode
       0u, // queueFamilyIndexCount
       nullptr, // pQueueFamilyIndices
       layout_, // initialLayout
   };
 
-  // TODO: enable creation with a custom pool
-  const VmaAllocationCreateInfo alloc_create_info{
-      memory_properties_.create_flags, // flags
-      memory_properties_.memory_usage, // usage
-      memory_properties_.required_mem_flags, // requiredFlags
-      memory_properties_.preferred_mem_flags, // preferredFlags
-      0u, // memoryTypeBits
-      VK_NULL_HANDLE, // pool
-      nullptr, // pUserData
-      0.5f, // priority
-  };
+  memory_.create_info = allocation_create_info;
 
-  VK_CHECK(vmaCreateImage(
-      allocator_,
-      &image_create_info,
-      &alloc_create_info,
-      &(handles_.image),
-      &allocation_,
-      nullptr));
+  if (allocate_memory) {
+    VK_CHECK(vmaCreateImage(
+        allocator_,
+        &image_create_info,
+        &allocation_create_info,
+        &(handles_.image),
+        &(memory_.allocation),
+        nullptr));
+    // Only create the image view if the image has been bound to memory
+    create_image_view();
+  } else {
+    VK_CHECK(vkCreateImage(
+        allocator_info.device, &image_create_info, nullptr, &(handles_.image)));
+  }
+}
 
-  // Image View
+VulkanImage::VulkanImage(VulkanImage&& other) noexcept
+    : image_properties_(other.image_properties_),
+      view_properties_(other.view_properties_),
+      sampler_properties_(other.sampler_properties_),
+      allocator_(other.allocator_),
+      memory_(std::move(other.memory_)),
+      owns_memory_(other.owns_memory_),
+      handles_(other.handles_),
+      layout_(other.layout_) {
+  other.handles_.image = VK_NULL_HANDLE;
+  other.handles_.image_view = VK_NULL_HANDLE;
+  other.handles_.sampler = VK_NULL_HANDLE;
+  other.owns_memory_ = false;
+}
+
+VulkanImage& VulkanImage::operator=(VulkanImage&& other) noexcept {
+  VkImage tmp_image = handles_.image;
+  VkImageView tmp_image_view = handles_.image_view;
+  bool tmp_owns_memory = owns_memory_;
+
+  image_properties_ = other.image_properties_;
+  view_properties_ = other.view_properties_;
+  sampler_properties_ = other.sampler_properties_;
+  allocator_ = other.allocator_;
+  memory_ = std::move(other.memory_);
+  owns_memory_ = other.owns_memory_;
+  handles_ = other.handles_;
+  layout_ = other.layout_;
+
+  other.handles_.image = tmp_image;
+  other.handles_.image_view = tmp_image_view;
+  other.owns_memory_ = tmp_owns_memory;
+
+  return *this;
+}
+
+VulkanImage::~VulkanImage() {
+  if (VK_NULL_HANDLE != handles_.image_view) {
+    vkDestroyImageView(this->device(), handles_.image_view, nullptr);
+  }
+
+  if (VK_NULL_HANDLE != handles_.image) {
+    if (owns_memory_) {
+      vmaDestroyImage(allocator_, handles_.image, memory_.allocation);
+    } else {
+      vkDestroyImage(this->device(), handles_.image, nullptr);
+    }
+    // Prevent the underlying memory allocation from being freed; it was either
+    // freed by vmaDestroyImage, or this resource does not own the underlying
+    // memory
+    memory_.allocation = VK_NULL_HANDLE;
+  }
+}
+
+void VulkanImage::create_image_view() {
+  VmaAllocatorInfo allocator_info{};
+  vmaGetAllocatorInfo(allocator_, &allocator_info);
 
   const VkComponentMapping component_mapping{
       VK_COMPONENT_SWIZZLE_IDENTITY, // r
@@ -413,55 +509,17 @@ VulkanImage::VulkanImage(
   };
 
   VK_CHECK(vkCreateImageView(
-      device, &image_view_create_info, nullptr, &(handles_.image_view)));
+      allocator_info.device,
+      &(image_view_create_info),
+      nullptr,
+      &(handles_.image_view)));
 }
 
-VulkanImage::VulkanImage(VulkanImage&& other) noexcept
-    : memory_properties_(other.memory_properties_),
-      image_properties_(other.image_properties_),
-      view_properties_(other.view_properties_),
-      sampler_properties_(other.sampler_properties_),
-      allocator_(other.allocator_),
-      allocation_(other.allocation_),
-      handles_(other.handles_),
-      layout_(other.layout_) {
-  other.allocation_ = VK_NULL_HANDLE;
-  other.handles_.image = VK_NULL_HANDLE;
-  other.handles_.image_view = VK_NULL_HANDLE;
-  other.handles_.sampler = VK_NULL_HANDLE;
-}
-
-VulkanImage& VulkanImage::operator=(VulkanImage&& other) noexcept {
-  const VmaAllocation tmp_allocation = allocation_;
-  const VkImage tmp_image = handles_.image;
-  const VkImageView tmp_image_view = handles_.image_view;
-
-  memory_properties_ = other.memory_properties_;
-  image_properties_ = other.image_properties_;
-  view_properties_ = other.view_properties_;
-  sampler_properties_ = other.sampler_properties_;
-  allocator_ = other.allocator_;
-  allocation_ = other.allocation_;
-  handles_ = other.handles_;
-  layout_ = other.layout_;
-
-  other.allocation_ = tmp_allocation;
-  other.handles_.image = tmp_image;
-  other.handles_.image_view = tmp_image_view;
-
-  return *this;
-}
-
-VulkanImage::~VulkanImage() {
-  if (VK_NULL_HANDLE != handles_.image_view) {
-    VmaAllocatorInfo allocator_info{};
-    vmaGetAllocatorInfo(allocator_, &allocator_info);
-    vkDestroyImageView(allocator_info.device, handles_.image_view, nullptr);
-  }
-
-  if (VK_NULL_HANDLE != handles_.image) {
-    vmaDestroyImage(allocator_, handles_.image, allocation_);
-  }
+VkMemoryRequirements VulkanImage::get_memory_requirements() const {
+  VkMemoryRequirements memory_requirements;
+  vkGetImageMemoryRequirements(
+      this->device(), handles_.image, &memory_requirements);
+  return memory_requirements;
 }
 
 //
@@ -498,13 +556,12 @@ ImageMemoryBarrier::ImageMemoryBarrier(
 // SamplerCache
 //
 
-SamplerCache::SamplerCache(const VkDevice device)
+SamplerCache::SamplerCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 SamplerCache::SamplerCache(SamplerCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 SamplerCache::~SamplerCache() {
@@ -515,7 +572,7 @@ VkSampler SamplerCache::retrieve(const SamplerCache::Key& key) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_.insert({key, SamplerCache::Value(device_, key)}).first;
   }
 
@@ -532,9 +589,9 @@ void SamplerCache::purge() {
 //
 
 MemoryAllocator::MemoryAllocator(
-    const VkInstance instance,
-    const VkPhysicalDevice physical_device,
-    const VkDevice device)
+    VkInstance instance,
+    VkPhysicalDevice physical_device,
+    VkDevice device)
     : instance_{},
       physical_device_(physical_device),
       device_(device),
@@ -572,10 +629,39 @@ MemoryAllocator::MemoryAllocator(MemoryAllocator&& other) noexcept
 }
 
 MemoryAllocator::~MemoryAllocator() {
-  if C10_LIKELY (VK_NULL_HANDLE == allocator_) {
+  if (VK_NULL_HANDLE == allocator_) {
     return;
   }
   vmaDestroyAllocator(allocator_);
+}
+
+MemoryAllocation MemoryAllocator::create_allocation(
+    const VkMemoryRequirements& memory_requirements,
+    const VmaAllocationCreateInfo& create_info) {
+  VmaAllocationCreateInfo alloc_create_info = create_info;
+  // Protect against using VMA_MEMORY_USAGE_AUTO_* flags when allocating memory
+  // directly, since those usage flags require that VkBufferCreateInfo and/or
+  // VkImageCreateInfo also be available.
+  switch (create_info.usage) {
+    // The logic for the below usage options are too complex, therefore prevent
+    // those from being used with direct memory allocation.
+    case VMA_MEMORY_USAGE_AUTO:
+    case VMA_MEMORY_USAGE_AUTO_PREFER_HOST:
+      VK_THROW(
+          "Only the VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE usage flag is compatible with create_allocation()");
+      break;
+    // Most of the time, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE will simply set the
+    // DEVICE_LOCAL_BIT as a preferred memory flag. Therefore the below is a
+    // decent approximation for VMA behaviour.
+    case VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE:
+      alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+      alloc_create_info.usage = VMA_MEMORY_USAGE_UNKNOWN;
+      break;
+    default:
+      break;
+  }
+
+  return MemoryAllocation(allocator_, memory_requirements, alloc_create_info);
 }
 
 VulkanImage MemoryAllocator::create_image(
@@ -584,8 +670,9 @@ VulkanImage MemoryAllocator::create_image(
     const VkImageType image_type,
     const VkImageViewType image_view_type,
     const VulkanImage::SamplerProperties& sampler_props,
-    const VkSampler sampler,
-    const bool allow_transfer) {
+    VkSampler sampler,
+    const bool allow_transfer,
+    const bool allocate_memory) {
   VkImageUsageFlags usage =
       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
   if (allow_transfer) {
@@ -593,18 +680,15 @@ VulkanImage MemoryAllocator::create_image(
         (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
   }
 
-  const VulkanImage::MemoryProperties mem_props{
-      DEFAULT_ALLOCATION_STRATEGY,
-      VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-      0u,
-      0u,
-      usage,
-  };
+  VmaAllocationCreateInfo alloc_create_info = {};
+  alloc_create_info.flags = DEFAULT_ALLOCATION_STRATEGY;
+  alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
   const VulkanImage::ImageProperties image_props{
       image_type,
       image_format,
       extents,
+      usage,
   };
 
   const VulkanImage::ViewProperties view_props{
@@ -616,71 +700,66 @@ VulkanImage MemoryAllocator::create_image(
 
   return VulkanImage(
       allocator_,
-      device_,
-      mem_props,
+      alloc_create_info,
       image_props,
       view_props,
       sampler_props,
       initial_layout,
-      sampler);
+      sampler,
+      allocate_memory);
 }
 
 VulkanBuffer MemoryAllocator::create_storage_buffer(
     const VkDeviceSize size,
-    const bool gpu_only) {
+    const bool gpu_only,
+    const bool allocate_memory) {
   const VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-  VmaAllocationCreateFlags create_flags = DEFAULT_ALLOCATION_STRATEGY;
+  VmaAllocationCreateInfo alloc_create_info = {};
+  alloc_create_info.flags = DEFAULT_ALLOCATION_STRATEGY;
+  alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+  // The create storage buffer will be accessed by both the CPU and GPU, so set
+  // the appropriate flags to indicate that the host device will be accessing
+  // the data from this buffer.
   if (!gpu_only) {
-    create_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+    // Deferred memory allocation should only be used for GPU only buffers.
+    VK_CHECK_COND(
+        allocate_memory,
+        "Only GPU-only buffers should use deferred memory allocation");
+
+    alloc_create_info.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+    alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+    alloc_create_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+        VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
   }
 
-  const VmaMemoryUsage vma_usage =
-      gpu_only ? VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE : VMA_MEMORY_USAGE_AUTO;
-
-  const VkMemoryPropertyFlags required_mem_props =
-      gpu_only ? 0u : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-
-  const VkMemoryPropertyFlags preferred_mem_props = gpu_only
-      ? 0u
-      : VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
-          VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-
-  const VulkanBuffer::MemoryProperties mem_props{
-      create_flags,
-      vma_usage,
-      required_mem_props,
-      preferred_mem_props,
-      buffer_usage,
-  };
-
-  return VulkanBuffer(allocator_, size, mem_props);
+  return VulkanBuffer(
+      allocator_, size, alloc_create_info, buffer_usage, allocate_memory);
 }
 
 VulkanBuffer MemoryAllocator::create_staging_buffer(const VkDeviceSize size) {
-  const VulkanBuffer::MemoryProperties mem_props{
-      DEFAULT_ALLOCATION_STRATEGY,
-      VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
-      0u,
-      0u,
-      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-  };
+  VmaAllocationCreateInfo alloc_create_info = {};
+  alloc_create_info.flags = DEFAULT_ALLOCATION_STRATEGY;
+  alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
 
-  return VulkanBuffer(allocator_, size, mem_props);
+  VkBufferUsageFlags buffer_usage =
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+  return VulkanBuffer(allocator_, size, alloc_create_info, buffer_usage);
 }
 
 VulkanBuffer MemoryAllocator::create_uniform_buffer(const VkDeviceSize size) {
-  const VulkanBuffer::MemoryProperties mem_props{
-      DEFAULT_ALLOCATION_STRATEGY |
-          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-      VMA_MEMORY_USAGE_AUTO,
-      0u,
-      0u,
-      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-  };
+  VmaAllocationCreateInfo alloc_create_info = {};
+  alloc_create_info.flags = DEFAULT_ALLOCATION_STRATEGY |
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+  alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO;
 
-  VulkanBuffer uniform_buffer(allocator_, size, mem_props);
+  VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 
+  VulkanBuffer uniform_buffer(
+      allocator_, size, alloc_create_info, buffer_usage);
   return uniform_buffer;
 }
 
@@ -691,7 +770,7 @@ VulkanBuffer MemoryAllocator::create_uniform_buffer(const VkDeviceSize size) {
 VulkanFence::VulkanFence()
     : device_(VK_NULL_HANDLE), handle_(VK_NULL_HANDLE), waiting_(false) {}
 
-VulkanFence::VulkanFence(const VkDevice device)
+VulkanFence::VulkanFence(VkDevice device)
     : device_(device), handle_(VK_NULL_HANDLE), waiting_(VK_NULL_HANDLE) {
   const VkFenceCreateInfo fence_create_info{
       VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, // sType
@@ -721,7 +800,7 @@ VulkanFence& VulkanFence::operator=(VulkanFence&& other) noexcept {
 }
 
 VulkanFence::~VulkanFence() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyFence(device_, handle_, nullptr);
@@ -738,7 +817,7 @@ void VulkanFence::wait() {
       // The timeout (last) arg is in units of ns
       fence_status = vkWaitForFences(device_, 1u, &handle_, VK_TRUE, 100000);
 
-      TORCH_CHECK(
+      VK_CHECK_COND(
           fence_status != VK_ERROR_DEVICE_LOST,
           "Vulkan Fence: Device lost while waiting for fence!");
     } while (fence_status != VK_SUCCESS);

@@ -214,13 +214,13 @@ class PhiloxStateTracker:
 
 
 # Adding more decompositions which eventually use rand_like inside decomps.
-# Adding these in rng_decompositins ensures the functionalization of rand_like
+# Adding these in rng_decompositions ensures the functionalization of rand_like
 # ops used in these decomps. The list is copied from inductor codebase, which
 # uses it for similar purpose.
 #
 # Caution - These decomps do not have same accuracy as that of eager. However,
 # we can't just disable them with a config flag like fallback_random, because
-# for fuctionalization of rng ops, we have to decompose these ops.
+# for functionalization of rng ops, we have to decompose these ops.
 extra_random_decomps = get_decompositions(
     [
         aten.cauchy,

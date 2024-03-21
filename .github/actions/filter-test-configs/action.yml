@@ -13,6 +13,10 @@ inputs:
     required: true
     type: string
     description: JSON description of what test configs to run.
+  job-name:
+    type: string
+    required: false
+    default: ""
 
 outputs:
   test-matrix:
@@ -22,11 +26,20 @@ outputs:
     description: True if the filtered test configs matrix is empty. False otherwise.
     value: ${{ steps.filter.outputs.is-test-matrix-empty }}
   keep-going:
-    description: True if keep-going label was on PR.
+    description: True if keep-going label was on PR or [keep-going] in PR body.
     value: ${{ steps.filter.outputs.keep-going }}
   reenabled-issues:
     description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
     value: ${{ steps.filter.outputs.reenabled-issues }}
+  ci-verbose-test-logs:
+    description: True if ci-verbose-test-logs label was on PR or [ci-verbose-test-logs] in PR body.
+    value: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+  ci-no-test-timeout:
+    description: True if ci-no-test-timeout label was on PR or [ci-no-test-timeout] in PR body.
+    value: ${{ steps.filter.outputs.ci-no-test-timeout }}
+  ci-no-td:
+    description: True if ci-no-td label was on PR or [ci-no-td] in PR body.
+    value: ${{ steps.filter.outputs.ci-no-td }}
 
 runs:
   using: composite
@@ -42,7 +55,8 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          python3 -m pip install requests==2.26.0 pyyaml==6.0
+          # PyYAML 6.0 doesn't work with MacOS x86 anymore
+          python3 -m pip install requests==2.26.0 pyyaml==6.0.1
 
     - name: Parse ref
       id: parse-ref
@@ -56,6 +70,7 @@ runs:
 
     - name: Get the job name
       id: get-job-name
+      if: inputs.job-name == ''
       continue-on-error: true
       shell: bash
       run: |
@@ -91,7 +106,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
+        JOB_NAME: ${{ inputs.job-name == '' && steps.get-job-name.outputs.job-name || inputs.job-name }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         TAG: ${{ steps.parse-ref.outputs.tag }}
         EVENT_NAME: ${{ github.event_name }}

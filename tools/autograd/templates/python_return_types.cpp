@@ -14,8 +14,7 @@ ${py_return_types}
 
 }}}
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 static void addReturnType(
     PyObject* module,
@@ -50,5 +49,4 @@ void initReturnTypes(PyObject* module) {
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

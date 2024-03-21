@@ -33,6 +33,8 @@ ScalarName = Literal[
     "BFloat16",
     "Float8E5M2",
     "Float8E4M3FN",
+    "Float8E5M2FNUZ",
+    "Float8E4M3FNUZ",
     "Undefined",
 ]
 
@@ -55,6 +57,8 @@ TorchName = Literal[
     "bfloat16",
     "float8_e5m2",
     "float8_e4m3fn",
+    "float8_e5m2fnuz",
+    "float8_e4m3fnuz",
 ]
 
 
@@ -96,7 +100,9 @@ class JitScalarType(enum.IntEnum):
     BFLOAT16 = enum.auto()  # 15
     FLOAT8E5M2 = enum.auto()  # 16
     FLOAT8E4M3FN = enum.auto()  # 17
-    UNDEFINED = enum.auto()  # 18
+    FLOAT8E5M2FNUZ = enum.auto()  # 18
+    FLOAT8E4M3FNUZ = enum.auto()  # 19
+    UNDEFINED = enum.auto()  # 20
 
     @classmethod
     @_beartype.beartype
@@ -153,6 +159,26 @@ class JitScalarType(enum.IntEnum):
 
     @classmethod
     @_beartype.beartype
+    def from_onnx_type(
+        cls, onnx_type: Optional[Union[int, _C_onnx.TensorProtoDataType]]
+    ) -> JitScalarType:
+        """Convert a ONNX data type to JitScalarType.
+
+        Args:
+            onnx_type: A torch._C._onnx.TensorProtoDataType to create a JitScalarType from
+
+        Returns:
+            JitScalarType
+
+        Raises:
+            OnnxExporterError: if dtype is not a valid torch.dtype or if it is None.
+        """
+        if onnx_type not in _ONNX_TO_SCALAR_TYPE:
+            raise errors.OnnxExporterError(f"Unknown onnx_type: {onnx_type}")
+        return _ONNX_TO_SCALAR_TYPE[typing.cast(_C_onnx.TensorProtoDataType, onnx_type)]
+
+    @classmethod
+    @_beartype.beartype
     def from_value(
         cls, value: Union[None, torch._C.Value, torch.Tensor], default=None
     ) -> JitScalarType:
@@ -170,7 +196,9 @@ class JitScalarType(enum.IntEnum):
             SymbolicValueError: when value.type()'s info are empty and default is None
         """
 
-        if not isinstance(value, (torch._C.Value, torch.Tensor)):
+        if not isinstance(value, (torch._C.Value, torch.Tensor)) or (
+            isinstance(value, torch._C.Value) and value.node().mustBeNone()
+        ):
             # default value of type JitScalarType is returned when value is not valid
             if default is None:
                 raise errors.OnnxExporterError(
@@ -284,6 +312,8 @@ _SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
     JitScalarType.BFLOAT16: "BFloat16",
     JitScalarType.FLOAT8E5M2: "Float8E5M2",
     JitScalarType.FLOAT8E4M3FN: "Float8E4M3FN",
+    JitScalarType.FLOAT8E5M2FNUZ: "Float8E5M2FNUZ",
+    JitScalarType.FLOAT8E4M3FNUZ: "Float8E4M3FNUZ",
     JitScalarType.UNDEFINED: "Undefined",
 }
 
@@ -310,6 +340,8 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
     JitScalarType.BFLOAT16: "bfloat16",
     JitScalarType.FLOAT8E5M2: "float8_e5m2",
     JitScalarType.FLOAT8E4M3FN: "float8_e4m3fn",
+    JitScalarType.FLOAT8E5M2FNUZ: "float8_e5m2fnuz",
+    JitScalarType.FLOAT8E4M3FNUZ: "float8_e4m3fnuz",
 }
 
 _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
@@ -336,7 +368,11 @@ _SCALAR_TYPE_TO_ONNX = {
     JitScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
     JitScalarType.FLOAT8E5M2: _C_onnx.TensorProtoDataType.FLOAT8E5M2,
     JitScalarType.FLOAT8E4M3FN: _C_onnx.TensorProtoDataType.FLOAT8E4M3FN,
+    JitScalarType.FLOAT8E5M2FNUZ: _C_onnx.TensorProtoDataType.FLOAT8E5M2FNUZ,
+    JitScalarType.FLOAT8E4M3FNUZ: _C_onnx.TensorProtoDataType.FLOAT8E4M3FNUZ,
 }
+
+_ONNX_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_ONNX.items()}
 
 # source of truth is
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
@@ -359,6 +395,8 @@ _SCALAR_TYPE_TO_DTYPE = {
     JitScalarType.BFLOAT16: torch.bfloat16,
     JitScalarType.FLOAT8E5M2: torch.float8_e5m2,
     JitScalarType.FLOAT8E4M3FN: torch.float8_e4m3fn,
+    JitScalarType.FLOAT8E5M2FNUZ: torch.float8_e5m2fnuz,
+    JitScalarType.FLOAT8E4M3FNUZ: torch.float8_e4m3fnuz,
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}

@@ -4,6 +4,8 @@ set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/edge)
 set(OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/out)
 file(GLOB_RECURSE all_python "${TORCH_ROOT}/torchgen/*.py")
+include(${TORCH_ROOT}/cmake/public/utils.cmake)
+append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
 
 # Generate unboxing kernels
 set(GEN_COMMAND

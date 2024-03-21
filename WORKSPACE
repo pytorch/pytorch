@@ -243,7 +243,13 @@ new_local_repository(
 new_local_repository(
     name = "cudnn",
     build_file = "@//third_party:cudnn.BUILD",
-    path = "/usr/",
+    path = "/usr/local/cuda",
+)
+
+new_local_repository(
+    name = "cudnn_frontend",
+    build_file = "@//third_party:cudnn_frontend.BUILD",
+    path = "third_party/cudnn_frontend/",
 )
 
 local_repository(

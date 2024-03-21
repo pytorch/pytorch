@@ -2,6 +2,7 @@ import array
 import enum
 import functools
 import logging
+import operator
 import struct
 import sys
 from typing import List, NamedTuple, Optional, Tuple
@@ -945,9 +946,7 @@ class _NnapiSerializer:
     def add_tuple_construct(self, node):
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
-        values = []
-        for inp in node.inputs():
-            values.append(inp)
+        values = list(node.inputs())
         self.add_tensor_sequence(output, values)
 
     def add_unsqueeze(self, node):
@@ -1034,11 +1033,7 @@ class _NnapiSerializer:
 
         out_shape = (
             in_oper.shape[:start_dim]
-            + (
-                functools.reduce(
-                    lambda x, y: x * y, in_oper.shape[start_dim : end_dim + 1]
-                ),
-            )
+            + (functools.reduce(operator.mul, in_oper.shape[start_dim : end_dim + 1]),)
             + in_oper.shape[end_dim + 1 :]
         )
 
@@ -1181,7 +1176,7 @@ class _NnapiSerializer:
             shape=change_element(out_oper.shape, dim, out_dim_size)
         )
 
-        if in_oper.dim_order == DimOrder.CHANNELS_LAST:
+        if in_oper.dim_order == DimOrder.CHANNELS_LAST:  # type: ignore[possibly-undefined]
             assert len(out_oper.shape) == 4
             nnapi_dim = [0, 3, 1, 2][dim]
         else:
@@ -1333,8 +1328,8 @@ class _NnapiSerializer:
 
         self.add_operation(opcode, inputs, outputs)
 
-    def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):
-        """Helper for pointwise binary broadcast ops with superfluous extra args"""
+    def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):  # noqa: D401
+        """Helper for pointwise binary broadcast ops with superfluous extra args."""
         assert node.outputsSize() == 1
 
         assert node.inputsAt(0).type().kind() == "TensorType"
@@ -1638,10 +1633,10 @@ class _NnapiSerializer:
         size_ctype, size_arg = self.get_constant_value(size_jit)
 
         if node.inputsSize() == 3:
-            scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+            scale_ctype, scale_arg = self.get_constant_value(scale_jit)  # type: ignore[possibly-undefined]
         else:
-            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)
-            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)
+            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)  # type: ignore[possibly-undefined]
+            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)  # type: ignore[possibly-undefined]
 
             # The only way for the 4-argument overload of upsample_nearest2d to
             # have been added to the graph without error is if the scale_h and
@@ -2177,7 +2172,8 @@ class _NnapiSerializer:
 def serialize_model(
     module, inputs, *, config=None, return_shapes=None, use_int16_for_qint16=False
 ):
-    """Convert to NNAPI and serialize torchscript module:
+    """Convert to NNAPI and serialize torchscript module.
+
     Parameters:
         module: Torchscript module to convert
         inputs: Tensors used to specify input details for NNAPI
@@ -2187,7 +2183,6 @@ def serialize_model(
             buffer size for NNAPI
         use_int16_for_qint16 (optional): Use Pytorch int16 to represent NNAPI qint16 values
     """
-
     return _NnapiSerializer(config, use_int16_for_qint16).serialize_model(
         module, inputs, return_shapes
     )

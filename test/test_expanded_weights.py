@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, tf32_off
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests, parametrize
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests, parametrize, skipIfTorchDynamo
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
@@ -203,6 +203,7 @@ class TestExpandedWeightFunctional(TestCase):
 
             self._compare_ew_and_for_loop_per_sample_grads(op, sample_input, torch.mean)
 
+    @skipIfTorchDynamo("Checking error message doesn't work with dynamo")
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_unsupported_expand_weights(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
@@ -687,7 +688,7 @@ for test_param in supported_tests:
     if 'constructor' not in test_param:
         name = test_param.pop('module_name')
         test_param['constructor'] = getattr(nn, name)
-    decorator = test_param.pop('decorator', None)
+    decorator = test_param.pop('decorator', lambda test: test)
     test = ContextManagerTests(**test_param)
     test_name = test.get_name()
     if hasattr(TestExpandedWeightModule, test_name):
@@ -695,16 +696,14 @@ for test_param in supported_tests:
     test_name_multi_input = test.get_name() + "_multiple_inputs"
     if hasattr(TestExpandedWeightModule, test_name_multi_input):
         raise RuntimeError('Found two tests with the same name: ' + test_name)
-    if decorator is not None:
-        fn = decorator(fn)
     if test.test_cpu:
-        setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
+        setattr(TestExpandedWeightModule, test_name, decorator(lambda self, test=test: test.test_context_manager(self, 'cpu')))
         setattr(TestExpandedWeightModule, test_name_multi_input,
-                lambda self, test=test: test.test_context_manager_multiple_inputs(self, 'cpu'))
+                decorator(lambda self, test=test: test.test_context_manager_multiple_inputs(self, 'cpu')))
     if TEST_CUDA and test.test_cuda:
         # since this checks derivatives, only use double for precision
         setattr(TestExpandedWeightModule, test_name + '_cuda_double',
-                lambda self, test=test: test.test_context_manager(self, 'cuda'))
+                decorator(lambda self, test=test: test.test_context_manager(self, 'cuda')))
 
 # ------------- HELPER FUNCTIONS -----------------
 

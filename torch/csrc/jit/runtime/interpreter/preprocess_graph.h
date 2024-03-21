@@ -5,9 +5,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace interpreter {
+namespace torch::jit::interpreter {
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
@@ -18,6 +16,4 @@ struct PreprocessGraph {
   std::unordered_map<Node*, bool> can_emit_inline;
 };
 
-} // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::interpreter

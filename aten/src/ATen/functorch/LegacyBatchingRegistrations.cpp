@@ -19,8 +19,7 @@
 
 #include <utility>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 
 // NOTE: [What is a batching rule?]
@@ -98,30 +97,6 @@ static bool participatesInCurrentLevel(ITensorListRef self) {
     }
   }
   return false;
-}
-
-std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::tensor_split(self, sections, dim);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::tensor_split(self_physical.tensor(), sections, dim_physical);
-  self_physical.getPhysicalToLogicalMap().applyInplace(result);
-  return result;
-}
-
-std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntArrayRef indices, int64_t dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::tensor_split(self, indices, dim);
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::tensor_split(self_physical.tensor(), indices, dim_physical);
-  self_physical.getPhysicalToLogicalMap().applyInplace(result);
-  return result;
 }
 
 Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
@@ -271,14 +246,26 @@ std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, 
   return result;
 }
 
-std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, SymIntArrayRef split_sizes, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return split_with_sizes(self, split_sizes, dim);
+    return split_with_sizes_symint(self, split_sizes, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = split_with_sizes(self_physical.tensor(), split_sizes, dim_physical);
+  auto result = split_with_sizes_symint(self_physical.tensor(), split_sizes, dim_physical);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
+  return result;
+}
+
+std::vector<Tensor> split_with_sizes_copy_batching_rule(const Tensor& self, SymIntArrayRef split_sizes, int64_t dim) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    return split_with_sizes_copy_symint(self, split_sizes, dim);
+  }
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = split_with_sizes_copy_symint(self_physical.tensor(), split_sizes, dim_physical);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
@@ -747,10 +734,9 @@ TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c teturns multiple tensors
-  m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
-  m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("split_with_sizes_copy", split_with_sizes_copy_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("cat", cat_batching_rule);
   m.impl("block_diag", block_diag_batching_rule);
@@ -777,5 +763,5 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
   m.impl("cat", nested_cat_batching_rule);
 }
-} // namespace functorch
-} // namespace at
+
+} // namespace at::functorch

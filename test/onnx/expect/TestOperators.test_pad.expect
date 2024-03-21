@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::ConstantOfShape_27"
-    name: "Constant_0"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -18,7 +18,7 @@ graph {
   }
   node {
     output: "onnx::Concat_28"
-    name: "Constant_1"
+    name: "Constant_9"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -33,7 +33,7 @@ graph {
   node {
     input: "onnx::ConstantOfShape_27"
     output: "onnx::Concat_10"
-    name: "ConstantOfShape_2"
+    name: "ConstantOfShape_10"
     op_type: "ConstantOfShape"
     attribute {
       name: "value"
@@ -49,7 +49,7 @@ graph {
     input: "onnx::Concat_28"
     input: "onnx::Concat_10"
     output: "onnx::Reshape_11"
-    name: "Concat_3"
+    name: "Concat_11"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -59,7 +59,7 @@ graph {
   }
   node {
     output: "onnx::Reshape_12"
-    name: "Constant_4"
+    name: "Constant_12"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -75,7 +75,7 @@ graph {
     input: "onnx::Reshape_11"
     input: "onnx::Reshape_12"
     output: "onnx::Slice_13"
-    name: "Reshape_5"
+    name: "Reshape_13"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -85,7 +85,7 @@ graph {
   }
   node {
     output: "onnx::Slice_14"
-    name: "Constant_6"
+    name: "Constant_14"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -99,7 +99,7 @@ graph {
   }
   node {
     output: "onnx::Slice_15"
-    name: "Constant_7"
+    name: "Constant_15"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -113,7 +113,7 @@ graph {
   }
   node {
     output: "onnx::Slice_16"
-    name: "Constant_8"
+    name: "Constant_16"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -127,7 +127,7 @@ graph {
   }
   node {
     output: "onnx::Slice_17"
-    name: "Constant_9"
+    name: "Constant_17"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -146,13 +146,13 @@ graph {
     input: "onnx::Slice_14"
     input: "onnx::Slice_17"
     output: "onnx::Transpose_18"
-    name: "Slice_10"
+    name: "Slice_18"
     op_type: "Slice"
   }
   node {
     input: "onnx::Transpose_18"
     output: "onnx::Reshape_19"
-    name: "Transpose_11"
+    name: "Transpose_19"
     op_type: "Transpose"
     attribute {
       name: "perm"
@@ -163,7 +163,7 @@ graph {
   }
   node {
     output: "onnx::Reshape_20"
-    name: "Constant_12"
+    name: "Constant_20"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -179,7 +179,7 @@ graph {
     input: "onnx::Reshape_19"
     input: "onnx::Reshape_20"
     output: "onnx::Cast_21"
-    name: "Reshape_13"
+    name: "Reshape_21"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -190,7 +190,7 @@ graph {
   node {
     input: "onnx::Cast_21"
     output: "onnx::Pad_22"
-    name: "Cast_14"
+    name: "Cast_22"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -199,10 +199,10 @@ graph {
     }
   }
   node {
-    input: "onnx::Pad_0"
+    input: "input"
     input: "onnx::Pad_22"
     output: "23"
-    name: "Pad_15"
+    name: "Pad_23"
     op_type: "Pad"
     attribute {
       name: "mode"
@@ -212,7 +212,7 @@ graph {
   }
   name: "main_graph"
   input {
-    name: "onnx::Pad_0"
+    name: "input"
     type {
       tensor_type {
         elem_type: 1

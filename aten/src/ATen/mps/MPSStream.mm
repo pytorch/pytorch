@@ -8,8 +8,7 @@
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 //-----------------------------------------------------------------
 //  MPSStream
@@ -147,9 +146,9 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
 }
 
 void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType) {
-  TORCH_INTERNAL_ASSERT(length >= offset);
-  if (length == 0)
+  if (length == 0) {
     return;
+  }
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
@@ -249,7 +248,7 @@ MPSStream* MPSStreamImpl::_stream = nullptr;
 
 MPSStream* MPSStreamImpl::getInstance() {
   if (_stream == nullptr) {
-    _stream = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS), 0));
+    _stream = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS, 0), 0));
   }
   return _stream;
 }
@@ -264,5 +263,4 @@ MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
 }
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps

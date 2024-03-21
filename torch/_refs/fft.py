@@ -34,7 +34,7 @@ __all__ = [
     "ifftshift",
 ]
 
-NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
+NormType = Union[None, Literal["forward", "backward", "ortho"]]
 _NORM_VALUES = {None, "forward", "backward", "ortho"}
 aten = torch._ops.ops.aten
 
@@ -66,7 +66,7 @@ def _promote_type_fft(
         dtype = torch.get_default_dtype()
 
     allowed_types = [torch.float32, torch.float64]
-    maybe_support_half = device.type in ["cuda", "meta"] and not torch.version.hip
+    maybe_support_half = device.type in ["cuda", "meta"]
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
@@ -125,10 +125,9 @@ def _fft_c2r(
     input = _maybe_promote_tensor_fft(input, require_complex=True)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    num_points = 0 if n is None else n
     torch._check(
         last_dim_size >= 1,
-        lambda: f"Invalid number of data points ({num_points}) specified",
+        lambda: f"Invalid number of data points ({last_dim_size}) specified",
     )
 
     if n is not None:
@@ -157,18 +156,16 @@ def _fft_r2c(
     )
     input = _maybe_promote_tensor_fft(input)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
-    last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    num_points = 0 if n is None else n
+    dim_size = n if n is not None else input.shape[dim]
     torch._check(
-        last_dim_size >= 1,
-        lambda: f"Invalid number of data points ({num_points}) specified",
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
     )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
 
     ret = prims.fft_r2c(input, dim=dims, onesided=onesided)
-    ret = _apply_norm(ret, norm, input.shape[dim], forward)
+    ret = _apply_norm(ret, norm, dim_size, forward)
     return ret if forward else torch.conj(ret)
 
 
@@ -186,18 +183,16 @@ def _fft_c2c(
         lambda: f"{func_name} expects a complex input tensor, but got {input.dtype}",
     )
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
-    last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    num_points = 0 if n is None else n
+    dim_size = n if n is not None else input.shape[dim]
     torch._check(
-        last_dim_size >= 1,
-        lambda: f"Invalid number of data points ({num_points}) specified",
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
     )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
 
     ret = prims.fft_c2c(input, dim=dims, forward=forward)
-    return _apply_norm(ret, norm, input.shape[dim], forward)
+    return _apply_norm(ret, norm, dim_size, forward)
 
 
 @register_decomposition(aten.fft_fft)
@@ -317,7 +312,7 @@ def _canonicalize_fft_shape_and_dim_args(
 
         # Translate any -1 values in shape to the default length
         ret_shape = tuple(
-            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)
+            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
         )
     elif dim is None:
         # No shape, no dim
@@ -325,12 +320,12 @@ def _canonicalize_fft_shape_and_dim_args(
         ret_shape = tuple(input_sizes)
     else:
         # No shape, has dim
-        ret_shape = tuple(input_sizes[d] for d in ret_dims)
+        ret_shape = tuple(input_sizes[d] for d in ret_dims)  # type: ignore[possibly-undefined]
 
     for n in ret_shape:
         torch._check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
 
-    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
+    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)  # type: ignore[possibly-undefined]
 
 
 def _prod(xs: Iterable[int]) -> int:

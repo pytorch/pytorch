@@ -9,8 +9,7 @@
 #include <torch/csrc/jit/frontend/source_ref.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace profiling {
 
 struct Datapoint {
@@ -33,6 +32,8 @@ class TORCH_API InstructionSpan {
  private:
   std::unique_ptr<Datapoint> datapoint_;
 };
+
+bool TORCH_API isProfilingOngoing();
 
 } // namespace profiling
 
@@ -73,6 +74,8 @@ class TORCH_API SourceStats : public CustomClassHolder {
  * scriptProfile.disable();
  * ...
  *
+ * NOTE: you cannot attach the profiler while the script is running.
+ *
  * To retrieve collected runtime data, users may call dumpStats() and do
  * arbitrary filtering on the data they want. Note that dumpStats() should
  * not be called inside a profiling section.
@@ -97,5 +100,4 @@ class TORCH_API ScriptProfile : public CustomClassHolder {
   SourceMap sourceMap_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

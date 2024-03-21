@@ -342,10 +342,7 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
 def _refine_sharding(
     op_schema: OpSchema, active_dim: Optional[int]
 ) -> Sequence[Placement]:
-    """
-    Considers 2 first inputs of op_schema as having same shape,
-    and returns suggested placement for a pointwise operation.
-    """
+    """Considers 2 first inputs of op_schema as having same shape, and returns suggested placement for a pointwise operation."""
     # consider the operating dimension as a singleton to prevent sharding on it
     # however, if active_dim is None, this means the input and output shapes are equal and
     # we'll apply exactly the pointwise rule.

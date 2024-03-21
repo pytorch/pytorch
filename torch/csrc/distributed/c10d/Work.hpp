@@ -109,6 +109,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   virtual float getDuration() const;
 
+  virtual uint64_t getSequencenumber() const;
+
   OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(
@@ -142,15 +144,18 @@ class TORCH_API Work : public torch::CustomClassHolder {
 struct TORCH_API WorkInfo {
   WorkInfo(
       const OpType& opType,
+      const uint64_t seq,
       const std::chrono::time_point<std::chrono::system_clock>& timeStarted,
       const std::chrono::time_point<std::chrono::system_clock>& timeFinished,
       const std::chrono::duration<float>& activeDuration)
       : opType(opType),
+        seq(seq),
         timeStarted(timeStarted),
         timeFinished(timeFinished),
         activeDuration(activeDuration) {}
 
   OpType opType;
+  uint64_t seq;
   std::chrono::time_point<std::chrono::system_clock> timeStarted;
   std::chrono::time_point<std::chrono::system_clock> timeFinished;
   std::chrono::duration<float> activeDuration;

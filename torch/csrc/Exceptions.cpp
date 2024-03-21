@@ -221,14 +221,7 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
         "called with invalid exception pointer");
     std::rethrow_exception(e_ptr);
   }
-  CATCH_ALL_ERRORS(return )
-}
-
-IndexError::IndexError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
+  CATCH_ALL_ERRORS(return)
 }
 
 TypeError::TypeError(const char* format, ...) {
@@ -238,28 +231,7 @@ TypeError::TypeError(const char* format, ...) {
   va_end(fmt_args);
 }
 
-ValueError::ValueError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
-NotImplementedError::NotImplementedError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
 AttributeError::AttributeError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
-LinAlgError::LinAlgError(const char* format, ...) {
   va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
@@ -286,7 +258,7 @@ PyObject* map_warning_to_python_type(const c10::Warning& warning) {
       return PyExc_DeprecationWarning;
     }
   };
-  return c10::visit(Visitor(), warning.type());
+  return std::visit(Visitor(), warning.type());
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification

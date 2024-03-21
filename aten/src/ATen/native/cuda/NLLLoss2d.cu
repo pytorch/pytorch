@@ -9,6 +9,7 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
+#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 
@@ -55,6 +56,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
   int64_t ignore_index
 ) {
   int64_t batch_size = input.size(0);
+  int64_t n_classes = input.size(1);
   int64_t H = input.size(2);
   int64_t W = input.size(3);
 
@@ -68,13 +70,14 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
       output[b][h][w] = static_cast<scalar_t>(0);
       continue;
     }
+    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
     scalar_t value = input[b][cur_target][h][w];
     scalar_t cur_weight = weight != nullptr ? weight[cur_target] : static_cast<scalar_t>(1);
     output[b][h][w] = -value * cur_weight;
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_forward_kernel(
   scalar_t* output,
@@ -91,14 +94,14 @@ __global__ void nll_loss2d_forward_kernel(
   accscalar_t input_sum = 0;
   accscalar_t acc_weight = 0;
 
-  int sample = blockIdx.x / blocks_per_sample;
-  int toffset = sample * map_nelem;
-  int ioffset = sample * map_nelem * n_classes;
+  index_t sample = blockIdx.x / blocks_per_sample;
+  index_t toffset = sample * map_nelem;
+  index_t ioffset = sample * map_nelem * n_classes;
   int step = blockDim.x * blocks_per_sample;
   for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    int64_t t = target[toffset + i];
+    index_t t = target[toffset + i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weight != nullptr ? weight[t] : static_cast<scalar_t>(1);
@@ -318,29 +321,33 @@ void nll_loss2d_forward_out_cuda_template(
       "nll_loss2d_forward_kernel",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
-        nll_loss2d_forward_kernel<scalar_t, accscalar_t>
-            <<<total_blocks,
-              CUDA_NUM_THREADS,
-              0,
-              at::cuda::getCurrentCUDAStream()>>>(
-                output.mutable_data_ptr<scalar_t>(),
-                total_weight.mutable_data_ptr<scalar_t>(),
-                input_.const_data_ptr<scalar_t>(),
-                target_.const_data_ptr<int64_t>(),
-                optional_data<scalar_t>(weight_),
-                input_.size(1),
-                input_.size(2) * input_.size(3),
-                blocks_per_sample,
-                ignore_index);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-        // Divide by total_weight
-        if (reduction == at::Reduction::Mean) {
-          nll_loss2d_forward_size_average_kernel<scalar_t>
-              <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  output.mutable_data_ptr<scalar_t>(),
-                  total_weight.const_data_ptr<scalar_t>());
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
+    AT_DISPATCH_INDEX_TYPES(
+        at::native::canUse32BitIndexMath(input_, INT_MAX) ? ScalarType::Int : ScalarType::Long,
+        "nll_loss2d_forward_launcher", [&] {
+            nll_loss2d_forward_kernel<scalar_t, accscalar_t, index_t>
+                <<<total_blocks,
+                  CUDA_NUM_THREADS,
+                  0,
+                  at::cuda::getCurrentCUDAStream()>>>(
+                    output.mutable_data_ptr<scalar_t>(),
+                    total_weight.mutable_data_ptr<scalar_t>(),
+                    input_.const_data_ptr<scalar_t>(),
+                    target_.const_data_ptr<int64_t>(),
+                    optional_data<scalar_t>(weight_),
+                    input_.size(1),
+                    input_.size(2) * input_.size(3),
+                    blocks_per_sample,
+                    ignore_index);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            // Divide by total_weight
+            if (reduction == at::Reduction::Mean) {
+              nll_loss2d_forward_size_average_kernel<scalar_t>
+                  <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      output.mutable_data_ptr<scalar_t>(),
+                      total_weight.const_data_ptr<scalar_t>());
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }
+    });
       });
 }
 

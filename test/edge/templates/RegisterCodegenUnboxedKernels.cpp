@@ -1,8 +1,11 @@
 #include <operator_registry.h>
+#include <event_tracer_hooks.h>
 #include "${fn_header}" // Generated Function import headers
 
 namespace torch {
 namespace executor {
+
+using namespace internal;
 
 namespace {
 using KernelArrayRef = ::at::ArrayRef<::torch::executor::Kernel>;

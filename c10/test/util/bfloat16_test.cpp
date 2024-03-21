@@ -41,7 +41,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
-    EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    EXPECT_LE(std::fabs(out[i] - in[i]) / in[i], 1.0 / 128);
   }
 }
 
@@ -64,7 +64,7 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
-    EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    EXPECT_LE(std::fabs(out[i] - in[i]) / in[i], 1.0 / 128);
   }
 }
 

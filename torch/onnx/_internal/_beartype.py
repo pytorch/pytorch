@@ -22,6 +22,12 @@ try:
         "ignore",
         category=_roar.BeartypeDecorHintPep585DeprecationWarning,
     )
+
+    if _beartype_lib.__version__ == "0.16.0":
+        # beartype 0.16.0 has a bug that causes it to crash when used with
+        # PyTorch. See https://github.com/beartype/beartype/issues/282
+        warnings.warn("beartype 0.16.0 is not supported. Please upgrade to 0.16.1+.")
+        _beartype_lib = None  # type: ignore[assignment]
 except ImportError:
     _beartype_lib = None  # type: ignore[assignment]
 except Exception as e:

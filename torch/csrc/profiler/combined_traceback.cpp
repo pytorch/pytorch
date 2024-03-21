@@ -90,6 +90,7 @@ SymbolizedTracebacks symbolize(
   for (const auto& e : to_symbolize) {
     if (e->python_) {
       if (cur_python != e->python_ && !cur_py_frames.empty()) {
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
         cur_python->appendSymbolized(cur_py_frames, r);
         cur_py_frames.clear();
       }
@@ -103,11 +104,13 @@ SymbolizedTracebacks symbolize(
     }
   }
   if (!cur_py_frames.empty()) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     cur_python->appendSymbolized(cur_py_frames, r);
     cur_py_frames.clear();
   }
   std::vector<std::vector<uint64_t>> python_frame_fragments =
       std::move(r.tracebacks);
+  r.tracebacks = {};
 
   for (const auto& sc : to_symbolize) {
     r.tracebacks.emplace_back();
