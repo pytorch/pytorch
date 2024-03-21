@@ -14,7 +14,9 @@ TORCH_API ScalarType toScalarType(const DLDataType& dtype);
 TORCH_API DLManagedTensor* toDLPack(const Tensor& src);
 TORCH_API Tensor fromDLPack(DLManagedTensor* src);
 C10_DEPRECATED_MESSAGE("Please migrate to a non-const variant")
-inline Tensor fromDLPack(const DLManagedTensor* src) { return fromDLPack(const_cast<DLManagedTensor*>(src)); }
+inline Tensor fromDLPack(const DLManagedTensor* src) {
+  return fromDLPack(const_cast<DLManagedTensor*>(src));
+}
 TORCH_API Tensor
 fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter);
 TORCH_API DLDataType getDLDataType(const Tensor& t);
