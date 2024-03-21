@@ -517,10 +517,10 @@ def forward(self, arg0_1):
             with mode:
                 self._check_tracing(fn, inp)
 
-    def test_while_loop_aot_eager(self):
+    def test_while_loop_compile(self):
         for backend in ["eager", "aot_eager"]:
             for fn, inp in _while_loop_tests().values():
-                self._check_compile(fn, inp, backend="aot_eager")
+                self._check_compile(fn, inp, backend=backend)
 
     def test_while_loop_nested2_traced(self):
         fn, inp = _while_loop_tests()["nested2"]
