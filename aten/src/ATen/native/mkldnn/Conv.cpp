@@ -223,10 +223,10 @@ static void _mkldnn_convolution_out (
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
-  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
-  const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
+  const ideep::tensor x = itensor_from_tensor(input);
+  const ideep::tensor w = itensor_from_tensor(weight);
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
+    const ideep::tensor b = itensor_from_tensor(bias);
     ideep::convolution_forward::compute_v3(
         x,
         w,
@@ -704,9 +704,9 @@ Tensor _mkldnn_convolution_transpose(
   auto output_sizes = conv_input_size(input.sizes(), weight_IOHW_sizes, padding_expanded, output_padding_expanded, stride_expanded, dilation_expanded, groups);
   auto output = at::empty({0}, input.options());
 
-  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
+  const ideep::tensor x = itensor_from_tensor(input);
 
-  ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
+  ideep::tensor w = itensor_from_tensor(weight);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
@@ -720,7 +720,7 @@ Tensor _mkldnn_convolution_transpose(
   }
 
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
+    const ideep::tensor b = itensor_from_tensor(bias);
     ideep::convolution_transpose_forward::compute_v3(
         x,
         w,
