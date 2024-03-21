@@ -125,23 +125,6 @@ class SideEffects:
             tensor_hooks=self.tensor_hooks,
         )
 
-    def apply(self, fn, cache=None, skip_fn=lambda _: False):
-        if cache is None:
-            cache = dict()
-
-        self.id_to_variable = {
-            k: VariableTracker.apply(fn, v, cache, skip_fn)
-            for k, v in self.id_to_variable.items()
-        }
-        self.store_attr_mutations = {
-            k: VariableTracker.apply(fn, v, cache, skip_fn)
-            for k, v in self.store_attr_mutations.items()
-        }
-        self.save_for_backward = VariableTracker.apply(
-            fn, self.save_for_backward, cache, skip_fn
-        )
-        self.tensor_hooks = VariableTracker.apply(fn, self.tensor_hooks, cache, skip_fn)
-
     def __contains__(self, item):
         return id(item) in self.id_to_variable
 
@@ -311,7 +294,6 @@ class SideEffects:
                 and var.mutable_local is not skip_obj
             ):
                 live_new_objects.add(var.mutable_local)
-            return var
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
@@ -320,13 +302,13 @@ class SideEffects:
                 return is_live(var.mutable_local)
             return True
 
-        VariableTracker.apply(visit, (tx.stack, tx.symbolic_locals))
+        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
         for var in self.id_to_variable.values():
             if not isinstance(var.mutable_local, AttributeMutationNew):
-                VariableTracker.apply(visit, var)
+                VariableTracker.visit(visit, var)
 
         for skip_obj, setattrs in self.store_attr_mutations.items():
-            VariableTracker.apply(visit, setattrs)
+            VariableTracker.visit(visit, setattrs)
 
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
