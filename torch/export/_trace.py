@@ -315,7 +315,9 @@ def _restore_state_dict(
 
 
 def _get_module_hierarchy(mod: torch.nn.Module) -> Dict[str, str]:
-    return {name: type(m).__name__ for name, m in mod.named_modules()}
+    return {
+        name: type(m).__name__ for name, m in mod.named_modules(remove_duplicate=False)
+    }
 
 
 def _make_module_call_graph(

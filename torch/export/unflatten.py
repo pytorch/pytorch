@@ -145,6 +145,8 @@ class UnflattenedModule(torch.nn.Module):
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
 
+        fqn_list = [entry.fqn for entry in export_module.module_call_graph]
+        assert fqn_list[0] == ""
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
@@ -224,7 +226,10 @@ class UnflattenedModule(torch.nn.Module):
             node for node in self.graph.nodes if node.op == "placeholder"
         ]
         self.check_input_constraints = True
-        assert self.module_call_graph[0].fqn == ""
+        _reorder_submodules(self, {fqn: i for i, fqn in enumerate(fqn_list)})
+        assert [
+            fqn for fqn, _ in self.named_modules(remove_duplicate=False)
+        ] == fqn_list
 
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
@@ -786,6 +791,22 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         },
         module=root_module,
     ).run_outer()
+
+
+def _reorder_submodules(
+    parent: torch.nn.Module, fqn_order: Dict[str, int], prefix: str = ""
+):
+    children = []
+    for name, child in list(parent._modules.items()):
+        if child is None:
+            continue
+        fqn = prefix + name
+        _reorder_submodules(child, fqn_order, prefix=fqn + ".")
+        delattr(parent, name)
+        children.append((fqn_order[fqn], name, child))
+    children.sort(key=lambda x: x[0])
+    for _, name, child in children:
+        parent.register_module(name, child)
 
 
 def _sink_params(
