@@ -9,11 +9,8 @@ import torch
 import torch._inductor.config as config
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    skipIfRocm,
-    TestCase as TorchTestCase,
-)
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -79,7 +76,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     device = DEVICE
     pass
 
@@ -931,7 +928,7 @@ class WouldBeNiceIfItWorked:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests(needs="filelock")
