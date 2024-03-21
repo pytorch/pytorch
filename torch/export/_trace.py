@@ -15,8 +15,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.non_strict_utils import (
-    get_export_module_name,
-    get_wrapped_export_root_str,
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
@@ -44,7 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.utils._pytree import TreeSpec
+from torch.utils._pytree import MappingKey, tree_map_with_path, TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
@@ -137,12 +135,43 @@ def _convert_input_to_fake(gm, args, kwargs):
     fake_args = pytree.tree_map_only(torch.Tensor, convert_to_fake, args)
     # TODO properly use the cached fake tensor
     fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
+
+    fake_combined_args = (
+        inspect.signature(gm.forward).bind(*fake_args, **fake_kwargs).arguments
+    )
+
+    def _assign_placeholder_name(kp, x):
+        if isinstance(x, FakeTensor):
+            name = "_".join(
+                str(y.key if isinstance(y, MappingKey) else y.idx) for y in kp
+            ).replace(".", "__")
+            x._name = name
+        return x
+
+    fake_combined_args = tree_map_with_path(
+        lambda kp, val: _assign_placeholder_name(kp, val), fake_combined_args
+    )
+    fake_combined_args = list(fake_combined_args.values())
+
     fake_params_buffers = pytree.tree_map_only(
         torch.Tensor,
         functools.partial(fake_mode.from_tensor, static_shapes=True),
         params_buffers,
     )
-    return fake_args, fake_kwargs, fake_params_buffers, fake_mode
+
+    def _assign_param_buffer_name(name, x):
+        name = name[len("L__self___") :].replace(".", "_")
+        if isinstance(x, torch.nn.Parameter):
+            x._name = "p_" + name
+        else:
+            x._name = "b_" + name
+        return x
+
+    fake_params_buffers = {
+        k: _assign_param_buffer_name(k, v) for k, v in fake_params_buffers.items()
+    }
+
+    return fake_combined_args, fake_params_buffers, fake_mode
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
@@ -158,18 +187,6 @@ def _replace_param_buffer_names(param_buffer_table, sig):
             OutputKind.GRADIENT_TO_PARAMETER,
         ):
             spec.target = param_buffer_table[spec.target]
-
-
-def _convert_to_positional_args(orig_arg_names, args, kwargs):
-    assert len(orig_arg_names) == len(args) + len(kwargs), (
-        f"Total number of arg names is expected to be {len(orig_arg_names)} "
-        f"but got {len(args)} positional args, {len(kwargs)} kwargs."
-    )
-    reordered_kwargs = [kwargs[kw_name] for kw_name in orig_arg_names[len(args) :]]
-    return (
-        *args,
-        *reordered_kwargs,
-    )
 
 
 def _normalize_nn_module_stack(gm_torch_level, root_cls):
@@ -278,6 +295,30 @@ def _remap_constants(
             constant = constants[orig_target]
             del constants[orig_target]
             constants[spec.target] = constant
+
+
+def _rename_constants_nodes(
+    gm: torch.fx.GraphModule,
+    graph_signature: ExportGraphSignature,
+    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
+) -> None:
+    """Rename the constant nodes in the graph & graph signature from buffers to constants."""
+    buffer_to_constant = {}
+    for name in constants.keys():
+        name = name.replace(".", "_")
+        buffer_to_constant[f"b_{name}"] = f"c_{name}"
+
+    for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.nodes:
+            if node.name in buffer_to_constant:
+                node.name = node.target = buffer_to_constant[node.name]
+        mod.recompile()
+
+    for spec in graph_signature.input_specs:
+        if spec.arg.name in buffer_to_constant:
+            spec.arg.name = buffer_to_constant[spec.arg.name]
 
 
 def _restore_state_dict(
@@ -876,14 +917,13 @@ def _export(
         module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
 
         def strip_root(x):
-            export_root = get_wrapped_export_root_str()
-            if isinstance(x, str) and x.startswith(export_root):
-                stripped = x[len(export_root) :]
+            if isinstance(x, str) and x.startswith("_export_root"):
+                stripped = x[len("_export_root") :]
                 return stripped[1:] if stripped.startswith(".") else stripped
             return x
 
         def fixup_key(x):
-            return get_export_module_name() + strip_root(x)
+            return "L__self__" + strip_root(x)
 
         def _tuplify_outputs(aot_export):
             def _aot_export_non_strict(mod, args, kwargs=None, **flags):
@@ -1032,8 +1072,7 @@ def _export(
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
     (
-        fake_args,
-        fake_kwargs,
+        fake_combined_args,
         fake_params_buffers,
         dynamo_fake_mode,
     ) = _convert_input_to_fake(gm_torch_level, args, kwargs)
@@ -1114,13 +1153,11 @@ def _export(
     # NOTE: graph module expects only positional args
     ep_non_strict = _export_non_strict(
         gm_torch_level,
-        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
-        {},
+        fake_combined_args,
         fake_params_buffers,
         constant_attrs,
         pre_dispatch=pre_dispatch,
     )
-    breakpoint()
 
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
@@ -1188,6 +1225,9 @@ def _export(
 
     # 4. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
+
+    # 5. Rename constants nodes in graph module from buffers to constants
+    _rename_constants_nodes(gm, export_graph_signature, constants)
 
     module_call_signatures = {
         fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)

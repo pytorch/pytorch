@@ -58,13 +58,6 @@ def _is_constant_argument(t):
     return t is None or isinstance(t, (int, float, bool, str))
 
 
-class NamedFakeTensor(torch.Tensor):
-    def __init__(self, fake_tensor, name):
-        super().__init__()
-        self.fake_tensor = fake_tensor
-        self.name = name
-
-
 def fakify(
     mode: FakeTensorMode,
     kp: KeyPath,
@@ -92,7 +85,6 @@ def fakify(
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
-
     # assign names
     name = "_".join(
         str(y.key if isinstance(y, MappingKey) else y.idx) for y in kp
@@ -318,12 +310,3 @@ def make_constraints(
             range_constraints[symbol] = shape_env.var_to_range[symbol]
 
     return range_constraints
-
-
-# not sure what to call these, but this feels better than hardcoding it in 2 places
-def get_export_module_name():
-    return "L__self__"
-
-
-def get_wrapped_export_root_str():
-    return "_export_root"

@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import itertools
 from contextlib import nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
