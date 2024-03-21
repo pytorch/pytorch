@@ -750,6 +750,55 @@ class TestExport(TestCase):
             6,
         )
 
+    def test_static_dim_constraints(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(6,4)
+            def forward(self, x, y, z):
+                x0 = self.l(x) + y[1:]
+                return x0, z * 2.0
+
+        foo = Foo()
+        inputs = (torch.randn(4, 6), torch.randn(5, 4), torch.randn(3, 3))
+        dx = Dim("dx", min=3, max=6)
+        dy = dx + 1
+        dz = Dim("dz", min=3, max=6)
+
+        # all of these should be fine
+        for dynamic_shapes in [
+            ({0: dx, 1: 6}, {0: dy, 1: 4}, {0: dz, 1: 3}),
+            ((dx, None), (dy, 4), (dz, 3)),
+            ((None, 6), (5, None), (None, None)),
+            ((4, 6), {0: None, 1: 4}, {0: None, 1: 3})
+        ]:
+            ep = export(foo, inputs, dynamic_shapes=dynamic_shapes)
+            self.assertEqual(foo(*inputs), ep.module()(*inputs))
+
+        # check range_constraints - static dims shouldn't be present
+        ep = export(foo, inputs, dynamic_shapes=((dx, None), (dy, 4), (dz, 3)))
+        self.assertEqual(len(ep.range_constraints), 3)
+        for vr in ep.range_constraints.values():
+            self.assertTrue(vr.lower < vr.upper)
+
+        # check raised errors
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError
+            ),
+            "Static shape constraint of 5 does not match input size of 4, for .*"
+        ):
+            _ = export(foo, inputs, dynamic_shapes=((5, None), None, None))
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError
+            ),
+            "Static shape constraint of 9 does not match input size of 6, for .*"
+        ):
+            _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
+
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
