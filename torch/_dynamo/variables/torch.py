@@ -329,14 +329,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
             # some variable types to track and compare tensor getset descriptors
-            return SourcelessBuilder()(
+            return SourcelessBuilder.create(
                 tx, torch.overrides.get_default_nowrap_functions()
             )
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx, *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.accumulate_grad), args, kwargs
+                SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -344,7 +344,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder()(tx, polyfill.radians), args, kwargs
+                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -573,7 +573,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
-                return SourcelessBuilder()(tx, invocation_result)
+                return SourcelessBuilder.create(tx, invocation_result)
 
             @register(DTensor.from_local)
             def handle_from_local(self, tx, *args, **kwargs):
