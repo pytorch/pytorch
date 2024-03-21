@@ -457,7 +457,7 @@ def _sfdp_pattern_18(
     query, key, value, inv_scale, causal_mask_value, causal_mask, dropout_p
 ):
     # for hf_GPT2 with dropout (introduces clone node) for inference
-    # For inference, it also returns permuted key & value
+    # it also returns permuted key & value
     query = query.permute([0, 2, 1, 3])
     key = key.permute([0, 2, 1, 3])
     value = value.permute([0, 2, 1, 3])
@@ -755,6 +755,7 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), c(), c(), m_bool()],
                 d,
+                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 _sfdp_extra_check(disable_cuda=True),
             ),
             (
@@ -762,6 +763,7 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), c(), c(), m_bs1_bool()],
                 d,
+                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 _sfdp_extra_check(disable_cuda=True),
             ),
         ]
