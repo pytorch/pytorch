@@ -354,6 +354,38 @@ def shape_of_mm(a, b):
     return [m, n]
 
 
+# TODO: this pattern is generalizable to all accumulate funcions
+@register_graph_pattern(
+    CallFunction(
+        aten.add.Tensor,
+        CallFunction(
+            aten._unsafe_index_put,
+            KeywordArg("x1"),
+            KeywordArg("indices1"),
+            KeywordArg("values1"),
+            True,
+        ),
+        CallFunction(
+            aten._unsafe_index_put,
+            KeywordArg("x2"),
+            KeywordArg("indices2"),
+            KeywordArg("values2"),
+            True,
+        ),
+    ),
+    pass_dict=pass_patterns[0],
+)
+def add_index_put(match, x1, indices1, values1, x2, indices2, values2):
+    def repl(x1, indices1, values1, x2, indices2, values2):
+        result = aten.add(x1, x2)
+        result = aten._unsafe_index_put(result, indices1, values1, True)
+        result = aten._unsafe_index_put(result, indices2, values2, True)
+        return result
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [x1, indices1, values1, x2, indices2, values2])
+
+
 @register_lowering_pattern(
     CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
 )
