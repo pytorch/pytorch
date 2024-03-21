@@ -11,7 +11,7 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 # TODO: Remove me once Triton version is again in sync for vanilla and ROCm
-ROCM_TRITION_VERSION = "2.1.0"
+ROCM_TRITION_VERSION = "2.2.0"
 
 def read_triton_pin(rocm_hash: bool = False) -> str:
     triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
