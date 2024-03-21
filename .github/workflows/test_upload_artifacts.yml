@@ -1,0 +1,76 @@
+name: test-upload-artifacts
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test_upload_artifacts.yml
+  workflow_dispatch:
+
+env:
+  ACTIONS_STEP_DEBUG: true
+
+jobs:
+  upload-step:
+    name: upload-step
+    runs-on:
+      group: arc-lf-linux.2xlarge.arc-rootless.canary
+#      group: arc-lf-linux.2xlarge.arc.canary
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Create artifact
+        run: |
+          echo "some text" > test.txt
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
+          role-session-name: gha-arc-runner
+          aws-region: us-east-1
+
+      - name: Upload artifact
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: test-run
+          retention-days: 14
+          if-no-files-found: error
+          path: test.txt
+          s3-bucket: pytorch-ci-artifacts
+
+  download-step:
+    needs: upload-step
+    runs-on: linux.2xlarge
+    steps:
+    - name: Download artifacts
+      run: |
+        REPO="${{ github.repository }}"
+        RUN_ID="${{ github.run_id }}"
+        NAME="test-run"
+
+        curl -o test.txt https://pytorch-ci-artifacts.s3.amazonaws.com/$REPO/$RUN_ID/$NAME/test.txt
+
+#    - name: Download artifact
+#      run: |
+#        curl -o artifacts.zip https://pytorch-ci-artifacts.s3.amazonaws.com/pytorch/pytorch/8019633822/linux-jammy-py3.8-gcc11/artifacts.zip
+
+    - name: Test
+      run: |
+        whoami
+        ls -l test.txt
+        less test.txt
+#
+#    - name: Download artifact
+#      uses: seemethere/download-artifact-s3@v4
+#      env:
+#        AWS_ACCESS_KEY_ID: 1
+#        AWS_SECRET_ACCESS_KEY: 1
+#      with:
+#        name: test-run
+#        s3-bucket: pytorch-ci-artifacts
+
+
+
+
+
