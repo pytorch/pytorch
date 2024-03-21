@@ -8,8 +8,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <list>
 
-namespace py = pybind11;
-
 extern "C" {
 
 #endif

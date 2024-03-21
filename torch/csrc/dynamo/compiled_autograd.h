@@ -268,9 +268,10 @@ class CompiledNodeArgs {
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
       collect_size(ordered_dict.size());
-      for (auto it : ordered_dict) {
-        collect(it.key());
-        collect(it.value());
+      // NOLINTNEXTLINE(modernize-loop-convert)
+      for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
+        collect(it->key());
+        collect(it->value());
       }
     } else {
       try {
@@ -487,11 +488,11 @@ class CompiledNodeArgs {
   CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
       : _compiler(compiler),
         _node_call(node_call),
-        _specialization_key_size(0),
-        _specialization_key_storage(1024),
         _specialization_key(
+            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
             (uint8_t*)std::malloc(_specialization_key_storage)) {}
   ~CompiledNodeArgs() {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(_specialization_key);
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
@@ -502,6 +503,7 @@ class CompiledNodeArgs {
     while (C10_UNLIKELY(
         _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
       _specialization_key_storage *= 2;
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       _specialization_key = (uint8_t*)std::realloc(
           _specialization_key, _specialization_key_storage);
     }
@@ -511,8 +513,8 @@ class CompiledNodeArgs {
 
   AutogradCompilerCall& _compiler;
   NodeCall& _node_call;
-  size_t _specialization_key_size;
-  size_t _specialization_key_storage;
+  size_t _specialization_key_size{0};
+  size_t _specialization_key_storage{1024};
   uint8_t* _specialization_key;
 };
 
@@ -520,7 +522,7 @@ struct TraceState {
   TraceState(
       const std::vector<c10::optional<c10::SymInt>>& ss,
       size_t num_outputs)
-      : sym_sizes_index(0), sym_sizes(ss), outputs(num_outputs) {}
+      : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
@@ -530,7 +532,7 @@ struct TraceState {
     return sym_sizes[sym_sizes_index++];
   }
 
-  size_t sym_sizes_index;
+  size_t sym_sizes_index{0};
   std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
 };
@@ -769,11 +771,14 @@ class SwapSavedVariables {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   AutogradCompilerCall& compiler;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
   // it's lifecycle is entirely longer than this objects.
   PyObject* py_compiler;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
 
   // These mappings are used to save the prior values when we overwrite things

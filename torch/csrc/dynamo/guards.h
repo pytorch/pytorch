@@ -2,7 +2,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace py = pybind11;
 
 PyObject* torch_c_dynamo_guards_init();
 
