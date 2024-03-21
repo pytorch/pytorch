@@ -14,6 +14,7 @@ import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
@@ -25,7 +26,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -71,7 +71,7 @@ def cdata(t):
     return t.untyped_storage()._cdata
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -1230,6 +1230,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
+        def test_unstable_ptr(self):
+            import torch
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(m, inp):
+                return m(inp)
+
+            def f():
+                l = []
+                m = torch.nn.Linear(20, 20).cuda()
+                for _ in range(4):
+                    inp = torch.rand([20, 20], device="cuda")
+                    foo(m, inp)
+                    m.weight.data = torch.rand([20, 20], device="cuda")
+
+            self.assertRaises(RuntimeError, f)
+
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
@@ -1425,6 +1442,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_incompatible_cudagraph_ops_item(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.item()
+
+            self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
+            self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_incompatible_cudagraph_ops_nonzero(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.nonzero()
+
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 2], device="cuda")), torch.tensor([[0], [2]])
+            )
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
+            )
+
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
             torch._C._set_storage_access_error_msg(x, "custom error msg")
@@ -1434,7 +1473,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if not TEST_CUDA_GRAPH:
         if __name__ == "__main__":

@@ -48,9 +48,6 @@ class OpName:
     ) -> OpName:
         # NOTE: in PyTorch, the overload could be unprovided to indicate the
         # default overload
-        # TODO: This is slightly unsafe that dev could accidentally create illegal
-        # OpName by using initializer directly
-        # https://github.com/pytorch/pytorch/pull/103943#discussion_r1256511069
         if overload is None or overload == "":
             overload = "default"
         return cls(namespace, op_name, overload)

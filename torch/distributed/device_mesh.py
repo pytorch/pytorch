@@ -198,8 +198,10 @@ else:
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
         ) -> None:
             self.device_type = device_type
+            if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
+                raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach()
+                mesh.detach().cpu()
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
@@ -285,16 +287,12 @@ else:
                     # for each dim and append the groups
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
-                        # if dim_group exists for given subgroup_ranks, we re-use it.
-                        # "" is the default tag for user PGs, and it contains all pgs for a given rank.
-                        dim_group = _find_pg_by_ranks_and_tag(
-                            tag="", ranks=subgroup_ranks
-                        )
-                        if not dim_group:
-                            # call new_group regardless of the current rank in the
-                            # pg or not, it's required that all ranks participate
-                            # in subgroup construction
-                            dim_group = new_group(ranks=subgroup_ranks)
+
+                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                        # Temporarily reverting to resolve test timeout while root-causing.
+                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        dim_group = new_group(ranks=subgroup_ranks)
+
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
@@ -306,7 +304,7 @@ else:
                                 (
                                     _get_group_tag(not_none(dim_group)),
                                     subgroup_ranks,
-                                    not_none(dim_group).group_name,
+                                    dim_group.group_name,
                                 )
                             )
             self._dim_group_infos = dim_group_infos
@@ -370,10 +368,14 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if self.mesh.ndim <= 1:
-                raise RuntimeError(
-                    f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
-                )
+            if self.mesh.ndim == 1:
+                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
+                    return self
+                else:
+                    raise RuntimeError(
+                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
+                    )
+
             mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 

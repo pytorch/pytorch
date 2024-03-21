@@ -125,5 +125,10 @@ register_artifact(
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
 )
+register_artifact(
+    "sym_node",
+    "Logs extra info for various SymNode operations",
+    off_by_default=True,
+)
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")

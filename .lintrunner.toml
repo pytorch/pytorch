@@ -46,7 +46,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.11.1',
     'pyflakes==3.1.0',
-    'torchfix==0.2.0',
+    'torchfix==0.4.0 ; python_version >= "3.9"',
 ]
 
 
@@ -144,9 +144,10 @@ init_command = [
     'types-pkg-resources==0.1.3',
     'types-Jinja2==2.11.9',
     'types-colorama==0.4.6',
+    'filelock==3.13.1',
     'junitparser==2.1.1',
     'rich==10.9.0',
-    'pyyaml==6.0',
+    'pyyaml==6.0.1',
     'optree==0.10.0',
 ]
 
@@ -185,12 +186,17 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    # Enable coverage of headers in aten/src/ATen
+    # and excluding most sub-directories for now.
+    'aten/src/ATen/*.h',
+    'aten/src/ATen/*.cpp',
+    'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
-    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
     'torch/csrc/*.h',
-    'torch/csrc/autograd/**/*.h',
+    'torch/csrc/*.cpp',
+    'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -199,9 +205,9 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    '**/cuda/*pp',
-    '**/*XPU*',
-    '**/xpu/*pp',
+    'aten/**/cuda/*pp',
+    'c10/xpu/**/*.h',
+    'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
@@ -218,8 +224,6 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/autograd/profiler_legacy.cpp',
-    'torch/csrc/cuda/**',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
     'torch/csrc/inductor/**/*',
@@ -974,7 +978,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'PyYAML==6.0',
+    'PyYAML==6.0.1',
 ]
 
 # Black + usort
@@ -1353,6 +1357,7 @@ exclude_patterns = [
     'test/nn/test_embedding.py',
     'test/nn/test_init.py',
     'test/nn/test_lazy_modules.py',
+    'test/nn/test_load_state_dict.py',
     'test/nn/test_module_hooks.py',
     'test/nn/test_multihead_attention.py',
     'test/nn/test_packed_sequence.py',
@@ -1547,7 +1552,6 @@ exclude_patterns = [
     'test/test_mkldnn_verbose.py',
     'test/test_mobile_optimizer.py',
     'test/test_model_dump.py',
-    'test/test_module_init.py',
     'test/test_modules.py',
     'test/test_monitor.py',
     'test/test_mps.py',
@@ -1902,6 +1906,7 @@ exclude_patterns = [
     'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
+    "torch/cuda/_gpu_trace.py",
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
@@ -2429,7 +2434,6 @@ exclude_patterns = [
     'torch/utils/_contextlib.py',
     'torch/utils/_cpp_extension_versioner.py',
     'torch/utils/_crash_handler.py',
-    'torch/utils/_cuda_trace.py',
     'torch/utils/_device.py',
     'torch/utils/_foreach_utils.py',
     'torch/utils/_freeze.py',
@@ -2558,6 +2562,7 @@ exclude_patterns = [
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
     'torch/utils/weak.py',
+    'torch/xpu/_gpu_trace.py',
 ]
 init_command = [
     'python3',
@@ -2650,7 +2655,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.14',
+    'ruff==0.3.0',
 ]
 is_formatter = true
 
@@ -2663,6 +2668,96 @@ include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
 command = [
     'python3',
     'tools/linter/adapters/no_merge_conflict_csv_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+is_formatter = true
+
+[[linter]]
+code = 'ATEN_CPU_GPU_AGNOSTIC'
+include_patterns = [
+    # aten source
+    "aten/src/ATen/*.cpp",
+    "aten/src/ATen/cpu/*.cpp",
+    "aten/src/ATen/functorch/**/*.cpp",
+    "aten/src/ATen/nnapi/*.cpp",
+    "aten/src/ATen/quantized/*.cpp",
+    "aten/src/ATen/vulkan/*.cpp",
+    "aten/src/ATen/metal/*.cpp",
+    "aten/src/ATen/detail/CPUGuardImpl.cpp",
+    "aten/src/ATen/detail/MetaGuardImpl.cpp",
+    # aten native source
+    "aten/src/ATen/native/cpu/*.cpp",
+    "aten/src/ATen/native/ao_sparse/cpu/kernels/*.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/kernels/*.cpp",
+    "aten/src/ATen/native/quantized/cpu/kernels/*.cpp",
+    "aten/src/ATen/native/*.cpp",
+    "aten/src/ATen/native/cpu/**/*.cpp",
+    "aten/src/ATen/native/ao_sparse/*.cpp",
+    "aten/src/ATen/native/ao_sparse/**/*.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/*.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/**/*.cpp",
+    "aten/src/ATen/native/nested/*.cpp",
+    "aten/src/ATen/native/quantized/*.cpp",
+    "aten/src/ATen/native/quantized/**/*.cpp",
+    "aten/src/ATen/native/sparse/*.cpp",
+    "aten/src/ATen/native/transformers/*.cpp",
+    "aten/src/ATen/native/utils/*.cpp",
+    "aten/src/ATen/native/xnnpack/*.cpp",
+    "aten/src/ATen/native/metal/MetalPrepackOpRegister.cpp",
+    # aten headers
+    "aten/src/ATen/*.h",
+    "aten/src/ATen/functorch/**/*.h",
+    "aten/src/ATen/ops/*.h",
+    "aten/src/ATen/cpu/**/*.h",
+    "aten/src/ATen/nnapi/*.h",
+    "aten/src/ATen/quantized/*.h",
+    "aten/src/ATen/vulkan/*.h",
+    "aten/src/ATen/metal/*.h",
+    "aten/src/ATen/mps/*.h",
+    # aten native headers
+    "aten/src/ATen/native/*.h",
+    "aten/src/ATen/native/cpu/**/*.h",
+    "aten/src/ATen/native/nested/*.h",
+    "aten/src/ATen/native/sparse/*.h",
+    "aten/src/ATen/native/ao_sparse/*.h",
+    "aten/src/ATen/native/ao_sparse/cpu/*.h",
+    "aten/src/ATen/native/ao_sparse/quantized/*.h",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/*.h",
+    "aten/src/ATen/native/quantized/*.h",
+    "aten/src/ATen/native/quantized/cpu/*.h",
+    "aten/src/ATen/native/transformers/*.h",
+    "aten/src/ATen/native/quantized/cpu/qnnpack/include/*.h",
+    "aten/src/ATen/native/utils/*.h",
+    "aten/src/ATen/native/vulkan/ops/*.h",
+    "aten/src/ATen/native/xnnpack/*.h",
+    "aten/src/ATen/native/metal/MetalPrepackOpContext.h",
+    "aten/src/ATen/native/mps/Copy.h",
+    "aten/src/ATen/native/mkldnn/**/*.h",
+]
+exclude_patterns = [
+    "aten/src/ATen/Context.h",
+    "aten/src/ATen/Context.cpp",
+    "aten/src/ATen/DLConvertor.cpp",
+    "aten/src/ATen/core/Array.h",
+    "aten/src/ATen/native/ConvUtils.h",
+    "aten/src/ATen/native/quantized/ConvUtils.h",
+    "aten/src/ATen/native/sparse/SparseBlasImpl.cpp",  # triton implementation
+    "aten/src/ATen/native/transformers/attention.cpp",
+    "aten/src/ATen/native/**/cudnn/**",  # cudnn is cuda specific
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=(^#if.*USE_ROCM.*)|(^#if.*USE_CUDA.*)',
+    '--linter-name=ATEN_CPU',
+    '--error-name=aten-cpu should be gpu agnostic',
+    """--error-description=\
+        We strongly discourage the compile-time divergence \
+        on ATen-CPU code for different GPU code. This \
+        disallows sharing the same aten-cpu shared object \
+        between different GPU backends \
+    """,
     '--',
     '@{{PATHSFILE}}'
 ]

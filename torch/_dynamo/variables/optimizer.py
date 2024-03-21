@@ -4,7 +4,8 @@ import weakref
 from typing import Dict, List
 
 import torch
-from ..decorators import mark_static_address
+
+from ..exc import unimplemented, Unsupported
 
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
@@ -27,6 +28,30 @@ class GuardInstallException(Exception):
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
+    _nonvar_fields = {
+        "grad_to_source",
+        "tensor_to_source",
+        "static_tensor_names",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
+
+    @classmethod
+    def throw_if_unsupported_step(cls, symbolic_locals, f_name):
+        """
+        We don't support calling the step with closure argument, so graph break if
+        if that's the case.
+        """
+        if (
+            "closure" in symbolic_locals
+            and not isinstance(symbolic_locals["closure"], ConstantVariable)
+            and "self" in symbolic_locals
+            and isinstance(symbolic_locals["self"], OptimizerVariable)
+            and f_name == "step"
+        ):
+            unimplemented(
+                "Optimizer step with closure not supported by torch.compile()"
+            )
+
     def __init__(
         self,
         value,
@@ -35,6 +60,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
+        from ..decorators import mark_static_address
+
         super().__init__(value, **kwargs)
 
         for group in self.value.param_groups:
@@ -77,11 +104,25 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # trace normally if we can't map args or install guards correctly
                 pass
 
+        if name == "step":
+            if (
+                "closure" in kwargs
+                and not isinstance(kwargs["closure"], ConstantVariable)
+                or len(args) == 1
+                and not isinstance(args[0], ConstantVariable)
+            ):
+                raise Unsupported(
+                    "Optimizer step with closure not supported by torch.compile()"
+                )
+
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
-        if name == "_init_group":
-            return GetAttrVariable(self, name)
+        # Note: this allows us to intercept the call in call_method
+        # in the typical case, we return a UserMethodVariable
+        # which will directly inline
+        if name in ("_init_group", "step"):
+            return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         return super().var_getattr(tx, name)
 
@@ -109,23 +150,36 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return new_args, new_kwargs
 
     def map_sources_and_install_guards(self, tx):
-        from .builder import VariableBuilder
-
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
-        for g_ind, group in enumerate(self.value.param_groups):
-            group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
-            for p_ind, p in enumerate(group["params"]):
-                param_source = GetItemSource(
-                    GetItemSource(group_source, "params"), p_ind
-                )
+        from .builder import VariableBuilder
+        from .lazy import LazyVariableTracker
+
+        param_groups_vt = LazyVariableTracker.realize_all(
+            VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+                self.value.param_groups
+            )
+        )
+
+        for g_ind, (group, group_vt) in enumerate(
+            zip(self.value.param_groups, param_groups_vt.items)
+        ):
+            group_source = group_vt.source
+            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            for p_ind, (p, p_vt) in enumerate(
+                zip(group["params"], params_vt.unpack_var_sequence(tx))
+            ):
+                param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
+                grad_source = AttrSource(
+                    param_source,
+                    "grad",
+                )
                 if p.grad is not None:
-                    self.grad_to_source[p.grad] = AttrSource(
-                        param_source,
-                        "grad",
-                    )
+                    self.grad_to_source[p.grad] = grad_source
+                else:
+                    install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
         # state guards take a long time to generate
         # so we manually generate them here
@@ -153,13 +207,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     raise GuardInstallException()
 
-        # this next line has the side effect of installing guards
-        VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-            self.value.param_groups
-        ).recursive_realize()
-
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
+        from ..decorators import mark_static_address
         from .builder import VariableBuilder
 
         # If we have a source for a tensor already use it,
@@ -204,7 +254,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                                 VariableBuilder(tx, GetItemSource(arg.source, i))(val)
                             )
                         else:
-                            arg.items.append(SourcelessBuilder()(tx, val))
+                            arg.items.append(SourcelessBuilder.create(tx, val))
 
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names

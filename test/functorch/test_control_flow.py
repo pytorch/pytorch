@@ -10,7 +10,7 @@ from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch._higher_order_ops.while_loop import while_loop
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch._subclasses.functional_tensor import FunctionalTensor, CppFunctionalizeAPI, PythonFunctionalizeAPI, FunctionalTensorMode
 
@@ -94,14 +94,35 @@ def _while_loop_tests():
 
         return while_loop(outer_cond_fn, outer_body_fn, (out_iter, it, y))
 
+    class Nested(torch.nn.Module):
+        def forward(self, ci, cj, a, b):
+
+            def cond_fn(i1, j1, x1, y1):
+                return i1 > 0
+
+            def body_fn(i1, j1, x1, y1):
+
+                def cond_fn_nested(i2, j2, x2, y2):
+                    return j2 > 0
+
+                def body_fn_nested(i2, j2, x2, y2):
+                    return i2.clone(), j2 - 1, x2 + 3.14, y2 - 2.71
+
+                i1, j1, x1, y1 = while_loop(
+                    cond_fn_nested, body_fn_nested, [i1, j1, x1, y1]
+                )
+                return i1 - 1, j1.clone(), x1 * 2, y1 / 2
+            return while_loop(cond_fn, body_fn, (ci, cj, a, b))
+
+    nested2 = Nested()
 
     x = torch.zeros(1)
     y = torch.zeros(1)
     z = torch.zeros(1)
     return {"simple": (simple, (x,)),
             "nested": (nested, (x, y, z)),
+            "nested2": (nested2, (torch.tensor(2), torch.tensor(2), torch.ones(2, 2), torch.ones(2, 2))),
             "simple_with_mutation": (simple_with_mutation, (x,))}
-
 
 def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_field_name):
     ret = []
@@ -130,7 +151,7 @@ class ReduceMod(torch.nn.Module):
         return self._reduce(*operands)
 
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
     def setUp(self):
@@ -316,6 +337,7 @@ class TestControlFlow(TestCase):
         self.assertEqual(true_outs, fake_outs)
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def setUp(self):
@@ -330,6 +352,11 @@ class TestControlFlowTraced(TestCase):
             graphs[tracing_mode] = graph
             self.assertEqual(graph(*args), eager_res)
         return graphs
+
+    def _check_compile(self, fn, args, *, backend="eager"):
+        eager_res = fn(*args)
+        compiled_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(compiled_fn(*args), eager_res)
 
     def test_cond_traced_not_nested(self):
         def true_fn(x):
@@ -375,7 +402,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 def forward(self, arg0_1, arg1_1, arg2_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg1_1, arg0_1, arg2_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg1_1 = arg0_1 = arg2_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
@@ -489,6 +516,74 @@ def forward(self, arg0_1):
             mode = mode if mode is not None else contextlib.nullcontext()
             with mode:
                 self._check_tracing(fn, inp)
+
+    def test_while_loop_aot_eager(self):
+        for backend in ["eager", "aot_eager"]:
+            for fn, inp in _while_loop_tests().values():
+                self._check_compile(fn, inp, backend="aot_eager")
+
+    def test_while_loop_nested2_traced(self):
+        fn, inp = _while_loop_tests()["nested2"]
+        graphs = self._check_tracing(fn, inp)
+        gm = graphs["symbolic"]
+        outer_body = gm.while_loop_body_graph_0
+        outer_cond = gm.while_loop_cond_graph_0
+        inner_body = outer_body.while_loop_body_graph_0
+        inner_cond = outer_body.while_loop_cond_graph_0
+        self.assertExpectedInline(gm.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, getitem_2, getitem_3)
+    """)  # noqa: B950
+        self.assertExpectedInline(outer_body.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
+    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
+    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
+    return (sub, clone, mul, div)
+    """)  # noqa: B950
+        self.assertExpectedInline(outer_body.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
+    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
+    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
+    return (sub, clone, mul, div)
+    """)  # noqa: B950
+        self.assertExpectedInline(inner_body.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
+    return (clone, sub, add, sub_1)
+    """)
+        self.assertExpectedInline(inner_cond.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    gt = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
+    return gt
+    """)
 
     def test_cond_nested_traced(self):
         def true_nested(y):
@@ -1618,9 +1713,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         inp = torch.ones(2, 3)
-        # For top-level cond, it take 5 arguments (x, a, b, a, b)
+        # For top-level cond, it take 3 arguments (x, a, b). Dynamo should
+        # realize that the nonlocal variables are same for the true and false
+        # branches, so it should de-dupe them.
         # For second-level conds, it takes (x, a, b)
-        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=5)
+        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=3)
 
     def test_cond_nested_with_closure_graph_module(self):
         a = torch.ones(1, 1)
@@ -1907,6 +2004,8 @@ def forward(self, arg0_1):
             )
 
         res = torch.vmap(fn, in_dims=(0,))(a,)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            res = torch.vmap(fn, in_dims=(0,))(a,)
         self.assertEqual(a + c, res)
 
     def test_cond_vmap_multiple_args_with_closure(self):

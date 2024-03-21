@@ -1,13 +1,13 @@
 import os
 import warnings
-from typing import Any, Dict, Optional, Union
+from typing import Any, cast, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
+from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
-from .filesystem import FileSystemReader
 from .planner import LoadPlanner
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
@@ -49,8 +49,6 @@ def load(
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    coordinator_rank: int = 0,
-    no_dist: bool = False,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -75,9 +73,13 @@ def load(
         pos-processing and non-tensor data properly propagates.
 
     .. note:
-        This function can be used for local inference and load a checkpoint
-        produced by ``save_state_dict`` without having a process group initialized
-        by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
+        If no process group is initialized, this function can assumesbe the intent
+        is to load a checkpoint into the local process. This can be useful in the
+        case of local inference, and when using regular Tensors (as opposed to DTensor
+         or ShardedTensor)
+
+    .. note:
+        Rank 0 is assumed to be the coordinator rank.
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
@@ -97,10 +99,6 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-        coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default. (Default: ``0``)
-        no_dist (bool): If ``True``, distributed checkpoint will not save
-            in SPMD style. (Default: ``False``)
 
     Returns:
         None.
@@ -131,18 +129,16 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    with _profile():
-        if not storage_reader:
-            if not checkpoint_id:
-                raise RuntimeError(
-                    "`checkpoint_id` must be specificed if storage_reader is None."
-                )
-            # TODO: automatically decide whether to use FSSpecFileSystem
-            # https://github.com/pytorch/pytorch/issues/118033 and
-            # https://github.com/pytorch/pytorch/issues/118036
-            storage_reader = FileSystemReader(checkpoint_id)
+    no_dist = not (dist.is_available() and dist.is_initialized())
+    if no_dist:
+        warnings.warn(
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+        )
 
-        storage_reader.reset(checkpoint_id)
+    with _profile():
+        storage_reader = cast(
+            StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
+        )
 
         if no_dist:
             keys = list(state_dict.keys())
@@ -164,12 +160,11 @@ def load(
             )
 
         _load_state_dict(
-            statetful_sd,
-            storage_reader,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
+            state_dict=statetful_sd,
+            storage_reader=storage_reader,
+            process_group=process_group,
+            no_dist=no_dist,
+            planner=planner,
         )
         for key in keys:
             if key not in state_dict:
