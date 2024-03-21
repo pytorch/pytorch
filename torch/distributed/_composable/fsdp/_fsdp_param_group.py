@@ -339,18 +339,20 @@ class FSDPParamGroup:
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             # NOTE(yf225): since compile doesn't support `t.grad_fn` access or `torch._C._will_engine_execute_node()` yet,
             # when compile, we always do unshard and rely on Inductor DCE to remove the unnecessary ops
+            # NOTE(yf225): unfortunately we can't use `.use_training_state()` ctx manager because Dynamo doesn't support it yet.
             if torch.distributed._functional_collectives.is_torchdynamo_compiling() or \
             any(
                 torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
                 for grad_fns in target_fsdp_param_group.all_forward_output_grad_fns
                 for grad_fn in grad_fns
             ):
+                old_training_state = target_fsdp_param_group._training_state
+                target_fsdp_param_group._training_state = TrainingState.PRE_BACKWARD
                 with torch.profiler.record_function(
                     "FSDP::backward_prefetch"
-                ), target_fsdp_param_group.use_training_state(
-                    TrainingState.PRE_BACKWARD
                 ):
                     target_fsdp_param_group.unshard()
+                target_fsdp_param_group._training_state = old_training_state
 
     # Utilities #
     def _to_sharded(self):
@@ -396,6 +398,11 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        # NOTE: we ignore the `RegisterPostBackwardFunction` function in compile, instead we rely on _root_post_backward_final_callback
+        # to call the param_group.post_backward(), and rely on Inductor comm reordering to optimally decide
+        # when to issue prefetch and reshard.
+        if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
         args_list, args_spec = tree_flatten(args)
@@ -409,11 +416,7 @@ class FSDPParamGroup:
                 inp_tensors.append(obj)
         if len(inp_tensors) == 0:
             return args, kwargs  # no tensors that require gradients
-        # NOTE: we ignore this custom autograd function in compile, instead we rely on _root_post_backward_final_callback
-        # to call the param_group.post_backward(), and rely on Inductor comm reordering to optimally decide
-        # when to issue prefetch and reshard.
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+        inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor
         args_list = args_kwargs_list[: len(args_list)]
