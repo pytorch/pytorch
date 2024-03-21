@@ -5,6 +5,7 @@ import io
 import unittest
 
 import torch
+import torch._dynamo as torchdynamo
 import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch.export import export, load, save
@@ -14,14 +15,16 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase as TorchTestCase
-from torch.testing._internal.hop_exportability_db import (
-    hop_export_opinfo_db,
-    hop_that_doesnt_have_export_test_allowlist,
+from torch.testing._internal.hop_opinfo_db import (
+    hop_opinfo_db,
+    hop_that_doesnt_have_opinfo_test_allowlist,
 )
 
 hop_tests = []
 
-for _, val in hop_export_opinfo_db.items():
+for key, val in hop_opinfo_db.items():
+    if key in hop_that_doesnt_have_opinfo_test_allowlist:
+        continue
     hop_tests.extend(val)
 
 
@@ -29,7 +32,7 @@ class TestHOPGeneric(TestCase):
     def test_all_hops_have_op_info(self):
         from torch._ops import _higher_order_ops
 
-        hops_that_have_op_info = hop_export_opinfo_db.keys()
+        hops_that_have_op_info = hop_opinfo_db.keys()
         all_hops = _higher_order_ops.keys()
 
         missing_ops = []
@@ -37,13 +40,14 @@ class TestHOPGeneric(TestCase):
         for op in all_hops:
             if (
                 op not in hops_that_have_op_info
-                and op not in hop_that_doesnt_have_export_test_allowlist
+                and op not in hop_that_doesnt_have_opinfo_test_allowlist
             ):
                 missing_ops.append(op)
 
         self.assertTrue(len(missing_ops) == 0, f"Missing op info for {missing_ops}")
 
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestHOP(TestCase):
     def _compare(self, eager_model, export, input):
         eager_inp = copy.deepcopy(input)
