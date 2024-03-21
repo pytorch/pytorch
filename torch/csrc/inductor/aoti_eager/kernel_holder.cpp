@@ -36,8 +36,8 @@ void AOTIPythonKernelHolder::operator()(
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack) {
   // TODO(Eikan): By now, we always fallback to python python_kernel_holder_ to
-  // simulate the cass miss
-  //  behavior. We will add cache lookup later when the design is mature.
+  // simulate the cache miss behavior. We will add cache lookup later
+  // when the design is mature.
   python_kernel_holder_(op, keyset, stack);
 }
 
