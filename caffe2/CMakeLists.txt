@@ -985,8 +985,7 @@ if(USE_ROCM)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
-    target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
-    add_dependencies(torch_hip aotriton_external)
+    target_link_libraries(torch_hip PRIVATE __caffe2_oort)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
@@ -1549,10 +1548,6 @@ if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
   target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
-endif()
-
-if(MSVC)
-  target_link_libraries(torch_cpu PRIVATE sleef)
 endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)
