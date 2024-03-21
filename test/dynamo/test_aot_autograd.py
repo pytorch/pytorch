@@ -867,7 +867,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 """\
 SeqNr|OrigAten|SrcFn
 0|aten.convolution.default|l__self___conv1
-0|aten.add.Tensor|l__self___bn1
+0|aten.add.Tensor|l__self___bn1_1
 1|aten._native_batch_norm_legit_functional.default|l__self___bn1
 2|aten.relu.default|l__self___relu1
 2|aten.detach.default|l__self___relu1
