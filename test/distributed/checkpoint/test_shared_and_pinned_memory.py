@@ -37,7 +37,7 @@ def test_shared_pinned_ipc(
             )
             event.record()
 
-        send_queue.put((cache, event))
+        send_queue.put((cache, event)) # we will synchronize before here, bc of child process
 
         t_recv = recv_queue.get()
         t_recv["a"] -= 1
