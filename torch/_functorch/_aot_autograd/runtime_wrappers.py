@@ -76,7 +76,8 @@ def create_runtime_wrapper(
 
     def runtime_wrapper(*args):
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        args = (*[torch.tensor([])] * num_tokens, *args)
+        if num_tokens > 0:
+            args = (*[torch.empty(0)] * num_tokens, *args)
 
         if trace_joint:
             args_ = list(args)
@@ -234,14 +235,14 @@ def create_runtime_wrapper(
 
                 o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = args[info.base_idx]  # type: ignore[index]
+                    aliased_base_tensor = args[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
                         aliased_base_tensor, o_, o_grad
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = args[info.base_idx]  # type: ignore[index]
+                    aliased_base_tensor = args[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
