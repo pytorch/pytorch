@@ -411,6 +411,20 @@ auto build_graph_and_tensors_backward(
                                         .set_dim({1, 1, 1, 1})
                                         .set_stride({1, 1, 1, 1})
                                         .set_data_type(fe::DataType_t::INT32));
+    auto O = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("O")
+            .set_dim(
+                std::vector<int64_t>(o.sizes().begin(), o.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                o.strides().begin(), o.strides().end())));
+     auto STATS = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("stats")
+            .set_dim(
+                std::vector<int64_t>(softmaxstats.sizes().begin(), softmaxstats.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                softmaxstats.strides().begin(), softmaxstats.strides().end())));
      auto DO = mha_graph->tensor(
         fe::graph::Tensor_attributes()
             .set_name("dO")
@@ -448,6 +462,9 @@ auto build_graph_and_tensors_backward(
        mha_graph->create_execution_plans({fe::HeurMode_t::A}));
      AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
      AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
+     return std::make_tuple(
+      mha_graph, Q, K, V, O, dO, STATS, DQ, DK, DV);
+
 }
 
 
