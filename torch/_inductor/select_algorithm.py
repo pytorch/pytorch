@@ -22,12 +22,8 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import (
-    ChoiceCaller,
-    IndentedBuffer,
-    KernelTemplate,
-    PrimitiveInfoType,
-)
+from .codegen.common import IndentedBuffer, KernelTemplate
+
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -35,8 +31,10 @@ from .codegen.triton import (
     TritonPrinter,
     TritonScheduling,
 )
+
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
+from .ir import ChoiceCaller, PrimitiveInfoType
 from .utils import (
     do_bench,
     get_dtype_size,
@@ -653,7 +651,7 @@ class ExternKernelChoice:
         )
 
 
-class TritonTemplateCaller(ChoiceCaller):
+class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def __init__(
         self,
         name,
@@ -712,6 +710,9 @@ class TritonTemplateCaller(ChoiceCaller):
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return self.log_info
+
+    def get_make_kernel_render(self):
+        return self.make_kernel_render
 
 
 class ExternKernelCaller(ChoiceCaller):
@@ -814,6 +815,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
+        return_multi_template=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -853,12 +855,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 len(choices),
                 num_workers,
             )
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                futures = executor.map(
-                    lambda c: c.precompile(),
-                    [c for c in choices if hasattr(c, "precompile")],
-                    timeout=precompilation_timeout_seconds,
-                )
+
+            executor = ThreadPoolExecutor(max_workers=num_workers)
+            futures = executor.map(
+                lambda c: c.precompile(),
+                [c for c in choices if hasattr(c, "precompile")],
+                timeout=precompilation_timeout_seconds,
+            )
+
+            def wait_on_futures():
                 try:
                     iterator = iter(futures)
                     while True:
@@ -876,14 +881,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     pass
                 executor.shutdown(wait=True)
 
+            return wait_on_futures
+
         def autotune(choices):
-            try:
-                precompile(choices)
-            except TimeoutError:
-                log.warning(
-                    "Precompilation phase took longer than timeout allowed. Continuing"
-                )
-                pass
             return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -892,25 +892,69 @@ class AlgorithmSelectorCache(PersistentCache):
             # do the optional warmup
             tuning_pool.initialize()
 
-        autotune_start_ts = time.time()
-        timings = self.lookup(
-            choices,
-            name,
-            repr([self.key_of(x) for x in input_nodes]),
-            autotune,
-        )
-        autotune_elapse = time.time() - autotune_start_ts
+        def do_autotuning(precompile_fn):
+            precompile_start_ts = time.time()
+            precompile_fn()
+            precompile_elapse = time.time() - precompile_start_ts
+
+            autotune_start_ts = time.time()
+            timings = self.lookup(
+                choices,
+                name,
+                repr([self.key_of(x) for x in input_nodes]),
+                autotune,
+            )
+            autotune_elapse = time.time() - autotune_start_ts
+
+            if make_benchmark_fn.cache_info().currsize:
+                counters["inductor"]["select_algorithm_autotune"] += 1
+
+            if (
+                make_benchmark_fn.cache_info().currsize
+                or log.getEffectiveLevel() == logging.DEBUG
+                or config.trace.log_autotuning_results
+            ):
+                self.log_results(
+                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                )
+
+            return timings
+
+        precompile_fn = precompile(choices)
+
+        if return_multi_template:
+
+            def get_timings():
+                timings = do_autotuning(precompile_fn)
+                min_extern_choice = float("inf")
+                for choice, timing in timings.items():
+                    if isinstance(choice, ExternKernelCaller):
+                        min_extern_choice = min(min_extern_choice, timing)
+
+                timings = {
+                    choice: time
+                    for choice, time in timings.items()
+                    if (
+                        time <= min_extern_choice
+                        or not isinstance(choice, ExternKernelCaller)
+                    )
+                }
+
+                return timings
+
+            return torch._inductor.ir.TensorBox.create(
+                torch._inductor.ir.MultiTemplateBuffer(
+                    layout,
+                    input_nodes,
+                    get_timings,
+                )
+            )
+
+        # TODO - dont want to precompile if we have a cache hit
+        timings = do_autotuning(precompile_fn)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
-        if make_benchmark_fn.cache_info().currsize:
-            counters["inductor"]["select_algorithm_autotune"] += 1
-        if (
-            make_benchmark_fn.cache_info().currsize
-            or log.getEffectiveLevel() == logging.DEBUG
-            or config.trace.log_autotuning_results
-        ):
-            self.log_results(name, input_nodes, timings, autotune_elapse)
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
@@ -1045,6 +1089,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: List[ir.IRNode],
         timings: Dict[ChoiceCaller, float],
         elapse: float,
+        precompile_elapse: float,
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
@@ -1081,7 +1126,10 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
+        sys.stderr.write(
+            f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
+            " seconds precompiling\n"
+        )
 
     @staticmethod
     def benchmark_example_value(node):
@@ -1143,6 +1191,14 @@ def autotune_select_algorithm(*args, **kwargs):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+
+    if "return_multi_template" not in kwargs:
+        # TODO - enable multi templates even if benchmark_fusion not enabled
+        kwargs["return_multi_template"] = (
+            torch._inductor.config.benchmark_multi_templates
+            and torch._inductor.config.benchmark_fusion
+        )
+
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
