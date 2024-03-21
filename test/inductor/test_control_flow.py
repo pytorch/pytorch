@@ -149,6 +149,16 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [c])
 
+    class WithNonTensorPredicate(torch.nn.Module):
+        def forward(self, a, b):
+            def true_fn(x, y):
+                return x.sum(0) / 3.14
+
+            def false_fn(x, y):
+                return y.sum(0) * 2.71
+
+            return torch.cond(a.size(0) > b.size(0), true_fn, false_fn, [a, b])
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -313,6 +323,24 @@ class CondTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_non_tensor_predicates(self, device, dynamic):
+        # model with a boolean predicate
+        for b_size_0 in [5, 15]:
+            torch._dynamo.reset()
+            self._run_test(
+                model=CondModels.WithNonTensorPredicate(),
+                inputs=(
+                    torch.randn(10, 20),
+                    torch.randn(b_size_0, 20),
+                ),
+                device=device,
+                dynamic=dynamic,
+                num_predicates=0,
+            )
 
     @requires_cuda
     def test_aliasing_outputs(self):

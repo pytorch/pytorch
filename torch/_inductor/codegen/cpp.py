@@ -496,6 +496,12 @@ class CppPrinter(ExprPrinter):
             )
         return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
 
+    def _print_BooleanTrue(self, expr):
+        return "true"
+
+    def _print_BooleanFalse(self, expr):
+        return "false"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint
