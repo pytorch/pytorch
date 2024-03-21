@@ -984,9 +984,10 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
-                dense = (
-                    n.meta["val"].is_contiguous()
-                    or torch.ops.aten.is_non_overlapping_and_dense(n.meta["val"])
+                dense = n.meta[
+                    "val"
+                ].is_contiguous() or torch.ops.aten.is_non_overlapping_and_dense(
+                    n.meta["val"]
                 )
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
