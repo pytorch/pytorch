@@ -27,8 +27,7 @@
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 __host__ __device__ __forceinline__ int imin(int a, int b) {
   return a > b ? b : a;
 }
@@ -45,18 +44,18 @@ __global__ void replication_pad_forward_kernel1d(
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  const int plane = blockIdx.y + y_shift;
-  const int batch = blockIdx.z + z_shift;
+  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= output.size(2)) {
     return;
   }
-  const int outputPointX = outputPointId % output.size(2);
+  const auto outputPointX = outputPointId % output.size(2);
 
   const int iStartX = imax(0, -padL);
   const int oStartX = imax(0, padL);
 
-  const int inputPointX = imin(imax(padL, outputPointX), input.size(2) + padL - 1) - oStartX + iStartX;
+  const auto inputPointX = imin(imax(padL, outputPointX), input.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = input[batch][plane][inputPointX];
   output[batch][plane][outputPointX] = valueToCopy;
@@ -69,18 +68,18 @@ __global__ void replication_pad_backward_kernel(
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  const int plane = blockIdx.y + y_shift;
-  const int batch = blockIdx.z + z_shift;
+  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= gradOutput.size(2)) {
     return;
   }
-  const int outputPointX = outputPointId % gradOutput.size(2);
+  const auto outputPointX = outputPointId % gradOutput.size(2);
 
   const int iStartX = imax(0, -padL);
   const int oStartX = imax(0, padL);
 
-  const int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
+  const auto inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
   gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointX], valueToCopy);
@@ -243,13 +242,11 @@ void replication_pad2d_backward_out_cuda_template(
   const auto padR = paddingSize[1];
   const auto padT = paddingSize[2];
   const auto padB = paddingSize[3];
-  int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
 
   int numInputDims = input.dim();
   if (numInputDims == 4) {
-    planeDim++;
     dimh++;
     dimw++;
   }
@@ -271,7 +268,7 @@ void replication_pad2d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "replication_pad2d_backward_cuda", [&] {
 
         auto gradInput_ = gradInput;
@@ -302,46 +299,6 @@ void replication_pad2d_backward_out_cuda_template(
         }
       }
   );
-}
-
-static inline void shapeCheck3d(
-    const Tensor& input,
-    int pleft, int pright,
-    int ptop, int pbottom,
-    int pfront, int pback) {
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
-  int numInputDims = input.dim();
-
-  bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
-  TORCH_CHECK(
-       (numInputDims == 4 && input.size(0) != 0 && valid_dims) ||
-       (numInputDims == 5 && valid_dims && input.size(4) != 0),
-       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-       input.sizes());
-
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
-  if (numInputDims == 5) {
-    planeDim++;
-    dimd++;
-    dimh++;
-    dimw++;
-  }
-
-  const int idepth = input.size(dimd);
-  const int iheight = input.size(dimh);
-  const int iwidth = input.size(dimw);
-  const int odepth = idepth + pfront + pback;
-  const int oheight = iheight + ptop + pbottom;
-  const int owidth  = iwidth + pleft + pright;
-  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
-      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
-      ") is too small."
-      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
-
 }
 
 static inline void shapeAndGradOutputCheck3d(
@@ -417,18 +374,8 @@ void replication_pad3d_backward_out_cuda_template(
   shapeAndGradOutputCheck3d(input, gradOutput, pleft, pright, ptop,
       pbottom, pfront, pback);
 
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
 
   int numInputDims = input.dim();
-  if (numInputDims == 5) {
-    planeDim++;
-    dimd++;
-    dimh++;
-    dimw++;
-  }
 
   gradInput.resize_as_(input);
   if (gradInput.numel() == 0) {
@@ -436,7 +383,7 @@ void replication_pad3d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(), "replication_pad3d_backward_cuda", [&] {
       auto gradInput_ = gradInput;
       auto gradOutput_ = gradOutput;
@@ -472,8 +419,8 @@ void replication_pad3d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
+  TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
 
   int64_t padL = paddingSize[0];
   int64_t padR = paddingSize[1];
@@ -490,7 +437,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
     return;
   }
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
     input.scalar_type(), "replication_pad1d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -533,28 +480,26 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("replication_pad1d_backward_cuda");
 
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
-      "output gradient tensor must fit into 32-bit index math");
+  TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
+  TORCH_CHECK(gradOutput.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports output tensors with less than 2^63 - 1 elements");
 
-  const int padL = paddingSize[0];
-  int planeDim = 0;
-  int dimw = 1;
+  const int64_t padL = paddingSize[0];
+  int64_t dimw = 1;
 
-  int numInputDims = input.ndimension();
+  int64_t numInputDims = input.ndimension();
   if (numInputDims == 3) {
-    planeDim++;
     dimw++;
   }
-  int iwidth = input.size(dimw);
+  int64_t iwidth = input.size(dimw);
 
   if (gradInput.numel() == 0) {
     return;
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "replication_pad1d_backward_cuda", [&] {
 
       auto gradInput_ = gradInput;
@@ -598,7 +543,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
   // const auto padR = paddingSize[1]; // This padding is ignored here
   const auto padT = paddingSize[2];
   // const auto padB = paddingSize[3]; // This padding is ignored here
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
     input.scalar_type(), "replication_pad2d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -690,7 +635,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
     return;
   }
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
     input.scalar_type(), "replication_pad3d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -751,4 +696,3 @@ Tensor replication_pad3d_backward_cuda(
 }
 
 } // at::native
-} // at

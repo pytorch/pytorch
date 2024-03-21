@@ -1,5 +1,7 @@
-_pandas = None
-_WITH_PANDAS = None
+from typing import Any, Optional
+
+_pandas: Any = None
+_WITH_PANDAS: Optional[bool] = None
 
 
 def _try_import_pandas() -> bool:
@@ -43,8 +45,7 @@ class PandasWrapper:
     def iterate(cls, data):
         if not _with_pandas():
             raise Exception("DataFrames prototype requires pandas to function")
-        for d in data.itertuples(index=False):
-            yield d
+        yield from data.itertuples(index=False)
 
     @classmethod
     def concat(cls, buffer):

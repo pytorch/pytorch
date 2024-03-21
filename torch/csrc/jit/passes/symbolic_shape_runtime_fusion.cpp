@@ -13,13 +13,14 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
+#include <utility>
 
 namespace torch {
 namespace jit {
 
 // Inserts the Compute for Each Symbolic Shape in the TensorExpr Graph
 // and returns back a map from Symbolic Shape Value to its runtime Value *
-std::map<int64_t, Value*> InsertSymbolicShapesCompute(
+static std::map<int64_t, Value*> InsertSymbolicShapesCompute(
     const ShapeComputeGraphMapping& shape_mapping,
     Node* tensorexpr_graph) {
   WithInsertPoint guard(tensorexpr_graph);
@@ -114,7 +115,7 @@ StrideInput strideInputFromString(const std::string& si) {
 
 // in the runtime guard, strides are serialized as one flat
 // vector. stride_inputs_offset indexes into that vector
-// where the strides of this tensor beegin
+// where the strides of this tensor begin
 inline StrideInput summarizeStrideDim(
     const c10::IntArrayRef sizes,
     const c10::IntArrayRef strides,
@@ -139,7 +140,7 @@ inline StrideInput summarizeStrideDim(
   }
 }
 
-std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
+static std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
   auto strides = *tt.strides().concrete_sizes();
   auto sizes = *tt.sizes().concrete_sizes();
   if (c10::is_contiguous_strides(sizes, strides)) {
@@ -157,7 +158,7 @@ std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
 };
 
 // Todo: incorporate in codegen
-StrideInput summarizeOutputStrides(const TensorType& tt) {
+static StrideInput summarizeOutputStrides(const TensorType& tt) {
   auto strides = *tt.strides().concrete_sizes();
   auto sizes = *tt.sizes().concrete_sizes();
   // We only try to maintain output striding for channels last tensors,
@@ -177,7 +178,7 @@ StrideInput summarizeOutputStrides(const TensorType& tt) {
 // Also summarize input striding behavior. The Size information is stored on the
 // type, The striding is returned. See StrideInput for description of stride
 // specializations
-c10::optional<std::vector<std::vector<StrideInput>>>
+static c10::optional<std::vector<std::vector<StrideInput>>>
 TryGeneralizeInputDimensionsToSymbolicShapes(
     std::shared_ptr<Graph> tensorexpr_graph) {
   std::map<size_t, int64_t> shape_to_sym_shape;
@@ -211,7 +212,7 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
   return input_striding;
 }
 
-void moveConstantTensorsOutOfSubgraph(
+static void moveConstantTensorsOutOfSubgraph(
     Node* tensorexpr_graph_node,
     std::shared_ptr<Graph> tensorexpr_graph) {
   auto parent = tensorexpr_graph_node->owningGraph();
@@ -303,7 +304,7 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   return true;
 }
 
-void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
+static void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   DepthFirstGraphNodeIterator it(graph);
 
   Node* n = nullptr;
@@ -321,7 +322,7 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   auto false_block = if_v.elseBlock();
   std::vector<Value*> false_block_outputs(
       if_v.elseOutputs().begin(), if_v.elseOutputs().end());
-  TORCH_INTERNAL_ASSERT(false_block_outputs.size() != 0);
+  TORCH_INTERNAL_ASSERT(!false_block_outputs.empty());
 
   for (auto out : false_block_outputs) {
     TORCH_INTERNAL_ASSERT(out->type()->cast<TensorType>());
@@ -358,7 +359,7 @@ void insertDynamicShapesGuard(
       continue;
     }
     inputs_to_check.push_back(node_input);
-    guard_types.push_back(
+    guard_types.emplace_back(
         subgraph->inputs().at(i)->type()->expect<TensorType>()->withStrides(
             c10::VaryingShape<c10::Stride>()));
   }
@@ -378,7 +379,7 @@ void insertDynamicShapesGuard(
           ->create(Symbol::prim("TensorExprDynamicGuard"), inputs_to_check, 1)
           ->insertBefore(guarded_node);
 
-  typecheck_node->tys_(attr::types, guard_types);
+  typecheck_node->tys_(attr::types, std::move(guard_types));
   Value* typecheck_result = typecheck_node->output()->setType(BoolType::get());
 
   // Insert if
@@ -429,7 +430,8 @@ void insertDynamicShapesGuard(
     ss << "SS_" << -pair.first;
     subgraph->addInput(ss.str())->setType(IntType::get());
   }
-  guarded_node->is_(attr::symbolic_shape_inputs, symbolic_shape_inputs);
+  guarded_node->is_(
+      attr::symbolic_shape_inputs, std::move(symbolic_shape_inputs));
 
   std::vector<std::vector<std::string>> input_striding;
   for (auto& vec : input_info) {
@@ -439,7 +441,7 @@ void insertDynamicShapesGuard(
   }
   auto ival = IValue(input_striding);
   guarded_node->ival_(attr::striding_inputs_desc, ival);
-  typecheck_node->ival_(attr::striding_inputs_desc, ival);
+  typecheck_node->ival_(attr::striding_inputs_desc, std::move(ival));
 
   for (Value* v : subgraph->inputs()) {
     if (auto t = v->type()->cast<TensorType>()) {
@@ -455,7 +457,7 @@ void insertDynamicShapesGuard(
   std::vector<std::string> output_striding =
       fmap(output_strides, [&](StrideInput inp) { return toString(inp); });
   auto output_ival = IValue(output_striding);
-  guarded_node->ival_(attr::striding_outputs_desc, output_ival);
+  guarded_node->ival_(attr::striding_outputs_desc, std::move(output_ival));
 
   if (add_composed_op) {
     // only in SR flow do we check for values on the stack and
@@ -493,12 +495,12 @@ void insertDynamicShapesGuard(
 // tensors
 // Note: this logic is meant to reflect the invocation of the TE Kernel
 // and `runWithAllocatedOutputs` in tensorexpr_fuser.cpp
-Operation StaticRuntimeCopyOuts(const Node* node) {
+static Operation StaticRuntimeCopyOuts(const Node* node) {
   auto num_ten_inputs = node->inputs().size();
   return [num_ten_inputs](Stack& stack) {
     std::vector<IValue> inputs = pop(stack, num_ten_inputs);
     // uncommon case - first run
-    if (stack.size() == 0) {
+    if (stack.empty()) {
       for (IValue elem : inputs) {
         push(stack, std::move(elem));
       }
@@ -548,7 +550,7 @@ RegisterOperators reg_guard({
 
           // Map from symbolic dimension value to its set's index
           std::map<int64_t, size_t> sym_dim_flat_index;
-          TORCH_INTERNAL_ASSERT(types.size() >= 1);
+          TORCH_INTERNAL_ASSERT(!types.empty());
 
           // we should just be fusing fusion groups with a single device
           // and with tensors not requiring grad
@@ -568,7 +570,7 @@ RegisterOperators reg_guard({
             }
           }
 
-          for (auto type : types) {
+          for (const auto& type : types) {
             auto tt = type->expect<TensorType>();
             auto ss = tt->symbolic_sizes();
             TORCH_INTERNAL_ASSERT(ss.rank());
@@ -719,8 +721,8 @@ void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
   interpreter.run(stack);
 }
 
-Operation createTensorExprDynamicGroup(const Node* node) {
-  auto graph = node->g(attr::Subgraph);
+static Operation createTensorExprDynamicGroup(const Node* node) {
+  const auto& graph = node->g(attr::Subgraph);
   Code code(graph, "");
   // This implementation creates a Code object and InterpreterState on every
   // call to TensorExprDynamicGroup, which affects performance. Ideally, we

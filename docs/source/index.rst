@@ -51,7 +51,8 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
-   :maxdepth: 1
+   :glob:
+   :maxdepth: 2
    :caption: Python API
 
    torch
@@ -63,26 +64,39 @@ Features described in this documentation are classified by release status:
    torch.amp <amp>
    torch.autograd <autograd>
    torch.library <library>
+   cpu
    cuda
+   torch.cuda.memory <torch_cuda_memory>
+   mps
+   xpu
+   meta
    torch.backends <backends>
+   torch.export <export>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
+   torch.distributed.tensor.parallel <distributed.tensor.parallel>
+   torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
+   torch.compiler <torch.compiler>
    torch.fft <fft>
+   torch.func <func>
    futures
    fx
+   fx.experimental
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
    torch.monitor <monitor>
+   torch.signal <signal>
    torch.special <special>
    torch.overrides
    torch.package <package>
    profiler
    nn.init
+   nn.attention
    onnx
    optim
    complex_numbers
@@ -96,11 +110,13 @@ Features described in this documentation are classified by release status:
    sparse
    storage
    torch.testing <testing>
+   torch.utils <utils>
    torch.utils.benchmark <benchmark_utils>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.deterministic <deterministic>
    torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>
@@ -110,6 +126,9 @@ Features described in this documentation are classified by release status:
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   torch.__future__ <future_mod>
+   logging
+   torch_environment_variables
 
 .. toctree::
    :maxdepth: 1
@@ -121,7 +140,7 @@ Features described in this documentation are classified by release status:
    TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   PyTorch on XLA Devices <http://pytorch.org/xla/>
+   PyTorch on XLA Devices <https://pytorch.org/xla/>
 
 Indices and tables
 ==================

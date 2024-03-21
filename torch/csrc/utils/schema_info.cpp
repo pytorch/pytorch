@@ -20,8 +20,9 @@ void SchemaInfo::addArgumentValues(
       "Schema does not have enough arguments for value list");
 
   for (size_t i = 0; i < value_list.size(); i++) {
-    if (value_list[i] != c10::nullopt) {
-      value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
+    if (value_list[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      value_map_[schema_.arguments()[i].name()] = *value_list[i];
       alias_maps_current_ = false;
     }
   }
@@ -107,7 +108,7 @@ bool SchemaInfo::has_argument(c10::string_view name) {
 bool SchemaInfo::is_mutable(c10::string_view name) {
   c10::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
-      index != c10::nullopt, "Schema has no argument named ", name);
+      index.has_value(), "Schema has no argument named ", name);
 
   return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
 }
@@ -261,7 +262,7 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   std::vector<c10::FunctionSchema> nondeterministic_ops;
   nondeterministic_ops.reserve(nondeterministic_op_strings.size());
   for (const std::string& signature : nondeterministic_op_strings) {
-    nondeterministic_ops.push_back(torch::jit::parseSchema(signature));
+    nondeterministic_ops.emplace_back(torch::jit::parseSchema(signature));
   }
 
   return nondeterministic_ops;
@@ -341,7 +342,7 @@ void SchemaInfo::initSchemaInfo() {
       c10::optional<c10::AliasTypeSet> contained_types =
           schema_.getAliasTypeSetContainedTypes(
               schema_.mapTypeToAliasTypeSet(argument.type()));
-      if (contained_types && contained_types->size() > 0) {
+      if (contained_types && !contained_types->empty()) {
         container_set_.insert({type, i});
       }
     }

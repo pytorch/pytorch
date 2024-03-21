@@ -1,13 +1,16 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/ArrayRef.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -16,10 +19,7 @@ namespace api {
 
 class CommandBuffer final {
  public:
-  explicit CommandBuffer(
-      const VkCommandBuffer,
-      const VkCommandBufferUsageFlags =
-          VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+  explicit CommandBuffer(VkCommandBuffer, const VkCommandBufferUsageFlags);
 
   CommandBuffer(const CommandBuffer&) = delete;
   CommandBuffer& operator=(const CommandBuffer&) = delete;
@@ -69,17 +69,30 @@ class CommandBuffer final {
   Bound bound_;
 
  public:
+  inline bool is_reusable() {
+    return !(flags_ & VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+  }
+
+  inline void invalidate() {
+    handle_ = VK_NULL_HANDLE;
+    bound_.reset();
+  }
+
   void begin();
   void end();
 
-  void bind_pipeline(
-      const VkPipeline,
-      const VkPipelineLayout,
-      const utils::uvec3);
-  void bind_descriptors(const VkDescriptorSet);
+  void bind_pipeline(VkPipeline, VkPipelineLayout, const utils::uvec3);
+  void bind_descriptors(VkDescriptorSet);
 
-  void insert_barrier(const PipelineBarrier& pipeline_barrier);
+  void insert_barrier(PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
+
+  void copy_buffer_to_buffer(
+      const api::VulkanBuffer&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
 
   void copy_texture_to_texture(
       const api::VulkanImage&,
@@ -102,10 +115,10 @@ class CommandBuffer final {
       const api::utils::uvec3&,
       const api::utils::uvec3&);
 
-  void write_timestamp(const VkQueryPool, const uint32_t) const;
-  void reset_querypool(const VkQueryPool, const uint32_t, const uint32_t) const;
+  void write_timestamp(VkQueryPool, const uint32_t) const;
+  void reset_querypool(VkQueryPool, const uint32_t, const uint32_t) const;
 
-  VkCommandBuffer get_submit_handle();
+  VkCommandBuffer get_submit_handle(const bool final_use = false);
 
   inline operator bool() const {
     return VK_NULL_HANDLE != handle_;
@@ -119,10 +132,7 @@ struct CommandPoolConfig final {
 
 class CommandPool final {
  public:
-  explicit CommandPool(
-      const VkDevice,
-      const uint32_t,
-      const CommandPoolConfig&);
+  explicit CommandPool(VkDevice, const uint32_t, const CommandPoolConfig&);
 
   CommandPool(const CommandPool&) = delete;
   CommandPool& operator=(const CommandPool&) = delete;
@@ -143,7 +153,7 @@ class CommandPool final {
   size_t in_use_;
 
  public:
-  CommandBuffer get_new_cmd();
+  CommandBuffer get_new_cmd(bool reusable = false);
 
   void flush();
 

@@ -55,7 +55,7 @@ Saving tensors preserves their view relationships:
     tensor([ 1,  4,  3,  8,  5, 12,  7, 16,  9])
 
 Behind the scenes, these tensors share the same "storage." See
-`Tensor Views <https://pytorch.org/docs/master/tensor_view.html>`_ for more
+`Tensor Views <https://pytorch.org/docs/main/tensor_view.html>`_ for more
 on views and storage.
 
 When PyTorch saves tensors it saves their storage objects and tensor
@@ -153,7 +153,7 @@ can use this pattern:
     # A module with two linear layers
     >>> class MyModule(torch.nn.Module):
           def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.l0 = torch.nn.Linear(4, 2)
             self.l1 = torch.nn.Linear(2, 1)
 
@@ -175,6 +175,44 @@ can use this pattern:
     >>> new_m = MyModule()
     >>> new_m.load_state_dict(m_state_dict)
     <All keys matched successfully>
+
+.. _serialized-file-format:
+
+Serialized file format for ``torch.save``
+-----------------------------------------
+
+Since PyTorch 1.6.0, ``torch.save`` defaults to returning an uncompressed ZIP64
+archive unless the user sets ``_use_new_zipfile_serialization=False``.
+
+In this archive, the files are ordered as such
+
+.. code-block:: text
+
+    checkpoint.pth
+    ├── data.pkl
+    ├── byteorder  # added in PyTorch 2.1.0
+    ├── data/
+    │   ├── 0
+    │   ├── 1
+    │   ├── 2
+    │   └── …
+    └── version
+
+The entries are as follows:
+  * ``data.pkl`` is the result of pickling the object passed to ``torch.save``
+    excluding ``torch.Storage`` objects that it contains
+  * ``byteorder`` contains a string with the ``sys.byteorder`` when saving (“little” or “big”)
+  * ``data/`` contains all the storages in the object, where each storage is a separate file
+  * ``version`` contains a version number at save time that can be used at load time
+
+When saving, PyTorch will ensure that the local file header of each file is padded
+to an offset that is a multiple of 64 bytes, ensuring that the offset of each file
+is 64-byte aligned.
+
+.. note::
+    Tensors on certain devices such as XLA are serialized as pickled numpy arrays. As
+    such, their storages are not serialized. In these cases ``data/`` might not exist
+    in the checkpoint.
 
 .. _serializing-python-modules:
 
@@ -218,13 +256,13 @@ this:
     # A module with control flow
     >>> class ControlFlowModule(torch.nn.Module):
           def __init__(self):
-            super(ControlFlowModule, self).__init__()
+            super().__init__()
             self.l0 = torch.nn.Linear(4, 2)
             self.l1 = torch.nn.Linear(2, 1)
 
           def forward(self, input):
             if input.dim() > 1:
-            return torch.tensor(0)
+                return torch.tensor(0)
 
             out0 = self.l0(input)
             out0_relu = torch.nn.functional.relu(out0)
@@ -341,3 +379,16 @@ torch.full return float tensors by default, even when given bool or
 integer fill values. ScriptModules using :func:`torch.full` and serialized on PyTorch 1.6
 and later cannot be loaded in earlier versions of PyTorch, however, since those
 earlier versions do not understand the new behavior.
+
+.. _utility functions:
+
+Utility functions
+-----------------
+
+The following utility functions are related to serialization:
+
+.. currentmodule:: torch.serialization
+
+.. autofunction:: register_package
+.. autofunction:: get_default_load_endianness
+.. autofunction:: set_default_load_endianness

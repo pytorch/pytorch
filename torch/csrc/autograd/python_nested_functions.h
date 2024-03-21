@@ -1,9 +1,9 @@
 #pragma once
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
+
+PyMethodDef* get_nested_functions_manual();
 
 void initNestedFunctions(PyObject* module);
 
-}
-} // namespace torch
+} // namespace torch::autograd

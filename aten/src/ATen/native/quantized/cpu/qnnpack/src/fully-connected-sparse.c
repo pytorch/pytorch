@@ -26,11 +26,12 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     size_t output_channels,
     uint8_t input_zero_point,
     const uint8_t* kernel_zero_points,
-    const uint32_t* kernel_col_indices,
-    const uint32_t* kernel_row_values,
+    const void* kernel_col_indices,
+    const void* kernel_row_values,
     const uint8_t* kernel_values,
     const uint32_t kernel_row_block_size,
     const uint32_t kernel_col_block_size,
+    enum pytorch_qnnp_sparse_matrix_indices_dtype kernel_indices_dtype,
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max,
@@ -71,14 +72,40 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
 
   if (kernel_row_block_size == 8 && kernel_col_block_size == 1) {
     // This is to gate 8x1 on SSE2 since we have not implemented SSE2
-    // kernel that suppors 8x1 sparsity pattern.
+    // kernel that supports 8x1 sparsity pattern.
     if (pytorch_qnnp_params.q8gemm_sparse_c8x1.packA == NULL) {
       status = pytorch_qnnp_status_invalid_parameter;
       goto error;
     }
   }
-  fully_connected->sparse_matrix.col_indices = kernel_col_indices;
-  fully_connected->sparse_matrix.row_values = kernel_row_values;
+
+  fully_connected->sparse_matrix.indices_dtype = kernel_indices_dtype;
+  switch (kernel_indices_dtype) {
+    case pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t:
+      fully_connected->sparse_matrix.col_indices_w32 =
+          (const uint32_t*)kernel_col_indices;
+      fully_connected->sparse_matrix.row_values_w32 =
+          (const uint32_t*)kernel_row_values;
+      break;
+    case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t:
+      fully_connected->sparse_matrix.col_indices_w16 =
+          (const uint16_t*)kernel_col_indices;
+      fully_connected->sparse_matrix.row_values_w16 =
+          (const uint16_t*)kernel_row_values;
+      break;
+    case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t:
+      fully_connected->sparse_matrix.col_indices_w8 =
+          (const uint8_t*)kernel_col_indices;
+      fully_connected->sparse_matrix.row_values_w8 =
+          (const uint8_t*)kernel_row_values;
+      break;
+    case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
+      status = pytorch_qnnp_status_invalid_parameter;
+      pytorch_qnnp_log_error(
+          "Invalid indices dtype specified for qnnpack fully connected sparse");
+      goto error;
+  }
+
   fully_connected->sparse_matrix.values = kernel_values;
   fully_connected->sparse_matrix.row_block_size = kernel_row_block_size;
   fully_connected->sparse_matrix.col_block_size = kernel_col_block_size;

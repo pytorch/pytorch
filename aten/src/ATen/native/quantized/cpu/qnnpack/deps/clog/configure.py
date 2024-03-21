@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import confu
+
 parser = confu.standard_parser("clog configuration script")
 
 
@@ -19,13 +20,16 @@ def main(args):
     with build.options(source_dir="src", extra_include_dirs="src"):
         build.static_library("clog", build.cc("clog.c"))
 
-    with build.options(source_dir="test", deps={
-            (build, build.deps.googletest): all,
-            "log": build.target.is_android}):
+    with build.options(
+        source_dir="test",
+        deps={(build, build.deps.googletest): all, "log": build.target.is_android},
+    ):
         build.unittest("clog-test", build.cxx("clog.cc"))
 
     return build
 
+
 if __name__ == "__main__":
     import sys
+
     main(sys.argv[1:]).generate()

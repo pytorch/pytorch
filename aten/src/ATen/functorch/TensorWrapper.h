@@ -8,9 +8,9 @@
 
 #include <ATen/functorch/Macros.h>
 #include <ATen/Tensor.h>
+#include <ATen/functorch/Interpreter.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch's TensorWrapper]
 //
@@ -38,12 +38,8 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       Tensor value,
       int64_t level,
       std::shared_ptr<bool> is_alive,
+      bool is_immutable = false,  // if true, this came from an operation that aliases an immutable tensor
       bool use_value_sizes_strides = true);
-
-  // Override a bunch of methods inherited from TensorImpl to return error messages
-  void set_size(int64_t dim, int64_t new_size) override;
-  void set_stride(int64_t dim, int64_t new_stride) override;
-  void set_storage_offset(int64_t storage_offset) override;
 
   void refreshMetadata();
 
@@ -55,6 +51,9 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       return level_;
     }
     return {};
+  }
+  bool is_immutable() const {
+    return is_immutable_;
   }
   bool is_alive() const;
 
@@ -71,6 +70,7 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   const char* tensorimpl_type_name() const override;
   Tensor value_;
   int64_t level_;
+  bool is_immutable_;
 
   // TensorWrapper receives a boolean flag on whether or not the Grad Interpreter
   // that created it is still alive or not.
@@ -84,10 +84,20 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   std::shared_ptr<bool> is_alive_;
 };
 
-TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level);
+// There are two variants of makeTensorWrapper: one that accepts a level
+// and one that accepts an Interpreter.
+//
+// The one that accepts a level tries to automatically get the life handle from the
+// interpreter on the DynamicLayerStack.
+// It needs to be used with caution: if the interpreter is not on the
+// DynamicLayerStack, then we won't be able to find the life handle.
+//
+// In practice this isn't a problem: when we're constructing TensorWrapper in
+// Python, the corresponding interpreter is on the stack.
+TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable=false);
+TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, const Interpreter& interpreter, bool is_immutable=false);
 TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
 TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
 TORCH_API void dumpTensorCout(const Tensor& tensor);
 
-}
-} // namespace at
+} // namespace at::functorch

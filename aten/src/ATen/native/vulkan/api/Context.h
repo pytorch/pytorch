@@ -1,16 +1,20 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
+
+#include <ATen/native/vulkan/api/vk_api.h>
 
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -57,6 +61,8 @@ class Context final {
   DescriptorPool descriptor_pool_;
   FencePool fences_;
   // Diagnostics
+  // TODO: remove USE_VULKAN_GPU_DIAGNOSTICS
+  bool enable_op_profiling_{false};
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
@@ -75,6 +81,18 @@ class Context final {
 
   inline Adapter* adapter_ptr() {
     return adapter_p_;
+  }
+
+  inline void enable_op_profiling() {
+    enable_op_profiling_ = true;
+  }
+
+  inline void disable_op_profiling() {
+    enable_op_profiling_ = false;
+  }
+
+  inline bool op_profiling_enabled() {
+    return enable_op_profiling_;
   }
 
   inline VkDevice device() {
@@ -143,111 +161,141 @@ class Context final {
     return std::unique_lock<std::mutex>(cmd_mutex_);
   }
 
- private:
-  inline void set_cmd() {
+  inline void set_cmd(bool reusable = false) {
     if (!cmd_) {
-      cmd_ = command_pool_.get_new_cmd();
+      cmd_ = command_pool_.get_new_cmd(reusable);
       cmd_.begin();
     }
   }
 
-  DescriptorSet submit_compute_prologue(
-      CommandBuffer&,
-      const ShaderSource&,
-      const utils::uvec3&);
+  DescriptorSet get_descriptor_set(const ShaderInfo&, const utils::uvec3&);
 
-  void submit_compute_epilogue(
-      CommandBuffer&,
+  void register_shader_dispatch(
       const DescriptorSet&,
-      const PipelineBarrier&,
+      PipelineBarrier&,
+      const ShaderInfo&,
       const utils::uvec3&);
 
- public:
   template <class S, class D>
-  void submit_copy(
-      const PipelineBarrier&,
+  bool submit_copy(
+      PipelineBarrier&,
       const S&,
       const D&,
       const api::utils::uvec3&,
       const api::utils::uvec3&,
       const api::utils::uvec3&,
-      const VkFence fence_handle);
+      VkFence fence_handle);
 
   template <typename... Arguments>
-  void submit_compute_job(
-      const ShaderSource&,
-      const PipelineBarrier&,
+  bool submit_compute_job(
+      const ShaderInfo&,
+      PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
-      const VkFence fence_handle,
+      VkFence fence_handle,
       Arguments&&...);
 
- private:
-  void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
+  void submit_cmd_to_gpu(
+      VkFence fence_handle = VK_NULL_HANDLE,
+      const bool final_use = false);
 
- public:
   void flush();
 };
 
 class UniformParamsBuffer final {
  private:
   Context* context_p_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
+  UniformParamsBuffer() : context_p_{nullptr}, vulkan_buffer_{} {}
+
   template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
       : context_p_(context_p),
+        nbytes_(sizeof(block)),
         vulkan_buffer_(
             context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
-  UniformParamsBuffer(const UniformParamsBuffer&) = delete;
-  UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
+  UniformParamsBuffer(const UniformParamsBuffer&);
+  UniformParamsBuffer& operator=(const UniformParamsBuffer&);
 
-  UniformParamsBuffer(UniformParamsBuffer&&) = delete;
-  UniformParamsBuffer& operator=(UniformParamsBuffer&&) = delete;
+  UniformParamsBuffer(UniformParamsBuffer&&) = default;
+  UniformParamsBuffer& operator=(UniformParamsBuffer&&) = default;
 
   ~UniformParamsBuffer() {
-    context_p_->register_buffer_cleanup(vulkan_buffer_);
+    if (vulkan_buffer_) {
+      context_p_->register_buffer_cleanup(vulkan_buffer_);
+    }
   }
 
   VulkanBuffer& buffer() {
     return vulkan_buffer_;
+  }
+
+  template <typename Block>
+  void update(const Block& block) {
+    if (sizeof(block) != nbytes_) {
+      VK_THROW(
+          "Attempted to update UniformParamsBuffer with data of different size");
+    }
+    // Fill the uniform buffer with data in block
+    {
+      MemoryMap mapping(vulkan_buffer_, MemoryAccessType::WRITE);
+      Block* data_ptr = mapping.template data<Block>();
+
+      *data_ptr = block;
+    }
   }
 };
 
 class StorageBuffer final {
  private:
   Context* context_p_;
-  c10::ScalarType dtype_;
+  ScalarType dtype_;
   size_t numel_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
   StorageBuffer(
       Context* context_p,
-      const c10::ScalarType dtype,
+      const ScalarType dtype,
       const size_t numel,
       const bool gpuonly = false)
       : context_p_(context_p),
         dtype_(dtype),
         numel_(numel),
+        nbytes_(element_size(dtype_) * numel_),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            c10::elementSize(dtype_) * numel_,
+            nbytes_,
             gpuonly)) {}
 
   StorageBuffer(const StorageBuffer&) = delete;
   StorageBuffer& operator=(const StorageBuffer&) = delete;
 
-  StorageBuffer(StorageBuffer&&) = delete;
-  StorageBuffer& operator=(StorageBuffer&&) = delete;
+  StorageBuffer(StorageBuffer&&) = default;
+  StorageBuffer& operator=(StorageBuffer&&) = default;
 
   ~StorageBuffer() {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
-  VulkanBuffer& buffer() {
+  inline ScalarType dtype() {
+    return dtype_;
+  }
+
+  inline VulkanBuffer& buffer() {
     return vulkan_buffer_;
+  }
+
+  inline size_t numel() {
+    return numel_;
+  }
+
+  inline size_t nbytes() {
+    return nbytes_;
   }
 };
 
@@ -259,12 +307,37 @@ Context* context();
 
 namespace detail {
 
+inline void arg_is_empty(bool& any_is_empty, const VulkanBuffer& buffer) {
+  // bool(buffer) will evaluate to false if no memory has been allocated
+  any_is_empty = any_is_empty || !buffer;
+}
+
+inline void arg_is_empty(bool& any_is_empty, const VulkanImage& image) {
+  // bool(image) will evaluate to false if no memory has been allocated
+  any_is_empty = any_is_empty || !image;
+}
+
+/*
+  Reports if any VulkanBuffer or VulkanImage argument in a variadic argument
+  list does not have any memory associated with it.
+ */
+template <typename... Arguments>
+inline bool any_arg_is_empty(Arguments&&... arguments) {
+  bool any_is_empty = false;
+  VK_UNUSED const int _[]{
+      0,
+      (arg_is_empty(any_is_empty, std::forward<Arguments>(arguments)), 0)...,
+  };
+
+  return any_is_empty;
+}
+
 template <size_t... Indices, typename... Arguments>
 inline void bind(
     DescriptorSet& descriptor_set,
-    const std::index_sequence<Indices...>,
+    const std::index_sequence<Indices...>&,
     Arguments&&... arguments) {
-  C10_UNUSED const int _[]{
+  VK_UNUSED const int _[]{
       0,
       (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
@@ -280,6 +353,18 @@ inline void record_copy(
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset) = delete;
+
+template <>
+inline void record_copy<VulkanBuffer, VulkanBuffer>(
+    CommandBuffer& cmd,
+    const VulkanBuffer& source,
+    const VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  cmd.copy_buffer_to_buffer(
+      source, destination, copy_range, src_offset, dst_offset);
+}
 
 template <>
 inline void record_copy<VulkanImage, VulkanImage>(
@@ -317,15 +402,34 @@ inline void record_copy<VulkanBuffer, VulkanImage>(
       source, destination, copy_range, src_offset, dst_offset);
 }
 
+/*
+  Records a GPU data copy into the current command buffer. If the number of
+  submit_*_job calls exceeds the configured frequency, or if a fence is
+  provided, then the command buffer is submitted to the GPU for execution.
+  Returns a bool indicating whether or not the function call resulted in a GPU
+  queue submission.
+ */
 template <class S, class D>
-inline void Context::submit_copy(
-    const PipelineBarrier& pipeline_barrier,
+inline bool Context::submit_copy(
+    PipelineBarrier& pipeline_barrier,
     const S& source,
     const D& destination,
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
+  // If any of the provided arguments does not have memory associated with it,
+  // then exit early as there is no work to be done. However, if a fence has
+  // been passed the command buffer is not empty, then the current command
+  // buffer must still be submitted so that the fence can be signaled.
+  if (!source || !destination) {
+    if (fence_handle != VK_NULL_HANDLE && submit_count_ > 0) {
+      submit_cmd_to_gpu(fence_handle);
+      return true;
+    }
+    return false;
+  }
+
   // Serialize recording to the shared command buffer. Do not initialize with a
   // mutex just yet, since in some cases it will be externally managed.
   std::unique_lock<std::mutex> cmd_lock;
@@ -337,9 +441,12 @@ inline void Context::submit_copy(
   set_cmd();
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  std::string label = "cmd_copy";
-  uint32_t log_idx = querypool_.shader_profile_begin(
-      cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
+  uint32_t log_idx = UINT32_MAX;
+  if (enable_op_profiling_) {
+    std::string label = "cmd_copy";
+    log_idx = querypool_.shader_profile_begin(
+        cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   cmd_.insert_barrier(pipeline_barrier);
@@ -347,24 +454,47 @@ inline void Context::submit_copy(
   record_copy(cmd_, source, destination, copy_range, src_offset, dst_offset);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
+  if (enable_op_profiling_) {
+    querypool_.shader_profile_end(cmd_, log_idx);
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
+    return true;
   }
+  return false;
 }
 
+/*
+  Records a compute shader dispatch into the current command buffer. If the
+  number of submit_*_job calls exceeds the configured frequency, or if a fence
+  is provided, then the command buffer is submitted to the GPU for execution.
+  Returns a bool indicating whether or not the function call resulted in a GPU
+  queue submission.
+ */
 template <typename... Arguments>
-inline void Context::submit_compute_job(
-    const ShaderSource& shader_descriptor,
-    const PipelineBarrier& pipeline_barrier,
+inline bool Context::submit_compute_job(
+    const ShaderInfo& shader,
+    PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
-    const VkFence fence_handle,
+    VkFence fence_handle,
     Arguments&&... arguments) {
+  // If any of the provided arguments does not have memory associated with it,
+  // then exit early as there is no work to be done. However, if a fence has
+  // been passed the command buffer is not empty, then the current command
+  // buffer must still be submitted so that the fence can be signaled.
+  if (detail::any_arg_is_empty(arguments...)) {
+    if (fence_handle != VK_NULL_HANDLE && submit_count_ > 0) {
+      submit_cmd_to_gpu(fence_handle);
+      return true;
+    }
+    return false;
+  }
+
   // Serialize recording to the shared command buffer. Do not initialize with a
   // mutex just yet, since in some cases it will be externally managed.
   std::unique_lock<std::mutex> cmd_lock;
@@ -382,16 +512,19 @@ inline void Context::submit_compute_job(
   set_cmd();
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  uint32_t log_idx = querypool_.shader_profile_begin(
-      cmd_,
-      shader_descriptor.kernel_name,
-      create_extent3d(global_work_group),
-      create_extent3d(local_work_group_size));
+  uint32_t log_idx = UINT32_MAX;
+  if (enable_op_profiling_) {
+    log_idx = querypool_.shader_profile_begin(
+        cmd_,
+        shader.kernel_name,
+        create_extent3d(global_work_group),
+        create_extent3d(local_work_group_size));
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set =
-      submit_compute_prologue(cmd_, shader_descriptor, local_work_group_size);
+      get_descriptor_set(shader, local_work_group_size);
 
   detail::bind(
       descriptor_set,
@@ -399,18 +532,23 @@ inline void Context::submit_compute_job(
       std::forward<Arguments>(arguments)...);
 
   // Factor out template parameter independent code to minimize code bloat.
-  submit_compute_epilogue(
-      cmd_, descriptor_set, pipeline_barrier, global_work_group);
+  register_shader_dispatch(
+      descriptor_set, pipeline_barrier, shader, global_work_group);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
+  if (enable_op_profiling_) {
+    querypool_.shader_profile_end(cmd_, log_idx);
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
+    return true;
   }
+
+  return false;
 }
 
 } // namespace api

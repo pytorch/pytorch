@@ -1,17 +1,15 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
+#include <utility>
 
 template <class T>
-class THPPointer {
+class TORCH_PYTHON_API THPPointer {
  public:
   THPPointer() : ptr(nullptr){};
   explicit THPPointer(T* ptr) noexcept : ptr(ptr){};
-  THPPointer(THPPointer&& p) noexcept {
-    free();
-    ptr = p.ptr;
-    p.ptr = nullptr;
-  };
+  THPPointer(THPPointer&& p) noexcept : ptr(std::exchange(p.ptr, nullptr)) {}
 
   ~THPPointer() {
     free();

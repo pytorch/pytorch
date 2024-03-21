@@ -6,6 +6,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_spdiags_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
@@ -13,8 +14,7 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(spdiags_kernel_stub);
 
@@ -92,5 +92,4 @@ Tensor spdiags(
   return result_coo;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

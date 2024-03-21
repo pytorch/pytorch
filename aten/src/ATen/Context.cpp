@@ -2,27 +2,20 @@
 
 #include <ATen/Context.h>
 
-#include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/env.h>
 
 #include <algorithm>
 #include <cctype>
-#include <mutex>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <thread>
+#include <stdexcept>
 
-#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
-
-#ifdef USE_MPS
-#include <ATen/mps/MPSDevice.h>
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <cpuinfo.h>
 #endif
 
 namespace at {
@@ -76,6 +69,14 @@ void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms_warn_only = warn_only;
 }
 
+bool Context::deterministicFillUninitializedMemory() const {
+  return _deterministic_fill_uninitialized_memory;
+}
+
+void Context::setDeterministicFillUninitializedMemory(bool b) {
+  _deterministic_fill_uninitialized_memory = b;
+}
+
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
@@ -96,6 +97,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::userEnabledNNPACK() const {
+  return enabled_nnpack;
+}
+
+void Context::setUserEnabledNNPACK(bool e) {
+  enabled_nnpack = e;
+}
+
 bool Context::allowTF32CuDNN() const {
   return allow_tf32_cudnn;
 }
@@ -103,6 +112,39 @@ bool Context::allowTF32CuDNN() const {
 void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
+
+bool Context::userEnabledFlashSDP() const {
+  return enabled_flashSDP;
+}
+
+void Context::setSDPUseFlash(bool e) {
+  enabled_flashSDP = e;
+}
+
+bool Context::userEnabledMemEfficientSDP() const {
+  return enabled_mem_efficientSDP;
+}
+
+void Context::setSDPUseMemEfficient(bool e) {
+  enabled_mem_efficientSDP = e;
+}
+
+bool Context::userEnabledMathSDP() const {
+  return enabled_mathSDP;
+}
+
+void Context::setSDPUseMath(bool e) {
+  enabled_mathSDP = e;
+}
+
+bool Context::userEnabledCuDNNSDP() const {
+  return enabled_cudnnSDP;
+}
+
+void Context::setSDPUseCuDNN(bool e) {
+  enabled_cudnnSDP = e;
+}
+
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
@@ -136,7 +178,7 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     "case, you must set an environment variable before running your PyTorch application: ",
     cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
+    "https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility"
   );
 
   if (deterministicAlgorithmsWarnOnly()) {
@@ -163,8 +205,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
-  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
@@ -230,6 +271,15 @@ void Context::setAllowFP16ReductionCuBLAS(bool b) {
   allow_fp16_reduction_cublas = b;
 }
 
+bool Context::allowBF16ReductionCuBLAS() const {
+  return allow_bf16_reduction_cublas;
+}
+
+void Context::setAllowBF16ReductionCuBLAS(bool b) {
+  allow_bf16_reduction_cublas = b;
+}
+
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -241,14 +291,6 @@ bool Context::hasMKL() {
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
-#else
-  return false;
-#endif
-}
-
-bool Context::hasMPS() {
-#if USE_MPS
-  return at::mps::is_available();
 #else
   return false;
 #endif
@@ -271,8 +313,29 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  // If wasn't explicitly set - take the last one available
-  return quantized_engine.value_or(supportedQEngines().back());
+  static auto _quantized_engine = []() {
+    at::QEngine qengine = at::kNoQEngine;
+#if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
+    qengine = at::kQNNPACK;
+#endif
+
+#if AT_MKLDNN_ENABLED()
+    qengine = at::kONEDNN;
+#endif
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      /* X86 is enabled if and only if fbgemm is available.
+       * It combines goodness of fbgemm and onednn by dispatching.
+       * If onednn not available, always dispatch to fbgemm.
+       * Make it default qengine for X86 CPU platforms.
+      */
+      qengine = at::kX86;
+    }
+#endif
+    return qengine;
+  }();
+  return quantized_engine.value_or(_quantized_engine);
 }
 
 void Context::setQEngine(at::QEngine e) {
@@ -308,9 +371,12 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
+      engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif
+
     return engines;
   }();
   return supported_qengines;
@@ -322,6 +388,14 @@ bool Context::isXNNPACKAvailable() {
 #else
   return false;
 #endif
+}
+
+void Context::setCheckSparseTensorInvariants(bool e) {
+  enable_sparse_tensor_invariant_checks = e;
+}
+
+bool Context::checkSparseTensorInvariants() const {
+  return enable_sparse_tensor_invariant_checks;
 }
 
 bool Context::releaseWeightsWhenPrepacking() const {
@@ -363,25 +437,23 @@ bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
 
-#ifdef USE_ROCM
 // Ops can query this flag to know they are in the backward pass.
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool ROCmBackwardPassGuard::is_backward_pass_;
+thread_local bool rocm_is_backward_pass;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
-  is_backward_pass_ = true;
+  rocm_is_backward_pass = true;
 }
 
 ROCmBackwardPassGuard::~ROCmBackwardPassGuard() {
-  is_backward_pass_ = false;
+  rocm_is_backward_pass = false;
 }
 
 bool ROCmBackwardPassGuard::is_backward_pass() {
-  return is_backward_pass_;
+  return rocm_is_backward_pass;
 }
-#endif
 
 bool Context::areVmapFallbackWarningsEnabled() const {
   return display_vmap_fallback_warnings_;
@@ -407,5 +479,22 @@ void Context::unsetDefaultMobileCPUAllocator() {
   // Setting the priority high to make sure no other allocator gets used instead of this.
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
+}
+
+bool Context::allowFP16ReductionCPU() const {
+  return allow_fp16_reduction_cpu;
+}
+
+void Context::setAllowFP16ReductionCPU(bool b) {
+  if ( b && !allow_fp16_reduction_cpu) {
+    // Check that CPU supports fp16 reductions
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+    if (!cpuinfo_initialize() || !cpuinfo_has_arm_fp16_arith())
+#else
+    if (true)
+#endif
+      throw std::runtime_error("Float16 arithmetic is not supported by the CPU!");
+  }
+  allow_fp16_reduction_cpu = b;
 }
 } // namespace at

@@ -48,11 +48,16 @@
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 
-#include <ATen/ATen.h>
 #include <ATen/TracerMode.h>
+#include <ATen/core/Tensor.h>
 
-namespace at {
-namespace cpp_custom_type_hack {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
+namespace at::cpp_custom_type_hack {
 
 template <typename T>
 [[deprecated(
@@ -102,5 +107,4 @@ create(std::unique_ptr<T> ptr, TensorOptions options) {
   return retval;
 }
 
-} // namespace cpp_custom_type_hack
-} // namespace at
+} // namespace at::cpp_custom_type_hack

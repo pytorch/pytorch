@@ -20,7 +20,7 @@ namespace nn {
 
 /// TransformerEncoder module.
 /// See
-/// https://pytorch.org/docs/master/generated/torch.nn.TransformerEncoder.html
+/// https://pytorch.org/docs/main/generated/torch.nn.TransformerEncoder.html
 /// to learn abouut the exact behavior of this encoder layer module.
 ///
 /// See the documentation for `torch::nn::TransformerEncoder` class to learn
@@ -33,7 +33,6 @@ namespace nn {
 /// encoder(TransformerEncoderOptions(encoderLayer,
 /// 6).norm(LayerNorm(LayerNormOptions({2}))));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerEncoderImpl
     : public Cloneable<TransformerEncoderImpl> {
  public:
@@ -80,7 +79,7 @@ TORCH_MODULE(TransformerEncoder);
 
 /// TransformerDecoder is a stack of N decoder layers.
 /// See
-/// https://pytorch.org/docs/master/generated/torch.nn.TransformerDecoder.html
+/// https://pytorch.org/docs/main/generated/torch.nn.TransformerDecoder.html
 /// to learn abouut the exact behavior of this decoder module
 ///
 /// See the documentation for `torch::nn::TransformerDecoderOptions` class to
@@ -95,7 +94,6 @@ TORCH_MODULE(TransformerEncoder);
 /// torch::rand({10, 32, 512}); const auto tgt = torch::rand({20, 32, 512});
 /// auto out = transformer_decoder(tgt, memory);
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerDecoderImpl
     : public Cloneable<TransformerDecoderImpl> {
  public:

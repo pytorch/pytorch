@@ -3,6 +3,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/view.h>
 #include <ATen/ops/view_copy.h>
 #endif
 
@@ -15,11 +16,17 @@
 #include <functional>
 #include <sstream>
 #include <tuple>
+#include <utility>
 
 namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
+TORCH_API std::vector<SymInt> infer_size_symint(
+    SymIntArrayRef a,
+    SymIntArrayRef b);
 TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
+TORCH_API SymDimVector
+infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b);
 
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -56,7 +63,7 @@ inline bool are_expandable(IntArrayRef shape1, IntArrayRef shape2) {
   size_t ndim2 = shape2.size();
   size_t ndim = ndim1 < ndim2 ? ndim1 : ndim2;
 
-  for (int64_t i = ndim - 1; i >= 0; --i) {
+  for (int64_t i = static_cast<int64_t>(ndim) - 1; i >= 0; --i) {
     if (shape1[--ndim1] == shape2[--ndim2] || shape1[ndim1] == 1 ||
         shape2[ndim2] == 1) {
       continue;
@@ -93,10 +100,11 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  if (tensor.sizes().equals(to_expand.sizes())) {
+  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
     return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
-  return c10::MaybeOwned<Tensor>::owned(to_expand.expand(tensor.sizes()));
+  return c10::MaybeOwned<Tensor>::owned(
+      to_expand.expand_symint(tensor.sym_sizes()));
 }
 
 inline c10::MaybeOwned<Tensor> expand_inplace(
@@ -179,17 +187,18 @@ expand_inplace(
 // See NOTE [ ExpandUtils Borrowing ] above for `MaybeOwned` explanation.
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
 expand_outplace(const Tensor& to_expand1, const Tensor& to_expand2) {
-  if (to_expand1.sizes().equals(to_expand2.sizes())) {
+  auto s1 = to_expand1.sym_sizes();
+  auto s2 = to_expand2.sym_sizes();
+  if (s1.equals(s2)) {
     return std::make_tuple(
         c10::MaybeOwned<Tensor>::borrowed(to_expand1),
         c10::MaybeOwned<Tensor>::borrowed(to_expand2));
   }
 
-  auto expanded_size =
-      infer_size_dimvector(to_expand1.sizes(), to_expand2.sizes());
+  auto expanded_size = infer_size_symdimvector(s1, s2);
   return std::make_tuple(
-      c10::MaybeOwned<Tensor>::owned(to_expand1.expand(expanded_size)),
-      c10::MaybeOwned<Tensor>::owned(to_expand2.expand(expanded_size)));
+      c10::MaybeOwned<Tensor>::owned(to_expand1.expand_symint(expanded_size)),
+      c10::MaybeOwned<Tensor>::owned(to_expand2.expand_symint(expanded_size)));
 }
 
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
@@ -437,15 +446,16 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-static inline Tensor sum_to(
+template <typename T>
+inline Tensor _sum_to(
     Tensor tensor,
-    const c10::SymIntArrayRef shape,
+    const c10::ArrayRef<T> shape,
     bool always_return_non_view = false) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
 
-  auto sizes = tensor.sym_sizes();
+  auto sizes = at::symint::sizes<T>(tensor);
   c10::SmallVector<int64_t, 8> reduce_dims;
   const int64_t leading_dims = sizes.size() - shape.size();
   for (const auto i : c10::irange(leading_dims)) {
@@ -465,22 +475,27 @@ static inline Tensor sum_to(
     // This is only actually used by the functionalization pass.
     // We want to be able to guarantee that this function doesn't return a view
     // of the input.
-    return leading_dims > 0 ? at::view_copy_symint(tensor, shape)
+    return leading_dims > 0 ? at::symint::view_copy<T>(tensor, shape)
                             : tensor.clone();
   } else {
-    return leading_dims > 0 ? tensor.view_symint(shape) : tensor;
+    return leading_dims > 0 ? at::symint::view<T>(tensor, shape) : tensor;
   }
+}
+
+inline Tensor sum_to(
+    Tensor tensor,
+    const c10::SymIntArrayRef shape,
+    bool always_return_non_view = false) {
+  return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(
+inline Tensor sum_to(
     Tensor tensor,
     const IntArrayRef shape,
     bool always_return_non_view = false) {
-  auto sym_size = c10::SymIntArrayRef(
-      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
-  return sum_to(tensor, sym_size, always_return_non_view);
+  return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
 static inline bool is_expandable_to(
@@ -492,8 +507,8 @@ static inline bool is_expandable_to(
     return false;
   }
   for (const auto i : c10::irange(ndim)) {
-    auto size = shape[ndim - i - 1];
-    auto target = desired[target_dim - i - 1];
+    const auto& size = shape[ndim - i - 1];
+    const auto& target = desired[target_dim - i - 1];
     if (size != target && size != 1) {
       return false;
     }

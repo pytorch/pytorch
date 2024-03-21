@@ -4,6 +4,18 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quant_type import QuantType
 from torch.jit._recursive import wrap_cpp_module
 
+__all__ = [
+    "script_qconfig",
+    "script_qconfig_dict",
+    "fuse_conv_bn_jit",
+    "prepare_jit",
+    "prepare_dynamic_jit",
+    "convert_jit",
+    "convert_dynamic_jit",
+    "quantize_jit",
+    "quantize_dynamic_jit",
+]
+
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -242,7 +254,7 @@ def quantize_dynamic_jit(model, qconfig_dict, inplace=False, debug=False):
     ```python
     import torch
     from torch.ao.quantization import per_channel_dynamic_qconfig
-    from torch.ao.quantization import quantize_dynmiac_jit
+    from torch.ao.quantization import quantize_dynamic_jit
 
     ts_model = torch.jit.script(float_model.eval())  # or torch.jit.trace(float_model, input)
     qconfig = get_default_qconfig('fbgemm')

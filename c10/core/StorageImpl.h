@@ -1,10 +1,18 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/SymInt.h>
-
+#include <c10/core/impl/COW.h>
+#include <c10/core/impl/COWDeleter.h>
+#include <c10/core/impl/PyObjectSlot.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/intrusive_ptr.h>
+#include <cstddef>
+#include <utility>
 
 namespace c10 {
 
@@ -43,7 +51,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
         size_bytes_(std::move(size_bytes)),
-        size_bytes_is_symbolic_(size_bytes_.is_symbolic()),
+        size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
@@ -55,39 +63,29 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   StorageImpl(
       use_byte_size_t /*use_byte_size*/,
-      SymInt size_bytes,
+      const SymInt& size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            size_bytes.is_symbolic()
+            size_bytes.is_heap_allocated()
                 ? allocator->allocate(0)
                 : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() override = default;
 
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
-    size_bytes_is_symbolic_ = false;
-  }
-
-  template <typename T>
-  inline T* data() const {
-    return unsafe_data<T>();
-  }
-
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(this->data_ptr_.get());
+    size_bytes_is_heap_allocated_ = false;
   }
 
   // Destructor doesn't call release_resources because it's
@@ -97,7 +95,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   size_t nbytes() const {
-    TORCH_CHECK(!size_bytes_is_symbolic_);
+    // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
+    TORCH_CHECK(!size_bytes_is_heap_allocated_);
     return size_bytes_.as_int_unchecked();
   }
 
@@ -107,44 +106,46 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
-    size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
+    size_bytes_is_heap_allocated_ = false;
   }
 
   void set_nbytes(c10::SymInt size_bytes) {
-    size_bytes_ = size_bytes;
+    size_bytes_ = std::move(size_bytes);
   }
 
   bool resizable() const {
     return resizable_;
-  };
+  }
 
-  at::DataPtr& data_ptr() {
+  at::DataPtr& mutable_data_ptr() {
+    maybe_materialize_cow();
     return data_ptr_;
-  };
+  }
 
   const at::DataPtr& data_ptr() const {
     return data_ptr_;
-  };
+  }
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    at::DataPtr old_data_ptr(std::move(data_ptr_));
-    data_ptr_ = std::move(data_ptr);
-    return old_data_ptr;
-  };
+    // We need to materialize the old COW DataPtr because it is
+    // being returned as mutable.
+    maybe_materialize_cow();
+    return set_data_ptr_no_materialize_cow(std::move(data_ptr));
+  }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
   }
 
-  // TODO: Return const ptr eventually if possible
-  void* data() {
+  const void* data() const {
     return data_ptr_.get();
   }
 
-  void* data() const {
-    return data_ptr_.get();
+  void* mutable_data() {
+    maybe_materialize_cow();
+    return data_ptr_.mutable_get();
   }
 
   at::DeviceType device_type() const {
@@ -157,7 +158,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   const at::Allocator* allocator() const {
     return allocator_;
-  };
+  }
 
   // You generally shouldn't use this method, but it is occasionally
   // useful if you want to override how a tensor will be reallocated,
@@ -197,8 +198,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
-    size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
+    size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
     resizable_ = false;
   }
@@ -213,14 +214,63 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+ protected:
+  // materialize_cow_storage needs to call set_data_ptr_no_materlize_cow
+  friend void c10::impl::cow::materialize_cow_storage(StorageImpl& storage);
+
+  // Returns the previous data_ptr. If the old data_ptr was COW,
+  // this avoids materializing it
+  at::DataPtr set_data_ptr_no_materialize_cow(at::DataPtr&& data_ptr) {
+    at::DataPtr old_data_ptr(std::move(data_ptr_));
+    data_ptr_ = std::move(data_ptr);
+    return old_data_ptr;
+  }
+
  private:
+  // Triggers a copy if this is a copy-on-write tensor.
+  void maybe_materialize_cow() {
+    if (data_ptr_.get_deleter() == impl::cow::cow_deleter) {
+      impl::cow::materialize_cow_storage(*this);
+    }
+  }
+
   DataPtr data_ptr_;
   SymInt size_bytes_;
-  bool size_bytes_is_symbolic_;
+  bool size_bytes_is_heap_allocated_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  impl::PyObjectSlot pyobj_slot_;
 };
+
+// Declare StorageImpl create function pointer types.
+using StorageImplCreateHelper = intrusive_ptr<StorageImpl> (*)(
+    StorageImpl::use_byte_size_t,
+    SymInt size_bytes,
+    DataPtr data_ptr,
+    Allocator* allocator,
+    bool resizable);
+
+C10_API void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr);
+
+C10_API StorageImplCreateHelper GetStorageImplCreate(DeviceType t);
+
+C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
+    c10::StorageImpl::use_byte_size_t use_byte_size,
+    c10::SymInt size_bytes,
+    c10::DataPtr data_ptr,
+    c10::Allocator* allocator,
+    bool resizable,
+    c10::optional<at::Device> device_opt);
+
 } // namespace c10

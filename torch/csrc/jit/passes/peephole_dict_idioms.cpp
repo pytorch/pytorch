@@ -235,7 +235,7 @@ class PeepholeOptimizeDictIdiomsImpl {
       }
 
       // only optimizing dict ops
-      if (node->inputs().size() == 0 || !isDict(node->input(0))) {
+      if (node->inputs().empty() || !isDict(node->input(0))) {
         continue;
       }
 

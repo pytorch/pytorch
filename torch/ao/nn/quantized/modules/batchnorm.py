@@ -1,5 +1,10 @@
 import torch
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
+
+__all__ = [
+    "BatchNorm2d",
+    "BatchNorm3d"
+]
 
 class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:

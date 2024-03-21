@@ -25,7 +25,7 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
         "Int8ChannelShuffleOp only supports NHWC order");
   }
 
-  ~Int8ChannelShuffleOp() {
+  ~Int8ChannelShuffleOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

@@ -122,12 +122,8 @@ def gen_fallback_code(
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
-    or_has_generator = ""
-    if schema.generator_arg:
-        # generators are always optional and there is never more than one, at least currently
-        or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
-        if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
+        if (force_eager_fallback({aten_symbol(schema)})) {{
             return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
@@ -172,6 +168,7 @@ class GenLazyIR(ABC):
     backend_index: BackendIndex
     backend_name: str
     node_base: str
+    use_lazy_shape: bool
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -203,9 +200,7 @@ class GenLazyIR(ABC):
         # as long as all of its arguments can be generated from information available from the schema
         base_ctor_value_args_list = []
         for arg in value_args:
-            if isinstance(arg.lazy_type, BaseCType) or isinstance(
-                arg.lazy_type, VectorCType
-            ):
+            if isinstance(arg.lazy_type, (BaseCType, VectorCType)):
                 base_ctor_value_args_list.append(f"{arg.name}")
             elif isinstance(arg.lazy_type, OptionalCType):
                 base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
@@ -217,7 +212,7 @@ class GenLazyIR(ABC):
 
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
-        # Shape constuction.
+        # Shape construction.
         # Conditionally build shape depending on specified shape property
         if schema.properties.ShapePrecompute:
             shape_ctor_arg = "std::move(shapes),"
@@ -252,7 +247,7 @@ class GenLazyIR(ABC):
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
         reuse_ctor_args = ", ".join(ctor_args)
-        if schema.properties.ShapePrecompute:
+        if self.use_lazy_shape and schema.properties.ShapePrecompute:
             ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
         node_ctor_args = ", ".join(ctor_args)
 
@@ -291,9 +286,12 @@ class GenLazyIR(ABC):
         members_to_string = []
         for arg in scalar_args:
             if isinstance(arg.lazy_type, OptionalCType):
+                value = f"{arg.name}.value()"
+                if arg.is_generator:
+                    value = '"torch.Generator()"'
                 members_to_string.append(
                     f"""if ({arg.name}.has_value()) {{
-      ss << ", {arg.name}=" << {arg.name}.value();
+      ss << ", {arg.name}=" << {value};
     }} else {{
       ss << ", {arg.name}=null";
     }}"""
@@ -540,7 +538,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 dispatch_ns = "meta"
             aten_name = schema.aten_name
             # TODO: this is trolling
-            if func.func.has_symint():
+            if func.func.has_symint() and metadata.supports_symint():
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}

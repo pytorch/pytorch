@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "caffe2/core/logging.h"
-#include "caffe2/core/static_tracepoint.h"
+#include "c10/util/static_tracepoint.h"
 
 namespace caffe2 {
 
@@ -343,7 +343,7 @@ _ScopeGuard<T> ScopeGuard(T f) {
 #define CAFFE_EVENT(stats, field, ...)                              \
   {                                                                 \
     auto __caffe_event_value_ = stats.field.increment(__VA_ARGS__); \
-    CAFFE_SDT(                                                      \
+    TORCH_SDT(                                                      \
         field,                                                      \
         stats.field.groupName.c_str(),                              \
         __caffe_event_value_,                                       \

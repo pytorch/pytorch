@@ -1,7 +1,7 @@
 # Owner(s): ["module: dispatch"]
 
 import torch._C as C
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
@@ -101,28 +101,26 @@ class TestDispatch(TestCase):
 
         # double underscore to make it less likely we conflict with something
         # else
-        test_namespace = "__test{}__".format(self.namespace_index)
+        test_namespace = f"__test{self.namespace_index}__"
 
         def check_invariants(actual_provenance):
             C._dispatch_check_invariants(name)
             # Normalize the test namespace so that expected outputs are stable
             actual_state = C._dispatch_dump(
-                "{}::{}".format(test_namespace, name)).replace(test_namespace, "test")
+                f"{test_namespace}::{name}").replace(test_namespace, "test")
             actual_table = C._dispatch_dump_table(
-                "{}::{}".format(test_namespace, name)).replace(test_namespace, "test")
+                f"{test_namespace}::{name}").replace(test_namespace, "test")
             expected_state, expected_table, expected_provenance = results.setdefault(
                 frozenset(active_ops),
                 Result(actual_state, actual_table, actual_provenance)
             )
             self.assertMultiLineEqual(
                 expected_state, actual_state,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                f"expected from {expected_provenance}; actual from {actual_provenance}"
             )
             self.assertMultiLineEqual(
                 expected_table, actual_table,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                f"expected from {expected_provenance}; actual from {actual_provenance}"
             )
 
         results.setdefault(frozenset(), Result("", "", "hardcoded initial state"))
@@ -138,7 +136,7 @@ class TestDispatch(TestCase):
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
-                check_invariants("running ctors {}".format(ctor_order[:i + 1]))
+                check_invariants(f"running ctors {ctor_order[:i + 1]}")
             except RuntimeError as e:
                 if not expect_raises:
                     raise
@@ -146,7 +144,7 @@ class TestDispatch(TestCase):
                 actual = actual.split("\nException raised from ")[0]
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
-                    Result(actual, "", "error after running ctors {}".format(ctor_order[:i + 1]))
+                    Result(actual, "", f"error after running ctors {ctor_order[:i + 1]}")
                 )
                 self.assertMultiLineEqual(expected, actual, expected_provenance)
                 set_to_report = frozenset(active_ops)
@@ -154,10 +152,10 @@ class TestDispatch(TestCase):
                 # NB: this finally test asserts that if a registrations fails,
                 # the dispatcher is left in the same state *that it was before*!
                 check_invariants(
-                    "running ctors {} and then failing to run ctor {} "
+                    f"running ctors {ctor_order[:i]} and then failing to run ctor {op_ix} "
                     "(did this failure leave the dispatcher in a wedged state? "
                     "it shouldn't!)"
-                    .format(ctor_order[:i], op_ix))
+                )
                 break
         last_ctor = i
         if expect_raises and len(active_ops) == len(ops):
@@ -167,7 +165,7 @@ class TestDispatch(TestCase):
             self.assertTrue(
                 False,
                 "expected exception to be raised, but nothing was raised "
-                "(after running ctors {})".format(ctor_order))
+                f"(after running ctors {ctor_order})")
         # In the order specified by dtor_order, run deregistrations
         for i, op_ix in enumerate(dtor_order):
             # Trigger a destruction
@@ -179,8 +177,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                "running ctors {}, then running dtors {}"
-                .format(ctor_order[:last_ctor + 1], dtor_order[:i + 1])
+                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
             )
         return results[set_to_report][0]
 
@@ -391,7 +388,7 @@ CPU: impl_t_t [kernel]
 CUDA: default_def_name_t_t [math kernel]
 XLA: default_def_name_t_t [math kernel]
 AutogradOther: default_def_name_t_t [math kernel]
-AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
+AutogradCPU: registered in pytorch framework [backend fallback]
 AutogradCUDA: default_def_name_t_t [math kernel]
 AutogradXLA: default_def_name_t_t [math kernel]
 ''')
@@ -456,7 +453,7 @@ CPU: fn_cpu [kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
 AutogradOther: fn_math [math kernel]
-AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
+AutogradCPU: registered in pytorch framework [backend fallback]
 AutogradCUDA: fn_math [math kernel]
 AutogradXLA: fn_math [math kernel]
 ''')
@@ -587,10 +584,10 @@ Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
-AutogradOther: fallthrough registered in pytorch framework [backend fallback]
-AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
-AutogradCUDA: fallthrough registered in pytorch framework [backend fallback]
-AutogradXLA: fallthrough registered in pytorch framework [backend fallback]
+AutogradOther: registered in pytorch framework [backend fallback]
+AutogradCPU: registered in pytorch framework [backend fallback]
+AutogradCUDA: registered in pytorch framework [backend fallback]
+AutogradXLA: registered in pytorch framework [backend fallback]
 ''')
 
     def test_computed_table_with_cpu_autograd_defaultbackend(self):
@@ -763,7 +760,6 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
     # function but not a def() for it. This is usually a bug, e.g. someone
     # misspelled an operator name, or someone registered an impl for an op that
     # no longer exists
-    @skipIfTorchDynamo("Installing functorch reveals a dangling impl - aten::postive_")
     def test_find_dangling_impls(self):
         dangling_impls = C._dispatch_find_dangling_impls()
         self.assertEqual(
@@ -772,7 +768,6 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
             msg=f"Expect zero dangling impls, but found: {dangling_impls}"
         )
 
-    @skipIfTorchDynamo("Installing functorch reveals a dangling impl - aten::positive_")
     def test_find_dangling_impls_ext(self):
         extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
         module = torch.utils.cpp_extension.load(
@@ -787,11 +782,11 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         impls = C._dispatch_find_dangling_impls()
         self.assertEqual(1, len(impls))
         self.assertEqual(
-            '''\
+            f'''\
 name: __test::foo
 schema: (none)
-CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
-'''.format(extension_path),
+CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
+''',
             impls[0])
 
     def test_dispatch_print_registrations_for_dispatch_key_invalid(self):
@@ -816,9 +811,9 @@ XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
-AutogradCPU     fallthrough [backend fallback]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
+AutogradCPU     [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
 '''
         )
 
@@ -838,8 +833,8 @@ Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fn_AutogradCPU [kernel]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
 '''
         )
         self.assertExpectedInline(
@@ -871,10 +866,10 @@ CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeExplicitAutograd [default backend kernel]
-AutogradOther   fallthrough [backend fallback]
+AutogradOther   [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
 '''
         )
 
@@ -908,7 +903,7 @@ XLA             fn_CompositeImplicitAutograd [math kernel]
 Lazy            fn_CompositeImplicitAutograd [math kernel]
 FPGA            fn_FPGA [kernel]
 AutogradOther   ambiguous_autogradother [ambiguous autogradother]
-AutogradCPU     fallthrough [backend fallback]
+AutogradCPU     [backend fallback]
 AutogradXLA     fn_CompositeImplicitAutograd [math kernel]
 AutogradLazy    fn_CompositeImplicitAutograd [math kernel]
 '''

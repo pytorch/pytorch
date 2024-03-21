@@ -24,7 +24,7 @@ from .ns_types import (
 from torch.ao.ns.fx.mappings import (
     get_node_type_to_io_type_map,
 )
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from typing import Dict, Tuple, Callable, List, Any, Union, Optional, Set
 
@@ -38,7 +38,7 @@ def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
         if node.op == 'call_module':
             assert isinstance(node.target, str)
             module = getattr_from_fqn(gm, node.target)
-            if is_activation_post_process(module):
+            if _is_activation_post_process(module):
                 node_to_use_for_fqn = get_normalized_nth_input(node, gm, 0)
         fqn = gm._node_name_to_scope[node_to_use_for_fqn.name][0]  # type: ignore[index]
     return fqn  # type: ignore[return-value]
@@ -424,7 +424,7 @@ def _can_insert_copy_of_subgraph_a(
                     return False
             cur_idx += 1
 
-        for kwarg_name, kwarg_val in norm_kwargs.items():
+        for kwarg_val in norm_kwargs.values():
             # stitch the inputs from base graph
             if cur_idx == 0:
                 pass
@@ -759,7 +759,7 @@ def create_a_shadows_b(
                 continue
 
             fqn_base_a = _maybe_get_fqn(subgraph_a.base_op_node, gm_a)
-            fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)
+            fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)  # type: ignore[possibly-undefined]
 
             if node_b_is_start_node:
 
@@ -817,7 +817,7 @@ def create_a_shadows_b(
                 # cast dtype from the dtype of node_c's input to the dtype of
                 # node_a's input (dequant, etc)
                 # prev_node_c = node_c.args[0]
-                prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
+                prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)  # type: ignore[possibly-undefined]
                 if should_log_inputs:
                     # skip the input logger when inserting a dtype cast
                     if isinstance(prev_node_c, Node):
@@ -901,7 +901,7 @@ def create_a_shadows_b(
                     # input_logger = env_c[dtype_cast_node.name]
                     # Find the first node in the subgraph
                     cur_node = node_a_shadows_c
-                    while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:
+                    while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:  # type: ignore[possibly-undefined]
                         cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
                     if isinstance(input_logger, Node):
                         input_logger_mod = getattr(gm_b, input_logger.name)

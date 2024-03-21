@@ -1,15 +1,11 @@
 #pragma once
-#include <cstring>
-#include <map>
-#include <memory>
 #include <ostream>
 #include <sstream>
 #include <unordered_map>
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
-namespace at {
-namespace vitals {
+namespace at::vitals {
 
 TORCH_API bool torchVitalEnabled();
 
@@ -41,6 +37,8 @@ struct TORCH_API TorchVital {
   std::unordered_map<std::string, TorchVitalAttr> attrs;
 
   explicit TorchVital(std::string n) : name(std::move(n)) {}
+  TorchVital(const TorchVital&) = default;
+  TorchVital(TorchVital&&) = default;
   TorchVital() = delete;
 
   TorchVitalAttr& create(const std::string& attr);
@@ -80,8 +78,7 @@ class TORCH_API APIVitals {
 
 extern TORCH_API APIVitals VitalsAPI;
 
-} // namespace vitals
-} // namespace at
+} // namespace at::vitals
 
 #define TORCH_VITAL_DECLARE(name) \
   TORCH_API at::vitals::TorchVital TorchVital_##name;

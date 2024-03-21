@@ -13,8 +13,8 @@ namespace nn {
 
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
-    const TransformerEncoderLayerOptions& options_)
-    : options(options_) {
+    TransformerEncoderLayerOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -71,14 +71,14 @@ Tensor TransformerEncoderLayerImpl::forward(
   Tensor ret = norm1(src + dropout1(src2));
 
   // feedforward
-  if (c10::get_if<enumtype::kGELU>(&options.activation())) {
+  if (std::holds_alternative<enumtype::kGELU>(options.activation())) {
     src2 = linear2(dropout(F::gelu(linear1(ret))));
-  } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.activation())) {
     src2 = linear2(dropout(F::relu(linear1(ret))));
-  } else if (c10::get_if<std::function<Tensor(const Tensor&)>>(
-                 &options.activation())) {
+  } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
+                 options.activation())) {
     auto callable_activation =
-        *c10::get_if<std::function<Tensor(const Tensor&)>>(
+        *std::get_if<std::function<Tensor(const Tensor&)>>(
             &options.activation());
     src2 = linear2(dropout(callable_activation(linear1(ret))));
   } else {
@@ -91,8 +91,8 @@ Tensor TransformerEncoderLayerImpl::forward(
 
 // ========================TransformerDecoderLayerImpl=========================
 TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
-    const TransformerDecoderLayerOptions& options_)
-    : options(options_) {
+    TransformerDecoderLayerOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -198,14 +198,14 @@ Tensor TransformerDecoderLayerImpl::forward(
 }
 
 Tensor TransformerDecoderLayerImpl::activation(const Tensor& input) {
-  if (c10::get_if<enumtype::kGELU>(&options.activation())) {
+  if (std::holds_alternative<enumtype::kGELU>(options.activation())) {
     return F::gelu(input);
-  } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.activation())) {
     return F::relu(input);
-  } else if (c10::get_if<std::function<Tensor(const Tensor&)>>(
-                 &options.activation())) {
+  } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
+                 options.activation())) {
     auto callable_activation =
-        *c10::get_if<std::function<Tensor(const Tensor&)>>(
+        *std::get_if<std::function<Tensor(const Tensor&)>>(
             &options.activation());
     return callable_activation(input);
   } else {
@@ -466,7 +466,7 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   // Treat 0 dim valid here
   TORCH_CHECK(
       sz >= 0,
-      "Input size must be non-negative to genearte a valid square subsequent mask, but got ",
+      "Input size must be non-negative to generate a valid square subsequent mask, but got ",
       sz);
 
   // check IEEE754 support here since -inf is not guaranteed to be valid on non
@@ -479,7 +479,7 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   // platform
   else {
     TORCH_WARN_ONCE(
-        "IEEE754 is not supporetd on this platform, generate_square_subsequent_mask will fill "
+        "IEEE754 is not supported on this platform, generate_square_subsequent_mask will fill "
         "the mask with smallest float number on this platform instead of -inf");
     return torch::triu(
         torch::full({sz, sz}, std::numeric_limits<float>::lowest()), 1);

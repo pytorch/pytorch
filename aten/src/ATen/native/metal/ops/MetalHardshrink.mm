@@ -15,6 +15,8 @@ namespace metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
+// NB: this is currently unused, but I've left it because in principle
+// it's useful
 Tensor& hardshrink_(Tensor& input, const at::Scalar& lambda=0.5) {
   float l = lambda.toFloat();
   MPSImage* X = imageFromTensor(input);
@@ -84,7 +86,6 @@ Tensor hardshrink(const at::Tensor& input, const at::Scalar& lambda=0.5) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), TORCH_FN(hardshrink_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), TORCH_FN(hardshrink));
 };
 

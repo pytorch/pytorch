@@ -20,7 +20,6 @@ from torchgen.api.types import (
     Binding,
     boolT,
     CppSignatureGroup,
-    intArrayRefT,
     layoutT,
     longT,
     NamedCType,
@@ -29,6 +28,7 @@ from torchgen.api.types import (
     SpecialArgName,
     stringT,
     symIntArrayRefT,
+    SymIntT,
     tensorGeometryT,
     tensorOptionsT,
     typeAndSizeT,
@@ -42,14 +42,19 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsViewGroup,
     OperatorName,
+    SchemaKind,
     Type,
     Variant,
 )
-from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
+from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
-_GLOBAL_LOAD_DERIVATIVE_CACHE = {}
+DerivativeRet = Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]
+
+_GLOBAL_LOAD_DERIVATIVE_CACHE: Dict[Tuple[str, str], DerivativeRet] = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
+
 
 # This function directly adds per-dispatchkey derivative entries for {view}_copy variants of each view op.
 # Since every {view} and {view}_copy op shares the same derivative formula,
@@ -66,7 +71,7 @@ def add_view_copy_derivatives(
 
     view_infos = {}
 
-    for _, info_dispatch_dict in infos.items():
+    for info_dispatch_dict in infos.values():
         # maybe_view_group only needs to be calculated once per info_dispatch_dict
         maybe_view_group = None
         view_copy_differentiability_infos = {}
@@ -81,7 +86,8 @@ def add_view_copy_derivatives(
                     view_copy_differentiability_infos[dispatch_key] = view_copy_info
             else:
                 break
-        if len(view_copy_differentiability_infos) > 0:
+        # prefer manually-defined derivatives if any
+        if len(view_copy_differentiability_infos) > 0 and fn_schema not in infos:
             assert fn_schema is not None
             view_infos[fn_schema] = view_copy_differentiability_infos
 
@@ -90,24 +96,22 @@ def add_view_copy_derivatives(
 
 def load_derivatives(
     derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
-) -> Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]:
+) -> DerivativeRet:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
-
-        with open(derivatives_yaml_path, "r") as f:
+        with open(derivatives_yaml_path) as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
         funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
-        native_functions_without_view_copies = concatMap(
-            # We need to pull out the view_inplace ops too, since they might have their own derivative entries.
+        native_functions = concatMap(
             lambda g: [g]
             if isinstance(g, NativeFunction)
-            else list(g.functions(include_copy=False)),
+            else list(g.functions(include_copy=True)),
             native_functions_with_view_groups,
         )
         view_groups = [
@@ -124,7 +128,7 @@ def load_derivatives(
             FunctionSchema, List[NativeFunction]
         ] = defaultdict(list)
         functions_by_schema: Dict[str, NativeFunction] = {}
-        for function in native_functions_without_view_copies:
+        for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
             assert str(function.func) not in functions_by_schema
             functions_by_schema[str(function.func)] = function
@@ -270,9 +274,13 @@ def postprocess_forward_derivatives(
     args_with_derivatives: Sequence[Binding],
 ) -> List[ForwardDerivative]:
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
+        is_foreach = f.func.name.name.base.startswith("_foreach_")
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == "at::TensorList":
+            if (
+                arg.type in ("at::TensorList", "const at::ITensorListRef &")
+                and not is_foreach
+            ):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -297,6 +305,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
+            assert (
+                f.func.kind() != SchemaKind.inplace
+            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -387,12 +398,10 @@ def postprocess_forward_derivatives(
 
             # Call into the forward again. We need two cases here to handle both Tensor methods and at:: functions.
             if Variant.function in f.variants:
-                fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
+                fw_formula = f"at::{defn_name}({', '.join(new_args)})"
             else:
                 assert Variant.method in f.variants
-                fw_formula = "{}.{}({})".format(
-                    new_args[0], defn_name, ", ".join(new_args[1:])
-                )
+                fw_formula = f"{new_args[0]}.{defn_name}({', '.join(new_args[1:])})"
 
             # All of the input tangents are always used so all of them are required here.
             required_inputs_tangent = tuple(diff_arg_names)
@@ -615,7 +624,7 @@ def create_differentiability_info(
     output_differentiability = defn_dict.pop("output_differentiability", None)
     output_differentiability_conditions = None
     if output_differentiability and any(
-        [isinstance(diff, str) for diff in output_differentiability]
+        isinstance(diff, str) for diff in output_differentiability
     ):
         if len(output_differentiability) != 1:
             raise RuntimeError(
@@ -751,14 +760,6 @@ def saved_variables(
         return f'strides_or_error({name}, "{name}")'
 
     REPLACEMENTS: List[Tuple[str, Dict[str, Any]]] = [
-        # replace self.sizes() with self_sizes
-        (
-            r"{}.sizes\(\)",
-            {
-                "suffix": "_sizes",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-            },
-        ),
         # replace self.sym_sizes() with self_sym_sizes
         (
             r"{}.sym_sizes\(\)",
@@ -767,15 +768,26 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
             },
         ),
-        # replace self->sizes() with self_sizes_opt
+        # replace self->sym_sizes() with self_sym_sizes_opt
         (
-            r"{}->sizes\(\)",
+            r"{}->sym_sizes\(\)",
             {
-                "suffix": "_sizes_opt",
+                "suffix": "_sym_sizes_opt",
                 "nctype": lambda name: NamedCType(
-                    name, OptionalCType(BaseCType(intArrayRefT))
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+            },
+        ),
+        # replace self.sym_blocksize() with self_sym_blocksize_opt
+        (
+            r"{}.sym_blocksize\(\)",
+            {
+                "suffix": "_self_sym_blocksize_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"at::sparse_csr::getSymIntBlockSize({name})",
             },
         ),
         # replace self.options() with self_options
@@ -796,12 +808,12 @@ def saved_variables(
                 "res": lambda name: name + "_info.zeros()",  # at eval-time
             },
         ),
-        # replace self.size(2) with self_size_2
+        # replace self.sym_size(2) with self_sym_size_2
         (
-            r"{}.size\((\w+)\)",
+            r"{}.sym_size\((-?\w+)\)",
             {
-                "suffix": lambda m: "_argsize_{}".format(*m.groups()),
-                "nctype": lambda name: NamedCType(name, BaseCType(longT)),
+                "suffix": lambda m: f"_sym_argsize_{m.groups()[0].replace('-', 'minus_')}",
+                "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
             },
         ),
         # replace self.numel() with self_numel
@@ -812,6 +824,14 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
+        # replace self.sym_numel() with self_sym_numel
+        (
+            r"{}.sym_numel\(\)",
+            {
+                "suffix": "_sym_numel",
+                "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
+            },
+        ),
         # replace to_args_sizes(self) with self_args_sizes
         (
             r"to_args_sizes\({}\)",
@@ -819,6 +839,16 @@ def saved_variables(
                 "suffix": "_args_sizes",
                 "nctype": lambda name: NamedCType(
                     name, VectorCType(VectorCType(BaseCType(longT)))
+                ),
+            },
+        ),
+        # replace to_args_sizes_symint(self) with self_args_sizes
+        (
+            r"to_args_sizes_symint\({}\)",
+            {
+                "suffix": "_args_sizes_symint",
+                "nctype": lambda name: NamedCType(
+                    name, VectorCType(VectorCType(BaseCType(SymIntT)))
                 ),
             },
         ),
@@ -855,15 +885,6 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
-        # replace self.strides() with self_strides
-        (
-            r"{}.strides\(\)",
-            {
-                "suffix": "_strides",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-                "expr": stride_expr,
-            },
-        ),
         # replace self.sym_strides() with self_sym_strides
         (
             r"{}.sym_strides\(\)",
@@ -894,6 +915,23 @@ def saved_variables(
     # find which arguments need to be saved
     saved: List[SavedAttribute] = []
 
+    if ".sizes()" in formula or "->sizes()" in formula:
+        raise RuntimeError(
+            ".sizes() is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_sizes(), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
+    if re.search(r"\.size\([-]?\d+\)", formula) or re.search(
+        r"->size\([-]?\d+\)", formula
+    ):
+        raise RuntimeError(
+            ".size(int) is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_size(int), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
+    if ".strides()" in formula or "->strides()" in formula:
+        raise RuntimeError(
+            ".strides() is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_strides(), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
     for nctype in nctypes:
         name = (
             nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name

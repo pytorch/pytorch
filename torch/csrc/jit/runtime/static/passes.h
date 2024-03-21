@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void FuseInferenceOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph);
@@ -21,7 +20,7 @@ TORCH_API void ReplacePermuteWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
-void ReplaceWithMaybeCopy(
+TORCH_API void ReplaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
@@ -85,5 +84,6 @@ TORCH_API void FuseClampNaNToNum(std::shared_ptr<Graph>& graph);
 TORCH_API void UseInPlaceGetRealInputsFromOptionalInputsV2(
     std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+TORCH_API void PrepackWeights(std::shared_ptr<Graph>& graph);
+
+} // namespace torch::jit

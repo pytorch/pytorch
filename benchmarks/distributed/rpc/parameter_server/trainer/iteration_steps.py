@@ -1,4 +1,6 @@
-def basic_iteration_step(self, ddp_model, criterion, optimizer, hook_state, epoch, index, batch):
+def basic_iteration_step(
+    self, ddp_model, criterion, optimizer, hook_state, epoch, index, batch
+):
     r"""
     A function that performs an iteration of training.
     Args:

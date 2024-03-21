@@ -5,9 +5,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 // A utility class to implement integer division by multiplication, given a fixed
 // divisor.
@@ -65,7 +63,7 @@ struct DivMod {
 // everything else, we use plain division.
 template <typename Value>
 struct IntDivider {
-  IntDivider() { }  // Dummy constructor for arrays.
+  IntDivider() = default;
   IntDivider(Value d) : divisor(d) { }
 
   C10_HOST_DEVICE inline Value div(Value n) const { return n / divisor; }
@@ -82,7 +80,7 @@ template <>
 struct IntDivider<unsigned int> {
   static_assert(sizeof(unsigned int) == 4, "Assumes 32-bit unsigned int.");
 
-  IntDivider() { }  // Dummy constructor for arrays.
+  IntDivider() = default;
 
   IntDivider(unsigned int d) : divisor(d) {
     assert(divisor >= 1 && divisor <= INT32_MAX);
@@ -123,4 +121,4 @@ struct IntDivider<unsigned int> {
   unsigned int shift;  // Shift amounts.
 };
 
-}}}  // namespace at::cuda::detail
+}  // namespace at::cuda::detail

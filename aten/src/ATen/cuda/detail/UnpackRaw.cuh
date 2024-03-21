@@ -1,10 +1,8 @@
 // No "#pragma once" because this is a raw definition that can be copied by jit codegen.
 // Eager mode clients should not include this file directly, instead,
-// they should #include <ATen/cuda/CUDAGraphsUtils.cuh>, which has a #pragma once.
+// they should #include <ATen/cuda/PhiloxUtils.cuh>, which has a #pragma once.
 
-namespace at {
-namespace cuda {
-namespace philox {
+namespace at::cuda::philox {
 
 // In-kernel call to retrieve philox seed and offset from a PhiloxCudaState instance whether
 // that instance was created with graph capture underway or not.
@@ -15,7 +13,7 @@ namespace philox {
 // Easiest thing that comes to mind is, define a __device__ unpack helper here, in ATen/cuda.
 //
 // The raw definition lives in its own file so jit codegen can easily copy it.
-__device__ __forceinline__ std::tuple<uint64_t, uint64_t>
+__host__ __device__ __forceinline__ std::tuple<uint64_t, uint64_t>
 unpack(at::PhiloxCudaState arg) {
   if (arg.captured_) {
     // static_cast avoids "warning: invalid narrowing conversion from "long" to "unsigned long".
@@ -27,6 +25,4 @@ unpack(at::PhiloxCudaState arg) {
   }
 }
 
-} // namespace philox
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::philox

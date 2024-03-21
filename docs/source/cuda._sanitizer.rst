@@ -29,7 +29,7 @@ Here is an example of a simple synchronization error in PyTorch:
 
 The ``a`` tensor is initialized on the default stream and, without any synchronization
 methods, modified on a new stream. The two kernels will run concurrently on the same tensor,
-which might cause the second kernel to read unitialized data before the first one was able
+which might cause the second kernel to read uninitialized data before the first one was able
 to write it, or the first kernel might overwrite part of the result of the second.
 When this script is run on the commandline with:
 ::

@@ -1,4 +1,4 @@
-r"""Functional interface"""
+r"""Functional interface."""
 import math
 from torch import Tensor
 from typing import List
@@ -40,6 +40,9 @@ def sparse_adam(params: List[Tensor],
         grad = grad.coalesce()  # the update is non-linear so indices must be unique
         grad_indices = grad._indices()
         grad_values = grad._values()
+        if grad_values.numel() == 0:
+            # Skip update for empty grad
+            continue
         size = grad.size()
 
         exp_avg = exp_avgs[i]

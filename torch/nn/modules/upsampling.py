@@ -130,6 +130,7 @@ class Upsample(Module):
                   [1.2000, 1.3600, 1.5200, 1.2800, 0.6400, 0.0000],
                   [0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000]]]])
     """
+
     __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name', 'recompute_scale_factor']
     name: str
     size: Optional[_size_any_t]
@@ -141,7 +142,7 @@ class Upsample(Module):
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
                  mode: str = 'nearest', align_corners: Optional[bool] = None,
                  recompute_scale_factor: Optional[bool] = None) -> None:
-        super(Upsample, self).__init__()
+        super().__init__()
         self.name = type(self).__name__
         self.size = size
         if isinstance(scale_factor, tuple):
@@ -156,18 +157,23 @@ class Upsample(Module):
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
                              recompute_scale_factor=self.recompute_scale_factor)
 
+    def __setstate__(self, state):
+        if 'recompute_scale_factor' not in state:
+            state['recompute_scale_factor'] = True
+
+        super().__setstate__(state)
+
     def extra_repr(self) -> str:
         if self.scale_factor is not None:
-            info = 'scale_factor=' + str(self.scale_factor)
+            info = 'scale_factor=' + repr(self.scale_factor)
         else:
-            info = 'size=' + str(self.size)
-        info += ', mode=' + self.mode
+            info = 'size=' + repr(self.size)
+        info += ', mode=' + repr(self.mode)
         return info
 
 
 class UpsamplingNearest2d(Upsample):
-    r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input
-    channels.
+    r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
@@ -206,13 +212,13 @@ class UpsamplingNearest2d(Upsample):
                   [3., 3., 4., 4.],
                   [3., 3., 4., 4.]]]])
     """
+
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
+        super().__init__(size, scale_factor, mode='nearest')
 
 
 class UpsamplingBilinear2d(Upsample):
-    r"""Applies a 2D bilinear upsampling to an input signal composed of several input
-    channels.
+    r"""Applies a 2D bilinear upsampling to an input signal composed of several input channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
@@ -253,5 +259,6 @@ class UpsamplingBilinear2d(Upsample):
                   [2.3333, 2.6667, 3.0000, 3.3333],
                   [3.0000, 3.3333, 3.6667, 4.0000]]]])
     """
+
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
+        super().__init__(size, scale_factor, mode='bilinear', align_corners=True)

@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 
 namespace c10d {
 
@@ -7,7 +7,10 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
     int size,
     std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups)
     : ProcessGroup(rank, size), processGroups_(std::move(processGroups)) {
-  TORCH_CHECK(processGroups_.size() >= 1);
+  TORCH_WARN(
+      "ProcessGroupRoundRobin is deprecated and scheduled to be removed after this current release (1.13). ",
+      "Please file an issue on https://github.com/pytorch/pytorch/issues if there are any concerns or issues with this deprecation.");
+  TORCH_CHECK(!processGroups_.empty());
   for (const auto& processGroup : processGroups_) {
     TORCH_CHECK(processGroup->getRank() == rank_);
     TORCH_CHECK(processGroup->getSize() == size_);
@@ -15,7 +18,7 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
   iterator_ = processGroups_.begin();
 }
 
-ProcessGroupRoundRobin::~ProcessGroupRoundRobin() {}
+ProcessGroupRoundRobin::~ProcessGroupRoundRobin() = default;
 
 c10::intrusive_ptr<Work> ProcessGroupRoundRobin::broadcast(
     std::vector<at::Tensor>& tensors,

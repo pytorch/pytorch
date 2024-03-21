@@ -1,19 +1,27 @@
-#include <array>
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <cstddef>
-#include <sstream>
-#include <string>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <vector>
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
+#include <ATen/ops/fbgemm_linear_int8_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_int8_weight_native.h>
+#include <ATen/ops/fbgemm_linear_quantize_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
+#include <ATen/ops/fbgemm_pack_quantized_matrix_native.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -35,8 +43,7 @@ CAFFE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>);
 } // namespace caffe2
 #endif // USE_FBGEMM
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifdef USE_FBGEMM
 
@@ -118,6 +125,9 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto& pack_b =
       cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
+  int32_t* col_offsets_data = col_offsets.data_ptr<int32_t>();
+  float* bias_contig_data = bias_contig.data_ptr<float>();
+
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     // This operation does the following:
@@ -155,8 +165,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
           /*Aq_zero_point=*/q_params.zero_point,
           /*Bq_zero_point=*/&weight_zero_point_int32,
           /*row_offsets=*/pack_a.getRowOffsetBuffer(),
-          /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
-          /*bias=*/bias_contig.data_ptr<float>(),
+          /*col_offsets=*/col_offsets_data,
+          /*bias=*/bias_contig_data,
           /*nCol=*/N);
       // Do the GEMM
       fbgemm::fbgemmPacked(
@@ -573,5 +583,4 @@ Tensor fbgemm_linear_fp16_weight(
 
 #endif // USE_FBGEMM
 
-} // namespace native
-} // namespace at
+} // namespace at::native

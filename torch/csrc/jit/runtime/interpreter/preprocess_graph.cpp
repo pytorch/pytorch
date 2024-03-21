@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/runtime/interpreter/can_emit_inline.h>
 
-namespace torch {
-namespace jit {
-namespace interpreter {
+namespace torch::jit::interpreter {
 
 namespace {
 
@@ -67,11 +65,11 @@ void dropUnused(Block* b) {
   auto createDropIfUnused = [&](ArrayRef<Value*> values) -> Node* {
     std::vector<Value*> to_drop;
     for (auto v : values) {
-      if (v->uses().size() == 0 && v->node()->kind() != prim::Constant) {
+      if (v->uses().empty() && v->node()->kind() != prim::Constant) {
         to_drop.push_back(v);
       }
     }
-    if (to_drop.size() == 0) {
+    if (to_drop.empty()) {
       return nullptr;
     }
     return b->owningGraph()->create(prim::Drop, to_drop, 0);
@@ -213,6 +211,4 @@ PreprocessGraph::PreprocessGraph(Graph& g) : graph(g.copy()) {
   insertLastUses(*graph);
   can_emit_inline = std::move(CanEmitInline(*graph.get()).can_emit_inline_);
 }
-} // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::interpreter

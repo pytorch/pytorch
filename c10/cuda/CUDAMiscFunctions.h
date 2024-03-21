@@ -4,8 +4,9 @@
 
 #include <c10/cuda/CUDAMacros.h>
 
-namespace c10 {
-namespace cuda {
+#include <mutex>
+
+namespace c10::cuda {
 C10_CUDA_API const char* get_cuda_check_suffix() noexcept;
-}
-} // namespace c10
+C10_CUDA_API std::mutex* getFreeMutex();
+} // namespace c10::cuda

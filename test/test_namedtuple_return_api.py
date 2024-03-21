@@ -13,8 +13,8 @@ from collections import namedtuple
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
-    'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig',
-    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
+    'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd',
+    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_linalg_eigh", "_unpack_dual", 'linalg_qr',
     'linalg_svd', '_linalg_svd', 'linalg_slogdet', '_linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
@@ -22,6 +22,13 @@ all_operators_with_namedtuple_return = {
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
     '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex'
+}
+
+all_operators_with_namedtuple_return_skip_list = {
+    '_scaled_dot_product_flash_attention',
+    '_scaled_dot_product_flash_attention_for_cpu',
+    '_scaled_dot_product_efficient_attention',
+    '_scaled_dot_product_cudnn_attention',
 }
 
 
@@ -34,12 +41,12 @@ class TestNamedTupleAPI(TestCase):
     def test_native_functions_yaml(self):
         operators_found = set()
         regex = re.compile(r"^(\w*)(\(|\.)")
-        with open(aten_native_yaml, 'r') as file:
+        with open(aten_native_yaml) as file:
             for f in yaml.safe_load(file.read()):
                 f = f['func']
                 ret = f.split('->')[1].strip()
                 name = regex.findall(f)[0][0]
-                if name in all_operators_with_namedtuple_return:
+                if name in all_operators_with_namedtuple_return :
                     operators_found.add(name)
                     continue
                 if '_backward' in name or name.endswith('_forward'):
@@ -47,6 +54,8 @@ class TestNamedTupleAPI(TestCase):
                 if not ret.startswith('('):
                     continue
                 if ret == '()':
+                    continue
+                if name in all_operators_with_namedtuple_return_skip_list:
                     continue
                 ret = ret[1:-1].split(',')
                 for r in ret:
@@ -77,9 +86,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_linalg_slogdet'], input=(), names=('sign', 'logabsdet', 'LU', 'pivots'), hasout=True),
             op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
-            op(operators=['symeig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
-            op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
@@ -163,7 +170,7 @@ class TestNamedTupleAPI(TestCase):
                     ret3 = meth(*op.input)
                     check_namedtuple(ret3, op.names)
 
-        all_covered_operators = set([x for y in operators for x in y.operators])
+        all_covered_operators = {x for y in operators for x in y.operators}
 
         self.assertEqual(all_operators_with_namedtuple_return, all_covered_operators, textwrap.dedent('''
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of

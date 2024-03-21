@@ -1,13 +1,22 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/bucketize_native.h>
+#include <ATen/ops/searchsorted_native.h>
+#endif
+
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
  *
- * - torch.searchsorted(sorted_sequence, values, right=False, side='left', out_int32=False, sorter=None)
+ * - torch.searchsorted(sorted_sequence, values, right=False, side=None, out_int32=False, sorter=None)
  *   sorted_sequence - N*D or 1D (apply to all values) tensor containing sorted sequences in last dimension
  *   values          - N*D tensor or a Scalar (when sorted_sequence is 1D) containing the search values
  *   right           - corresponding to lower bound if False and upper bound if True
@@ -24,8 +33,7 @@
  * - Restrictions are defined in searchsorted_pre_check()
  */
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -154,7 +162,7 @@ Tensor& searchsorted_out_cpu(
     return result;
   }
 
-  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing the original result tensor
+  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaining the original result tensor
   Tensor out = result;
   if (!result.is_contiguous()) {
     out = result.contiguous();
@@ -178,6 +186,18 @@ Tensor& searchsorted_out_cpu(
     result.copy_(out);
   }
   return result;
+}
+
+Tensor& searchsorted_out_cpu(
+    const Tensor& sorted_sequence,
+    const Scalar& self,
+    bool out_int32,
+    bool right,
+    const c10::optional<c10::string_view> side_opt,
+    const c10::optional<Tensor>& sorter_opt,
+    Tensor& result) {
+  const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
+  return searchsorted_out_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
 }
 
 Tensor searchsorted_cpu(
@@ -223,4 +243,4 @@ Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int3
   return bucketize_cpu(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
-}} // namespace at::native
+} // namespace at::native

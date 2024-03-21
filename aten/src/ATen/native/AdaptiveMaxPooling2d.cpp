@@ -1,11 +1,17 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/AdaptivePooling.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_max_pool2d_backward_native.h>
+#include <ATen/ops/adaptive_max_pool2d_native.h>
+#endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_size) {
   int ndim = input.ndimension();
   TORCH_CHECK(ndim == 3 || ndim == 4,
@@ -52,21 +58,17 @@ TORCH_META_FUNC(adaptive_max_pool2d_backward)
   int64_t ndim = grad_output.ndimension();
   TORCH_CHECK(ndim == 3 || ndim == 4,
     "adaptive_max_pooling2d_backward(): Expected 3D or 4D grad_output, but got: ", grad_output.sizes());
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(grad_output.size(i) > 0,
-      "adaptive_max_pooling2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
-      "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i,
-      " being empty");
-  }
+
+  at::native::adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool2d_backward");
 
   TORCH_CHECK(input.dtype() == grad_output.dtype(),
     "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
 
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(input.suggest_memory_format()));
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cpu)
 (const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
@@ -82,5 +84,4 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cpu)
 DEFINE_DISPATCH(adaptive_max_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_max_pool2d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

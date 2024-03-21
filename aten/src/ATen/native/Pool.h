@@ -4,10 +4,11 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 #pragma once
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
     int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
@@ -25,6 +26,12 @@ using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel);
 
+using max_pool3d_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input,
+    int kW, int kH, int kD, int dW, int dH, int dD, int pW, int pH, int pD, int dilationW, int dilationH, int dilationD);
+using max_pool3d_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+
+DECLARE_DISPATCH(max_pool3d_fn, max_pool3d_kernel);
+DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel);
 namespace {
 
 template <typename dest_t, typename src_t>
@@ -60,24 +67,25 @@ static inline T pooling_output_shape(
     TORCH_CHECK(stride != 0, "stride should not be zero");
     TORCH_CHECK(pad >= 0,
                 "pad must be non-negative, but got pad: ", pad);
-    TORCH_CHECK(pad <= kernelSize / 2,
-                "pad should be at most half of kernel size, but got pad=",
-                pad, " and kernel_size=", kernelSize)
+    TORCH_CHECK(pad <= ((kernelSize - 1) * dilation + 1) / 2,
+                "pad should be at most half of effective kernel size, but got pad=",
+                pad, ", kernel_size=", kernelSize, " and dilation=", dilation)
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
 
-inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
-    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+template <typename T>
+std::pair<T, T> _pooling_same_mode_padding_lr(
+    T inputSize, T kernelSize, T stride, T dilation) {
   // NOTE: with strides, the output shape is ceil(inputSize/stride)
-  auto total_padding = dilation * (kernelSize - 1);
+  auto total_padding = T(dilation) * (kernelSize - 1);
 
   // Prefer symmetric padding if possible
   if (stride > 2 && (total_padding % 2 == 1)) {
     // The floor in the output size calculation gives us a little wiggle room
     auto wiggle_room = inputSize % stride - 1;
     if (wiggle_room > 0) {
-      --total_padding;
+      total_padding = total_padding - 1;
     }
   }
 
@@ -85,6 +93,15 @@ inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
   return {left, total_padding - left};
 }
 
+inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
+    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+  return _pooling_same_mode_padding_lr(inputSize, kernelSize, stride, dilation);
+}
+
+inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
+    c10::SymInt inputSize, c10::SymInt kernelSize, c10::SymInt stride, c10::SymInt dilation) {
+  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), std::move(stride), std::move(dilation));
+}
 
 // AveragePool2d/DilatedMaxPool2d (forward)
 static inline void
@@ -216,10 +233,20 @@ pool3d_shape_check(
   TORCH_CHECK(ndim == 4 || ndim == 5,
               fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
 
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(input.size(i) > 0,
-                fn_name, "Expected input to have non-zero size for non-batch dimensions, but got",
-                input.sizes(), " with dimension ", i, " being empty.");
+  for (const auto i : c10::irange(ndim)) {
+    if (ndim == 5 && i == 0) {
+      // size of batch-dim can be 0.
+      continue;
+    }
+    TORCH_CHECK(
+        input.size(i) > 0,
+        fn_name,
+        ": Expected input's non-batch dimensions to have positive length,"
+        " but input has a shape of ",
+        input.sizes(),
+        " and non-batch dimension ",
+        input.size(i),
+        " has length zero!")
   }
 
   if (check_input_size) { // AveragePool3d
@@ -308,7 +335,6 @@ avg_pool3d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-1, owidth);
 }
 
-} // namespace
+} // anonymous namespace
 
-} // at::native
-} // at
+} // namespace at::native

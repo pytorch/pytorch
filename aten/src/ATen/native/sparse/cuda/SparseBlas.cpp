@@ -24,8 +24,7 @@
 
 #include <c10/util/MaybeOwned.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /*
   Computes `result` <- α*(A @ B) * spy(C) + β*C, where spy(C) is the sparsity pattern matrix of C.
@@ -57,6 +56,7 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
 
   // there's a segfault when calling cuSPARSE on 0-sized matrices
   if (mat1.numel() == 0 || mat2.numel() == 0) {
+    result.mul_(beta);
     return result;
   }
 
@@ -83,16 +83,6 @@ Tensor& addmm_out_sparse_compressed_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-
-  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
-    // TODO: Add native CSC support to avoid costly conversion.
-    return addmm_out_sparse_compressed_cuda(self, mat1.to_sparse_csr(), mat2.to_sparse_csr(),
-        beta, alpha, result);
-  }
-  TORCH_CHECK(!(mat1.layout() == kSparseBsc || mat2.layout() == kSparseBsc),
-      "addmm_out_sparse_compressed_cuda currently does not support layout SparseBsc for input mat, but got ",
-      mat1.layout(), " for mat 1 and ", mat2.layout(), " for mat2.");
-
   sparse::impl::_check_is_cuda(self, "self");
   sparse::impl::_check_is_cuda(mat1, "mat1");
   sparse::impl::_check_is_cuda(mat2, "mat2");
@@ -135,13 +125,12 @@ Tensor& addmm_out_sparse_compressed_cuda(
               "x",
               self_->size(1));
 
-  if (&result != &self) {
+  if (!result.is_same(self)) {
     if (result.layout() == kStrided) {
       at::native::resize_output(result, self_->sizes());
     } else {
       result.resize_as_sparse_(*self_);
     }
-    result.copy_(*self_);
   }
 
   if (result.numel() == 0) {
@@ -151,15 +140,21 @@ Tensor& addmm_out_sparse_compressed_cuda(
   if (sparse::impl::_is_sparse_and_zero(mat1) || sparse::impl::_is_sparse_and_zero(mat2)) {
     // According to docs, when beta==0 values in self should be ignored.
     // nans and infs should not propagate
-    if (beta.toComplexDouble() == 0.) {
+    const auto beta_val = beta.toComplexDouble();
+    if (beta_val == 0.) {
       result.zero_();
     } else {
-      result.mul_(beta);
+      if (!result.is_same(self)) {
+        result.copy_(*self_);
+      }
+      if (beta_val != 1.) {
+        result.mul_(beta);
+      }
     }
     return result;
   }
 
-  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+  sparse::impl::cuda::addmm_out_sparse_csr(*self_, mat1, mat2, beta, alpha, result);
   return result;
 }
 
@@ -176,9 +171,8 @@ Tensor& baddbmm_out_sparse_csr_cuda(
   TORCH_CHECK(mat2.layout() == kStrided, "torch.baddbmm: Expect mat2 to be strided, but got ", mat2.layout());
   TORCH_CHECK(result.layout() == kStrided, "torch.baddbmm: Expect result to be strided, but got ", result.layout());
 
-  if (&result != &self) {
+  if (!result.is_same(self)) {
     at::native::resize_output(result, self.sizes());
-    result.copy_(self);
   }
 
   if (mat1._nnz() == 0) {
@@ -187,12 +181,17 @@ Tensor& baddbmm_out_sparse_csr_cuda(
     if (beta.toComplexDouble() == 0.) {
       result.zero_();
     } else {
-      result.mul_(beta);
+      if (!result.is_same(self)) {
+        result.copy_(self);
+      }
+      if (beta.toComplexDouble() != 1.) {
+        result.mul_(beta);
+      }
     }
     return result;
   }
 
-  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+  sparse::impl::cuda::addmm_out_sparse_csr(self, mat1, mat2, beta, alpha, result);
   return result;
 }
 
@@ -285,5 +284,4 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cuda(
   return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

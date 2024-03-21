@@ -1,6 +1,6 @@
 from enum import Enum
 
-from torch.types import Tuple, Number, _bool
+from torch.types import _bool, Tuple
 
 # Defined in torch/csrc/cuda/shared/cudnn.cpp
 is_cuda: _bool

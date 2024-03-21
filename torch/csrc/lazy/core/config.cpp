@@ -10,7 +10,12 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     torch_lazy_handle_special_scalars,
     false,
-    "Handle special scalars 0 and 1 diffrently");
+    "Handle special scalars 0 and 1 differently");
+
+C10_DEFINE_bool(
+    torch_lazy_all_numbers_special_scalars,
+    false,
+    "Handle all numbers as special scalars");
 
 C10_DEFINE_bool(
     torch_lazy_reuse_ir,
@@ -21,6 +26,11 @@ C10_DEFINE_bool(
     torch_lazy_use_thread_pool,
     false,
     "Use thread pool to schedule backend execution");
+
+C10_DEFINE_bool(
+    torch_lazy_enable_device_data_cache,
+    true,
+    "Enable or disable device data cache (turns cache on or off), does not change cache state");
 
 C10_DEFINE_int(
     torch_lazy_compilation_cache_size,

@@ -14,7 +14,7 @@ endif()
 
 include(GNUInstallDirs)
 
-set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 message(STATUS "ANDROID_STL:${ANDROID_STL}")
 
@@ -143,7 +143,6 @@ else()
       torch_cpu
       c10
       cpuinfo
-      clog
   )
 
   if(USE_NNPACK)
@@ -160,6 +159,7 @@ else()
 
   if(USE_PYTORCH_QNNPACK)
     list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+    list(APPEND pytorch_jni_LIBS clog)
   endif()
 
 endif()

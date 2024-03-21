@@ -46,11 +46,12 @@ def quantization_pertensor_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     """
-    Applies the ``torch.quantize_per_tensor`` logic to DDP using ``allgather``
-    protocol. Workers first allgather the scale and zero point of their own
+    Apply ``torch.quantize_per_tensor`` logic to DDP using ``allgather`` protocol.
+
+    Workers first allgather the scale and zero point of their own
     ``GradBucket`` prior to the quantization. After all workers have that information,
     the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
-    own gradient tensor, and uses ``allgather`` to communicate these accross all workers.
+    own gradient tensor, and uses ``allgather`` to communicate these across all workers.
     The final ``then`` callback called ``dequantize_and_aggregate``, dequantizes and
     aggregates each quantized gradient tensor locally and returns the mean.
 
@@ -68,7 +69,7 @@ def quantization_pertensor_hook(
 
     tensor = bucket.buffer()
 
-    myObserver = torch.quantization.MinMaxObserver().cuda(tensor.device)
+    myObserver = torch.ao.quantization.MinMaxObserver().cuda(tensor.device)
     myObserver(tensor)
 
     s, z = myObserver.calculate_qparams()
@@ -82,7 +83,7 @@ def quantization_pertensor_hook(
     ).get_future()
 
     def quantize_and_allgather(fut):
-        # Store scale and zeros accross all workers.
+        # Store scale and zeros across all workers.
         all_ranks_s_and_z = fut.wait()[0]
         # All workers quantize their own ``GradBucket`` tensors.
         quantized_tensor = _quantize_per_tensor_cuda(
@@ -120,8 +121,9 @@ def quantization_perchannel_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket, bucket_size=512
 ) -> torch.futures.Future[torch.Tensor]:
     """
-    Applies the ``torch.quantize_per_channel`` logic to DDP using ``allgather``
-    protocol. Compared to pertensor, the main motivation of perchannel is
+    Apply``torch.quantize_per_channel`` logic to DDP using ``allgather`` protocol.
+
+    Compared to per-tensor, the main motivation of per-channel is
     for considerably large tensors such as a tensor that contains 6 million
     elements quantizing per a bucket size of 512 (or 128) elements may significantly
     increase the resolution.
@@ -130,7 +132,7 @@ def quantization_perchannel_hook(
     elements. Then, workers allgather the scales and zero points of their own
     ``GradBucket`` prior to the quantization. After all workers have that information,
     the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
-    own gradient tensor, and uses ``allgather`` to communicate these accross all workers.
+    own gradient tensor, and uses ``allgather`` to communicate these across all workers.
     The final ``then`` callback called ``dequantize_and_aggregate``, dequantizes, flattens, and
     aggregates each quantized gradient tensor locally and returns the mean.
 
@@ -159,7 +161,7 @@ def quantization_perchannel_hook(
         .cuda(tensor.device)
     )
 
-    myPerChannelObserver = torch.quantization.PerChannelMinMaxObserver().cuda(
+    myPerChannelObserver = torch.ao.quantization.PerChannelMinMaxObserver().cuda(
         tensor.device
     )
     myPerChannelObserver(tensor_in_channels)
@@ -174,7 +176,7 @@ def quantization_perchannel_hook(
     ).get_future()
 
     def quantize_and_allgather(fut):
-        # Store scale and zeros accross all workers.
+        # Store scale and zeros across all workers.
         all_ranks_s_and_z = fut.wait()[0]
         # All workers quantize their corresponding ``GradBucket`` tensors.
         quantized_tensor = _quantize_per_channel_cuda(

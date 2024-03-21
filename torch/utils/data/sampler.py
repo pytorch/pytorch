@@ -19,16 +19,50 @@ class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
-    way to iterate over indices of dataset elements, and a :meth:`__len__` method
+    way to iterate over indices or lists of indices (batches) of dataset elements, and a :meth:`__len__` method
     that returns the length of the returned iterators.
+
+    Args:
+        data_source (Dataset): This argument is not used and will be removed in 2.2.0.
+            You may still have custom implementation that utilizes it.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> class AccedingSequenceLengthSampler(Sampler[int]):
+        >>>     def __init__(self, data: List[str]) -> None:
+        >>>         self.data = data
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return len(self.data)
+        >>>
+        >>>     def __iter__(self) -> Iterator[int]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         yield from torch.argsort(sizes).tolist()
+        >>>
+        >>> class AccedingSequenceLengthBatchSampler(Sampler[List[int]]):
+        >>>     def __init__(self, data: List[str], batch_size: int) -> None:
+        >>>         self.data = data
+        >>>         self.batch_size = batch_size
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return (len(self.data) + self.batch_size - 1) // self.batch_size
+        >>>
+        >>>     def __iter__(self) -> Iterator[List[int]]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         for batch in torch.chunk(torch.argsort(sizes), len(self)):
+        >>>             yield batch.tolist()
 
     .. note:: The :meth:`__len__` method isn't strictly required by
               :class:`~torch.utils.data.DataLoader`, but is expected in any
               calculation involving the length of a :class:`~torch.utils.data.DataLoader`.
     """
 
-    def __init__(self, data_source: Optional[Sized]) -> None:
-        pass
+    def __init__(self, data_source: Optional[Sized] = None) -> None:
+        if data_source is not None:
+            import warnings
+
+            warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
+                          "You may still have custom implementation that utilizes it.")
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -49,8 +83,8 @@ class Sampler(Generic[T_co]):
     #     This prevents triggering some fallback behavior. E.g., the built-in
     #     `list(X)` tries to call `len(X)` first, and executes a different code
     #     path if the method is not found or `NotImplemented` is returned, while
-    #     raising an `NotImplementedError` will propagate and and make the call
-    #     fail where it could have use `__iter__` to complete the call.
+    #     raising a `NotImplementedError` will propagate and make the call fail
+    #     where it could have used `__iter__` to complete the call.
     #
     # Thus, the only two sensible things to do are
     #
@@ -67,6 +101,7 @@ class SequentialSampler(Sampler[int]):
     Args:
         data_source (Dataset): dataset to sample from
     """
+
     data_source: Sized
 
     def __init__(self, data_source: Sized) -> None:
@@ -81,6 +116,7 @@ class SequentialSampler(Sampler[int]):
 
 class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
+
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
     Args:
@@ -89,6 +125,7 @@ class RandomSampler(Sampler[int]):
         num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
     """
+
     data_source: Sized
     replacement: bool
 
@@ -100,12 +137,10 @@ class RandomSampler(Sampler[int]):
         self.generator = generator
 
         if not isinstance(self.replacement, bool):
-            raise TypeError("replacement should be a boolean value, but got "
-                            "replacement={}".format(self.replacement))
+            raise TypeError(f"replacement should be a boolean value, but got replacement={self.replacement}")
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
-            raise ValueError("num_samples should be a positive integer "
-                             "value, but got num_samples={}".format(self.num_samples))
+            raise ValueError(f"num_samples should be a positive integer value, but got num_samples={self.num_samples}")
 
     @property
     def num_samples(self) -> int:
@@ -143,6 +178,7 @@ class SubsetRandomSampler(Sampler[int]):
         indices (sequence): a sequence of indices
         generator (Generator): Generator used in sampling.
     """
+
     indices: Sequence[int]
 
     def __init__(self, indices: Sequence[int], generator=None) -> None:
@@ -175,6 +211,7 @@ class WeightedRandomSampler(Sampler[int]):
         >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
         [0, 1, 4, 3, 2]
     """
+
     weights: Tensor
     num_samples: int
     replacement: bool
@@ -183,16 +220,14 @@ class WeightedRandomSampler(Sampler[int]):
                  replacement: bool = True, generator=None) -> None:
         if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
-            raise ValueError("num_samples should be a positive integer "
-                             "value, but got num_samples={}".format(num_samples))
+            raise ValueError(f"num_samples should be a positive integer value, but got num_samples={num_samples}")
         if not isinstance(replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got "
-                             "replacement={}".format(replacement))
+            raise ValueError(f"replacement should be a boolean value, but got replacement={replacement}")
 
         weights_tensor = torch.as_tensor(weights, dtype=torch.double)
         if len(weights_tensor.shape) != 1:
             raise ValueError("weights should be a 1d sequence but given "
-                             "weights have shape {}".format(tuple(weights_tensor.shape)))
+                             f"weights have shape {tuple(weights_tensor.shape)}")
 
         self.weights = weights_tensor
         self.num_samples = num_samples
@@ -229,11 +264,9 @@ class BatchSampler(Sampler[List[int]]):
         # check here.
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
-            raise ValueError("batch_size should be a positive integer value, "
-                             "but got batch_size={}".format(batch_size))
+            raise ValueError(f"batch_size should be a positive integer value, but got batch_size={batch_size}")
         if not isinstance(drop_last, bool):
-            raise ValueError("drop_last should be a boolean value, but got "
-                             "drop_last={}".format(drop_last))
+            raise ValueError(f"drop_last should be a boolean value, but got drop_last={drop_last}")
         self.sampler = sampler
         self.batch_size = batch_size
         self.drop_last = drop_last

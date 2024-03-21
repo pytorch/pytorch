@@ -21,8 +21,7 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -35,7 +34,7 @@ __device__ inline int max(int a, int b) {
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor64<scalar_t, 4> input,
+  PackedTensorAccessor64<const scalar_t, 4> input,
   PackedTensorAccessor64<scalar_t, 4> output,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
@@ -89,7 +88,7 @@ __global__ void avg_pool3d_cuda_update_output(
       {
         for (wi = wstart; wi < wend; ++wi)
         {
-          scalar_t val = input[slice][ti][hi][wi];
+          const scalar_t val = input[slice][ti][hi][wi];
           sum += val;
         }
       }
@@ -104,7 +103,7 @@ __global__ void avg_pool3d_cuda_update_output(
 //
 template<int KERNEL_WIDTH, typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor64<scalar_t, 4> input,
+  PackedTensorAccessor64<const scalar_t, 4> input,
   PackedTensorAccessor64<scalar_t, 4> output,
   int kT, int kH,
   int dT, int dH, int dW,
@@ -158,7 +157,7 @@ __global__ void avg_pool3d_cuda_update_output(
       {
         for (wi = wstart; wi < wend; ++wi)
         {
-          scalar_t val = input[slice][ti][hi][wi];
+          const scalar_t val = input[slice][ti][hi][wi];
           sum += val;
         }
       }
@@ -334,7 +333,7 @@ __global__ void avg_pool3d_cuda_update_grad_input(
 #define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:      \
   avg_pool3d_cuda_update_output<KW, scalar_t, accscalar_t>  \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
-       work_input.packed_accessor64<scalar_t, 4>(),         \
+       work_input.packed_accessor64<const scalar_t, 4>(),   \
        work_output.packed_accessor64<scalar_t, 4>(),        \
        kT, kH,                                              \
        dT, dH, dW,                                          \
@@ -423,7 +422,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
         default:
           avg_pool3d_cuda_update_output<scalar_t, accscalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                work_input.packed_accessor64<scalar_t, 4>(),
+                work_input.packed_accessor64<const scalar_t, 4>(),
                 work_output.packed_accessor64<scalar_t, 4>(),
                 kT, kH, kW,
                 dT, dH, dW,
@@ -605,4 +604,3 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
 }
 
 } // at::native
-} // at

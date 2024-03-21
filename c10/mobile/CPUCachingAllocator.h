@@ -1,11 +1,9 @@
 #pragma once
 
-#include <algorithm>
-#include <deque>
-#include <memory>
+#include <cstddef>
 #include <mutex>
 
-#include <c10/util/Exception.h>
+#include <c10/macros/Export.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/flat_hash_map.h>
 

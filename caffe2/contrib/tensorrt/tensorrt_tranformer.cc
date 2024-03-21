@@ -518,7 +518,7 @@ void TensorRTTransformer::Transform(
     return SubnetToTrtOp(net, &mapped_ws, &exporter2, &shape_hints);
   };
 
-  auto cutResult = opt::OptimizeForBackend(*pred_net, supports, trt_converter)
+  auto cutResult = opt::OptimizeForBackend(*pred_net, supports, trt_converter);
   NetDef net_opt = std::move(cutResult.net);
 
   // Need to figure out a proper place to handle device option

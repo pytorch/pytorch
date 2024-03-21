@@ -6,7 +6,7 @@
 #include <ATen/native/TensorProperties.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace detail {
 
@@ -101,9 +101,9 @@ bool cond_cudnn_grid_sampler(
     at::native::canUse32BitIndexMath(input) &&
     at::native::canUse32BitIndexMath(grid) &&
     input.dim() == 4 &&
-    input.size(1) <= 1024);
+    input.sym_size(1) <= 1024);
 }
 
 } // anonymous namespace
 
-}} // namespace at::native
+} // namespace at::native

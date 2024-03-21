@@ -16,7 +16,7 @@ std::string GetFirstUserFrameInPythonIfEnabled() {
 namespace torch {
 namespace lazy {
 
-hash_t OperandHashes(
+static hash_t OperandHashes(
     const OpList& operands,
     const c10::ArrayRef<Shape>& shapes,
     const hash_t& seed,
@@ -91,7 +91,7 @@ TSOpVector TensorList::Lower(
     std::shared_ptr<torch::jit::GraphFunction> function,
     TSLoweringContext* loctx) const {
   std::vector<torch::jit::Value*> tensor_list;
-  CHECK(!operands().empty());
+  TORCH_CHECK(!operands().empty());
   for (const torch::lazy::Output& operand : operands()) {
     tensor_list.emplace_back(loctx->GetOutputOp(operand));
   }

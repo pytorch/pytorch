@@ -1,10 +1,8 @@
-"""
-This module contains utility method for mobile model optimization and lint.
-"""
+"""This module contains utility method for mobile model optimization and lint."""
 
 import torch
 from enum import Enum
-from torch._C import MobileOptimizerType
+from torch._C import _MobileOptimizerType as MobileOptimizerType
 from typing import Optional, Set, List, AnyStr
 
 class LintCode(Enum):
@@ -19,6 +17,8 @@ def optimize_for_mobile(
         preserved_methods: Optional[List[AnyStr]] = None,
         backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
+    Optimize a torch script module for mobile deployment.
+
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
@@ -31,7 +31,7 @@ def optimize_for_mobile(
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     if optimization_blocklist is None:
         optimization_blocklist = set()
@@ -45,7 +45,7 @@ def optimize_for_mobile(
     preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
 
     bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
-    if all([hasattr(script_module, method) for method in bundled_inputs_attributes]):
+    if all(hasattr(script_module, method) for method in bundled_inputs_attributes):
         preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
 
     non_exist_methods = []
@@ -54,8 +54,7 @@ def optimize_for_mobile(
             non_exist_methods.append(method)
     if non_exist_methods:
         raise AttributeError(
-            'The following methods to preserve do not exist in script_module: {}'
-            .format(', '.join(non_exist_methods)))
+            f"The following methods to preserve do not exist in script_module: {', '.join(non_exist_methods)}")
 
     backend = backend.lower()
     if backend == 'cpu':
@@ -64,7 +63,10 @@ def optimize_for_mobile(
             optimization_blocklist,
             preserved_methods_str)
     elif backend == 'vulkan':
-        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods_str)
+        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(
+            script_module._c,
+            optimization_blocklist,
+            preserved_methods_str)
     elif backend == 'metal':
         optimized_cpp_module = torch._C._jit_pass_metal_optimize_for_mobile(script_module._c, preserved_methods_str)
     else:
@@ -75,15 +77,17 @@ def optimize_for_mobile(
 
 def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
+    Generate a list of lints for a given torch script module.
+
     Args:
-        script_module: An instance of torch script module with type of ScriptModule
+        script_module: An instance of torch script module with type of ScriptModule.
 
     Returns:
         lint_map: A list of dictionary that contains modules lints
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     lint_list = []
 
@@ -93,9 +97,9 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
 
     for name, param in script_module.named_parameters():
         if param.requires_grad:
-            lint_list.append({"name": LintCode.REQUIRES_GRAD.name, "message": "Param {} requires grad, "
+            lint_list.append({"name": LintCode.REQUIRES_GRAD.name, "message": f"Param {name} requires grad, "
                              "please set torch.no_grad() to reduce memory usage and improve computation speed during "
-                              "inference phase.".format(name)})
+                              "inference phase."})
 
     op_names = torch.jit.export_opnames(script_module)
     for op_name in op_names:

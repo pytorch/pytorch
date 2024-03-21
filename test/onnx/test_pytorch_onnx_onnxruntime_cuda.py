@@ -8,17 +8,14 @@ import onnxruntime  # noqa: F401
 import parameterized
 
 import torch
+from onnx_test_common import MAX_ONNX_OPSET_VERSION, MIN_ONNX_OPSET_VERSION
 from pytorch_test_common import (
     skipIfNoBFloat16Cuda,
     skipIfNoCuda,
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
-from test_pytorch_onnx_onnxruntime import (
-    _parameterized_class_attrs_and_values,
-    MAX_ONNX_OPSET_VERSION,
-    MIN_ONNX_OPSET_VERSION,
-)
+from test_pytorch_onnx_onnxruntime import _parameterized_class_attrs_and_values
 from torch.cuda.amp import autocast
 from torch.testing._internal import common_utils
 
@@ -110,8 +107,8 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
 
         try:
             from apex import amp
-        except Exception:
-            raise unittest.SkipTest("Apex is not available")
+        except Exception as e:
+            raise unittest.SkipTest("Apex is not available") from e
         input = torch.randn(3, 3, device=torch.device("cuda"))
         model = amp.initialize(LinearModel(), opt_level="O2")
         self.run_test(model, input)

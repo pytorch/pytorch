@@ -1,11 +1,10 @@
-#include <c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
 
 #include <deque>
 
 #include <ATen/core/functional.h>
 #include <c10/util/irange.h>
-#include <c10d/reducer.hpp>
-#include <torch/csrc/distributed/c10d/Ops.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
@@ -21,7 +20,7 @@ class BroadcastWork {
         flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}) {
     BroadcastOptions broadcastOptions;
     broadcastOptions.rootRank = root_rank;
-    work_ = ops::broadcast(process_group, flat_tensor_, broadcastOptions);
+    work_ = process_group->broadcast(flat_tensor_, broadcastOptions);
   }
 
   void finish() {
@@ -32,7 +31,13 @@ class BroadcastWork {
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
     for (const auto i : c10::irange(output_tensors.size())) {
-      bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
+      // if output_tensor is empty, no need to copy it back,
+      // this can avoid error when both bucket_tensor and output_tensor
+      // are empty, but they have different shapes, see
+      // https://github.com/pytorch/pytorch/issues/87280
+      if (output_tensors[i].numel() != 0) {
+        bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
+      }
     }
   }
 
@@ -55,15 +60,14 @@ class BroadcastWork {
 
 // Broadcast many tensors to all processes in the process group.
 void broadcast_coalesced(
-    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank) {
   // Coalesce tensors into buckets taking into account the maximum buffer size.
   // This routine is multi-device aware, so the tensors can be split across
   // multiple devices and can contain a mix of CPU and CUDA tensors.
-  std::vector<std::vector<size_t>> buckets;
-  std::tie(buckets, std::ignore) =
+  auto [buckets, _] =
       compute_bucket_assignment_by_size(tensors.vec(), {buffer_size});
 
   // Returns tensor at specified index in input tensor list.

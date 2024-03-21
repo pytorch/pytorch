@@ -14,7 +14,6 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
-#include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/to_copy.h>
 #include <torch/csrc/lazy/ts_backend/tensor_aten_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
@@ -70,14 +69,14 @@ at::Tensor LazyNativeFunctions::_copy_from(
   if (!self_tensor) {
     // providing a new 'eager' value (self) for an existing lazy tensor (dst)
     static bool sync_update = FLAGS_torch_lazy_ts_tensor_update_sync;
-    CHECK(dst_tensor);
+    TORCH_CHECK(dst_tensor);
     dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     // materializing a lazy tensor (self) and copying its value into eager
     // tensor (dst) detached=false lets us skip a copy in `ToTensor`, which
     // should be safe because we are only going to use the tensor for
     // dst.copy_()
-    CHECK(self_tensor);
+    TORCH_CHECK(self_tensor);
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/false);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
@@ -88,7 +87,7 @@ at::Tensor LazyNativeFunctions::_copy_from(
       // if dest is not backed by IR (e.g. result of some lazy operation),
       // then it should have at::Tensor data backing it instead
       auto dst_tensor_data = dst_tensor->CurrentTensorData();
-      CHECK(dst_tensor_data);
+      TORCH_CHECK(dst_tensor_data);
       auto src_tensor_data = self_tensor->CurrentTensorData();
       if (src_tensor_data) {
         // both src/dst are simply backed by at::Tensor data, no IR- do a
@@ -119,10 +118,10 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(
   auto dst_tensor = torch::lazy::TryGetLtcTensor(dst);
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   if (!self_tensor) {
-    CHECK(dst_tensor);
+    TORCH_CHECK(dst_tensor);
     dst_tensor->UpdateFromTensorOut(self);
   } else if (!dst_tensor) {
-    CHECK(self_tensor);
+    TORCH_CHECK(self_tensor);
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
@@ -277,7 +276,7 @@ at::Tensor LazyNativeFunctions::empty_symint(
     c10::optional<bool> pin_memory,
     c10::optional<at::MemoryFormat> memory_format) {
   // TODO: support this directly
-  auto size = c10::asIntArrayRefSlow(sym_size);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   const auto device_type = torch::lazy::getBackend()->EagerFallbackDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
@@ -309,8 +308,8 @@ at::Tensor LazyNativeFunctions::empty_strided_symint(
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t =
       empty_symint(sym_size, dtype, layout, device, pin_memory, c10::nullopt);
-  auto size = c10::asIntArrayRefSlow(sym_size);
-  auto stride = c10::asIntArrayRefSlow(sym_stride);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
+  auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 
@@ -372,42 +371,12 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
           indices);
 }
 
-at::Tensor& LazyNativeFunctions::normal_(
-    at::Tensor& self,
-    double mean,
-    double std,
-    c10::optional<at::Generator> generator) {
-  // Unconditionally fall back.
-  // implementing normal_ via lazy tensor caused differences in results compared
-  // to eager.
-  return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::
-      call(self, mean, std, generator);
-
-  // if (force_eager_fallback(c10::Symbol::fromQualString("aten::normal_"))) {
-  //   return at::native::call_fallback_fn<&ltc_eager_fallback,
-  //   ATEN_OP(normal_)>::call(self, mean, std, generator);
-  // }
-
-  // if (generator.has_value()) {
-  //   return at::native::call_fallback_fn<&ltc_eager_fallback,
-  //   ATEN_OP(normal_)>::call(self, mean, std, generator);
-  // }
-
-  // TORCH_LAZY_FN_COUNTER("lazy::");
-  // auto device = bridge::GetBackendDevice(self);
-  // LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
-  // std::vector<torch::lazy::Shape> shapes =
-  // {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())}; auto node =
-  // torch::lazy::MakeNode<Normal>(lazy_self.GetIrValue(), mean, std,
-  // std::move(shapes)); lazy_self.SetInPlaceIrValue(node); return self;
-};
-
 at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   return LazyNativeFunctions::view_copy_symint(
-      self, c10::fromIntArrayRef(size));
+      self, c10::fromIntArrayRefSlow(size));
 }
 
 // This is needed by the torch.tensor constructor.
@@ -442,7 +411,7 @@ at::Tensor LazyNativeFunctions::new_empty_strided_symint(
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   return at::functionalization::
-      functionalize_aten_op<ATEN_OP(new_empty_strided)>::call(
+      functionalize_aten_op_symint<ATEN_OP(new_empty_strided)>::call(
           self, size, stride, dtype, layout, device, pin_memory);
 }
 
@@ -451,7 +420,7 @@ at::Tensor LazyNativeFunctions::narrow_copy_symint(
     int64_t dim,
     c10::SymInt start,
     c10::SymInt length) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       narrow_copy)>::call(self, dim, start, length);
 }
 at::Tensor LazyNativeFunctions::pixel_shuffle(
@@ -466,12 +435,12 @@ at::Tensor LazyNativeFunctions::pixel_unshuffle(
   return at::functionalization::functionalize_aten_op<ATEN_OP(
       pixel_unshuffle)>::call(self, downscale_factor);
 }
-at::Tensor LazyNativeFunctions::select_backward(
+at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    c10::SymIntArrayRef input_sizes,
     int64_t dim,
-    int64_t index) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
+    c10::SymInt index) {
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       select_backward)>::call(grad_output, input_sizes, dim, index);
 }
 at::Tensor LazyNativeFunctions::_trilinear(
@@ -522,24 +491,33 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
-at::Tensor LazyNativeFunctions::diagonal_backward(
-    const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+at::Tensor LazyNativeFunctions::diag_embed(
+    const at::Tensor& self,
     int64_t offset,
     int64_t dim1,
     int64_t dim2) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diag_embed)>::call(self, offset, dim1, dim2);
+}
+
+at::Tensor LazyNativeFunctions::diagonal_backward_symint(
+    const at::Tensor& grad_output,
+    at::SymIntArrayRef input_sizes,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       diagonal_backward)>::call(grad_output, input_sizes, offset, dim1, dim2);
 }
 
-at::Tensor LazyNativeFunctions::slice_backward(
+at::Tensor LazyNativeFunctions::slice_backward_symint(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    at::SymIntArrayRef input_sizes,
     int64_t dim,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
+    c10::SymInt start,
+    c10::SymInt end,
+    c10::SymInt step) {
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
 }
 
@@ -557,8 +535,6 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
   return at::native::math_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }
-
-void InitializeAtenBindings() {}
 
 } // namespace lazy
 } // namespace torch

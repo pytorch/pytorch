@@ -77,11 +77,11 @@ Tensor Adagrad::step(LossClosure closure) {
       }
       auto grad = p.grad();
       TORCH_INTERNAL_ASSERT(
-          state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != nullptr,
+          state_[p.unsafeGetTensorImpl()] != nullptr,
           "state found NULL for the Tensor ",
           p);
-      auto& state = static_cast<AdagradParamState&>(
-          *state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto& state =
+          static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);
@@ -147,8 +147,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
       state->sum(sum_buffers[idx]);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] =
-          std::move(state);
+      state_[params[idx].unsafeGetTensorImpl()] = std::move(state);
     }
   }
 }

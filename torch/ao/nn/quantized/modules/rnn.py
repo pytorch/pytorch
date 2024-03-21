@@ -1,5 +1,9 @@
 import torch
 
+__all__ = [
+    "LSTM",
+]
+
 class LSTM(torch.ao.nn.quantizable.LSTM):
     r"""A quantized long short-term memory (LSTM).
 
@@ -10,7 +14,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     .. note::
         To access the weights and biases, you need to access them per layer.
-        See examples in :class:`~torch.nn.quantizable.LSTM`
+        See examples in :class:`~torch.ao.nn.quantizable.LSTM`
 
     Examples::
         >>> # xdoctest: +SKIP
@@ -25,7 +29,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
         >>> tq.prepare(model, prepare_custom_module_class=custom_module_config)
         >>> tq.convert(model, convert_custom_module_class=custom_module_config)
     """
-    _FLOAT_MODULE = torch.nn.quantizable.LSTM  # type: ignore[assignment]
+    _FLOAT_MODULE = torch.ao.nn.quantizable.LSTM  # type: ignore[assignment]
 
     def _get_name(self):
         return 'QuantizedLSTM'
@@ -40,7 +44,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     @classmethod
     def from_observed(cls, other):
-        assert type(other) == cls._FLOAT_MODULE
+        assert type(other) == cls._FLOAT_MODULE  # type: ignore[has-type]
         converted = torch.ao.quantization.convert(other, inplace=False,
                                                   remove_qconfig=True)
         converted.__class__ = cls

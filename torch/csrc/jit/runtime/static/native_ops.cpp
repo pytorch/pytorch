@@ -7,10 +7,12 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -20,8 +22,7 @@ namespace {
 constexpr auto createBorrowedIValue =
     c10::MaybeOwnedTraits<c10::IValue>::createBorrow;
 } // namespace
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -126,7 +127,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         return nullptr;
       }
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
+        DCHECK(
+            static_cast<size_t>(p_node->num_inputs() - 1) ==
+            p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
         const auto num_inputs = p_node->num_inputs();
         for (size_t i = 1; i < num_inputs; ++i) {
@@ -313,33 +316,17 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::index_put, aten_index_put, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
+          "aten::index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor")) ||
+      n->matches(torch::schema(
           "aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto& indices = p_node->Input(1).toOptionalTensorList();
+      const auto& indices =
+          at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
       const auto& values = p_node->Input(2).toTensor();
       const auto accumulate = p_node->Input(3).toBool();
       p_node->Output(0) =
           at::native::index_put(self, indices, values, accumulate);
-    };
-  }
-
-  if (n->matches(torch::schema(
-          "aten::index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto indices = p_node->Input(1).toTensorList();
-
-      c10::List<c10::optional<at::Tensor>> opt_list_indices;
-      opt_list_indices.reserve(indices.size());
-      for (const auto& ten : indices) {
-        opt_list_indices.push_back(ten);
-      }
-
-      const auto& values = p_node->Input(2).toTensor();
-      const auto accumulate = p_node->Input(3).toBool();
-      p_node->Output(0) =
-          at::native::index_put(self, opt_list_indices, values, accumulate);
     };
   }
 
@@ -885,9 +872,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node*
           "aten::tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
     return [](ProcessedNode* pnode) {
       const auto& a = pnode->Input(0).toTensor();
-      const auto b = pnode->Input(1).toInt();
+      const auto b = pnode->Input(1).toSymInt();
       const auto c = pnode->Input(2).toInt();
-      pnode->Output(0) = at::native::tensor_split(a, b, c);
+      pnode->Output(0) = at::native::tensor_split_sections_symint(a, b, c);
     };
   }
 
@@ -991,7 +978,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
-            if (!output.isTuple()) {
+            // If we are returning a tuple, we are either returning
+            // multiple unpacked values or all of the values wrapped
+            // in a single tuple. The second condition handles the
+            // the latter case.
+            if (!output.isTuple() || p_node->num_outputs() == 1) {
               p_node->Output(0) = std::move(output);
               return;
             }
@@ -1097,7 +1088,7 @@ class TORCH_API ForkedSubgraphSRLauncher {
 /*
   helper function to create a future on return type
   of the graph outputs. This function is utilized by
-  prim::fork and aten::wait oprations for async
+  prim::fork and aten::wait operations for async
   execution of subgraphs
 */
 c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
@@ -1260,7 +1251,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* pnode) {
         const auto& elems = pnode->Input(0).toTupleRef().elements();
-        const auto num_elems = elems.size();
+        using c10::ssize;
+        const auto num_elems = ssize(elems);
         const auto idx = pnode->Input(1).toInt();
         const auto norm_idx = normalizeIndex(idx, num_elems);
         if (norm_idx < 0 || norm_idx >= num_elems) {
@@ -1304,7 +1296,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (!sr_schema_check(n, "aten::format(str self, ...) -> str")) {
         return nullptr;
       }
-      TORCH_CHECK(n->inputs().size() > 0);
+      TORCH_CHECK(!n->inputs().empty());
       return [](ProcessedNode* pnode) {
         const auto num_inputs = pnode->num_inputs();
         auto stack = boxInputs(*pnode);
@@ -1496,7 +1488,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& tensor = pnode->Input(0).toTensor();
         // JIT does a check for requires_grad, but we skip it here since SR is
         // inference only
-        if (tensor.sizes().size() != 0) {
+        if (!tensor.sizes().empty()) {
           throw std::runtime_error(
               "Cannot convert a tensor of dimension > 0 to scalar");
         }
@@ -1543,5 +1535,4 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

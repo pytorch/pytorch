@@ -8,7 +8,6 @@
 
 
 import collections
-from future.utils import viewitems
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
 from caffe2.python import attention, core, rnn_cell, brew
@@ -38,7 +37,7 @@ def gen_vocab(corpus, unk_threshold):
             tokens = sentence.strip().split()
             for token in tokens:
                 freqs[token] += 1
-    for token, freq in viewitems(freqs):
+    for token, freq in freqs.items():
         if freq > unk_threshold:
             vocab[token]
 
@@ -317,7 +316,7 @@ def build_embedding_encoder(
     )
 
 
-class LSTMWithAttentionDecoder(object):
+class LSTMWithAttentionDecoder:
 
     def scope(self, name):
         return self.name + '/' + name if self.name is not None else name

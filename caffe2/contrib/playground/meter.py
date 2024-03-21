@@ -6,7 +6,7 @@
 from abc import abstractmethod
 
 
-class Meter(object):
+class Meter:
 
     @abstractmethod
     def __init__(self, **kwargs):

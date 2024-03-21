@@ -17,24 +17,18 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <queue>
-#include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 struct ReadyQueue;
 }
-} // namespace torch
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // Maximum reentrant backward depth before switching to a new thread
 // This limit is based on the TSAN's deadlock detector, where it will
@@ -45,7 +39,7 @@ namespace autograd {
 static constexpr int MAX_DEPTH = 60;
 
 void set_device(int device);
-void validate_outputs(
+TORCH_API void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
@@ -64,12 +58,11 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
-      : base_(base),
+      : base_(std::move(base)),
         fn_(std::move(fn)),
         inputs_(std::move(inputs)),
         isShutdownTask_(isShutdownTask) {}
@@ -135,6 +128,16 @@ struct TORCH_API Engine {
   static Engine& get_default_engine();
 
   static Engine& get_base_engine();
+
+  // compiled_autograd needs to live in a different .so file so that it
+  // can have python symbols, so we add a layer of indirection
+  // see [Note: Compiled Autograd]
+  typedef variable_list (*compiled_autograd_fn)(
+      const std::shared_ptr<Node>& graph_root,
+      GraphTask& graph_task,
+      bool accumulate_grad,
+      const edge_list& outputs);
+  static void set_compiled_autograd(compiled_autograd_fn fn);
 
   Engine(const Engine&) = delete;
   Engine(Engine&&) = delete;
@@ -245,7 +248,7 @@ struct TORCH_API Engine {
     // Data structures used by the threads for executing reentrant backwards
     // tasks. See Note [Reentrant backwards]
     // Number of available threads for processing new GraphTasks.
-    unsigned int num_workers_;
+    unsigned int num_workers_{0};
     // The threads will wait on work_ to be notified of GraphTasks
     std::condition_variable work_;
     // To protect reads and writes to graphtask_queue_ and num_workers_
@@ -255,8 +258,7 @@ struct TORCH_API Engine {
     // allocated inside Engine::execute and lives for the duration of execute
     std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    ThreadPoolShared() : num_workers_(0) {}
+    ThreadPoolShared() = default;
   };
 
   // Temporary workaround until shutting down threads is done
@@ -283,5 +285,4 @@ struct TORCH_API Engine {
 using EngineStub = Engine& (*)();
 TORCH_API void set_default_engine_stub(EngineStub stub);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

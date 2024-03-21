@@ -226,7 +226,7 @@ const auto lcm_string = jiterator_stringify(
 ); // lcm_string
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
 const auto digamma_string = jiterator_stringify(
@@ -428,8 +428,22 @@ const auto polygamma_string = zeta_string + jiterator_stringify(
 
 const auto exp2_string = jiterator_stringify(
   template <typename T>
-  T exp2_kernel(T a) {
+  T exp2_impl(T a) {
     return exp2(a);
+  }
+
+  namespace std { template <typename _Ty> class complex; }
+  template <typename T>
+  std::complex<T> exp2_impl(std::complex<T> x) {
+    // There is no std::exp2 overload for complex, so instead
+    // use the identity 2^x = e^(ln(2) * x)
+    const auto ln_2 = static_cast<T>(0.693147180559945309417232121458176);
+    return exp(ln_2 * x);
+  }
+
+  template <typename T>
+  T exp2_kernel(T a) {
+    return exp2_impl(a);
   }
 ); // exp2_string
 
@@ -2136,7 +2150,7 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 
         T p = T(1.0);
         T q = x + x;
-        T r;
+        T r = T(0.0);
 
         for (int64_t k = 2; k < n + n; k += 2) {
             r = (x + x) * q - k * p;
@@ -3024,7 +3038,7 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
 }
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
@@ -3113,7 +3127,7 @@ static inline C10_HOST_DEVICE scalar_t calc_trigamma(scalar_t in) {
 }
 
 /*
- * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information and documentation, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t
@@ -3135,7 +3149,7 @@ chbevl(scalar_t _x, const scalar_t array[], size_t len) {
 }
 
 /*
- * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information and documentation, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename T>
 C10_HOST_DEVICE inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {

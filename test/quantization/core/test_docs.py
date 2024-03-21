@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-# import torch.nn.quantized as nnq
+# import torch.ao.nn.quantized as nnq
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
@@ -25,7 +25,7 @@ class TestQuantizationDocs(QuantizationTestCase):
 
     def run(self, result=None):
         with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
-            super(TestQuantizationDocs, self).run(result)
+            super().run(result)
 
     def _get_code(
         self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False
@@ -55,16 +55,14 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         path_to_file = get_correct_path(path_from_pytorch)
         if path_to_file:
-            file = open(path_to_file)
-            content = file.readlines()
+            with open(path_to_file) as file:
+                content = file.readlines()
 
             # it will register as having a newline at the end in python
             if "\n" not in unique_identifier:
                 unique_identifier += "\n"
 
-            assert unique_identifier in content, "could not find {} in {}".format(
-                unique_identifier, path_to_file
-            )
+            assert unique_identifier in content, f"could not find {unique_identifier} in {path_to_file}"
 
             # get index of first line of code
             line_num_start = content.index(unique_identifier) + 1
@@ -84,10 +82,8 @@ class TestQuantizationDocs(QuantizationTestCase):
 
             # want to make sure we are actually getting some code,
             assert last_line_num - line_num_start > 3 or short_snippet, (
-                "The code in {} identified by {} seems suspiciously short:"
-                "\n\n###code-start####\n{}###code-end####".format(
-                    path_to_file, unique_identifier, code
-                )
+                f"The code in {path_to_file} identified by {unique_identifier} seems suspiciously short:"
+                f"\n\n###code-start####\n{code}###code-end####"
             )
             return code
 
@@ -140,7 +136,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "Custom API Example::"
 
-        global_inputs = {"nnq": torch.nn.quantized}
+        global_inputs = {"nnq": torch.ao.nn.quantized}
 
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)

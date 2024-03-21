@@ -50,7 +50,7 @@ blob as the input blob.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/clip_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/clip_op.cc
 
 <details>
 

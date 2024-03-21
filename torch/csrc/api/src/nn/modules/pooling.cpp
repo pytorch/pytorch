@@ -272,9 +272,8 @@ template class MaxUnpoolImpl<3, MaxUnpool3dImpl>;
 // ============================================================================
 
 FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(
-    const FractionalMaxPool2dOptions&
-        options_) // NOLINT(modernize-pass-by-value)
-    : options(options_) {
+    FractionalMaxPool2dOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -332,9 +331,8 @@ void FractionalMaxPool2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(
-    const FractionalMaxPool3dOptions&
-        options_) // NOLINT(modernize-pass-by-value)
-    : options(options_) {
+    FractionalMaxPool3dOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -430,6 +428,17 @@ Tensor LPPool2dImpl::forward(const Tensor& input) {
 }
 
 template class LPPoolImpl<2, LPPool2dImpl>;
+
+Tensor LPPool3dImpl::forward(const Tensor& input) {
+  return F::detail::lp_pool3d(
+      input,
+      options.norm_type(),
+      options.kernel_size(),
+      options.stride(),
+      options.ceil_mode());
+}
+
+template class LPPoolImpl<3, LPPool3dImpl>;
 
 } // namespace nn
 } // namespace torch

@@ -2,8 +2,10 @@
 // ${generated_comment}
 
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalInverses.h>
+#include <ATen/MemoryOverlap.h>
 #include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -33,11 +35,26 @@ constexpr auto exclude_keys_for_meta_dispatch =
     c10::DispatchKeySet({
         c10::DispatchKey::FuncTorchDynamicLayerBackMode,
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
-        c10::DispatchKey::Python
+        c10::DispatchKey::Python,
+        c10::DispatchKey::PreDispatch,
+
     });
+
+// Helper around at::has_internal_overlap.
+// The ATen util is used in hot-path eager mode: it's always fast,
+// but might return TOO_HARD sometimes.
+// During functionalization, we're ok taking a bit longer
+// to detect memory overlap.
+inline bool has_internal_overlap_helper(const at::Tensor t) {
+  auto has_overlap = at::has_internal_overlap(t);
+  if (has_overlap == at::MemOverlap::Yes) return true;
+  if (has_overlap == at::MemOverlap::No) return false;
+  return false;
+}
 
 
 inline Tensor to_meta(const Tensor& t) {
+    if (!t.defined()) return t;
     return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
@@ -50,10 +67,11 @@ inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
   return c10::nullopt;
 }
 
-inline std::vector<Tensor> to_meta(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_meta(t_list[i]);
+inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto& tensor : t_list) {
+    outputs.push_back(to_meta(tensor));
   }
   return outputs;
 }

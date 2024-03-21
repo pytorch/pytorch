@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 STAT_EVENT = "torch.monitor.Stat"
 
+
 class TensorboardEventHandler:
     """
     TensorboardEventHandler is an event handler that will write known events to
@@ -16,11 +17,13 @@ class TensorboardEventHandler:
     This currently only supports ``torch.monitor.Stat`` events which are logged
     as scalars.
 
-    >>> # xdoctest: +REQUIRES(module:tensorboard)
-    >>> from torch.utils.tensorboard import SummaryWriter
-    >>> from torch.monitor import TensorboardEventHandler, register_event_handler
-    >>> writer = SummaryWriter("log_dir")
-    >>> register_event_handler(TensorboardEventHandler(writer))
+    Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_MONITOR)
+        >>> # xdoctest: +REQUIRES(module:tensorboard)
+        >>> from torch.utils.tensorboard import SummaryWriter
+        >>> from torch.monitor import TensorboardEventHandler, register_event_handler
+        >>> writer = SummaryWriter("log_dir")
+        >>> register_event_handler(TensorboardEventHandler(writer))
     """
     def __init__(self, writer: "SummaryWriter") -> None:
         """

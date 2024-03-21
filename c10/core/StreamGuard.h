@@ -1,6 +1,11 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 
@@ -85,7 +90,7 @@ struct StreamGuard {
  */
 struct OptionalStreamGuard {
   /// Create an uninitialized guard.
-  explicit OptionalStreamGuard() : guard_() {}
+  explicit OptionalStreamGuard() = default;
 
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream.
@@ -136,7 +141,7 @@ struct OptionalStreamGuard {
   }
 
  private:
-  c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_;
+  c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_{};
 };
 
 /**

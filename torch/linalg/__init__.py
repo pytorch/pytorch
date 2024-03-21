@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -87,7 +86,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.cholesky_ex")}
 """ + r"""
 
 .. seealso::
@@ -223,7 +222,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.inv_ex")}
 """ + r"""
 
 .. note::
@@ -232,7 +231,7 @@ then the output has the same batch dimensions.
 
         linalg.solve(A, B) == linalg.inv(A) @ B  # When B is a matrix
 
-    It is always prefered to use :func:`~solve` when possible, as it is faster and more
+    It is always preferred to use :func:`~solve` when possible, as it is faster and more
     numerically stable than computing the inverse explicitly.
 
 .. seealso::
@@ -371,8 +370,8 @@ the output has the same batch dimensions.
 
 .. seealso::
 
-        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
-        absolute value of the determinant of real-valued (resp. complex) square matrices.
+        :func:`torch.linalg.slogdet` computes the sign and natural logarithm of the absolute
+        value of the determinant of square matrices.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -396,7 +395,7 @@ linalg.slogdet(A, *, out=None) -> (Tensor, Tensor)
 
 Computes the sign and natural logarithm of the absolute value of the determinant of a square matrix.
 
-For complex :attr:`A`, it returns the angle and the natural logarithm of the modulus of the
+For complex :attr:`A`, it returns the sign and the natural logarithm of the modulus of the
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
 The determinant can be recovered as `sign * exp(logabsdet)`.
@@ -477,9 +476,6 @@ the output has the same batch dimensions.
              by :math:`e^{i \phi}, \phi \in \mathbb{R}` produces another set of valid eigenvectors
              of the matrix.  For this reason, the loss function shall not depend on the phase of the
              eigenvectors, as this quantity is not well-defined.
-             This is checked when computing the gradients of this function. As such,
-             when inputs are on a CUDA device, this function synchronizes that device with the CPU
-             when computing the gradients.
              This is checked when computing the gradients of this function. As such,
              when inputs are on a CUDA device, the computation of the gradients
              of this function synchronizes that device with the CPU.
@@ -582,7 +578,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
-    A complex-valued tensor cointaining the eigenvalues even when :attr:`A` is real.
+    A complex-valued tensor containing the eigenvalues even when :attr:`A` is real.
 
 Examples::
 
@@ -647,6 +643,13 @@ The eigenvalues are returned in ascending order.
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
              :math:`\frac{1}{\min_{i \neq j} \lambda_i - \lambda_j}`.
+
+.. warning:: User may see pytorch crashes if running `eigh` on CUDA devices with CUDA versions before 12.1 update 1
+             with large ill-conditioned matrices as inputs.
+             Refer to :ref:`Linear Algebra Numerical Stability<Linear Algebra Stability>` for more details.
+             If this is the case, user may (1) tune their matrix inputs to be less ill-conditioned,
+             or (2) use :func:`torch.backends.cuda.preferred_linalg_library` to
+             try other supported backends.
 
 .. seealso::
 
@@ -751,7 +754,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
-    A real-valued tensor cointaining the eigenvalues even when :attr:`A` is complex.
+    A real-valued tensor containing the eigenvalues even when :attr:`A` is complex.
     The eigenvalues are returned in ascending order.
 
 Examples::
@@ -780,7 +783,7 @@ Computes the first `n` columns of a product of Householder matrices.
 Let :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, and
 let :math:`V \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`v_i \in \mathbb{K}^m`
 for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`w_i` the vector resulting from
-zeroing out the first :math:`i-1` compontents of :math:`v_i` and setting to `1` the :math:`i`-th.
+zeroing out the first :math:`i-1` components of :math:`v_i` and setting to `1` the :math:`i`-th.
 For a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`, this function computes the
 first :math:`n` columns of the matrix
 
@@ -871,8 +874,8 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -920,8 +923,8 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a `Runtim
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -963,7 +966,7 @@ Computes the solution of a system of linear equations using the LDL factorizatio
 :attr:`LD` and :attr:`pivots` are the compact representation of the LDL factorization and
 are expected to be computed by :func:`torch.linalg.ldl_factor_ex`.
 :attr:`hermitian` argument to this function should be the same
-as the corresponding argumens in :func:`torch.linalg.ldl_factor_ex`.
+as the corresponding arguments in :func:`torch.linalg.ldl_factor_ex`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -1015,9 +1018,8 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
 
-:attr:`driver` chooses the LAPACK/MAGMA function that will be used.
+:attr:`driver` chooses the backend function that will be used.
 For CPU inputs the valid values are `'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`.
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
 To choose the best driver on CPU consider:
 
 - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
@@ -1030,6 +1032,8 @@ To choose the best driver on CPU consider:
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
 
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
+
 See also the `full description of these drivers`_
 
 :attr:`rcond` is used to determine the effective rank of the matrices in :attr:`A`
@@ -1040,7 +1044,7 @@ If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precis
 
 This function returns the solution to the problem and some extra information in a named tuple of
 four tensors `(solution, residuals, rank, singular_values)`. For inputs :attr:`A`, :attr:`B`
-of shape `(*, m, n)`, `(*, m, k)` respectively, it cointains
+of shape `(*, m, n)`, `(*, m, k)` respectively, it contains
 
 - `solution`: the least squares solution. It has shape `(*, n, k)`.
 - `residuals`: the squared residuals of the solutions, that is, :math:`\|AX - B\|_F^2`.
@@ -1084,16 +1088,26 @@ Returns:
 
 Examples::
 
-    >>> A = torch.tensor([[[10, 2, 3], [3, 10, 5], [5, 6, 12]]], dtype=torch.float) # shape (1, 3, 3)
-    >>> B = torch.tensor([[[2, 5, 1], [3, 2, 1], [5, 1, 9]],
-                          [[4, 2, 9], [2, 0, 3], [2, 5, 3]]], dtype=torch.float) # shape (2, 3, 3)
+    >>> A = torch.randn(1,3,3)
+    >>> A
+    tensor([[[-1.0838,  0.0225,  0.2275],
+         [ 0.2438,  0.3844,  0.5499],
+         [ 0.1175, -0.9102,  2.0870]]])
+    >>> B = torch.randn(2,3,3)
+    >>> B
+    tensor([[[-0.6772,  0.7758,  0.5109],
+         [-1.4382,  1.3769,  1.1818],
+         [-0.3450,  0.0806,  0.3967]],
+        [[-1.3994, -0.1521, -0.1473],
+         [ 1.9194,  1.0458,  0.6705],
+         [-1.1802, -0.9796,  1.4086]]])
     >>> X = torch.linalg.lstsq(A, B).solution # A is broadcasted to shape (2, 3, 3)
     >>> torch.dist(X, torch.linalg.pinv(A) @ B)
-    tensor(2.0862e-07)
+    tensor(1.5152e-06)
 
     >>> S = torch.linalg.lstsq(A, B, driver='gelsd').singular_values
     >>> torch.dist(S, torch.linalg.svdvals(A))
-    tensor(5.7220e-06)
+    tensor(2.3842e-07)
 
     >>> A[:, 0].zero_()  # Decrease the rank of A
     >>> rank = torch.linalg.lstsq(A, B).rank
@@ -1101,7 +1115,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """)
@@ -1123,9 +1137,9 @@ as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
     Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
     a negative power as, if :attr:`n`\ `> 0`::
 
-        matrix_power(torch.linalg.solve(A, B), n) == matrix_power(A, -n)  @ B
+        torch.linalg.solve(matrix_power(A, n), B) == matrix_power(A, -n)  @ B
 
-    It is always prefered to use :func:`~solve` when possible, as it is faster and more
+    It is always preferred to use :func:`~solve` when possible, as it is faster and more
     numerically stable than computing :math:`A^{-n}` explicitly.
 
 .. seealso::
@@ -1391,7 +1405,7 @@ If :attr:`x` is complex valued, it computes the norm of :attr:`x`\ `.abs()`
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-This function does not necessarily treat multidimensonal :attr:`x` as a batch of
+This function does not necessarily treat multidimensional :attr:`x` as a batch of
 vectors, instead:
 
 - If :attr:`dim`\ `= None`, :attr:`x` will be flattened before the norm is computed.
@@ -1759,7 +1773,7 @@ Examples::
     tensor(3.0957e-06)
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
@@ -1964,7 +1978,7 @@ of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
 
         torch.linalg.lstsq(A, B).solution == A.pinv() @ B
 
-    It is always prefered to use :func:`~lstsq` when possible, as it is faster and more
+    It is always preferred to use :func:`~lstsq` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
 
 .. note::
@@ -2037,10 +2051,10 @@ Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the **matrix exponential** of :math:`A \in \mathbb{K}^{n \times n}`, which is defined as
 
 .. math::
-    \mathrm{matrix_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
+    \mathrm{matrix\_exp}(A) = \sum_{k=0}^\infty \frac{1}{k!}A^k \in \mathbb{K}^{n \times n}.
 
 If the matrix :math:`A` has eigenvalues :math:`\lambda_i \in \mathbb{C}`,
-the matrix :math:`\mathrm{matrix_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
+the matrix :math:`\mathrm{matrix\_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
 
 Supports input of bfloat16, float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -2117,7 +2131,7 @@ Letting `*` be zero or more batch dimensions,
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
 
 .. seealso::
@@ -2228,7 +2242,7 @@ Keyword args:
 Examples::
 
     >>> A = torch.randn(3, 3).triu_()
-    >>> b = torch.randn(3, 4)
+    >>> B = torch.randn(3, 4)
     >>> X = torch.linalg.solve_triangular(A, B, upper=True)
     >>> torch.allclose(A @ X, B)
     True
@@ -2318,9 +2332,9 @@ Examples::
     >>> A = torch.randn(2, 3, 3)
     >>> B1 = torch.randn(2, 3, 4)
     >>> B2 = torch.randn(2, 3, 7)
-    >>> A_factor = torch.linalg.lu_factor(A)
-    >>> X1 = torch.linalg.lu_solve(A_factor, B1)
-    >>> X2 = torch.linalg.lu_solve(A_factor, B2)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> X1 = torch.linalg.lu_solve(LU, pivots, B1)
+    >>> X2 = torch.linalg.lu_solve(LU, pivots, B2)
     >>> torch.allclose(A @ X1, B1)
     True
     >>> torch.allclose(A @ X2, B2)
@@ -2378,7 +2392,7 @@ If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathb
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
-If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True), given an LU factorization of :math:`A`
+If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True`), given an LU factorization of :math:`A`
 this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
 
 .. math::
@@ -2546,7 +2560,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
         linalg.tensorsolve(A, B) == torch.tensordot(linalg.tensorinv(A), B)  # When B is a tensor with shape A.shape[:B.ndim]
 
-    It is always prefered to use :func:`~tensorsolve` when possible, as it is faster and more
+    It is always preferred to use :func:`~tensorsolve` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
 
 .. seealso::
@@ -2579,7 +2593,7 @@ Examples::
 
     >>> A = torch.randn(4, 4)
     >>> Atensorinv = torch.linalg.tensorinv(A, ind=1)
-    >>> Ainv = torch.linalg.inverse(A)
+    >>> Ainv = torch.linalg.inv(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
 """)

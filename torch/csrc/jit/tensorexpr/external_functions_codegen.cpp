@@ -4,18 +4,15 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 #ifdef C10_MOBILE
 extern "C" {
 #endif
 
-void nnc_aten_abs(
+static void nnc_aten_abs(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -33,7 +30,7 @@ void nnc_aten_abs(
   } catch (...) {
   }
 }
-void nnc_aten_absolute(
+static void nnc_aten_absolute(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -51,7 +48,7 @@ void nnc_aten_absolute(
   } catch (...) {
   }
 }
-void nnc_aten_angle(
+static void nnc_aten_angle(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -69,7 +66,7 @@ void nnc_aten_angle(
   } catch (...) {
   }
 }
-void nnc_aten_sgn(
+static void nnc_aten_sgn(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -87,7 +84,7 @@ void nnc_aten_sgn(
   } catch (...) {
   }
 }
-void nnc_aten_acos(
+static void nnc_aten_acos(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -105,7 +102,7 @@ void nnc_aten_acos(
   } catch (...) {
   }
 }
-void nnc_aten_arccos(
+static void nnc_aten_arccos(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -123,7 +120,7 @@ void nnc_aten_arccos(
   } catch (...) {
   }
 }
-void nnc_aten_acosh(
+static void nnc_aten_acosh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -141,7 +138,7 @@ void nnc_aten_acosh(
   } catch (...) {
   }
 }
-void nnc_aten_arccosh(
+static void nnc_aten_arccosh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -159,7 +156,7 @@ void nnc_aten_arccosh(
   } catch (...) {
   }
 }
-void nnc_aten_asinh(
+static void nnc_aten_asinh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -177,7 +174,7 @@ void nnc_aten_asinh(
   } catch (...) {
   }
 }
-void nnc_aten_arcsinh(
+static void nnc_aten_arcsinh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -195,7 +192,7 @@ void nnc_aten_arcsinh(
   } catch (...) {
   }
 }
-void nnc_aten_atanh(
+static void nnc_aten_atanh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -213,7 +210,7 @@ void nnc_aten_atanh(
   } catch (...) {
   }
 }
-void nnc_aten_arctanh(
+static void nnc_aten_arctanh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -231,7 +228,7 @@ void nnc_aten_arctanh(
   } catch (...) {
   }
 }
-void nnc_aten_asin(
+static void nnc_aten_asin(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -249,7 +246,7 @@ void nnc_aten_asin(
   } catch (...) {
   }
 }
-void nnc_aten_arcsin(
+static void nnc_aten_arcsin(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -267,7 +264,7 @@ void nnc_aten_arcsin(
   } catch (...) {
   }
 }
-void nnc_aten_atan(
+static void nnc_aten_atan(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -285,7 +282,7 @@ void nnc_aten_atan(
   } catch (...) {
   }
 }
-void nnc_aten_arctan(
+static void nnc_aten_arctan(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -303,7 +300,7 @@ void nnc_aten_arctan(
   } catch (...) {
   }
 }
-void nnc_aten_bitwise_not(
+static void nnc_aten_bitwise_not(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -321,7 +318,7 @@ void nnc_aten_bitwise_not(
   } catch (...) {
   }
 }
-void nnc_aten_copysign(
+static void nnc_aten_copysign(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -340,7 +337,7 @@ void nnc_aten_copysign(
   } catch (...) {
   }
 }
-void nnc_aten_logical_not(
+static void nnc_aten_logical_not(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -358,7 +355,7 @@ void nnc_aten_logical_not(
   } catch (...) {
   }
 }
-void nnc_aten_logical_xor(
+static void nnc_aten_logical_xor(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -377,7 +374,7 @@ void nnc_aten_logical_xor(
   } catch (...) {
   }
 }
-void nnc_aten_logical_and(
+static void nnc_aten_logical_and(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -396,7 +393,7 @@ void nnc_aten_logical_and(
   } catch (...) {
   }
 }
-void nnc_aten_logical_or(
+static void nnc_aten_logical_or(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -415,7 +412,7 @@ void nnc_aten_logical_or(
   } catch (...) {
   }
 }
-void nnc_aten_bmm(
+static void nnc_aten_bmm(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -434,7 +431,7 @@ void nnc_aten_bmm(
   } catch (...) {
   }
 }
-void nnc_aten_ceil(
+static void nnc_aten_ceil(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -452,7 +449,7 @@ void nnc_aten_ceil(
   } catch (...) {
   }
 }
-void nnc_aten_clamp_max(
+static void nnc_aten_clamp_max(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -471,7 +468,7 @@ void nnc_aten_clamp_max(
   } catch (...) {
   }
 }
-void nnc_aten_clamp_min(
+static void nnc_aten_clamp_min(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -490,7 +487,7 @@ void nnc_aten_clamp_min(
   } catch (...) {
   }
 }
-void nnc_aten_complex(
+static void nnc_aten_complex(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -509,7 +506,7 @@ void nnc_aten_complex(
   } catch (...) {
   }
 }
-void nnc_aten_polar(
+static void nnc_aten_polar(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -528,7 +525,7 @@ void nnc_aten_polar(
   } catch (...) {
   }
 }
-void nnc_aten_cos(
+static void nnc_aten_cos(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -546,7 +543,7 @@ void nnc_aten_cos(
   } catch (...) {
   }
 }
-void nnc_aten_cosh(
+static void nnc_aten_cosh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -564,7 +561,7 @@ void nnc_aten_cosh(
   } catch (...) {
   }
 }
-void nnc_aten_div(
+static void nnc_aten_div(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -583,7 +580,7 @@ void nnc_aten_div(
   } catch (...) {
   }
 }
-void nnc_aten_divide(
+static void nnc_aten_divide(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -602,7 +599,7 @@ void nnc_aten_divide(
   } catch (...) {
   }
 }
-void nnc_aten_true_divide(
+static void nnc_aten_true_divide(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -621,7 +618,7 @@ void nnc_aten_true_divide(
   } catch (...) {
   }
 }
-void nnc_aten_dot(
+static void nnc_aten_dot(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -640,7 +637,7 @@ void nnc_aten_dot(
   } catch (...) {
   }
 }
-void nnc_aten_vdot(
+static void nnc_aten_vdot(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -659,7 +656,7 @@ void nnc_aten_vdot(
   } catch (...) {
   }
 }
-void nnc_aten_erf(
+static void nnc_aten_erf(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -677,7 +674,7 @@ void nnc_aten_erf(
   } catch (...) {
   }
 }
-void nnc_aten_erfc(
+static void nnc_aten_erfc(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -695,7 +692,7 @@ void nnc_aten_erfc(
   } catch (...) {
   }
 }
-void nnc_aten_exp(
+static void nnc_aten_exp(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -713,7 +710,7 @@ void nnc_aten_exp(
   } catch (...) {
   }
 }
-void nnc_aten_exp2(
+static void nnc_aten_exp2(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -731,7 +728,7 @@ void nnc_aten_exp2(
   } catch (...) {
   }
 }
-void nnc_aten_expm1(
+static void nnc_aten_expm1(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -749,7 +746,7 @@ void nnc_aten_expm1(
   } catch (...) {
   }
 }
-void nnc_aten_floor(
+static void nnc_aten_floor(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -767,7 +764,7 @@ void nnc_aten_floor(
   } catch (...) {
   }
 }
-void nnc_aten_floor_divide(
+static void nnc_aten_floor_divide(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -786,7 +783,7 @@ void nnc_aten_floor_divide(
   } catch (...) {
   }
 }
-void nnc_aten_frac(
+static void nnc_aten_frac(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -804,7 +801,7 @@ void nnc_aten_frac(
   } catch (...) {
   }
 }
-void nnc_aten_gcd(
+static void nnc_aten_gcd(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -823,7 +820,7 @@ void nnc_aten_gcd(
   } catch (...) {
   }
 }
-void nnc_aten_lcm(
+static void nnc_aten_lcm(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -842,7 +839,7 @@ void nnc_aten_lcm(
   } catch (...) {
   }
 }
-void nnc_aten_inverse(
+static void nnc_aten_inverse(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -860,7 +857,7 @@ void nnc_aten_inverse(
   } catch (...) {
   }
 }
-void nnc_aten_kron(
+static void nnc_aten_kron(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -879,7 +876,7 @@ void nnc_aten_kron(
   } catch (...) {
   }
 }
-void nnc_aten_ldexp(
+static void nnc_aten_ldexp(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -898,7 +895,7 @@ void nnc_aten_ldexp(
   } catch (...) {
   }
 }
-void nnc_aten_log(
+static void nnc_aten_log(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -916,7 +913,7 @@ void nnc_aten_log(
   } catch (...) {
   }
 }
-void nnc_aten_log10(
+static void nnc_aten_log10(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -934,7 +931,7 @@ void nnc_aten_log10(
   } catch (...) {
   }
 }
-void nnc_aten_log1p(
+static void nnc_aten_log1p(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -952,7 +949,7 @@ void nnc_aten_log1p(
   } catch (...) {
   }
 }
-void nnc_aten_log2(
+static void nnc_aten_log2(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -970,7 +967,7 @@ void nnc_aten_log2(
   } catch (...) {
   }
 }
-void nnc_aten_logaddexp(
+static void nnc_aten_logaddexp(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -989,7 +986,7 @@ void nnc_aten_logaddexp(
   } catch (...) {
   }
 }
-void nnc_aten_logaddexp2(
+static void nnc_aten_logaddexp2(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1008,7 +1005,7 @@ void nnc_aten_logaddexp2(
   } catch (...) {
   }
 }
-void nnc_aten_xlogy(
+static void nnc_aten_xlogy(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1046,7 +1043,7 @@ void nnc_aten_matmul(
   } catch (...) {
   }
 }
-void nnc_aten__compute_linear_combination(
+static void nnc_aten__compute_linear_combination(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1084,7 +1081,7 @@ void nnc_aten_mm(
   } catch (...) {
   }
 }
-void nnc_aten_mul(
+static void nnc_aten_mul(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1103,7 +1100,7 @@ void nnc_aten_mul(
   } catch (...) {
   }
 }
-void nnc_aten_multiply(
+static void nnc_aten_multiply(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1141,7 +1138,7 @@ void nnc_aten_mv(
   } catch (...) {
   }
 }
-void nnc_aten_rad2deg(
+static void nnc_aten_rad2deg(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1159,7 +1156,7 @@ void nnc_aten_rad2deg(
   } catch (...) {
   }
 }
-void nnc_aten_deg2rad(
+static void nnc_aten_deg2rad(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1177,7 +1174,7 @@ void nnc_aten_deg2rad(
   } catch (...) {
   }
 }
-void nnc_aten_reciprocal(
+static void nnc_aten_reciprocal(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1195,7 +1192,7 @@ void nnc_aten_reciprocal(
   } catch (...) {
   }
 }
-void nnc_aten_neg(
+static void nnc_aten_neg(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1213,7 +1210,7 @@ void nnc_aten_neg(
   } catch (...) {
   }
 }
-void nnc_aten_negative(
+static void nnc_aten_negative(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1231,7 +1228,7 @@ void nnc_aten_negative(
   } catch (...) {
   }
 }
-void nnc_aten_round(
+static void nnc_aten_round(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1249,7 +1246,7 @@ void nnc_aten_round(
   } catch (...) {
   }
 }
-void nnc_aten_rsqrt(
+static void nnc_aten_rsqrt(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1267,7 +1264,7 @@ void nnc_aten_rsqrt(
   } catch (...) {
   }
 }
-void nnc_aten_silu(
+static void nnc_aten_silu(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1285,7 +1282,7 @@ void nnc_aten_silu(
   } catch (...) {
   }
 }
-void nnc_aten_mish(
+static void nnc_aten_mish(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1303,7 +1300,7 @@ void nnc_aten_mish(
   } catch (...) {
   }
 }
-void nnc_aten_sigmoid(
+static void nnc_aten_sigmoid(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1321,7 +1318,7 @@ void nnc_aten_sigmoid(
   } catch (...) {
   }
 }
-void nnc_aten_sin(
+static void nnc_aten_sin(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1339,7 +1336,7 @@ void nnc_aten_sin(
   } catch (...) {
   }
 }
-void nnc_aten_sinc(
+static void nnc_aten_sinc(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1357,7 +1354,7 @@ void nnc_aten_sinc(
   } catch (...) {
   }
 }
-void nnc_aten_sinh(
+static void nnc_aten_sinh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1375,7 +1372,7 @@ void nnc_aten_sinh(
   } catch (...) {
   }
 }
-void nnc_aten_sqrt(
+static void nnc_aten_sqrt(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1393,7 +1390,7 @@ void nnc_aten_sqrt(
   } catch (...) {
   }
 }
-void nnc_aten_square(
+static void nnc_aten_square(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1411,7 +1408,7 @@ void nnc_aten_square(
   } catch (...) {
   }
 }
-void nnc_aten_tan(
+static void nnc_aten_tan(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1429,7 +1426,7 @@ void nnc_aten_tan(
   } catch (...) {
   }
 }
-void nnc_aten_tanh(
+static void nnc_aten_tanh(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1447,7 +1444,7 @@ void nnc_aten_tanh(
   } catch (...) {
   }
 }
-void nnc_aten_trunc(
+static void nnc_aten_trunc(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1465,7 +1462,7 @@ void nnc_aten_trunc(
   } catch (...) {
   }
 }
-void nnc_aten_fix(
+static void nnc_aten_fix(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1483,7 +1480,7 @@ void nnc_aten_fix(
   } catch (...) {
   }
 }
-void nnc_aten_heaviside(
+static void nnc_aten_heaviside(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1502,7 +1499,7 @@ void nnc_aten_heaviside(
   } catch (...) {
   }
 }
-void nnc_aten_hspmm(
+static void nnc_aten_hspmm(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1521,7 +1518,7 @@ void nnc_aten_hspmm(
   } catch (...) {
   }
 }
-void nnc_aten_bitwise_and(
+static void nnc_aten_bitwise_and(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1540,7 +1537,7 @@ void nnc_aten_bitwise_and(
   } catch (...) {
   }
 }
-void nnc_aten_bitwise_or(
+static void nnc_aten_bitwise_or(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1559,7 +1556,7 @@ void nnc_aten_bitwise_or(
   } catch (...) {
   }
 }
-void nnc_aten_bitwise_xor(
+static void nnc_aten_bitwise_xor(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1578,7 +1575,7 @@ void nnc_aten_bitwise_xor(
   } catch (...) {
   }
 }
-void nnc_aten_ne(
+static void nnc_aten_ne(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1597,7 +1594,7 @@ void nnc_aten_ne(
   } catch (...) {
   }
 }
-void nnc_aten_not_equal(
+static void nnc_aten_not_equal(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1616,7 +1613,7 @@ void nnc_aten_not_equal(
   } catch (...) {
   }
 }
-void nnc_aten_eq(
+static void nnc_aten_eq(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1635,7 +1632,7 @@ void nnc_aten_eq(
   } catch (...) {
   }
 }
-void nnc_aten_ge(
+static void nnc_aten_ge(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1654,7 +1651,7 @@ void nnc_aten_ge(
   } catch (...) {
   }
 }
-void nnc_aten_greater_equal(
+static void nnc_aten_greater_equal(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1673,7 +1670,7 @@ void nnc_aten_greater_equal(
   } catch (...) {
   }
 }
-void nnc_aten_le(
+static void nnc_aten_le(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1692,7 +1689,7 @@ void nnc_aten_le(
   } catch (...) {
   }
 }
-void nnc_aten_less_equal(
+static void nnc_aten_less_equal(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1711,7 +1708,7 @@ void nnc_aten_less_equal(
   } catch (...) {
   }
 }
-void nnc_aten_gt(
+static void nnc_aten_gt(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1730,7 +1727,7 @@ void nnc_aten_gt(
   } catch (...) {
   }
 }
-void nnc_aten_greater(
+static void nnc_aten_greater(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1749,7 +1746,7 @@ void nnc_aten_greater(
   } catch (...) {
   }
 }
-void nnc_aten_lt(
+static void nnc_aten_lt(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1768,7 +1765,7 @@ void nnc_aten_lt(
   } catch (...) {
   }
 }
-void nnc_aten_less(
+static void nnc_aten_less(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1787,7 +1784,7 @@ void nnc_aten_less(
   } catch (...) {
   }
 }
-void nnc_aten_take(
+static void nnc_aten_take(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1806,7 +1803,7 @@ void nnc_aten_take(
   } catch (...) {
   }
 }
-void nnc_aten_masked_select(
+static void nnc_aten_masked_select(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1825,7 +1822,7 @@ void nnc_aten_masked_select(
   } catch (...) {
   }
 }
-void nnc_aten_nonzero(
+static void nnc_aten_nonzero(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1843,7 +1840,7 @@ void nnc_aten_nonzero(
   } catch (...) {
   }
 }
-void nnc_aten_orgqr(
+static void nnc_aten_orgqr(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1862,7 +1859,7 @@ void nnc_aten_orgqr(
   } catch (...) {
   }
 }
-void nnc_aten_lu_solve(
+static void nnc_aten_lu_solve(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1882,7 +1879,7 @@ void nnc_aten_lu_solve(
   } catch (...) {
   }
 }
-void nnc_aten_lgamma(
+static void nnc_aten_lgamma(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1900,7 +1897,7 @@ void nnc_aten_lgamma(
   } catch (...) {
   }
 }
-void nnc_aten_digamma(
+static void nnc_aten_digamma(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1918,7 +1915,7 @@ void nnc_aten_digamma(
   } catch (...) {
   }
 }
-void nnc_aten_erfinv(
+static void nnc_aten_erfinv(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1936,7 +1933,7 @@ void nnc_aten_erfinv(
   } catch (...) {
   }
 }
-void nnc_aten_i0(
+static void nnc_aten_i0(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1954,7 +1951,7 @@ void nnc_aten_i0(
   } catch (...) {
   }
 }
-void nnc_aten_sign(
+static void nnc_aten_sign(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1972,7 +1969,7 @@ void nnc_aten_sign(
   } catch (...) {
   }
 }
-void nnc_aten_signbit(
+static void nnc_aten_signbit(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1990,7 +1987,7 @@ void nnc_aten_signbit(
   } catch (...) {
   }
 }
-void nnc_aten_atan2(
+static void nnc_aten_atan2(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2009,7 +2006,7 @@ void nnc_aten_atan2(
   } catch (...) {
   }
 }
-void nnc_aten_lerp(
+static void nnc_aten_lerp(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2029,7 +2026,7 @@ void nnc_aten_lerp(
   } catch (...) {
   }
 }
-void nnc_aten_fmod(
+static void nnc_aten_fmod(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2048,7 +2045,7 @@ void nnc_aten_fmod(
   } catch (...) {
   }
 }
-void nnc_aten_hypot(
+static void nnc_aten_hypot(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2067,7 +2064,7 @@ void nnc_aten_hypot(
   } catch (...) {
   }
 }
-void nnc_aten_igamma(
+static void nnc_aten_igamma(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2086,7 +2083,7 @@ void nnc_aten_igamma(
   } catch (...) {
   }
 }
-void nnc_aten_igammac(
+static void nnc_aten_igammac(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2105,7 +2102,7 @@ void nnc_aten_igammac(
   } catch (...) {
   }
 }
-void nnc_aten_nextafter(
+static void nnc_aten_nextafter(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2124,7 +2121,7 @@ void nnc_aten_nextafter(
   } catch (...) {
   }
 }
-void nnc_aten_remainder(
+static void nnc_aten_remainder(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2143,7 +2140,7 @@ void nnc_aten_remainder(
   } catch (...) {
   }
 }
-void nnc_aten_fmin(
+static void nnc_aten_fmin(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2162,7 +2159,7 @@ void nnc_aten_fmin(
   } catch (...) {
   }
 }
-void nnc_aten_fmax(
+static void nnc_aten_fmax(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2181,7 +2178,7 @@ void nnc_aten_fmax(
   } catch (...) {
   }
 }
-void nnc_aten_maximum(
+static void nnc_aten_maximum(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2200,7 +2197,7 @@ void nnc_aten_maximum(
   } catch (...) {
   }
 }
-void nnc_aten_max(
+static void nnc_aten_max(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2219,7 +2216,7 @@ void nnc_aten_max(
   } catch (...) {
   }
 }
-void nnc_aten_minimum(
+static void nnc_aten_minimum(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2238,7 +2235,7 @@ void nnc_aten_minimum(
   } catch (...) {
   }
 }
-void nnc_aten_min(
+static void nnc_aten_min(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2257,7 +2254,7 @@ void nnc_aten_min(
   } catch (...) {
   }
 }
-void nnc_aten_msort(
+static void nnc_aten_msort(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2275,7 +2272,7 @@ void nnc_aten_msort(
   } catch (...) {
   }
 }
-void nnc_aten_pow(
+static void nnc_aten_pow(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2294,7 +2291,7 @@ void nnc_aten_pow(
   } catch (...) {
   }
 }
-void nnc_aten_float_power(
+static void nnc_aten_float_power(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2313,7 +2310,7 @@ void nnc_aten_float_power(
   } catch (...) {
   }
 }
-void nnc_aten_hardsigmoid(
+static void nnc_aten_hardsigmoid(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2331,7 +2328,7 @@ void nnc_aten_hardsigmoid(
   } catch (...) {
   }
 }
-void nnc_aten_hardswish(
+static void nnc_aten_hardswish(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2349,7 +2346,7 @@ void nnc_aten_hardswish(
   } catch (...) {
   }
 }
-void nnc_aten_log_sigmoid(
+static void nnc_aten_log_sigmoid(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2367,7 +2364,7 @@ void nnc_aten_log_sigmoid(
   } catch (...) {
   }
 }
-void nnc_aten_log_sigmoid_backward(
+static void nnc_aten_log_sigmoid_backward(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2387,7 +2384,7 @@ void nnc_aten_log_sigmoid_backward(
   } catch (...) {
   }
 }
-void nnc_aten_adaptive_avg_pool3d_backward(
+static void nnc_aten_adaptive_avg_pool3d_backward(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2406,7 +2403,7 @@ void nnc_aten_adaptive_avg_pool3d_backward(
   } catch (...) {
   }
 }
-void nnc_aten_adaptive_max_pool2d_backward(
+static void nnc_aten_adaptive_max_pool2d_backward(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2426,7 +2423,7 @@ void nnc_aten_adaptive_max_pool2d_backward(
   } catch (...) {
   }
 }
-void nnc_aten_adaptive_max_pool3d_backward(
+static void nnc_aten_adaptive_max_pool3d_backward(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2446,7 +2443,7 @@ void nnc_aten_adaptive_max_pool3d_backward(
   } catch (...) {
   }
 }
-void nnc_aten_sigmoid_backward(
+static void nnc_aten_sigmoid_backward(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2465,7 +2462,7 @@ void nnc_aten_sigmoid_backward(
   } catch (...) {
   }
 }
-void nnc_aten_tanh_backward(
+static void nnc_aten_tanh_backward(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2484,7 +2481,7 @@ void nnc_aten_tanh_backward(
   } catch (...) {
   }
 }
-void nnc_aten_isposinf(
+static void nnc_aten_isposinf(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2502,7 +2499,7 @@ void nnc_aten_isposinf(
   } catch (...) {
   }
 }
-void nnc_aten_isneginf(
+static void nnc_aten_isneginf(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2520,7 +2517,7 @@ void nnc_aten_isneginf(
   } catch (...) {
   }
 }
-void nnc_aten_special_entr(
+static void nnc_aten_special_entr(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2538,7 +2535,7 @@ void nnc_aten_special_entr(
   } catch (...) {
   }
 }
-void nnc_aten_special_expm1(
+static void nnc_aten_special_expm1(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2556,7 +2553,7 @@ void nnc_aten_special_expm1(
   } catch (...) {
   }
 }
-void nnc_aten_special_exp2(
+static void nnc_aten_special_exp2(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2574,7 +2571,7 @@ void nnc_aten_special_exp2(
   } catch (...) {
   }
 }
-void nnc_aten_special_gammaln(
+static void nnc_aten_special_gammaln(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2592,7 +2589,7 @@ void nnc_aten_special_gammaln(
   } catch (...) {
   }
 }
-void nnc_aten_special_erf(
+static void nnc_aten_special_erf(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2610,7 +2607,7 @@ void nnc_aten_special_erf(
   } catch (...) {
   }
 }
-void nnc_aten_special_erfc(
+static void nnc_aten_special_erfc(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2628,7 +2625,7 @@ void nnc_aten_special_erfc(
   } catch (...) {
   }
 }
-void nnc_aten_special_erfinv(
+static void nnc_aten_special_erfinv(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2646,7 +2643,7 @@ void nnc_aten_special_erfinv(
   } catch (...) {
   }
 }
-void nnc_aten_special_xlog1py(
+static void nnc_aten_special_xlog1py(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2665,7 +2662,7 @@ void nnc_aten_special_xlog1py(
   } catch (...) {
   }
 }
-void nnc_aten_special_i0e(
+static void nnc_aten_special_i0e(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2683,7 +2680,7 @@ void nnc_aten_special_i0e(
   } catch (...) {
   }
 }
-void nnc_aten_special_expit(
+static void nnc_aten_special_expit(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2701,7 +2698,7 @@ void nnc_aten_special_expit(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_cholesky(
+static void nnc_aten_linalg_cholesky(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2719,7 +2716,7 @@ void nnc_aten_linalg_cholesky(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_det(
+static void nnc_aten_linalg_det(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2737,7 +2734,7 @@ void nnc_aten_linalg_det(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_eigvals(
+static void nnc_aten_linalg_eigvals(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2755,7 +2752,7 @@ void nnc_aten_linalg_eigvals(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_householder_product(
+static void nnc_aten_linalg_householder_product(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2774,7 +2771,7 @@ void nnc_aten_linalg_householder_product(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_inv(
+static void nnc_aten_linalg_inv(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2792,7 +2789,7 @@ void nnc_aten_linalg_inv(
   } catch (...) {
   }
 }
-void nnc_aten_inner(
+static void nnc_aten_inner(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2811,7 +2808,7 @@ void nnc_aten_inner(
   } catch (...) {
   }
 }
-void nnc_aten_outer(
+static void nnc_aten_outer(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2830,7 +2827,7 @@ void nnc_aten_outer(
   } catch (...) {
   }
 }
-void nnc_aten_ger(
+static void nnc_aten_ger(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2849,7 +2846,7 @@ void nnc_aten_ger(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_svdvals(
+static void nnc_aten_linalg_svdvals(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -2867,7 +2864,7 @@ void nnc_aten_linalg_svdvals(
   } catch (...) {
   }
 }
-void nnc_aten_linalg_solve(
+static void nnc_aten_linalg_solve(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -3301,6 +3298,4 @@ const static RegisterNNCExternalFunction nnc_linalg_solve(
 } // extern "C"
 #endif
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

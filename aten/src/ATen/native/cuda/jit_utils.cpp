@@ -3,7 +3,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
 #include <c10/util/Optional.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -21,7 +20,7 @@
 #include <cstdlib>
 #include <string>
 
-// TODO: C++17 has the fileystem header, which may replace these
+// TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
   // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
   #include <process.h>
@@ -39,7 +38,7 @@
 #endif
 
 
-namespace at { namespace cuda { namespace jit {
+namespace at::cuda::jit {
 
 // hiprtc already includes some traits, so this removes duplicate definitions of
 // integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
@@ -894,6 +893,8 @@ void codegenOutputQuery(
     max_dev_version = CUDAVersion(7, 5);
   } else if (nvrtc_version == CUDAVersion(11, 0)) { // 11.0 supports 3-8.0
     max_dev_version = CUDAVersion(8, 0);
+  } else if (nvrtc_major == 11 && nvrtc_minor < 8) {
+    max_dev_version = CUDAVersion(8, 6);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
@@ -920,14 +921,14 @@ void codegenOutputQuery(
 
 // TODO: another copy paste from jit, refactor so it's usable from both
 // TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
-void __inline__ initializeCudaContext() {
+void initializeCudaContext() {
   // lazily construct context if non-existing yet;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+        *(c10::cuda::getFreeMutex()));
     cudaFree(nullptr);
   }
 }
@@ -1509,7 +1510,7 @@ NvrtcFunction jit_pwise_function(
     std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
     if (readin.fail()) {
       // NOTE: this does not warn because the file might not exist
-      // TODO: consider if this should explicilty check for the file's existence or not to throw
+      // TODO: consider if this should explicitly check for the file's existence or not to throw
       //   an informative warning
       readin.close();
     } else {
@@ -1531,12 +1532,12 @@ NvrtcFunction jit_pwise_function(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
-  // (since older driver doesn't necessrily recognize PTX emitted by new
+  // (since older driver doesn't necessarily recognize PTX emitted by new
   // toolkit);
   // Meanwhile, for forward compatibility (future device with
   // `unsupported_arch==True`), since SASS are not necessarily compatible,
@@ -1546,7 +1547,7 @@ NvrtcFunction jit_pwise_function(
       std::to_string(cuda_minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   #ifndef NDEBUG
@@ -1655,5 +1656,4 @@ void launch_jitted_pwise_function(
     nullptr));
 }
 
-
-}}} // at::cuda::jit
+} // at::cuda::jit

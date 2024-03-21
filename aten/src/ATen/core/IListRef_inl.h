@@ -8,8 +8,8 @@ class Tensor;
 class OptionalTensorRef;
 }
 
-namespace c10 {
-namespace detail {
+
+namespace c10::detail {
 
 /*
  * Specializations of `IListRefTagImplBase` that implement the default
@@ -93,9 +93,9 @@ class IListRefTagImplBase<IListRefTag::Boxed, T, ListElemT> {
  * implementation for `IListRefTag::Materialized`.
  */
 template <typename T>
-class IListRefTagImplBase<IListRefTag::Materialized, T, _MaterializedIListRefElem<T>> {
+class IListRefTagImplBase<IListRefTag::Materialized, T, MaterializedIListRefElem<T>> {
  public:
-  using elem_type = _MaterializedIListRefElem<T>;
+  using elem_type = MaterializedIListRefElem<T>;
   using list_type = MaterializedIListRef<T>;
 
   static const list_type& unwrap(const IListRef<T>& ilist) {
@@ -141,7 +141,7 @@ class IListRefTagImpl<IListRefTag::Materialized, at::Tensor>
     : public IListRefTagImplBase<
           IListRefTag::Materialized,
           at::Tensor,
-          _MaterializedIListRefElem<at::Tensor>> {};
+          MaterializedIListRefElem<at::Tensor>> {};
 
 /*
  * [Note: IOptTensorListRef]
@@ -182,10 +182,10 @@ class IListRefTagImpl<IListRefTag::Materialized, at::OptionalTensorRef>
     : public IListRefTagImplBase<
           IListRefTag::Materialized,
           at::OptionalTensorRef,
-          _MaterializedIListRefElem<at::OptionalTensorRef>> {};
+          MaterializedIListRefElem<at::OptionalTensorRef>> {};
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
+
 
 namespace at {
 

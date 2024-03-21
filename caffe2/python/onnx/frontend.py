@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class Caffe2Frontend(object):
+class Caffe2Frontend:
     # This number controls the semantics of the operators we target.  Whenever
     # ONNX makes a BC breaking change to semantics of operators, having this set
     # to an accurate number will prevent our models form exporting.  However,

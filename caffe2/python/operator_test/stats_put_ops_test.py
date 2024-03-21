@@ -16,7 +16,7 @@ class TestPutOps(TestCase):
         count_postfix = "/stat_value/count".encode("ascii")
         default_value = 16.0
 
-        workspace.FeedBlob("value", np.array([], dtype=np.float))
+        workspace.FeedBlob("value", np.array([], dtype=np.float64))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             "AveragePut",
@@ -37,9 +37,9 @@ class TestPutOps(TestCase):
 
         self.assertIn(stat_name + sum_postfix, stat_dict)
         self.assertIn(stat_name + count_postfix, stat_dict)
-        self.assertEquals(stat_dict[stat_name + sum_postfix],
+        self.assertEqual(stat_dict[stat_name + sum_postfix],
          default_value * magnitude_expand)
-        self.assertEquals(stat_dict[stat_name + count_postfix], 1)
+        self.assertEqual(stat_dict[stat_name + count_postfix], 1)
 
     def test_clamp(self):
         put_value = 10
@@ -48,7 +48,7 @@ class TestPutOps(TestCase):
         sum_postfix = "/stat_value/sum".encode("ascii")
         count_postfix = "/stat_value/count".encode("ascii")
 
-        workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
+        workspace.FeedBlob("value", np.array([put_value], dtype=np.float64))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             "AveragePut",
@@ -68,9 +68,9 @@ class TestPutOps(TestCase):
 
         self.assertIn(stat_name + sum_postfix, stat_dict)
         self.assertIn(stat_name + count_postfix, stat_dict)
-        self.assertEquals(stat_dict[stat_name + sum_postfix],
+        self.assertEqual(stat_dict[stat_name + sum_postfix],
             9223372036854775807)
-        self.assertEquals(stat_dict[stat_name + count_postfix], 1)
+        self.assertEqual(stat_dict[stat_name + count_postfix], 1)
 
     def test_clamp_with_out_of_bounds(self):
         put_value = float(1e20)
@@ -79,7 +79,7 @@ class TestPutOps(TestCase):
         sum_postfix = "/stat_value/sum".encode("ascii")
         count_postfix = "/stat_value/count".encode("ascii")
 
-        workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
+        workspace.FeedBlob("value", np.array([put_value], dtype=np.float64))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             "AveragePut",
@@ -99,9 +99,9 @@ class TestPutOps(TestCase):
 
         self.assertIn(stat_name + sum_postfix, stat_dict)
         self.assertIn(stat_name + count_postfix, stat_dict)
-        self.assertEquals(stat_dict[stat_name + sum_postfix],
+        self.assertEqual(stat_dict[stat_name + sum_postfix],
             9223372036854775807)
-        self.assertEquals(stat_dict[stat_name + count_postfix], 1)
+        self.assertEqual(stat_dict[stat_name + count_postfix], 1)
 
     def test_avg_put_ops(self):
         put_value = 15.1111
@@ -110,7 +110,7 @@ class TestPutOps(TestCase):
         sum_postfix = "/stat_value/sum".encode("ascii")
         count_postfix = "/stat_value/count".encode("ascii")
 
-        workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
+        workspace.FeedBlob("value", np.array([put_value], dtype=np.float64))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             "AveragePut",
@@ -129,9 +129,9 @@ class TestPutOps(TestCase):
 
         self.assertIn(stat_name + sum_postfix, stat_dict)
         self.assertIn(stat_name + count_postfix, stat_dict)
-        self.assertEquals(stat_dict[stat_name + sum_postfix],
+        self.assertEqual(stat_dict[stat_name + sum_postfix],
          put_value * magnitude_expand)
-        self.assertEquals(stat_dict[stat_name + count_postfix], 1)
+        self.assertEqual(stat_dict[stat_name + count_postfix], 1)
 
     def test_increment_put_ops(self):
         put_value = 15.1111
@@ -139,7 +139,7 @@ class TestPutOps(TestCase):
         stat_name = "i1".encode('ascii')
         member_postfix = "/stat_value".encode("ascii")
 
-        workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
+        workspace.FeedBlob("value", np.array([put_value], dtype=np.float64))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             "IncrementPut",
@@ -157,7 +157,7 @@ class TestPutOps(TestCase):
         stat_dict = dict(zip(k, v))
 
         self.assertIn(stat_name + member_postfix, stat_dict)
-        self.assertEquals(stat_dict[stat_name + member_postfix],
+        self.assertEqual(stat_dict[stat_name + member_postfix],
          put_value * magnitude_expand)
 
     def test_stddev_put_ops(self):
@@ -169,7 +169,7 @@ class TestPutOps(TestCase):
         sumoffset_postfix = "/stat_value/sumoffset".encode("ascii")
         sumsqoffset_postfix = "/stat_value/sumsqoffset".encode("ascii")
 
-        workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
+        workspace.FeedBlob("value", np.array([put_value], dtype=np.float64))
 
         workspace.RunOperatorOnce(core.CreateOperator(
             "StdDevPut",
@@ -190,6 +190,6 @@ class TestPutOps(TestCase):
         self.assertIn(stat_name + count_postfix, stat_dict)
         self.assertIn(stat_name + sumoffset_postfix, stat_dict)
         self.assertIn(stat_name + sumsqoffset_postfix, stat_dict)
-        self.assertEquals(stat_dict[stat_name + sum_postfix],
+        self.assertEqual(stat_dict[stat_name + sum_postfix],
             put_value * magnitude_expand)
-        self.assertEquals(stat_dict[stat_name + count_postfix], 1)
+        self.assertEqual(stat_dict[stat_name + count_postfix], 1)

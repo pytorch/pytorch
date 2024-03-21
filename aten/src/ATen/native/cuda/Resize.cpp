@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -11,26 +12,25 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   auto allocator = storage->allocator();
   TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
 
-  auto device = at::cuda::current_device();
+  c10::Device device = storage->device();
+
   if (size_bytes == 0) {
-    storage->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
+    storage->set_data_ptr_noswap(at::DataPtr(nullptr, device));
     storage->set_nbytes(0);
     return;
   }
 
+  c10::cuda::CUDAGuard guard(device.index());
   at::DataPtr data = allocator->allocate(size_bytes);
   if (storage->data_ptr()) {
-    // Enable p2p access when the memcpy is across devices
     at::globalContext().lazyInitCUDA();
-    at::cuda::get_p2p_access(device, storage->device().index());
 
     C10_CUDA_CHECK(
         cudaMemcpyAsync(
@@ -54,6 +54,7 @@ const Tensor& resize_cuda_(
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
+  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =
@@ -64,7 +65,10 @@ const Tensor& resize_cuda_(
         memory_format);
     self_->empty_tensor_restride(memory_format);
   }
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
+  }
   return self;
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

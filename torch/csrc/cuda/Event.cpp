@@ -25,13 +25,14 @@ static PyObject* THCPEvent_pynew(
   unsigned char interprocess = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "enable_timing", "blocking", "interprocess", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
           "|bbb",
-          kwlist,
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<char**>(kwlist),
           &enable_timing,
           &blocking,
           &interprocess)) {
@@ -43,9 +44,7 @@ static PyObject* THCPEvent_pynew(
     return nullptr;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent*)ptr.get();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
       (interprocess ? cudaEventInterprocess : cudaEventDefault);
@@ -88,7 +87,6 @@ static PyObject* THCPEvent_from_ipc_handle(
   if (!ptr) {
     return nullptr;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent*)ptr.get();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -101,7 +99,10 @@ static PyObject* THCPEvent_from_ipc_handle(
 }
 
 static void THCPEvent_dealloc(THCPEvent* self) {
-  self->cuda_event.~CUDAEvent();
+  {
+    pybind11::gil_scoped_release no_gil{};
+    self->cuda_event.~CUDAEvent();
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -176,15 +177,13 @@ static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static struct PyGetSetDef THCPEvent_properties[] = {
     {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
     {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static PyMethodDef THCPEvent_methods[] = {
     {(char*)"from_ipc_handle",
      castPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),

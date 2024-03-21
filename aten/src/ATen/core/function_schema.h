@@ -10,6 +10,7 @@
 #include <ATen/core/operator_name.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <unordered_map>
+#include <utility>
 
 namespace c10 {
 
@@ -27,12 +28,12 @@ bool operator==(const Argument& lhs, const Argument& rhs);
 struct Argument {
   Argument(
       std::string name = "",
-      TypePtr type = nullptr,
+      const TypePtr& type = nullptr,
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
-    : Argument(name, type, type, N, default_value, kwarg_only, alias_info) {}
+    : Argument(std::move(name), type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
 
   Argument(
       std::string name,
@@ -45,7 +46,7 @@ struct Argument {
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
         real_type_(real_type ? std::move(real_type) : type_),
-        N_(std::move(N)),
+        N_(N),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
         kwarg_only_(kwarg_only) {
@@ -142,10 +143,10 @@ struct Argument {
         inferred_type_hint);
   }
 
-  Argument cloneWithType(TypePtr new_type) const {
+  Argument cloneWithType(const TypePtr& new_type) const {
     return Argument(
         name_,
-        std::move(new_type),
+        new_type,
         N_,
         default_value_,
         kwarg_only_,
@@ -216,6 +217,7 @@ enum struct TORCH_API SchemaArgType { input, output };
 struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
+  SchemaArgument(SchemaArgType tpe, size_t idx) : type(tpe), index(idx) {}
   bool operator==(const SchemaArgument& rhs) const {
     return type == rhs.type && index == rhs.index;
   }
@@ -636,6 +638,47 @@ template<>
     size_t operator()(const c10::SchemaArgument& arg) const
     {
       return c10::hash_combine(std::hash<size_t>()(arg.index), std::hash<size_t>()(static_cast<std::size_t>(arg.type)));
+    }
+  };
+template<>
+  struct hash<c10::Argument> {
+    size_t operator()(const c10::Argument& arg) const
+    {
+      auto hash = std::hash<std::string>{}(arg.name());
+      auto type_hash = std::hash<c10::TypePtr>{}(arg.type());
+      auto kwarg_only_hash = std::hash<bool>{}(arg.kwarg_only());
+      hash = c10::hash_combine(hash, type_hash);
+      hash = c10::hash_combine(hash, kwarg_only_hash);
+      // hashing optional fields if they exist
+      if (arg.default_value()) {
+        auto default_value_hash = c10::hash<c10::IValue>{}(arg.default_value().value());
+        hash = c10::hash_combine(hash, default_value_hash);
+      }
+      if (arg.N()) {
+        auto N_hash = std::hash<int64_t>{}(*arg.N());
+        hash = c10::hash_combine(hash, N_hash);
+      }
+      if (arg.alias_info()) {
+        auto alias_info_hash = std::hash<c10::AliasInfo>{}(*arg.alias_info());
+        hash = c10::hash_combine(hash, alias_info_hash);
+      }
+      return hash;
+    }
+  };
+template<>
+  struct hash<c10::FunctionSchema> {
+    size_t operator()(const c10::FunctionSchema& schema) const
+    {
+      auto hash = std::hash<c10::OperatorName>{}(schema.operator_name());
+      auto args_hash = c10::hash<std::vector<c10::Argument>>{}(schema.arguments());
+      auto returns_hash = c10::hash<std::vector<c10::Argument>>{}(schema.returns());
+      auto is_vararg_hash = std::hash<bool>{}(schema.is_vararg());
+      auto is_varret_hash = std::hash<bool>{}(schema.is_varret());
+      hash = c10::hash_combine(hash, args_hash);
+      hash = c10::hash_combine(hash, returns_hash);
+      hash = c10::hash_combine(hash, is_vararg_hash);
+      hash = c10::hash_combine(hash, is_varret_hash);
+      return hash;
     }
   };
 } // namespace std

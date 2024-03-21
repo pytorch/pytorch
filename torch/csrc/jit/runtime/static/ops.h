@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
@@ -17,11 +16,9 @@ at::Tensor& to_copy_out(
     bool non_blocking,
     bool copy_strides,
     c10::optional<MemoryFormat> memory_format);
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
@@ -32,7 +29,7 @@ struct SROperatorFunctor {
   virtual ~SROperatorFunctor() = default;
 };
 
-C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
@@ -43,7 +40,7 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
   };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
 
-C10_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
+TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 #define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
   struct SRNativeOperatorFunctor_##id : public SROperatorFunctor { \
     const SROpFunctor fn = __VA_ARGS__;                            \
@@ -148,10 +145,10 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name);
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant);
+    const c10::FastMap<Node*, bool>& node_has_out_variant);
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant);
+    const c10::FastMap<Node*, bool>& node_has_out_variant);
 
 SROperator getOutOfPlaceOperation(Node* n);
 SROperator getNativeOperation(Node* n);
@@ -186,5 +183,4 @@ bool sr_schema_check(
 
 bool sr_schema_check_kind(torch::jit::Node* node, c10::Symbol node_kind);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

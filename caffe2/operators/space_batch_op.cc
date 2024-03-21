@@ -7,7 +7,7 @@ OPERATOR_SCHEMA(SpaceToBatch).NumInputs(1).NumOutputs(1).SetDoc(R"DOC(
 Zero-pads and then rearranges (permutes) blocks of spatial data into batch. More specifically, this op outputs a copy of the input tensor where values from the height and width dimensions are moved to the batch dimension. After the zero-padding is according to the `pad` argument, both height and width of the input must be divisible by the `block_size`. Only "NCHW" order is currently supported.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/space_batch_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/space_batch_op.cc
 
 <details>
 
@@ -58,7 +58,7 @@ OPERATOR_SCHEMA(BatchToSpace).NumInputs(1).NumOutputs(1).SetDoc(R"DOC(
 Rearranges (permutes) data from batch into blocks of spatial data, followed by cropping. This is the reverse transformation of `SpaceToBatch`. More specifically, this op outputs a copy of the input tensor where values from the batch dimension are moved in spatial blocks to the height and width dimensions, followed by cropping along the height and width dimensions. Only "NCHW" order is currently supported.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/space_batch_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/space_batch_op.cc
 
 <details>
 

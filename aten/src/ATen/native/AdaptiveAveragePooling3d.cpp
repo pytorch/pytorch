@@ -1,26 +1,31 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+#include <ATen/native/AdaptivePooling.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_adaptive_avg_pool3d.h>
+#include <ATen/ops/_adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/_adaptive_avg_pool3d_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
+namespace at::native {
 
 namespace {
 
-inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (a / b) * c + ((a % b) * c) / b;
-}
-
-inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return 1 + ((a + 1) * c - 1) / b;
-}
-
 template <typename scalar_t>
 static void adaptive_avg_pool3d_out_frame(
-    scalar_t* input_p,
+    const scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeD,
     int64_t isizeT,
@@ -52,7 +57,7 @@ static void adaptive_avg_pool3d_out_frame(
             int kW = iendW - istartW;
 
             /* local pointers */
-            scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
+            const scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
                 istartH * istrideH + istartW * istrideW;
             scalar_t* op = output_p + d * osizeT * osizeH * osizeW +
                 ot * osizeH * osizeW + oh * osizeW + ow;
@@ -121,9 +126,9 @@ void adaptive_avg_pool3d_out_cpu_template(
   if (input.ndimension() == 4) {
     output.resize_({sizeD, osizeT, osizeH, osizeW});
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool3d_out_frame<scalar_t>(
               input_data,
@@ -144,9 +149,9 @@ void adaptive_avg_pool3d_out_cpu_template(
     output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
     int64_t n = input.size(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
             for (const auto b : c10::irange(start, end)) {
@@ -229,6 +234,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
+
   /* sizes */
   int64_t sizeD = input.size(-4);
   int64_t isizeT = input.size(-3);
@@ -240,7 +247,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
 
   /* backprop */
   if (input.ndimension() == 4) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -260,7 +267,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   } else {
     int64_t n = input.size(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -299,7 +306,7 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
   return output;
 }
 
-Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
+Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_size) {
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   TORCH_CHECK(
         (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
@@ -312,7 +319,7 @@ Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);
     return out;
   } else {
-    return _adaptive_avg_pool3d(input, output_size);
+    return _adaptive_avg_pool3d_symint(input, output_size);
   }
 }
 
@@ -331,5 +338,4 @@ Tensor adaptive_avg_pool3d_backward_cpu(const Tensor& gradOutput_,
   return gradInput;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -199,7 +199,7 @@ class Vectorized<int32_t> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
@@ -264,6 +264,20 @@ class Vectorized<int32_t> {
   DEFINE_MEMBER_OP(operator|, int32_t, vec_or)
   DEFINE_MEMBER_OP(operator^, int32_t, vec_xor)
 };
+
+template <>
+Vectorized<int32_t> inline operator<<(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+                vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
+                vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1()) ;
+          return Vectorized<int32_t>{vec_sl(a.vec0(), shift_vec0), vec_sl(a.vec1(), shift_vec1)};
+}
+
+template <>
+Vectorized<int32_t> inline operator>>(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+                vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
+                vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1()) ;
+          return Vectorized<int32_t>{vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
+}
 
 template <>
 Vectorized<int32_t> inline maximum(

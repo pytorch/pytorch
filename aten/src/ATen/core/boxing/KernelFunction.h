@@ -1,10 +1,12 @@
 #pragma once
 
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/core/boxing/BoxedKernel.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/TypeList.h>
+#include <type_traits>
 
 namespace c10 {
 
@@ -16,10 +18,11 @@ class KernelFunction;
 
 template <typename T>
 using has_symint =
-  guts::disjunction<
-    std::is_same<c10::SymInt, std::decay_t<T>>,
-    std::is_same<c10::SymIntArrayRef, std::decay_t<T>>,
-    std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
+  std::disjunction<
+    std::is_same<c10::SymInt, T>,
+    std::is_same<c10::SymIntArrayRef, T>,
+    std::is_same<at::OptionalSymIntArrayRef, T>,
+    std::is_same<c10::optional<c10::SymInt>, T>
   >;
 
 template <typename T>
@@ -33,6 +36,11 @@ struct remove_symint<c10::SymInt> {
 };
 
 template <>
+struct remove_symint<at::OptionalSymIntArrayRef> {
+  using type = OptionalIntArrayRef;
+};
+
+template <>
 struct remove_symint<c10::SymIntArrayRef> {
   using type = c10::IntArrayRef;
 };
@@ -42,11 +50,29 @@ struct remove_symint<c10::optional<c10::SymInt>> {
   using type = c10::optional<int64_t>;
 };
 
+
+template <bool symint, typename T>
+struct maybe_keep_symint final {};
+
+template <typename T>
+struct maybe_keep_symint<true, T> { using type = T; };
+
+template <typename T>
+struct maybe_keep_symint<false, T> { using type = typename remove_symint<T>::type; };
+
 template <typename T>
 using fn_has_symint = typename guts::typelist::true_for_any_type<
   has_symint,
   typename guts::infer_function_traits<T>::type::parameter_types
 >;
+
+template <typename T>
+struct fn_remove_symint;
+
+template <typename Ret, typename... Args>
+struct fn_remove_symint<Ret(Args...)> {
+  using type = Ret(typename remove_symint<Args>::type...);
+};
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.

@@ -16,13 +16,11 @@ namespace at {
 namespace native {
 namespace metal {
 
-Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
-  at::Tensor tensor = tensors[0];
+Tensor cat_batch(const Tensor& tensor, const ITensorListRef& tensors, MetalTensorImplStorage& mt) {
   MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort cat_dim4_pointer = 0;
-  for (int i = 0; i < tensors.size(); ++i) {
-    const auto& t = tensors[i];
+  for (const auto& t : tensors) {
     MPSImage* X = imageFromTensor(t);
     MetalCommandBuffer* Xcb = getCommandBuffer(t);
     TORCH_CHECK(
@@ -35,7 +33,7 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
                           X, "copy_offset", "copy_offset_nonarray")];
     id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:1 * sizeof(ushort)
-                    options:MTLResourceOptionCPUCacheModeWriteCombined];
+                    options:MTLResourceCPUCacheModeWriteCombined];
     ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
     offsetBufferPtr[0] = cat_dim4_pointer;
 
@@ -55,8 +53,7 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
   return output;
 }
 
-Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
-  at::Tensor tensor = tensors[0];
+Tensor cat_feature(const Tensor& tensor, const ITensorListRef& tensors, MetalTensorImplStorage& mt) {
   MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort channel_offset = 0;
@@ -68,9 +65,9 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
   tt.texture()->allocateTemporaryStorage(temp_size, commandBuffer);
   MPSImage* T = tt.texture()->image();
 
-  for (int i = 0; i < tensors.size(); ++i) {
-    MPSImage* X = imageFromTensor(tensors[i]);
-    MetalCommandBuffer* Xcb = getCommandBuffer(tensors[i]);
+  for (const auto& t : tensors) {
+    MPSImage* X = imageFromTensor(t);
+    MetalCommandBuffer* Xcb = getCommandBuffer(t);
     TORCH_CHECK(
         [commandBuffer isEqual:Xcb],
         @"inputs have different Metal command buffers");
@@ -94,7 +91,7 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
                          ]];
       id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
           newBufferWithLength:6 * sizeof(ushort)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
       ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
       offsetBufferPtr[0] = (X.featureChannels + tex_offset + 3) / 4;
       offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;
@@ -144,7 +141,7 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
                          ]];
       id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
           newBufferWithLength:2 * sizeof(ushort)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
       ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
       offsetBufferPtr[0] = channel_offset / 4;
       offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;
@@ -165,15 +162,15 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
   return output;
 }
 
-Tensor cat(const TensorList tensors, int64_t dim) {
+Tensor cat(const ITensorListRef& tensors, int64_t dim) {
   TORCH_CHECK(
       dim == 0 || dim == 1,
       "Metal cat is implemented only for batch dimension");
   int64_t cat_dim_size = 0;
-  at::Tensor tensor = tensors[0];
+  TORCH_CHECK(!tensors.empty(), "cat expected a non-empty list of Tensor");
+  at::Tensor tensor = *tensors.begin();
   MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
-  for (int i = 0; i < tensors.size(); ++i) {
-    const auto& t = tensors[i];
+  for (const auto& t : tensors) {
     TORCH_CHECK(t.dim() == 4, "Metal cat expects 4 dimensional inputs");
     TORCH_CHECK(t.is_metal(), "Metal cat expects metal tensors");
 
@@ -197,9 +194,9 @@ Tensor cat(const TensorList tensors, int64_t dim) {
   mt.texture()->allocateTemporaryStorage(result_size, commandBuffer);
 
   if (dim == 1) {
-    return cat_feature(tensors, mt);
+    return cat_feature(tensor, tensors, mt);
   }
-  return cat_batch(tensors, mt);
+  return cat_batch(tensor, tensors, mt);
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {

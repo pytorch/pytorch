@@ -3,9 +3,9 @@
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+#include <ATen/Context.h>
+
+namespace at::native::xnnpack {
 
 c10::intrusive_ptr<LinearOpContext>
 XNNPackLinearOpContext::create_context(
@@ -154,8 +154,6 @@ void XNNPackTransposeConv2dOpContext::free_orig_weight_and_bias() {
   orig_bias_.reset();
 }
 
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

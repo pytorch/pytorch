@@ -7,7 +7,7 @@
 from caffe2.python.docs.parser import Parser
 
 
-class Formatter(object):
+class Formatter:
     def __init__(self):
         self.content = ""
 

@@ -1,13 +1,17 @@
 from .graph_module import GraphModule
+from ._lazy_graph_module import _make_graph_module
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
+from . import config
 import torch.fx.traceback as fx_traceback
+import torch
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
+from torch.hub import tqdm
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -57,23 +61,30 @@ class Interpreter:
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
             result = NegSigmSwapInterpreter(gm).run(input)
-            torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
+            torch.testing.assert_close(result, torch.neg(input).sigmoid())
 
     Args:
-        module (GraphModule): The module to be executed
+        module (torch.nn.Module): The module to be executed
         garbage_collect_values (bool): Whether to delete values after their last
             use within the Module's execution. This ensures optimal memory usage during
             execution. This can be disabled to, for example, examine all of the intermediate
             values in the execution by looking at the ``Interpreter.env`` attribute.
+        graph (Optional[Graph]): If passed, the interpreter will execute this
+            graph instead of `module.graph`, using the provided `module`
+            argument to satisfy any requests for state.
     """
     @compatibility(is_backward_compatible=True)
-    def __init__(self, module : GraphModule, garbage_collect_values : bool = True):
-        assert isinstance(module, GraphModule)
+    def __init__(self, module: torch.nn.Module, garbage_collect_values: bool = True, graph: Optional[Graph] = None):
         self.module = module
         self.submodules = dict(self.module.named_modules())
+        if graph is not None:
+            self.graph = graph
+        else:
+            self.graph = self.module.graph
         self.env : Dict[Node, Any] = {}
-
+        self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
+        self.extra_traceback = True
 
         if self.garbage_collect_values:
             # Run through reverse nodes and record the first instance of a use
@@ -88,7 +99,7 @@ class Interpreter:
                     node_to_last_use[n] = user
                     self.user_to_last_uses.setdefault(user, []).append(n)
 
-            for node in reversed(self.module.graph.nodes):
+            for node in reversed(self.graph.nodes):
                 map_arg(node.args, lambda n: register_last_uses(n, node))
                 map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
@@ -109,16 +120,20 @@ class Interpreter:
         Returns:
             Any: The value returned from executing the Module
         """
-        self.env = initial_env if initial_env else {}
+        self.env = initial_env if initial_env is not None else {}
 
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of
         # position and extract those values.
         if enable_io_processing:
-            args = self.module.graph.process_inputs(*args)
+            args = self.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
+        pbar = tqdm(total=len(self.graph.nodes),
+                    desc=f"{self.name}: {str(list(self.graph.nodes)) if config.verbose_progress else ''}",
+                    initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
-        for node in self.module.graph.nodes:
+        for node in self.graph.nodes:
+            pbar.update(1)
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
@@ -126,7 +141,17 @@ class Interpreter:
                 # values for a subset of the program.
                 continue
 
-            self.env[node] = self.run_node(node)
+            try:
+                self.env[node] = self.run_node(node)
+            except Exception as e:
+                if self.extra_traceback:
+                    msg = f"While executing {node.format_node()}"
+                    msg = f'{e.args[0]}\n\n{msg}' if e.args else str(msg)
+                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                    e.args = (msg,) + e.args[1:]
+                    if isinstance(e, KeyError):
+                        raise RuntimeError(*e.args) from e
+                raise
 
             if self.garbage_collect_values:
                 for to_delete in self.user_to_last_uses.get(node, []):
@@ -134,11 +159,26 @@ class Interpreter:
 
             if node.op == 'output':
                 output_val = self.env[node]
-                return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
+                return self.graph.process_outputs(output_val) if enable_io_processing else output_val
+
+    @compatibility(is_backward_compatible=True)
+    def boxed_run(self, args_list):
+        """
+        Run `module` via interpretation and return the result.  This uses the "boxed"
+        calling convention, where you pass a list of arguments, which will be cleared
+        by the interpreter.  This ensures that input tensors are promptly deallocated.
+        """
+        args_iter = iter(args_list)
+        env = {}
+        for n in self.graph.nodes:
+            if n.op == "placeholder":
+                env[n] = next(args_iter)
+        args_list.clear()
+        return self.run(initial_env=env)
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.append_stack_trace(node.stack_trace):
+        with fx_traceback.set_current_meta(node):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -155,7 +195,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        with fx_traceback.append_stack_trace(n.stack_trace):
+        with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)
@@ -172,7 +212,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -192,7 +232,7 @@ class Interpreter:
                 if len(args) > 0:
                     return args[0]
                 else:
-                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!')
+                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!') from si
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -202,7 +242,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -220,7 +260,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -240,7 +280,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -262,7 +302,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -286,7 +326,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -303,7 +343,7 @@ class Interpreter:
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
 
         Args:
-            target (str): The fully-qualfiied name of the attribute to fetch
+            target (str): The fully-qualified name of the attribute to fetch
 
         Return:
             Any: The value of the attribute.
@@ -386,7 +426,7 @@ class Transformer(Interpreter):
 
             transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
             input = torch.randn(3, 4)
-            torch.testing.assert_allclose(transformed(input), torch.neg(input).sigmoid())
+            torch.testing.assert_close(transformed(input), torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The ``Module`` to be transformed.
@@ -402,6 +442,7 @@ class Transformer(Interpreter):
             def __init__(self, graph: Graph):
                 super().__init__()
                 self.graph = graph
+                self.tensor_attrs: Dict[torch.Tensor, str] = {}  # type: ignore[assignment]
 
             def is_leaf_module(self, _, __) -> bool:
                 return True
@@ -418,7 +459,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -436,13 +477,13 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -462,10 +503,10 @@ class Transformer(Interpreter):
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
         """
-        with fx_traceback.override_stack_trace():
+        with fx_traceback.preserve_node_meta():
             result = super().run(enable_io_processing=False)
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
             self.new_graph.output(map_aggregate(result, strip_proxy))
-        return GraphModule(self.module, self.new_graph)
+        return _make_graph_module(self.module, self.new_graph)

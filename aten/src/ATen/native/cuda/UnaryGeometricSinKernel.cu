@@ -5,20 +5,23 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-const char sin_name[] = "sin";
+#if AT_USE_JITERATOR()
+CONSTEXPR_EXCEPT_WIN_CUDA char sin_name[] = "sin_impl";
+#endif
+
 void sin_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR
+#if AT_USE_JITERATOR()
     static const auto sin_string = jiterator_stringify(
-        template <typename T> T sin(T a) { return std::sin(a); });
+        template <typename T> T sin_impl(T a) { return std::sin(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "sin_name", [&]() {
           jitted_gpu_kernel<
@@ -51,5 +54,4 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

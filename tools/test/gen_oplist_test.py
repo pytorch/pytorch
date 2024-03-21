@@ -4,7 +4,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from gen_oplist import throw_if_any_op_includes_overloads
+from tools.code_analyzer.gen_oplist import throw_if_any_op_includes_overloads
 
 
 class GenOplistTest(unittest.TestCase):

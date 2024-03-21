@@ -10,7 +10,7 @@ class TestException(TestCase):
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 10, kernel_size=5)
 
             @torch.jit.script_method
@@ -49,9 +49,9 @@ class TestException(TestCase):
         def foo(cond):
             a = 3
             if bool(cond):
-                raise ArbitraryError(a, "hi")
+                raise ArbitraryError(a, "hi")  # noqa: F821
                 if 1 == 2:
-                    raise ArbitraryError
+                    raise ArbitraryError  # noqa: F821
             return a
 
         with self.assertRaisesRegex(RuntimeError, "undefined value ArbitraryError"):
@@ -156,8 +156,7 @@ class TestException(TestCase):
 
     def test_custom_python_exception(self):
         class MyValueError(ValueError):
-            def __init__(self, msg):
-                super(MyValueError, self).__init__(msg)
+            pass
 
         @torch.jit.script
         def fn():

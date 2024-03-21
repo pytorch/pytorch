@@ -1,6 +1,9 @@
 #pragma once
+#include <cstddef>
 #include <memory>
+#include <utility>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {
@@ -10,7 +13,7 @@ using DeleterFnPtr = void (*)(void*);
 namespace detail {
 
 // Does not delete anything
-TORCH_API void deleteNothing(void*);
+C10_API void deleteNothing(void*);
 
 // A detail::UniqueVoidPtr is an owning smart pointer like unique_ptr, but
 // with three major differences:

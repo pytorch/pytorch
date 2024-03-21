@@ -1,12 +1,12 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <cstdint>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/FbgemmEmbedding.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void check_arguments(
     const Tensor& weight,
@@ -97,14 +97,14 @@ struct _EmbeddingBagKernelCacheImpl : private StorageMixins... {
 // instantiate the cache with the list of storage mixins
 // for each of the 8 _EmbeddingBagKernelCache* usages in the EmbeddingBag.cpp impl file
 using _EmbeddingBagKernelCache = _EmbeddingBagKernelCacheImpl<
-      _CallbackAndBlockSize<true, int32_t, float>,
-      _CallbackAndBlockSize<false, int32_t, float>,
-      _CallbackAndBlockSize<true, int64_t, float>,
-      _CallbackAndBlockSize<false, int64_t, float>,
-      _CallbackAndBlockSize<true, int32_t, unsigned short>,
-      _CallbackAndBlockSize<false, int32_t, unsigned short>,
-      _CallbackAndBlockSize<true, int64_t, unsigned short>,
-      _CallbackAndBlockSize<false, int64_t, unsigned short>>;
+    _CallbackAndBlockSize<true, int32_t, float>,
+    _CallbackAndBlockSize<false, int32_t, float>,
+    _CallbackAndBlockSize<true, int64_t, float>,
+    _CallbackAndBlockSize<false, int64_t, float>,
+    _CallbackAndBlockSize<true, int32_t, unsigned short>,
+    _CallbackAndBlockSize<false, int32_t, unsigned short>,
+    _CallbackAndBlockSize<true, int64_t, unsigned short>,
+    _CallbackAndBlockSize<false, int64_t, unsigned short>>;
 #else
 struct _EmbeddingBagKernelCache {
     explicit _EmbeddingBagKernelCache(c10::optional<int64_t> /* maybe_block_size */) {}
@@ -136,5 +136,4 @@ void _embedding_bag_cpu_out(
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);
 
-} // native
-} // at
+} // namespace at::native

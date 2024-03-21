@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _FILE_PREFIX = "_remote_module_"
 _TEMP_DIR = tempfile.TemporaryDirectory()
 INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
-logger.info(f"Created a temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
+logger.info("Created a temporary directory at %s", INSTANTIATED_TEMPLATE_DIR_PATH)
 sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 
@@ -31,9 +31,7 @@ def get_arg_return_types_from_interface(module_interface):
     module_interface_c = cu.get_interface(qualified_name)
     assert (
         "forward" in module_interface_c.getMethodNames()
-    ), "Expect forward in interface methods, while it has {}".format(
-        module_interface_c.getMethodNames()
-    )
+    ), f"Expect forward in interface methods, while it has {module_interface_c.getMethodNames()}"
     method_schema = module_interface_c.getMethod("forward")
 
     arg_str_list = []
@@ -43,12 +41,10 @@ def get_arg_return_types_from_interface(module_interface):
         arg_str_list.append(argument.name)
 
         if argument.has_default_value():
-            default_value_str = " = {}".format(argument.default_value)
+            default_value_str = f" = {argument.default_value}"
         else:
             default_value_str = ""
-        arg_type_str = "{name}: {type}{default_value}".format(
-            name=argument.name, type=argument.type, default_value=default_value_str
-        )
+        arg_type_str = f"{argument.name}: {argument.type}{default_value_str}"
         arg_type_str_list.append(arg_type_str)
 
     arg_str_list = arg_str_list[1:]  # Remove "self".
@@ -67,16 +63,16 @@ def get_arg_return_types_from_interface(module_interface):
 def _write(out_path, text):
     old_text: Optional[str]
     try:
-        with open(out_path, "r") as f:
+        with open(out_path) as f:
             old_text = f.read()
-    except IOError:
+    except OSError:
         old_text = None
     if old_text != text:
         with open(out_path, "w") as f:
-            logger.info("Writing {}".format(out_path))
+            logger.info("Writing %s", out_path)
             f.write(text)
     else:
-        logger.info("Skipped writing {}".format(out_path))
+        logger.info("Skipped writing %s", out_path)
 
 
 def _do_instantiate_remote_module_template(

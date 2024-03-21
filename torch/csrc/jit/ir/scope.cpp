@@ -3,8 +3,7 @@
 #include <ATen/core/class_type.h>
 #include <ATen/core/function.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 // util functions
 namespace utils {
 
@@ -36,14 +35,10 @@ ScopePtr Scope::intrusive_from_this() {
   return c10::intrusive_ptr<Scope>::reclaim(this);
 }
 
-Scope::Scope() {
-  name_ = Symbol::scope("");
-}
+Scope::Scope() : name_(Symbol::scope("")) {}
 
-Scope::Scope(ScopePtr parent, Symbol name) {
-  name_ = name;
-  parent_ = std::move(parent);
-}
+Scope::Scope(ScopePtr parent, Symbol name)
+    : parent_(std::move(parent)), name_(name) {}
 
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);
@@ -111,23 +106,28 @@ InlinedCallStackPtr InlinedCallStack::intrusive_from_this() {
 }
 
 InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
-    : fn_(fn), source_range_(std::move(source_range)) {
-  if (fn_) {
-    set_function_name(fn_->name());
-  }
-}
+    : fn_(fn),
+      fn_name_(fn_ ? fn_->name() : ""),
+      source_range_(std::move(source_range)) {}
 
 InlinedCallStack::InlinedCallStack(
     Function* fn,
     SourceRange source_range,
     c10::optional<ModuleInstanceInfo> module_instance_info)
     : fn_(fn),
+      fn_name_(fn_ ? fn_->name() : ""),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)) {
-  if (fn_) {
-    set_function_name(fn_->name());
-  }
-}
+      module_instance_info_(std::move(module_instance_info)) {}
+
+InlinedCallStack::InlinedCallStack(
+    Function* fn,
+    SourceRange source_range,
+    c10::optional<ModuleInstanceInfo> module_instance_info,
+    std::string& function_name)
+    : fn_(fn),
+      fn_name_(std::move(function_name)),
+      source_range_(std::move(source_range)),
+      module_instance_info_(std::move(module_instance_info)) {}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -135,11 +135,20 @@ InlinedCallStack::InlinedCallStack(
     SourceRange source_range)
     : callee_(std::move(callee)),
       fn_(fn),
-      source_range_(std::move(source_range)) {
-  if (fn_) {
-    set_function_name(fn_->name());
-  }
-}
+      fn_name_(fn_ ? fn_->name() : ""),
+      source_range_(std::move(source_range)) {}
+
+InlinedCallStack::InlinedCallStack(
+    InlinedCallStackPtr callee,
+    Function* fn,
+    SourceRange source_range,
+    c10::optional<ModuleInstanceInfo> module_instance_info,
+    std::string& function_name)
+    : callee_(std::move(callee)),
+      fn_(fn),
+      fn_name_(std::move(function_name)),
+      source_range_(std::move(source_range)),
+      module_instance_info_(std::move(module_instance_info)) {}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -148,12 +157,9 @@ InlinedCallStack::InlinedCallStack(
     c10::optional<ModuleInstanceInfo> module_instance_info)
     : callee_(std::move(callee)),
       fn_(fn),
+      fn_name_(fn_ ? fn_->name() : ""),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)) {
-  if (fn_) {
-    set_function_name(fn_->name());
-  }
-}
+      module_instance_info_(std::move(module_instance_info)) {}
 
 c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
@@ -175,11 +181,7 @@ Function* InlinedCallStack::function() const {
   return fn_;
 }
 
-void InlinedCallStack::set_function_name(std::string fn_name) {
-  fn_name_ = std::move(fn_name);
-}
-
-std::string InlinedCallStack::function_name() const {
+const std::string& InlinedCallStack::function_name() const {
   return fn_name_;
 }
 
@@ -187,10 +189,10 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
-    r.emplace_back(std::make_tuple(
+    r.emplace_back(
         (*current)->fn_,
         (*current)->source_range_,
-        (*current)->module_instance_info_));
+        (*current)->module_instance_info_);
     current = (*current)->callee_;
   }
   return r;
@@ -201,5 +203,4 @@ ModuleInstanceInfo::ModuleInstanceInfo(
     std::string instance_name)
     : module_type_(std::move(module_type)),
       instance_name_(std::move(instance_name)) {}
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -196,7 +196,7 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
   return c10::str(x, " vs ", y, ". ", args...);
 }
 
-template <typename Pred, typename T1, typename T2, typename... Args>
+template <typename Pred, typename T1, typename T2, typename GetFailMsgFunc>
 void enforceThatImpl(
     Pred p,
     const T1& lhs,
@@ -205,23 +205,39 @@ void enforceThatImpl(
     int line,
     const char* expr,
     const void* caller,
-    const Args&... args) {
+    GetFailMsgFunc getFailMsg) {
   if (C10_UNLIKELY(!(p(lhs, rhs)))) {
-    ::c10::ThrowEnforceNotMet(
-        file,
-        line,
-        expr,
-        ::c10::enforce_detail::enforceFailMsgImpl(lhs, rhs, args...),
-        caller);
+    ::c10::ThrowEnforceNotMet(file, line, expr, getFailMsg(lhs, rhs), caller);
   }
 }
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...) \
-  ::c10::enforce_detail::enforceThatImpl(                \
-      op, lhs, rhs, __FILE__, __LINE__, expr, nullptr, ##__VA_ARGS__)
+
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)  \
+  ::c10::enforce_detail::enforceThatImpl(                 \
+      op,                                                 \
+      (lhs),                                              \
+      (rhs),                                              \
+      __FILE__,                                           \
+      __LINE__,                                           \
+      expr,                                               \
+      nullptr,                                            \
+      [&](const auto& arg1, const auto& arg2) {           \
+        return ::c10::enforce_detail::enforceFailMsgImpl( \
+            arg1, arg2, ##__VA_ARGS__);                   \
+      })
 
 #define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
   ::c10::enforce_detail::enforceThatImpl(                            \
-      op, (lhs), (rhs), __FILE__, __LINE__, expr, this, ##__VA_ARGS__)
+      op,                                                            \
+      (lhs),                                                         \
+      (rhs),                                                         \
+      __FILE__,                                                      \
+      __LINE__,                                                      \
+      expr,                                                          \
+      this,                                                          \
+      [&](const auto& arg1, const auto& arg2) {                      \
+        return ::c10::enforce_detail::enforceFailMsgImpl(            \
+            arg1, arg2, ##__VA_ARGS__);                              \
+      })
 
 } // namespace enforce_detail
 
@@ -284,6 +300,14 @@ void enforceThatImpl(
 C10_API void SetAPIUsageLogger(std::function<void(const std::string&)> logger);
 C10_API void LogAPIUsage(const std::string& context);
 
+C10_API void SetAPIUsageMetadataLogger(
+    std::function<void(
+        const std::string&,
+        const std::map<std::string, std::string>& metadata_map)> logger);
+C10_API void LogAPIUsageMetadata(
+    const std::string& context,
+    const std::map<std::string, std::string>& metadata_map);
+
 // PyTorch ddp usage logging capabilities
 // DDPLoggingData holds data that can be logged in applications
 // for analysis and debugging. Data structure is defined in
@@ -307,6 +331,9 @@ C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 
 // Initializes the c10 logger.
 C10_API void initLogging();
+
+// Sets the rank, which will be included in log messages
+C10_API void SetGlobalRank(int64_t rank);
 
 } // namespace c10
 

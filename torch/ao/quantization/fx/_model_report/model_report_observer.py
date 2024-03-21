@@ -42,25 +42,34 @@ class ModelReportObserver(ObserverBase):
     Note: this tool is meant for FX Graph Mode Quantization
     """
 
+    epoch_activation_min: torch.Tensor
+    epoch_activation_max: torch.Tensor
+    min_val: torch.Tensor
+    max_val: torch.Tensor
+    comp_percentile: torch.Tensor
+    average_percentile_ratio: torch.Tensor
+    percentile_batches_tracked: torch.Tensor
+    constant_channels: torch.Tensor
+
     def __init__(self, ch_axis: int = 1, comp_percentile: float = 0.9):
         super().__init__(torch.qint8)
         self.num_batches_tracked = 0
 
         # keep track of the min and mix of the range for average batch and epoch as a whole
         self.average_batch_activation_range: torch.Tensor = torch.tensor(float(0))
-        self.epoch_activation_min = torch.tensor(float("inf"))
-        self.epoch_activation_max = torch.tensor(float("-inf"))
+        self.register_buffer("epoch_activation_min", torch.tensor(float("inf")))
+        self.register_buffer("epoch_activation_max", torch.tensor(float("-inf")))
 
         # keep track of per channel min max information using the given channel
         self.ch_axis: int = ch_axis
-        self.min_val: torch.Tensor = torch.tensor([])
-        self.max_val: torch.Tensor = torch.tensor([])
+        self.register_buffer("min_val", torch.tensor([]))
+        self.register_buffer("max_val", torch.tensor([]))
 
         # keep track of percentile ratio information per channel
-        self.comp_percentile: torch.Tensor = torch.tensor([comp_percentile])
-        self.average_percentile_ratio: torch.Tensor = torch.tensor([])
-        self.percentile_batches_tracked: torch.Tensor = torch.tensor([])
-        self.constant_channels: torch.Tensor = torch.tensor([])
+        self.register_buffer("comp_percentile", torch.tensor([comp_percentile]))
+        self.register_buffer("average_percentile_ratio", torch.tensor([]))
+        self.register_buffer("percentile_batches_tracked", torch.tensor([]))
+        self.register_buffer("constant_channels", torch.tensor([]))
 
     def forward(self, x):
         x_copy = x.detach()  # avoid keeping autograd tape
@@ -159,7 +168,7 @@ class ModelReportObserver(ObserverBase):
         # are done in place and types need to match for comparisons
         y = y.to(self.min_val.dtype)
         y = torch.flatten(y, start_dim=1)
-        y = y.to(self.min_val.dtype)
+        y = y.to(dtype=self.min_val.dtype, device="cpu")
 
         # find the percentile values along the axis
         # we want both 100th percentile and comp_percentile
@@ -221,8 +230,6 @@ class ModelReportObserver(ObserverBase):
 
         return x_copy
 
-
-
     @torch.jit.export
     def get_batch_to_epoch_ratio(self):
         epoch_activation_range = self.epoch_activation_max - self.epoch_activation_min
@@ -239,15 +246,17 @@ class ModelReportObserver(ObserverBase):
     @torch.jit.export
     def reset_batch_and_epoch_values(self):
         # set all the values back to their original defaults for a new epoch
+        # keep device
+        device = self.max_val.device
         self.num_batches_tracked = 0
-        self.average_batch_activation_range = torch.tensor(float(0))
-        self.epoch_activation_min = torch.tensor(float("inf"))
-        self.epoch_activation_max = torch.tensor(float("-inf"))
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
-        self.average_percentile_ratio = torch.tensor([])
-        self.percentile_batches_tracked = torch.tensor([])
-        self.constant_channels = torch.tensor([])
+        self.average_batch_activation_range = torch.tensor(float(0), device=device)
+        self.epoch_activation_min = torch.tensor(float("inf"), device=device)
+        self.epoch_activation_max = torch.tensor(float("-inf"), device=device)
+        self.min_val = torch.tensor([], device=device)
+        self.max_val = torch.tensor([], device=device)
+        self.average_percentile_ratio = torch.tensor([], device=device)
+        self.percentile_batches_tracked = torch.tensor([], device=device)
+        self.constant_channels = torch.tensor([], device=device)
 
     @torch.jit.export
     def calculate_qparams(self):

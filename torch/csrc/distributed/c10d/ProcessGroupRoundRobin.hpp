@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 namespace c10d {
 
@@ -28,7 +28,7 @@ class TORCH_API ProcessGroupRoundRobin final : public ProcessGroup {
   ~ProcessGroupRoundRobin() override;
 
   const std::string getBackendName() const override {
-      return std::string(ROUND_ROBIN_BACKEND_NAME);
+    return std::string(ROUND_ROBIN_BACKEND_NAME);
   }
 
   c10::intrusive_ptr<Work> broadcast(

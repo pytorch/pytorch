@@ -4,7 +4,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -33,6 +34,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <thrust/device_ptr.h>
@@ -49,7 +51,7 @@
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 using at::cuda::detail::TensorInfo;
@@ -294,9 +296,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   Tensor dense_buffer = dense.to(commonDtype);
   Tensor values = sparse._values().to(commonDtype);
 
-  if (is_same_tensor(r, dense_buffer)) {
-    TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-  } else {
+  if (!is_same_tensor(r, dense_buffer)) {
     r.resize_as_(dense);
     r.copy_(dense_buffer);
   }
@@ -313,8 +313,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     // TODO benchmark to decide whether to remove this special case
     const dim3 block = cuda::getApplyBlock();
     dim3 grid;
-    int curDevice = -1;
-    cudaGetDevice(&curDevice);
+    c10::DeviceIndex curDevice = -1;
+    c10::cuda::GetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
@@ -482,66 +482,17 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
   TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
-  SparseTensor t = t_.coalesce();
-  SparseTensor src = src_.coalesce();
+  // mul(sparse, sparse)
 
-  if (src_._nnz() == 0 || t_._nnz() == 0) {
-    r_.resize_as_(src_);
+  // Short circuit when there is zero nnz.
+  // Not strictly necessary, but there are tests checking whether
+  // resize in mul fails if run on tensors coming from .data/.detach.
+  if (t_.sizes().equals(src_.sizes()) && (!t_._nnz() || !src_._nnz())) {
+    r_.resize_as_(t_);
     return r_.zero_();
   }
-
-  // saving those because they can be overwritten when doing in-place operations
-  int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
-  int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
-  int64_t sparse_dim = src.sparse_dim();
-  auto commonDtype = at::result_type(t, src);
-  TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
-  Tensor t_indices_ = t._indices().contiguous();
-  Tensor t_values_ = t._values().to(commonDtype);
-  Tensor s_indices_ = src._indices().contiguous();
-  Tensor s_values_ = src._values().to(commonDtype);
-  Tensor r_indices_ = at::empty({sparse_dim, max_nnz}, t_indices_.options());
-  r_.resize_as_(src);
-
-  Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
-
-  int64_t valueSize = std::max<int64_t>(1, t_values_.stride(0));
-  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
-  dim3 grid;
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-  TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
-
-  Tensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-    at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "mul_out_sparse_cuda", [&] {
-        apply::valueSparseIntersectionKernel<<<grid, block, 0, stream>>>(
-            TensorMulOp<scalar_t>(),
-            I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-            V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
-            static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz));
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-        apply::indexSparseIntersectionKernel<uint64_t, scalar_t>
-          <<<1, 1, 0, stream>>>(
-            I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-            // reinterpret_cast shenanigans, because we don't actually have
-            // unsigned tensors...
-            static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz), reinterpret_cast<uint64_t*>(resultNnz.data_ptr()));
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
-  r_values_ = r_values_.to(r_.scalar_type());
-  get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
-
-  // sync!  (surely there is a more idiomatic way to do this...)
-  Tensor cpu_resultNnz = at::empty({1}, CPU(kLong));
-  cpu_resultNnz.copy_(resultNnz);
-  get_sparse_impl(r_)->set_nnz_and_narrow(cpu_resultNnz.accessor<int64_t, 1>()[0]);
-
-  return r_._coalesced_(true);
+  return _mul_sparse_sparse_out(t_, src_, r_);
 }
 
 // --------------------------------------------------------------------
@@ -589,6 +540,11 @@ __global__ void _sparse_sum_backward_cuda_kernel(
 Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
   TORCH_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
   TORCH_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
+
+  // Short circuit if grad is either zero or empty
+  if (((grad_.is_sparse() || at::sparse_csr::is_sparse_compressed(grad_)) && !grad_._nnz()) || !grad_.numel()) {
+    return at::zeros_like(input_);
+  }
 
   auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
@@ -654,8 +610,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       grad_input_values = grad_values_expand;
     }
     else {
-      int curDevice = -1;
-      cudaGetDevice(&curDevice);
+      c10::DeviceIndex curDevice = -1;
+      c10::cuda::GetDevice(&curDevice);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
       at::cuda::ThrustAllocator allocator;
       auto policy = thrust::cuda::par(allocator).on(stream);
@@ -759,8 +715,8 @@ __global__ void search_end_matrix_indices_cuda_kernel(
 // Search through a 1D tensor of sorted sparse matrix
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const Tensor& indices_1D) {
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  c10::DeviceIndex curDevice = -1;
+  c10::cuda::GetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 
   auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D);
@@ -881,7 +837,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 
   // See Note [Enabling Deterministic Operations]
   bool deterministic =  globalContext().deterministicAlgorithms();
-  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
+  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_SPMM_COO_ALG2 : CUSPARSE_SPMM_COO_ALG1;
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
@@ -1003,4 +959,4 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

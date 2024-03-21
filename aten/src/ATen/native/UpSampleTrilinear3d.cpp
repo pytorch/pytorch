@@ -1,13 +1,23 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace meta {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_trilinear3d.h>
+#include <ATen/ops/upsample_trilinear3d_backward.h>
+#include <ATen/ops/upsample_trilinear3d_backward_native.h>
+#include <ATen/ops/upsample_trilinear3d_native.h>
+#endif
+
+namespace at::meta {
 
 TORCH_META_FUNC(upsample_trilinear3d) (
   const Tensor& input,
@@ -54,8 +64,8 @@ TORCH_META_FUNC(upsample_trilinear3d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
-} // namespace meta
-namespace native {
+} // namespace at::meta
+namespace at::native {
 
 TORCH_IMPL_FUNC(upsample_trilinear3d_out_cpu) (
     const Tensor& input,
@@ -100,21 +110,7 @@ Tensor upsample_trilinear3d(
   return at::upsample_trilinear3d(input, osize, align_corners, scale_d, scale_h, scale_w);
 }
 
-Tensor upsample_trilinear3d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_trilinear3d_backward(grad_output, osize, input_size, align_corners, scale_d, scale_h, scale_w);
-}
-
 DEFINE_DISPATCH(upsample_trilinear3d_kernel);
 DEFINE_DISPATCH(upsample_trilinear3d_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

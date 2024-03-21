@@ -18,7 +18,7 @@ namespace nn {
 
 /// Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D
 /// (volumetric) data.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Upsample to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Upsample to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::UpsampleOptions` class to learn what
@@ -29,7 +29,6 @@ namespace nn {
 /// Upsample
 /// model(UpsampleOptions().scale_factor({3}).mode(torch::kLinear).align_corners(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
  public:
   explicit UpsampleImpl(const UpsampleOptions& options_ = {});

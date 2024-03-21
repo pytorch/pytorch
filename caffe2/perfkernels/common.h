@@ -62,7 +62,10 @@ In foo.cc, do:
 
 #pragma once
 
+#if defined(CAFFE2_PERF_WITH_AVX512) || defined(CAFFE2_PERF_WITH_AVX2) \
+     || defined(CAFFE2_PERF_WITH_AVX)
 #include <cpuinfo.h>
+#endif
 
 // DO macros: these should be used in your entry function, similar to foo()
 // above, that routes implementations based on CPU capability.

@@ -113,7 +113,7 @@ def test_impact_of_file(filename: str) -> str:
         CI - CI configuration files
     """
     parts = filename.split(os.sep)
-    if parts[0] in [".jenkins", ".circleci"]:
+    if parts[0] in [".jenkins", ".circleci", ".ci"]:
         return "CI"
     if parts[0] in ["docs", "scripts", "CODEOWNERS", "README.md"]:
         return "NONE"
@@ -133,11 +133,7 @@ def test_impact_of_file(filename: str) -> str:
 def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> None:
     if options.verbose:
         print_to_stderr(
-            "Determination found {} file {} -- running {}".format(
-                file_type,
-                filename,
-                test,
-            )
+            f"Determination found {file_type} file {filename} -- running {test}"
         )
 
 

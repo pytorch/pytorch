@@ -3,10 +3,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/ATen.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
@@ -19,6 +15,12 @@
 
 #include <array>
 #include <vector>
+
+template <int kSpatialDim = 2>
+int register_conv_params();
+
+extern template int register_conv_params<2>();
+extern template int register_conv_params<3>();
 
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
@@ -33,7 +35,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
         int64_t groups,
         bool transpose) {
   // TODO: need to check out to implement groups for conv operator in Conv.cpp
-  TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currenty limited to groups = 1; received groups =", groups);
+  TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currently limited to groups = 1; received groups =", groups);
   TORCH_CHECK(weight.qscheme() == c10::kPerTensorAffine, "Unsupported qscheme: ", toString(weight.qscheme()));
   TORCH_CHECK(
       kSpatialDim == 2,  // 1D is packed as 2d, hence we don't need other checks
@@ -138,8 +140,7 @@ class QConvPackWeightInt8Cudnn final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (const auto idx : c10::irange(kSpatialDim)) {
-      (void)idx; //Suppress unused variable warning
+    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
@@ -204,6 +205,8 @@ class QConv1dPackWeightInt8Cudnn final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  register_conv_params<2>();
+  register_conv_params<3>();
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_prepack"), TORCH_FN(QConv1dPackWeightInt8Cudnn::run_conv));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8Cudnn<2>::run_conv));
 }
@@ -212,6 +215,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace native
 } // namespace at
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

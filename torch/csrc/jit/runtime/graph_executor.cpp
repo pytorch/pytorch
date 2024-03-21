@@ -53,8 +53,12 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+C10_DEFINE_bool(
+    torch_jit_execution_plan_reuse_code_graph,
+    false,
+    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!");
+
+namespace torch::jit {
 
 EnableProfilingGuard::EnableProfilingGuard() {
   auto& executor_mode = getExecutorMode();
@@ -133,7 +137,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor tensor : tensors) {
+      for (const auto& tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -222,7 +226,7 @@ struct UnpackInstructions {
           stack.emplace_back(lst);
         } break;
         case PUSH_NONE: {
-          stack.emplace_back(IValue());
+          stack.emplace_back();
         }
       }
     }
@@ -326,7 +330,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
       input_tensor_lists_.insert({index_, value.toTensorList().size()});
-      for (const at::Tensor tensor : value.toTensorList()) {
+      for (const at::Tensor& tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
         index_++;
       }
@@ -357,7 +361,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor tensor : tensors) {
+      for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
@@ -922,13 +926,12 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   GRAPH_DEBUG(
-      "Before customPrePassses (beginning of runNondiffOptimization)\n",
-      *graph);
+      "Before customPrePasses (beginning of runNondiffOptimization)\n", *graph);
   // Run custom passes that different backends can register.
   for (const auto& passPair : getCustomPrePasses()) {
     passPair.first(graph);
   }
-  GRAPH_DEBUG("After customPrePassses\n", *graph);
+  GRAPH_DEBUG("After customPrePasses\n", *graph);
 
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
@@ -960,7 +963,7 @@ void runNondiffOptimization(
     passPair.first(graph);
   }
   GRAPH_DEBUG(
-      "After customPostPassses (end of runNondiffOptimization)\n", *graph);
+      "After customPostPasses (end of runNondiffOptimization)\n", *graph);
 }
 
 void runOptimization(
@@ -1063,5 +1066,4 @@ Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
   return fallback;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

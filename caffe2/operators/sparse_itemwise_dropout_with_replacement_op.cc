@@ -64,7 +64,7 @@ OPERATOR_SCHEMA(SparseItemwiseDropoutWithReplacement)
     .SetDoc(R"DOC(
 
 `SparseItemwiseDropoutWithReplacement` takes a 1-d input tensor and a lengths tensor.
-Values in the Lengths tensor represent how many input elements consitute each
+Values in the Lengths tensor represent how many input elements constitute each
 example in a given batch.  The each input value in the tensor of an example can be
 replaced with the replacement value with probability given by the `ratio`
 argument.

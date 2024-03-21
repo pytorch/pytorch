@@ -7,20 +7,11 @@
 #include <c10/util/Metaprogramming.h>
 #include <torch/library.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // This function implements a boxed fallback to CPU.
 // External backends can add their own custom logging on top if it to customize their own CPU fallbacks.
-TORCH_API void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-
-template <bool symint, typename T>
-struct maybe_keep_symint final {};
-
-template <typename T>
-struct maybe_keep_symint<true, T> { using type = T; };
-
-template <typename T>
-struct maybe_keep_symint<false, T> { using type = typename remove_symint<T>::type; };
+TORCH_API void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views = false);
 
 // This is a helper function that backends can use to directly call their boxed CPU fallback
 // TODO: update and add a usage example after https://github.com/pytorch/pytorch/pull/58092 lands.
@@ -29,13 +20,13 @@ struct _call_fallback_fn final {};
 
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class Op, bool symint, class ReturnType, class... ParameterTypes>
 struct _call_fallback_fn<fallback_fn, Op, symint, ReturnType(ParameterTypes...)> final {
-    static ReturnType call(typename maybe_keep_symint<symint, ParameterTypes>::type... args) {
+    static ReturnType call(typename c10::maybe_keep_symint<symint, ParameterTypes>::type... args) {
         auto op = c10::Dispatcher::singleton()
             // TODO: figure out how to make compiler happy without dynamic casts
             .findSchemaOrThrow((const char*) Op::name, (const char*) Op::overload_name)
             //.findSchemaOrThrow("a", "b")
-            .typed<ReturnType (typename maybe_keep_symint<symint, ParameterTypes>::type...)>();
-        return c10::impl::BoxedKernelWrapper<ReturnType (typename maybe_keep_symint<symint, ParameterTypes>::type...)>::call(
+            .typed<ReturnType (typename c10::maybe_keep_symint<symint, ParameterTypes>::type...)>();
+        return c10::impl::BoxedKernelWrapper<ReturnType (typename c10::maybe_keep_symint<symint, ParameterTypes>::type...)>::call(
             c10::BoxedKernel::makeFromFunction<fallback_fn>(),
             op,
             c10::DispatchKeySet(), // we know that the cpu_fallback doesn't use the dispatch keyset.
@@ -51,5 +42,4 @@ using call_fallback_fn_symint = _call_fallback_fn<fallback_fn, Op, true, typenam
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class Op>
 using call_fallback_fn = _call_fallback_fn<fallback_fn, Op, false, typename Op::schema>;
 
-} // namespace native
-} // namespace at
+} // namespace at::native

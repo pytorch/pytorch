@@ -6,7 +6,7 @@ operators that haven't been standardized yet, or custom `torch.autograd.Function
 are specific to a network.
 
 To bridge this gap, we provide an experimental operator in ONNX that allows you to directly access PyTorch's tensor functions using the ATen library.
-[ATen](https://github.com/pytorch/pytorch/tree/master/aten) is the underlying C++ library that PyTorch uses to do tensor operations. Caffe2 has an [ATen operator](https://github.com/pytorch/pytorch/tree/master/caffe2/contrib/aten)
+[ATen](https://github.com/pytorch/pytorch/tree/main/aten) is the underlying C++ library that PyTorch uses to do tensor operations. Caffe2 has an [ATen operator](https://github.com/pytorch/pytorch/tree/main/caffe2/contrib/aten)
 that can run these tensor functions in a Caffe2 network after importing them through ONNX.
 
 This guide explains how to configure Caffe2 and modify your PyTorch program to use
@@ -30,7 +30,7 @@ make install
 To export a model to ONNX, PyTorch first creates a trace of all the `torch.autograd.Function`s run
 in the forward pass of a network. For each function in the trace, it calls that function's
 `symbolic` method which describes how to construct the part of the ONNX graph
-that will compute this function (see [basic_ops.py](https://github.com/pytorch/pytorch/blob/master/torch/autograd/_functions/basic_ops.py#L59) for examples).
+that will compute this function (see [basic_ops.py](https://github.com/pytorch/pytorch/blob/main/torch/autograd/_functions/basic_ops.py#L59) for examples).
 
 When equivalent ONNX operators do not exist, you can instead call any ATen function.
 As an example let's assume we have an autograd function which computes `x*x+y`:

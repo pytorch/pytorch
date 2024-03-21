@@ -85,7 +85,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   using vectorized = policies::vectorized<vec_size, array_t>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size()];
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+#if !defined(USE_ROCM)
   // This fails only on CUDA 10.x, remove this after CUDA 10.x support is dropped
   scalar_t *buf_ = &buf[0];
   auto accessor = [&](int index) -> scalar_t & { return buf_[index]; };
@@ -154,7 +154,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     for (int j = 0; j < 16; j++) {
       b1 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer1) + i);
       b2 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
-      cudaGetLastError();
+      (void)cudaGetLastError();
       cudaDeviceSynchronize();
       vectorized_copy<double, 4><<<1, num_threads()>>>(b2, b1);
       cudaDeviceSynchronize();

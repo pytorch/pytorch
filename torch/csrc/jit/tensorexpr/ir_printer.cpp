@@ -6,9 +6,9 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+#include <iostream>
+
+namespace torch::jit::tensorexpr {
 
 std::string IRPrinter::dtypeToCppString(const Dtype& dtype) {
   return dtype.ToCppString();
@@ -288,12 +288,12 @@ void IRPrinter::visit(RampPtr v) {
 
 void IRPrinter::visit(LoadPtr v) {
   // TODO: support the mask case
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle();
   } else {
     os() << *v->base_handle() << "[";
     size_t i = 0;
-    for (ExprPtr ind : v->indices()) {
+    for (const ExprPtr& ind : v->indices()) {
       if (i++) {
         os() << ", ";
       }
@@ -329,7 +329,7 @@ void IRPrinter::visit(IntrinsicsPtr v) {
 void IRPrinter::visit(TermPtr v) {
   os() << "Term(";
   v->scalar()->accept(this);
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     os() << ",";
     t->accept(this);
   }
@@ -339,7 +339,7 @@ void IRPrinter::visit(TermPtr v) {
 void IRPrinter::visit(PolynomialPtr v) {
   bool first = true;
   os() << "Polynomial(";
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     if (!first) {
       os() << " + ";
     }
@@ -398,7 +398,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
 
   bool first = true;
   os() << "reduce_args={";
-  for (auto d : v->reduce_args()) {
+  for (const auto& d : v->reduce_args()) {
     if (!first) {
       os() << ", ";
     }
@@ -416,14 +416,14 @@ void IRPrinter::visit(ReduceOpPtr v) {
 
 void IRPrinter::visit(StorePtr v) {
   // TODO: handle the mask
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle() << " = " << *v->value() << ";";
     return;
   }
 
   os() << *v->base_handle() << "[";
   size_t i = 0;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     if (i++) {
       os() << ", ";
     }
@@ -456,7 +456,7 @@ void IRPrinter::visit(BlockPtr v) {
   os() << "{\n";
   indent_++;
 
-  for (StmtPtr s : *v) {
+  for (const StmtPtr& s : *v) {
     emitIndent();
     os() << *s << "\n";
   }
@@ -526,7 +526,7 @@ void IRPrinter::visit(CondPtr v) {
 void IRPrinter::visit(AtomicAddPtr v) {
   os() << "atomicAdd(&" << *v->base_handle() << "[";
   size_t i = 0;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     if (i++) {
       os() << ", ";
     }
@@ -547,7 +547,7 @@ void IRPrinter::visit(ExternalCallPtr v) {
 
   os() << "buf_args={";
   int i = 0;
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const BufPtr& buf_arg : v->buf_args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -556,7 +556,7 @@ void IRPrinter::visit(ExternalCallPtr v) {
 
   os() << "}, args={";
   i = 0;
-  for (ExprPtr arg : v->args()) {
+  for (const ExprPtr& arg : v->args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -667,9 +667,7 @@ void print(const Tensor& t) {
   std::cout << std::to_string(t);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 namespace std {
 std::string to_string(ExprPtr expr) {

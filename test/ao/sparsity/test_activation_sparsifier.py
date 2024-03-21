@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
 import copy
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 import logging
 import torch
-from torch.ao.sparsity._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
+from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.ao.sparsity.sparsifier.utils import module_to_fqn
+from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from typing import List
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -156,7 +155,7 @@ class TestActivationSparsifier(TestCase):
 
         assert torch.all(mask_model == mask_actual)
 
-        for _, config in activation_sparsifier.data_groups.items():
+        for config in activation_sparsifier.data_groups.values():
             assert 'data' not in config
 
 
@@ -173,7 +172,7 @@ class TestActivationSparsifier(TestCase):
             data (torch tensor)
                 dummy batched data
         """
-        # create a forward hook for checking ouput == layer(input * mask)
+        # create a forward hook for checking output == layer(input * mask)
         def check_output(name):
             mask = activation_sparsifier.get_mask(name)
             features = activation_sparsifier.data_groups[name].get('features')
@@ -221,7 +220,6 @@ class TestActivationSparsifier(TestCase):
 
         assert sparsifier2.defaults == sparsifier1.defaults
 
-        # import pdb; pdb.set_trace()
         for name, state in sparsifier2.state.items():
             assert name in sparsifier1.state
             mask1 = sparsifier1.state[name]['mask']
@@ -236,11 +234,10 @@ class TestActivationSparsifier(TestCase):
                     for idx in range(len(mask1)):
                         assert torch.all(mask1[idx] == mask2[idx])
                 else:
-                    # import pdb; pdb.set_trace()
                     assert torch.all(mask1 == mask2)
 
         # make sure that the state dict is stored as torch sparse
-        for _, state in state_dict['state'].items():
+        for state in state_dict['state'].values():
             mask = state['mask']
             if mask is not None:
                 if isinstance(mask, List):
@@ -274,7 +271,7 @@ class TestActivationSparsifier(TestCase):
             return torch.mean(x, dim=0)
 
         def _vanilla_norm_sparsifier(data, sparsity_level):
-            r"""Similar to data norm spasifier but block_shape = (1,1).
+            r"""Similar to data norm sparsifier but block_shape = (1,1).
             Simply, flatten the data, sort it and mask out the values less than threshold
             """
             data_norm = torch.abs(data).flatten()

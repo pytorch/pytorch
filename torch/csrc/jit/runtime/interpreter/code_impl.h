@@ -14,8 +14,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-namespace torch {
-namespace jit {
+C10_DECLARE_bool(torch_jit_enable_expanded_stacks);
+
+namespace torch::jit {
 
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
@@ -59,15 +60,26 @@ struct WithCurrentNode {
   Node* old_value_;
 };
 
+struct NodeSourceInfo {
+  const char* func_name_;
+  const char* file_name_;
+  size_t line_;
+  NodeSourceInfo() : func_name_(nullptr), file_name_(nullptr), line_(0) {}
+};
+
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
+
+  const c10::unique_t node_stack_attr_symbol_ =
+      static_cast<c10::unique_t>(attr::node_stack_idx);
+  // Expanded inlined stacks as pointers to values in inlined call stack.
+  std::vector<std::vector<NodeSourceInfo>> expanded_node_stacks_;
 
   // same length as instructions.
   // what node in the graph cause this
   // instruction to be emitted?
   std::vector<Node*> instructions_source_;
-
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
 #ifndef NDEBUG
@@ -82,6 +94,7 @@ struct CodeImpl {
       operator_table_inv_;
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
+  std::vector<std::unique_ptr<GraphFunction>> awaited_functions_;
   std::vector<TypePtr> type_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
@@ -212,12 +225,61 @@ struct CodeImpl {
     return instructions_source_;
   }
 
+  NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
+    NodeSourceInfo nodeSource;
+    SourceRange r = range;
+    if (range.source()) {
+      if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (r.source()) {
+      auto lineno = r.source()->lineno_for_offset(r.start());
+      nodeSource.line_ = r.source()->lineno_to_source_lineno(lineno);
+      if (r.source()->filename()) {
+        nodeSource.file_name_ = r.source()->filename().value().c_str();
+      }
+    }
+    return nodeSource;
+  }
+
+  void expandInlinedNodeStack(
+      const InlinedCallStackPtr& cs,
+      std::vector<NodeSourceInfo>* expandedstack) {
+    auto nodeSourceInfo = getSourceInfoFromSourceRange(cs->source_range());
+    nodeSourceInfo.func_name_ = cs->function_name().c_str();
+    expandedstack->emplace_back(nodeSourceInfo);
+
+    if (cs->callee()) {
+      expandInlinedNodeStack(cs->callee().value(), expandedstack);
+    }
+  }
+
+  void getNodeStack(
+      const Node* node,
+      std::vector<NodeSourceInfo>* expandedstack) {
+    if (current_node_->callstack()) {
+      expandInlinedNodeStack(current_node_->callstack().value(), expandedstack);
+    }
+    auto nodeSourceInfo = getSourceInfoFromSourceRange(node->sourceRange());
+    expandedstack->emplace_back(nodeSourceInfo);
+  }
+
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
         safe_narrow_cast<uint16_t, uint64_t>(N));
     instructions_source_.emplace_back(current_node_);
+
+    if (FLAGS_torch_jit_enable_expanded_stacks &&
+        !current_node_->hasAttribute(attr::node_stack_idx)) {
+      std::vector<NodeSourceInfo> expandedStack;
+      getNodeStack(current_node_, &expandedStack);
+      auto insertIdx = expanded_node_stacks_.size();
+      expanded_node_stacks_.emplace_back(expandedStack);
+      current_node_->i_(attr::node_stack_idx, insertIdx);
+    }
 
     // check that we didn't accidentally emit nodes out of topological order
     if (op == OP) {
@@ -241,7 +303,7 @@ struct CodeImpl {
   }
 
   void createBailoutBlock(size_t jf_index) {
-    bailout_blocks_.emplace_back(BailoutBlock{jf_index});
+    bailout_blocks_.emplace_back(jf_index);
     auto& bailout_instructions = bailout_blocks_.back().instructions;
 
     bailout_instructions.insert(
@@ -501,7 +563,7 @@ struct CodeImpl {
     };
 
     auto empty_graph = std::make_shared<Graph>();
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));
@@ -611,6 +673,16 @@ struct CodeImpl {
     insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
   }
 
+  void emitAwaitable(Node* node) {
+    emitLoadInputs(node->inputs());
+    std::unique_ptr<GraphFunction> await_fn(new GraphFunction(
+        "<awaitable function>", node->g(attr::Subgraph), nullptr));
+    awaited_functions_.emplace_back(std::move(await_fn));
+    function_table_.emplace_back(awaited_functions_.back().get());
+    insertInstruction(
+        AWAITABLE, function_table_.size() - 1, node->inputs().size());
+  }
+
   void emitWarn(Node* node) {
     if (FLAGS_torch_jit_disable_warning_prints) {
       return;
@@ -715,6 +787,9 @@ struct CodeImpl {
         break;
       case prim::fork:
         emitFork(node);
+        break;
+      case prim::awaitable:
+        emitAwaitable(node);
         break;
       case aten::warn:
         emitWarn(node);
@@ -851,8 +926,8 @@ struct CodeImpl {
         static_cast<int64_t>(schema.arguments().size()) +
         static_cast<int64_t>(schema.returns().size());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        expected_size == actual_size || schema.is_varret() ||
-            schema.is_vararg(),
+        static_cast<size_t>(expected_size) == actual_size ||
+            schema.is_varret() || schema.is_vararg(),
         "Expected to find ",
         expected_size,
         " values on the stack, but found ",
@@ -903,7 +978,7 @@ struct MobileCodeImpl : CodeImpl {
 
           size_t numInclude = specifiedArgs.first +
               (support_default_args_before_out_ ? specifiedArgs.second : 0);
-          auto unique_name = op_schema.overload_name() != ""
+          auto unique_name = !op_schema.overload_name().empty()
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
           auto it = op_to_num_specified_args_.insert(
@@ -983,5 +1058,4 @@ struct MobileCodeImpl : CodeImpl {
 };
 
 } // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

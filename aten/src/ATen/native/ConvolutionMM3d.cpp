@@ -1,18 +1,29 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/Unfold3d.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/slow_conv3d_forward.h>
+#include <ATen/ops/slow_conv3d_forward_native.h>
+#include <ATen/ops/slow_conv3d_native.h>
+#include <ATen/ops/sum.h>
+#endif
+
 constexpr int64_t CONV3D_GRAIN_SALT = 20;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -60,7 +71,7 @@ static Tensor compute_columns3d(
                         output_depth * output_height * output_width},
                         input.options());
 
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "compute_columns3d", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "compute_columns3d", [&] {
       auto input_a = input.accessor<scalar_t, 5>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
@@ -417,14 +428,14 @@ void slow_conv3d_backward_out_cpu_template(
       n_input_plane * kernel_depth * kernel_height * kernel_width,
       output_depth * output_height * output_width}, input.options());
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+    auto grad_input_a = grad_input.accessor<scalar_t, 5>();
+    auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
+    auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
+    auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
     at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
                     [&](int64_t start, int64_t end) {
-        auto grad_input_a = grad_input.accessor<scalar_t, 5>();
-        auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
-        auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
-        auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
 
         for (const auto t : c10::irange(start, end)) {
           auto grad_input_t = grad_input_a[t];
@@ -524,8 +535,8 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
   const int64_t batch_size = input.size(0);
   Tensor finput = compute_columns3d(input, stride, padding, kernel_size, groups);
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_weight", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_weight", [&] {
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
     auto finput_a = finput.accessor<scalar_t, 3>();
@@ -562,7 +573,7 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
 
   // TODO: hacky way of deciding the groups
   // Assuming the group size is checked in upstream functions
-  const int64_t groups = self.size(1) / weight.size(1);
+  const int64_t groups = weight.size(1) > 0 ? self.size(1) / weight.size(1) : 0;
 
   slow_conv3d_shape_check(
       self,
@@ -611,7 +622,7 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
 
   TORCH_CHECK(output.is_contiguous(), "slow_conv3d output must be contiguous");
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv3d_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu", [&] {
     auto input_a = input.accessor<scalar_t, 5>();
     auto output_a = output.accessor<scalar_t, 5>();
     auto finput_a = finput.accessor<scalar_t, 3>();
@@ -676,7 +687,7 @@ Tensor slow_conv3d_forward_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor& grad_output,
+static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -791,5 +802,4 @@ Tensor slow_conv3d(
   return at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

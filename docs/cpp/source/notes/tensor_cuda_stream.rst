@@ -61,7 +61,7 @@ Pytorch's C++ API provides the following ways to set CUDA stream:
 
 .. attention::
 
-  This function may have nosthing to do with the current device. It only changes the current stream on the stream's device.
+  This function may have nothing to do with the current device. It only changes the current stream on the stream's device.
   We recommend using ``CUDAStreamGuard``, instead, since it switches to the stream's device and makes it the current stream on that device.
   ``CUDAStreamGuard`` will also restore the current device and stream when it's destroyed
 
@@ -144,7 +144,7 @@ CUDA Stream Usage Examples
   // sum() on tensor0 use `myStream0` as current CUDA stream on device 0
   tensor0.sum();
 
-  // change the current device index to 1 by using CUDA device guard within a braket scope
+  // change the current device index to 1 by using CUDA device guard within a bracket scope
   {
     at::cuda::CUDAGuard device_guard{1};
     // create a tensor on device 1
@@ -206,7 +206,7 @@ CUDA Stream Usage Examples
 
   // sum() on tensor0 uses default CUDA stream as current CUDA stream on device 0
   tensor0.sum();
-  // sum() on tensor1 uses defualt CUDA stream as current CUDA stream on device 1
+  // sum() on tensor1 uses default CUDA stream as current CUDA stream on device 1
   tensor1.sum();
 
 .. attention::

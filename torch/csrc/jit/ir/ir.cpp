@@ -23,8 +23,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace utils {
 std::string getNodesModuleHierarchy(const Node& n) {
@@ -123,13 +122,15 @@ static std::ostream& printValueRefs(
 // Can't make these two overloads directly a template, it'll be ambiguous with
 // the global printer for operator<<.
 
-std::ostream& operator<<(
+static std::ostream& operator<<(
     std::ostream& out,
     const at::ArrayRef<const Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
@@ -142,7 +143,7 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(
+static std::ostream& operator<<(
     std::ostream& out,
     const const_value_list_with_types& l) {
   size_t i = 0;
@@ -353,10 +354,7 @@ std::ostream& Node::print(
       }
     }
     if (auto file_line_col = r.file_line_col()) {
-      std::string filename;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t line, col;
-      std::tie(filename, line, col) = *file_line_col;
+      auto [filename, line, col] = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
   }
@@ -474,28 +472,26 @@ void Node::lint() const {
   }
 
   for (auto o : outputs()) {
-    size_t i = 0;
     for (auto use : o->uses()) {
       // Use invariants
       // - Use is consistent with inputs
       // - Every user node is live (checked in Graph)
       AT_ASSERT(use.user->inputs_[use.offset] == o);
-      i++;
     }
   }
 
   // Node subclass invariants
   switch (kind()) {
     case prim::Constant:
-      AT_ASSERT(inputs_.size() == 0);
+      AT_ASSERT(inputs_.empty());
       break;
     case prim::Return:
       // Return uses is zero
-      AT_ASSERT(outputs().size() == 0);
+      AT_ASSERT(outputs().empty());
       break;
     case prim::Param:
       // Param inputs is zero
-      AT_ASSERT(inputs_.size() == 0);
+      AT_ASSERT(inputs_.empty());
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
@@ -838,7 +834,7 @@ std::string Value::debugNameBase() const {
 
 bool Value::isValidName(const std::string& name) {
   // Empty strings are legal
-  if (!name.size()) {
+  if (name.empty()) {
     return true;
   }
 
@@ -864,7 +860,7 @@ Value* Value::setDebugName(const std::string& name) {
   }
 
   // allow "" to clear the uniquename
-  if (name == "") {
+  if (name.empty()) {
     return this;
   }
 
@@ -877,7 +873,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = c10::stoll(name.substr(last_dot_pos + 1));
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }
@@ -970,7 +966,7 @@ void Value::replaceAllUsesDominatedByNodeWith(
       uses_.end());
 }
 
-size_t findArgument(
+static size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
   for (const auto i : c10::irange(the_schema.arguments().size())) {
@@ -983,7 +979,7 @@ size_t findArgument(
       std::string("Couldn't find an argument called ") + unqualName);
 }
 
-size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   const auto unqualName = name.toUnqualString();
   return findArgument(the_schema, unqualName);
 }
@@ -1009,6 +1005,9 @@ Value* Node::namedInput(Symbol name) const {
 }
 
 bool Node::matches(const FunctionSchema& schema) const {
+  if (isBlockListedSchema(schema)) {
+    return false;
+  }
   // wrong name
   if (kind().toQualString() != schema.name()) {
     return false;
@@ -1124,7 +1123,7 @@ const Operator& Node::getOperator() const {
     er << *inputs()[i]->type();
   }
   const auto& candidates = getAllOperatorsFor(kind());
-  if (candidates.size() > 0) {
+  if (!candidates.empty()) {
     er << "\ncandidates were:\n";
     for (auto& candidate : candidates) {
       er << "  " << candidate->schema() << "\n";
@@ -1283,13 +1282,20 @@ void Node::assignTopoPosition() {
 
     // insert between two existing nodes
   } else {
-    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
-    if (posBetween == prevPos) {
+    int64_t remaining = nextPos - prevPos;
+    AT_ASSERT(remaining > 0);
+    if (remaining == 1) {
       // There was no room
       owningBlock()->reIndexTopology();
       return;
     }
-    topo_position_ = posBetween;
+    int64_t predicted_future_insertions = 0;
+    if (next() == graph_->insertPoint()) {
+      predicted_future_insertions = graph_->predicted_insert_count_++;
+    }
+    topo_position_ = prevPos +
+        std::max(int64_t(1), remaining / (2 + predicted_future_insertions));
+    AT_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
   }
 }
 
@@ -2047,7 +2053,7 @@ void inlineCallStackOfNode(
     Node* to_replace,
     c10::optional<ModuleInstanceInfo> m_info);
 
-void inlineCallStackOfBlock(
+static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
@@ -2109,7 +2115,7 @@ std::vector<Value*> inlineCallTo(
       module_instance_info = c10::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
     } else if (
-        to_replace->owningGraph()->inputs().size() > 0 &&
+        !to_replace->owningGraph()->inputs().empty() &&
         to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
@@ -2312,5 +2318,4 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   return false;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -7,14 +7,12 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstring>
-#include <type_traits>
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 /**  NOTE [ Grid Sample CPU Kernels ]
  *
@@ -110,7 +108,7 @@ namespace at { namespace native { namespace {
  *          //   3. writes the first `len` values in the interpolated vector to
  *          //      `out_slice` with spatial offset being `offset`.
  *          //
- *          // This assimes that `grid_x` and `grid_y` all contain valid grid
+ *          // This assumes that `grid_x` and `grid_y` all contain valid grid
  *          // values \in [-1, 1], even at indices greater than `len`.
  *          //
  *          // The `*_slice` argument names mean samples within a batch (i.e.,
@@ -391,8 +389,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
-    Vec res, grad_clip;
-    std::tie(res, grad_clip) = clip_coordinates_get_grad(unnormalize(in));
+    auto [res, grad_clip] = clip_coordinates_get_grad(unnormalize(in));
     return std::make_pair(res, grad_clip & Vec(scaling_factor));
   }
 };
@@ -423,8 +420,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
-    Vec res, grad_refl, grad_clip, grad(scaling_factor);
-    std::tie(res, grad_refl) = reflect_coordinates_get_grad(unnormalize(in));
+    auto [res, grad_refl] = reflect_coordinates_get_grad(unnormalize(in));
+    Vec grad_clip, grad(scaling_factor);
     grad = grad_refl * grad;
     std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
     grad = grad_clip & grad;
@@ -505,7 +502,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto s = Vec(1) - n;
 
     // get interpolation weights for each neighbor
-    // e.g., for the nw corder, the weight is `dist_to_south * dist_to_east`.
+    // e.g., for the nw corner, the weight is `dist_to_south * dist_to_east`.
     auto nw = s * e;
     auto ne = s * w;
     auto sw = n * e;
@@ -595,16 +592,12 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
                        const TensorAccessor<scalar_t, 3>& inp_slice,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
-    Vec x, y, gx_mult, gy_mult;
-    std::tie(x, gx_mult) = compute_W.apply_get_grad(grid_x);
-    std::tie(y, gy_mult) = compute_H.apply_get_grad(grid_y);
+    auto [x, gx_mult] = compute_W.apply_get_grad(grid_x);
+    auto [y, gy_mult] = compute_H.apply_get_grad(grid_y);
 
-    Vec n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask;
-    iVec i_y_n, i_x_w;
-
-    std::tie(
+    auto [
       n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask,
-      i_y_n, i_x_w) = compute_interp_params(x, y);
+      i_y_n, i_x_w] = compute_interp_params(x, y);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
     auto i_ne_offset = i_nw_offset + iVec(inp_sW);
@@ -1157,13 +1150,16 @@ void grid_sampler_2d_cpu_kernel_impl(
   auto spatial_size = H * W;
   auto grain_size = spatial_size == 0 ? (N + 1)
                                       : at::divup(at::internal::GRAIN_SIZE, spatial_size * 4 /* 2d * 2 tensors*/);
+  if (output.numel() == 0) {
+         return;
+  }
 
 #define HANDLE_CASE(interp, padding, align_corners)                            \
   case padding: {                                                              \
     ApplyGridSample<scalar_t, 2, interp, padding, align_corners>               \
     grid_sample(inp_acc);                                                      \
     parallel_for(0, N, grain_size, [&](int64_t begin, int64_t end) {           \
-      for (const auto n : c10::irange(begin, end)) {                                  \
+      for (const auto n : c10::irange(begin, end)) {                           \
         auto out_slice = out_acc[n];                                           \
         auto inp_slice = inp_acc[n];                                           \
         grid_sample_2d_grid_slice_iterator(                                    \
@@ -1220,6 +1216,10 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool,2> output_mask) {
+  if (grad_output_.numel() == 0) {
+    grad_grid.zero_();
+    return;
+  }
   // grad_output should be contiguous most of time. Ensuring that it is
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();
@@ -1319,4 +1319,4 @@ REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl);
 REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl);
 
 
-}}  // namespace at::native
+}  // namespace at::native

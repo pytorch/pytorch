@@ -12,7 +12,7 @@ from caffe2.python.schema import as_record, Field
 from caffe2.python.task import Node, Task, TaskGroup
 
 
-class Output(object):
+class Output:
     """
     Represents the result of a processor function. A processor can either
     return an Output, or it can return a record, in which case an Output will be
@@ -394,7 +394,7 @@ class ProcessingReader(Reader):
         return read_nets, status, fields
 
 
-class NetProcessor(object):
+class NetProcessor:
     """
     Processor that clones a core.Net each time it's called, executing
     the cloned net as the processor. It requires the Net to have input

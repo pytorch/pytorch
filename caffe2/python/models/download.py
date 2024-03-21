@@ -25,7 +25,7 @@ DOWNLOAD_COLUMNS = 70
 # Don't let urllib hang up on big downloads
 def signalHandler(signal, frame):
     print("Killing download...")
-    exit(0)
+    sys.exit(0)
 
 
 signal.signal(signal.SIGINT, signalHandler)
@@ -69,10 +69,10 @@ def downloadFromURLToFile(url, filename, show_progress=True):
         print("")  # New line to fix for progress bar
     except HTTPError as e:
         raise Exception("Could not download model. [HTTP Error] {code}: {reason}."
-                        .format(code=e.code, reason=e.reason))
+                        .format(code=e.code, reason=e.reason)) from e
     except URLError as e:
         raise Exception("Could not download model. [URL Error] {reason}."
-                        .format(reason=e.reason))
+                        .format(reason=e.reason)) from e
 
 
 def getURLFromName(name, filename):
@@ -107,7 +107,7 @@ def downloadModel(model, args):
                 response = input(query)
             if response.upper() == 'N' or not response:
                 print("Cancelling download...")
-                exit(0)
+                sys.exit(0)
         print("Overwriting existing folder! ({filename})".format(filename=model_folder))
         deleteDirectory(model_folder)
 
@@ -122,7 +122,7 @@ def downloadModel(model, args):
             print("Abort: {reason}".format(reason=str(e)))
             print("Cleaning up...")
             deleteDirectory(model_folder)
-            exit(0)
+            sys.exit(0)
 
     if args.install:
         os.symlink("{folder}/__sym_init__.py".format(folder=dir_path),

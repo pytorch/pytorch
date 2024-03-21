@@ -12,14 +12,13 @@
 #include <caffe2/core/common.h>
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
-#include <caffe2/proto/torch_pb.h>
+#include <caffe2/proto/torch.pb.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::PyTorchStreamReader;
 void postSetStateValidate(const IValue& v);
@@ -89,10 +88,7 @@ class ScriptModuleDeserializer final {
 Module ScriptModuleDeserializer::LEGACY_deserialize() {
   torch::ModelDef model_def;
 
-  at::DataPtr data_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t data_size;
-  std::tie(data_ptr, data_size) = reader_->getRecord("model.json");
+  auto [data_ptr, data_size] = reader_->getRecord("model.json");
   // NB: cannot use JsonStringToMessage, since fbcode's protobuf is too old
   // be consistent with JsonStringToMessage
   std::string url_prefix = "type.googleapis.com";
@@ -146,10 +142,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
 
 IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
     const std::string& name) {
-  at::DataPtr attributes_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
+  auto [attributes_ptr, attributes_size] = reader_->getRecord(name);
   auto ivalue = unpickle(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
@@ -191,10 +184,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 
   auto storage_it = storageMap.find(record_key);
   if (storage_it == storageMap.end()) {
-    at::DataPtr storage_ptr;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    uint64_t record_size;
-    std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
+    auto [storage_ptr, record_size] = reader_->getRecord(record_key);
     auto cpu_storage = at::Storage(
         c10::Storage::use_byte_size_t(),
         record_size,
@@ -332,10 +322,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   // generating code.
   std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
   if (module_def.has_torchscript_debug_arena()) {
-    at::DataPtr data;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t size;
-    std::tie(data, size) =
+    auto [data, size] =
         reader_->getRecord(module_def.torchscript_debug_arena().key());
 
     gen_ranges =
@@ -343,10 +330,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
 
   if (module_def.has_torchscript_arena()) {
-    at::DataPtr data;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t size;
-    std::tie(data, size) =
+    auto [data, size] =
         reader_->getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
     auto src = std::make_shared<Source>(
@@ -399,5 +383,4 @@ Module LEGACY_deserialize(
   return deserializer.LEGACY_deserialize();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

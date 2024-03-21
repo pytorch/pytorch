@@ -1,10 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <tuple>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/conv_tbc_backward_native.h>
+#include <ATen/ops/conv_tbc_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
+namespace at::native {
 
 Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, int64_t pad) {
   TORCH_CHECK(self.dim() == 3, "Input must have 3 dims: time, batch, "
@@ -108,5 +117,4 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   return std::make_tuple(dInput, dWeight, dBias);
 }
 
-}
-}
+} // namespace at::native

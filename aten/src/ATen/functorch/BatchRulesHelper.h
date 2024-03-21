@@ -3,8 +3,10 @@
 //
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
+#pragma once
 
-#include <ATen/native/ResizeCommon.h>
+#include <c10/util/TypeList.h>
+
 #include <ATen/ATen.h>
 #include <ATen/Operators.h>
 
@@ -17,12 +19,16 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/VmapGeneratedPlumbing.h>
 
+#include <utility>
+
 // This file contains helper functions for batching rules.
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
+
+TORCH_API Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x);
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
@@ -38,16 +44,16 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
 void check_randomness(RandomnessType randomness);
 void check_randomness(RandomnessType randomness, bool any_tensor_bdim);
 
-inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
+inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, c10::SymInt batch_size) {
   if (has_bdim) {
     return tensor;
   }
-  const auto sizes = tensor.sizes();
-  DimVector expanded_shape;
+  const auto sizes = tensor.sym_sizes();
+  SymDimVector expanded_shape;
   expanded_shape.reserve(sizes.size());
-  expanded_shape.emplace_back(batch_size);
+  expanded_shape.emplace_back(std::move(batch_size));
   expanded_shape.insert(expanded_shape.end(), sizes.begin(), sizes.end());
-  return tensor.expand(expanded_shape);
+  return tensor.expand_symint(expanded_shape);
 }
 
 #define VMAP_SUPPORT(op, batch_rule) \
@@ -64,7 +70,7 @@ template <typename A, A a, typename C>
 struct BasicUnaryBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
-struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
+struct BasicUnaryBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& tensor,
       optional<int64_t> batch_dim,
@@ -89,7 +95,7 @@ template <typename A, A a, typename C>
 struct VariadicBdimsBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
-struct VariadicBdimsBatchRuleHelper<F, Func, typelist<A, T...>> {
+struct VariadicBdimsBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& tensor,
       optional<int64_t> batch_dim,
@@ -122,7 +128,8 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "boxed_tensor_inputs_batch_rule");
+
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
@@ -137,9 +144,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   for (const auto idx : c10::irange(0, num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      Tensor tensor_value;
-      optional<int64_t> tensor_bdim;
-      std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
+      auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
       tensor_inputs.emplace_back(tensor_value, tensor_bdim);
       tensor_pos.push_back(idx);
     }
@@ -147,7 +152,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   Func(tensor_inputs);
 
   size_t tensor_idx = 0;
-  TORCH_INTERNAL_ASSERT(tensor_pos.size() > 0);
+  TORCH_INTERNAL_ASSERT(!tensor_pos.empty());
   for (const auto arg_idx : c10::irange(0, num_arguments)) {
     if (tensor_idx >= tensor_pos.size() || (int64_t)arg_idx != tensor_pos[tensor_idx]) {
       torch::jit::push(stack, arguments[arg_idx]);
@@ -240,7 +245,7 @@ inline void boxed_existing_bdim_all_batch_rule(
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "boxed_existing_bdim_all_batch_rule");
   int64_t cur_level = maybe_layer->layerId();
 
   const auto arguments = torch::jit::last(stack, num_arguments);
@@ -296,7 +301,7 @@ inline void boxed_all_tensors_have_optional_bdim(
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "boxed_all_tensors_have_optional_bdim");
   int64_t cur_level = maybe_layer->layerId();
 
   const auto arguments = torch::jit::last(stack, num_arguments);
@@ -334,7 +339,7 @@ inline void boxed_all_tensors_have_optional_bdim(
       if (tensor_idx == contig_tensor_index) {
         value_ = value_.contiguous();
       }
-      (*stack)[args_begin + tensor_pos[tensor_idx]] = value_;
+      (*stack)[args_begin + tensor_pos[tensor_idx]] = std::move(value_);
       continue;
     }
     TORCH_INTERNAL_ASSERT(logical_rank == feature_rank + 1);
@@ -342,7 +347,7 @@ inline void boxed_all_tensors_have_optional_bdim(
     if (tensor_idx == contig_tensor_index) {
       value_ = value_.contiguous();
     }
-    (*stack)[args_begin + tensor_pos[tensor_idx]] = value_;
+    (*stack)[args_begin + tensor_pos[tensor_idx]] = std::move(value_);
   }
 
   op.callBoxed(stack);
@@ -378,14 +383,14 @@ template <typename A, A a, typename C>
 struct ExistingBdimBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
-struct ExistingBdimBatchRuleHelper<F, Func, typelist<A, T...>> {
+struct ExistingBdimBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& self,
       optional<int64_t> self_bdim,
       T... extra_args) {
     auto self_ = reshape_dim_into(*self_bdim, 0, self);
     auto out = Func(self_, std::forward<T>(extra_args)...);
-    return std::make_tuple(reshape_dim_outof(0, self.sizes()[*self_bdim], out), 0);
+    return std::make_tuple(reshape_dim_outof_symint(0, self.sym_sizes()[*self_bdim], out), 0);
   }
 };
 
@@ -467,4 +472,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
     bool do_type_promotion=true);
 
-}}
+} // namespace at::functorch

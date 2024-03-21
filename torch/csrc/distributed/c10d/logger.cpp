@@ -1,17 +1,24 @@
 #include <c10/util/StringUtil.h>
-#include <c10d/Utils.hpp>
-#include <c10d/debug.h>
-#include <c10d/logger.hpp>
 #include <fmt/format.h>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <string>
 
 #include <c10/util/CallOnce.h>
 
 #ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #endif
 
 namespace c10d {
+
+static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
+    "TORCH_NCCL_BLOCKING_WAIT",
+    "NCCL_BLOCKING_WAIT"};
+static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING",
+    "NCCL_ASYNC_ERROR_HANDLING"};
 
 // Logs runtime stats to configured destination. Note that since data collection
 // only runs every ddp_runtime_logging_sample_rate iterations, the actual
@@ -37,7 +44,7 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
       ddp_logging_data.ints_map["avg_backward_comm_time"],
       ddp_logging_data.ints_map["avg_backward_compute_comm_overlap_time"]);
 
-  if (ddp_logging_data.strs_map["comm_hook"] != "") {
+  if (!ddp_logging_data.strs_map["comm_hook"].empty()) {
     loggerInfo += fmt::format(
         "\n Gradient comm. hook: {}", ddp_logging_data.strs_map["comm_hook"]);
   }
@@ -49,8 +56,8 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   return output << loggerInfo;
 }
 
-Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
-  reducer_ = reducer;
+Logger::Logger(std::shared_ptr<c10d::Reducer> reducer)
+    : reducer_(std::move(reducer)) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
@@ -67,33 +74,39 @@ void Logger::log_if_graph_static(bool is_static) {
 
 // Environment variables
 void Logger::set_env_variables() {
-  ddp_logging_data_->strs_map["master_port"] = parse_env("MASTER_PORT");
-  ddp_logging_data_->strs_map["master_addr"] = parse_env("MASTER_ADDR");
+  ddp_logging_data_->strs_map["master_port"] =
+      getCvarString({"MASTER_PORT"}, "N/A");
+  ddp_logging_data_->strs_map["master_addr"] =
+      getCvarString({"MASTER_ADDR"}, "N/A");
   ddp_logging_data_->strs_map["torch_distributed_debug"] =
-      parse_env("TORCH_DISTRIBUTED_DEBUG");
+      getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, "N/A");
   ddp_logging_data_->strs_map["cuda_visible_devices"] =
-      parse_env("CUDA_VISIBLE_DEVICES");
+      getCvarString({"CUDA_VISIBLE_DEVICES"}, "N/A");
   if (reducer_->process_group_->getBackendName() == "nccl") {
     ddp_logging_data_->strs_map["nccl_socket_ifname"] =
-        parse_env("NCCL_SOCKET_IFNAME");
+        getCvarString({"NCCL_SOCKET_IFNAME"}, "N/A");
     ddp_logging_data_->strs_map["nccl_blocking_wait"] =
-        parse_env("NCCL_BLOCKING_WAIT");
+        getCvarString(TORCH_NCCL_BLOCKING_WAIT, "N/A");
     ddp_logging_data_->strs_map["nccl_async_error_handling"] =
-        parse_env("NCCL_ASYNC_ERROR_HANDLING");
-    ddp_logging_data_->strs_map["nccl_debug"] = parse_env("NCCL_DEBUG");
-    ddp_logging_data_->strs_map["nccl_nthreads"] = parse_env("NCCL_NTHREADS");
+        getCvarString(TORCH_NCCL_ASYNC_ERROR_HANDLING, "N/A");
+    ddp_logging_data_->strs_map["nccl_debug"] =
+        getCvarString({"NCCL_DEBUG"}, "N/A");
+    ddp_logging_data_->strs_map["nccl_nthreads"] =
+        getCvarString({"NCCL_NTHREADS"}, "N/A");
     ddp_logging_data_->strs_map["nccl_ib_timeout"] =
-        parse_env("NCCL_IB_TIMEOUT");
+        getCvarString({"NCCL_IB_TIMEOUT"}, "N/A");
   }
   if (reducer_->process_group_->getBackendName() == "gloo") {
     ddp_logging_data_->strs_map["gloo_socket_ifname"] =
-        parse_env("GLOO_SOCKET_IFNAME");
+        getCvarString({"GLOO_SOCKET_IFNAME"}, "N/A");
     ddp_logging_data_->strs_map["gloo_device_transport"] =
-        parse_env("GLOO_DEVICE_TRANSPORT");
+        getCvarString({"GLOO_DEVICE_TRANSPORT"}, "N/A");
 
 #ifdef USE_C10D_GLOO
-    auto gloo_pg =
-        static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.get());
+    auto gloo_pg = static_cast<c10d::ProcessGroupGloo*>(
+        reducer_->process_group_
+            ->getBackend(c10d::ProcessGroup::BackendType::GLOO)
+            .get());
     auto n_threads = gloo_pg->getNumThreads();
     ddp_logging_data_->ints_map["gloo_num_threads"] = n_threads;
 #endif
@@ -272,7 +285,7 @@ void Logger::set_runtime_stats_and_log() {
   // If unused_parameters_ is not empty, calculate its sizes.
   // unused_parameters_ is calculated in forward call of
   // each iteration.
-  if (reducer_->unused_parameters_.size() == 0 &&
+  if (reducer_->unused_parameters_.empty() &&
       reducer_->find_unused_parameters_) {
     // No unused params in this iteration
     ddp_logging_data_->ints_map["unused_parameter_size"] = 0;
@@ -318,7 +331,9 @@ void Logger::set_runtime_stats_and_log() {
         "Cuda time stats are not collected for multi-device modules.");
     return;
   }
-  if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
+
+  if (!reducer_->timer_ &&
+      (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu())) {
     TORCH_WARN_ONCE(
         "Time stats are currently only collected for CPU and CUDA devices. "
         "Please refer to CpuTimer or CudaTimer for how to register timer "
@@ -395,4 +410,33 @@ at::DDPLoggingData Logger::get_ddp_logging_data() {
   return *ddp_logging_data_;
 }
 
+// initialization of static variables in C10dLogger
+std::unique_ptr<C10dLogger> C10dLogger::logger_ = nullptr;
+std::atomic<bool> C10dLogger::registered_(false);
+
+C10dLogger* C10dLogger::getLogger() {
+  if (!registered_.load()) {
+    return nullptr;
+  }
+  return logger_.get();
+}
+
+void C10dLogger::registerLogger(std::unique_ptr<C10dLogger> logger) {
+  if (registered_.load()) {
+    LOG(WARNING) << "C10dLogger has already been registered.";
+    return;
+  }
+  registered_.store(true);
+  logger_ = std::move(logger);
+}
+
+void C10dLogger::log(const C10dLoggingData& data) {
+  for (const auto& [key, value] : data.integers) {
+    LOG(INFO) << key << ": " << value;
+  }
+  for (const auto& [key, value] : data.strings) {
+    LOG(INFO) << key << ": " << value;
+  }
+  return;
+}
 } // namespace c10d

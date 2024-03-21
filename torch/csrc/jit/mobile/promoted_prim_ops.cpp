@@ -92,6 +92,14 @@ void device(Stack& stack) {
   push(stack, pop(stack).toTensor().device());
 }
 
+void device_with_index(Stack& stack) {
+  std::string type = pop(stack).toStringRef();
+  int index = pop(stack).toInt();
+  std::string device_str = type + ":" + std::to_string(index);
+  auto device = c10::Device(device_str);
+  push(stack, device);
+}
+
 void dtype(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
@@ -172,7 +180,10 @@ void toList(Stack& stack) {
       (out_ty == at::FloatType::get() && t.is_floating_point()) ||
           (out_ty == at::ComplexType::get() && t.is_complex()) ||
           tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
-      "Output annotation element type and runtime tensor element type must match for tolist()");
+      "Output annotation element type and runtime tensor element type must match for tolist(): ",
+      *tryScalarTypeFromJitType(*out_ty),
+      " vs ",
+      t.scalar_type());
 
   // Check that the dimension of the Tensor matches that of the
   // annotation.

@@ -1,22 +1,83 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <c10/util/Exception.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
-#include <ATen/native/Fill.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/TensorIndexing.h>
 #include <ATen/native/TypeProperties.h>
-#include <c10/core/QScheme.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <iostream>
+#include <c10/util/Exception.h>
 
-namespace at {
-namespace meta {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_aminmax_native.h>
+#include <ATen/ops/_assert_async_native.h>
+#include <ATen/ops/_functional_assert_async_native.h>
+#include <ATen/ops/_print_native.h>
+#include <ATen/ops/_assert_scalar_native.h>
+#include <ATen/ops/_functional_assert_scalar_native.h>
+#include <ATen/ops/_make_per_tensor_quantized_tensor.h>
+#include <ATen/ops/_unique.h>
+#include <ATen/ops/allclose_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/argsort_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/clamp.h>
+#include <ATen/ops/clamp_max.h>
+#include <ATen/ops/clamp_max_native.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/clamp_min_native.h>
+#include <ATen/ops/clamp_native.h>
+#include <ATen/ops/clip_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/eq.h>
+#include <ATen/ops/fill.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/index.h>
+#include <ATen/ops/is_nonzero_native.h>
+#include <ATen/ops/isclose.h>
+#include <ATen/ops/isclose_native.h>
+#include <ATen/ops/isfinite.h>
+#include <ATen/ops/isfinite_native.h>
+#include <ATen/ops/isin.h>
+#include <ATen/ops/isin_native.h>
+#include <ATen/ops/isinf.h>
+#include <ATen/ops/isinf_native.h>
+#include <ATen/ops/isnan_native.h>
+#include <ATen/ops/isneginf_native.h>
+#include <ATen/ops/isposinf_native.h>
+#include <ATen/ops/isreal_native.h>
+#include <ATen/ops/max.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/min.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/mode.h>
+#include <ATen/ops/mode_native.h>
+#include <ATen/ops/ne.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/result_type_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/where_native.h>
+#include <ATen/ops/zeros_like.h>
+
+#include <iostream>
+#include <utility>
+#endif
+
+namespace at::meta {
 
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
@@ -70,17 +131,17 @@ const OptionalTensorRef max) {
     TensorIteratorConfig()                  \
       .set_check_mem_overlap(true)          \
       .add_output(maybe_get_output())       \
-      .add_input(self)                      \
+      .add_const_input(self)                \
       .promote_inputs_to_common_dtype(true) \
       .cast_common_dtype_to_outputs(true)   \
       .enforce_safe_casting_to_output(true)
 
   if (min && max) {
-    build(CLAMP_CONFIG().add_input(*min).add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*min).add_const_input(*max));
   } else if (min) {
-    build(CLAMP_CONFIG().add_input(*min));
+    build(CLAMP_CONFIG().add_const_input(*min));
   } else if (max) {
-    build(CLAMP_CONFIG().add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*max));
   }
 }
 
@@ -204,9 +265,9 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keep
       .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -312,6 +373,18 @@ Tensor isreal(const Tensor& self) {
   return at::imag(self) == 0;
 }
 
+
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)                          \
+        AT_DISPATCH_FLOATING_TYPES_AND3( kHalf, kBFloat16, kFloat8_e5m2, \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)           \
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
+
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
@@ -324,7 +397,7 @@ Tensor isinf(const Tensor &self) {
           (at::isinf(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
@@ -340,13 +413,38 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }
 
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
+}
+
+void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
+  TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
+void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
+  TORCH_SYM_CHECK(scalar.toSymBool(), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
+Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
+  _assert_scalar(scalar, assert_msg);
+  return dep_token.clone();
+}
+
+Tensor _functional_assert_async_msg_cpu(
+  const Tensor& self,
+  c10::string_view assert_msg,
+  const Tensor& dep_token) {
+  _assert_async_msg_cpu(self, assert_msg);
+  return dep_token.clone();
+}
+
+void _print(c10::string_view s) {
+  std::cout << s << "\n";
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
@@ -363,17 +461,16 @@ static void isin_sorting(
     elements_flat = elements.ravel();
     test_elements_flat = test_elements.ravel();
   } else {
-    std::tie (elements_flat, unique_order) = at::_unique(
+    std::tie(elements_flat, unique_order) = at::_unique(
         elements, /*sorted=*/ false, /*return_inverse=*/ true);
-    std::tie (test_elements_flat, std::ignore) = at::_unique(test_elements, /*sorted=*/ false);
+    std::tie(test_elements_flat, std::ignore) = at::_unique(test_elements, /*sorted=*/ false);
   }
 
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
-  Tensor all_elements = at::cat({elements_flat, test_elements_flat});
-  Tensor sorted_elements, sorted_order;
-  std::tie (sorted_elements, sorted_order) = all_elements.sort(
+  Tensor all_elements = at::cat({std::move(elements_flat), std::move(test_elements_flat)});
+  auto [sorted_elements, sorted_order] = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);
 
   // 3. Create a mask for locations of adjacent duplicate values within the
@@ -399,36 +496,58 @@ static void isin_sorting(
   }
 }
 
+template<typename... Args>
+Device out_device(Args&... inps){
+  for (const auto& i : {inps...}){
+    if (i.device() != at::kCPU) {
+      return i.device();
+    }
+  }
+  return at::kCPU;
+}
+
+
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  Tensor self_, other_;
-  if (self.dtype() != other.dtype()) {
-    auto result_type = at::native::result_type(self, other);
-    self_ = self.to(result_type);
-    other_ = other.to(result_type);
-  } else {
-    self_ = self;
-    other_ = other;
+  const auto result_type = at::native::result_type(self, other);
+  TORCH_CHECK(out.scalar_type() == result_type, "Expected out type to be ", result_type, " but got ", out.scalar_type());
+
+  auto self_ = self.scalar_type() != result_type ? self.to(result_type): self;
+  auto other_ = other.scalar_type() != result_type ? other.to(result_type): other;
+  auto condition_ = condition;
+  auto device = out_device(condition, self_, other_);
+  if (device != at::kCPU) { // allow CPU scalars on non-cpu device
+    if (condition.device() != device && condition.ndimension() == 0) {
+      condition_ = condition.to(device);
+    }
+    if (self_.device() != device && self_.ndimension() == 0) {
+        self_ = self_.to(device);
+    }
+    if (other_.device() != device && other_.ndimension() == 0) {
+        other_ = other_.to(device);
+    }
   }
-  if (condition.scalar_type() == ScalarType::Byte) {
-  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  if (condition_.scalar_type() == ScalarType::Byte) {
+    TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+    condition_ = condition_.to(kBool);
   }
-  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+  TORCH_CHECK(condition_.scalar_type() == kBool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition_.scalar_type());
+  // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(out)
-    .add_input(cond_bool)
-    .add_input(self_)
-    .add_input(other_)
+    .add_const_input(condition_)
+    .add_const_input(self_)
+    .add_const_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
 }
 
+
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  auto device = out_device(condition, self, other);
   auto result_type = at::native::result_type(self, other);
-  Tensor ret = at::empty({0}, self.options().dtype(result_type));
+  Tensor ret = at::empty({0}, self.options().dtype(result_type).device(device));
   at::native::where_self_out(condition, self, other, ret);
   return ret;
 }
@@ -673,10 +792,10 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
 Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
@@ -742,5 +861,4 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

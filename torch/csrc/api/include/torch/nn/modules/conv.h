@@ -22,7 +22,6 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ConvNdImpl : public torch::nn::Cloneable<Derived> {
  public:
   explicit ConvNdImpl(detail::ConvNdOptions<D> options_)
@@ -33,13 +32,17 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 
   void reset() override {
     TORCH_CHECK(
+        options.in_channels() > 0 && options.groups() > 0 &&
+            options.out_channels() > 0,
+        "in_channels, groups and out_channels must be a positive integer.");
+    TORCH_CHECK(
         options.in_channels() % options.groups() == 0,
         "in_channels must be divisible by groups");
     TORCH_CHECK(
         options.out_channels() % options.groups() == 0,
         "out_channels must be divisible by groups");
 
-    c10::visit(
+    std::visit(
         c10::overloaded(
             [&](enumtype::kValid) {
               _reversed_padding_repeated_twice.resize(2 * D);
@@ -104,9 +107,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
         /*a=*/std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
     if (bias.defined()) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t fan_in, fan_out;
-      std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
+      auto [fan_in, fan_out] = init::_calculate_fan_in_and_fan_out(weight);
       auto bound = 1 / std::sqrt(fan_in);
       init::uniform_(bias, -bound, bound);
     }
@@ -118,7 +119,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
            << "(" << options.in_channels() << ", " << options.out_channels()
            << ", kernel_size=" << options.kernel_size()
            << ", stride=" << options.stride();
-    c10::visit(
+    std::visit(
         c10::overloaded(
             [&](enumtype::kValid) { stream << ", padding='valid'"; },
             [&](enumtype::kSame) { stream << ", padding='same'"; },
@@ -140,7 +141,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
     if (!options.bias()) {
       stream << ", bias=" << std::boolalpha << false;
     }
-    if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
       stream << ", padding_mode="
              << enumtype::get_enum_name(options.padding_mode());
     }
@@ -167,7 +168,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv1dOptions` class to learn what
@@ -177,7 +178,6 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
  public:
   Conv1dImpl(
@@ -200,7 +200,7 @@ TORCH_MODULE(Conv1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv2d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv2d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv2dOptions` class to learn what
@@ -210,7 +210,6 @@ TORCH_MODULE(Conv1d);
 /// ```
 /// Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv2dImpl : public ConvNdImpl<2, Conv2dImpl> {
  public:
   Conv2dImpl(
@@ -236,7 +235,7 @@ TORCH_MODULE(Conv2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv3d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv3d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv3dOptions` class to learn what
@@ -246,7 +245,6 @@ TORCH_MODULE(Conv2d);
 /// ```
 /// Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv3dImpl : public ConvNdImpl<3, Conv3dImpl> {
  public:
   Conv3dImpl(
@@ -270,14 +268,13 @@ TORCH_MODULE(Conv3d);
 
 /// Base class for all (dimension-specialized) convolution transpose modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
  public:
   using torch::nn::ConvNdImpl<D, Derived>::ConvNdImpl;
   explicit ConvTransposeNdImpl(detail::ConvNdOptions<D> options_)
       : ConvNdImpl<D, Derived>(options_) {
     TORCH_INTERNAL_ASSERT(
-        c10::holds_alternative<ExpandingArray<D>>(this->options.padding()),
+        std::holds_alternative<ExpandingArray<D>>(this->options.padding()),
         "ConvTranspose padding cannot be a string");
   }
 
@@ -304,7 +301,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
     if (!this->options.bias()) {
       stream << ", bias=" << std::boolalpha << false;
     }
-    if (!c10::get_if<enumtype::kZeros>(&this->options.padding_mode())) {
+    if (!std::get_if<enumtype::kZeros>(&this->options.padding_mode())) {
       stream << ", padding_mode="
              << enumtype::get_enum_name(this->options.padding_mode());
     }
@@ -313,7 +310,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 
  protected:
   const ExpandingArray<D>& padding() const {
-    return c10::get<ExpandingArray<D>>(this->options.padding());
+    return std::get<ExpandingArray<D>>(this->options.padding());
   }
 
   std::vector<int64_t> _output_padding(
@@ -328,7 +325,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose1dOptions` class to learn
@@ -339,7 +336,6 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 /// ConvTranspose1d model(ConvTranspose1dOptions(3, 2,
 /// 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose1dImpl
     : public ConvTransposeNdImpl<1, ConvTranspose1dImpl> {
  public:
@@ -371,7 +367,7 @@ TORCH_MODULE(ConvTranspose1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose2dOptions` class to learn
@@ -382,7 +378,6 @@ TORCH_MODULE(ConvTranspose1d);
 /// ConvTranspose2d model(ConvTranspose2dOptions(3, 2,
 /// 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose2dImpl
     : public ConvTransposeNdImpl<2, ConvTranspose2dImpl> {
  public:
@@ -414,7 +409,7 @@ TORCH_MODULE(ConvTranspose2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose3dOptions` class to learn
@@ -425,7 +420,6 @@ TORCH_MODULE(ConvTranspose2d);
 /// ConvTranspose3d model(ConvTranspose3dOptions(2, 2,
 /// 2).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose3dImpl
     : public ConvTransposeNdImpl<3, ConvTranspose3dImpl> {
  public:

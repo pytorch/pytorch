@@ -65,9 +65,9 @@ inline bool compute_requires_grad(Args&&... args) {
 }
 
 inline void set_history(
-    at::Tensor& variable,
+    const at::Tensor& variable,
     const std::shared_ptr<Node>& grad_fn) {
-  AT_ASSERT(grad_fn);
+  TORCH_CHECK(grad_fn != nullptr);
   if (variable.defined()) {
     // If the codegen triggers this, you most likely want to add your newly
     // added function to the DONT_REQUIRE_DERIVATIVE list in
@@ -81,15 +81,7 @@ inline void set_history(
 }
 
 inline void set_history(
-    std::vector<Variable>&& variables,
-    const std::shared_ptr<Node>& grad_fn) {
-  for (auto& variable : variables) {
-    set_history(variable, grad_fn);
-  }
-}
-
-inline void set_history(
-    std::vector<Variable>& variables,
+    const std::vector<Variable>& variables,
     const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
@@ -100,7 +92,7 @@ inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
   return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
-inline bool isFwGradDefinedTensorList(const at::TensorList& variables) {
+inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
   bool ret = false;
   for (auto& variable : variables) {
     ret |= isFwGradDefined(variable);
@@ -109,7 +101,7 @@ inline bool isFwGradDefinedTensorList(const at::TensorList& variables) {
 }
 
 inline bool isFwGradDefinedTensorList(
-    const c10::List<c10::optional<at::Tensor>> li) {
+    const c10::List<c10::optional<at::Tensor>>& li) {
   bool ret = false;
   for (auto i : c10::irange(li.size())) {
     auto t = li.get(i);

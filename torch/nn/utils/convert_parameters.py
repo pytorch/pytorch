@@ -3,10 +3,10 @@ from typing import Iterable, Optional
 
 
 def parameters_to_vector(parameters: Iterable[torch.Tensor]) -> torch.Tensor:
-    r"""Convert parameters to one vector
+    r"""Flatten an iterable of parameters into a single vector.
 
     Args:
-        parameters (Iterable[Tensor]): an iterator of Tensors that are the
+        parameters (Iterable[Tensor]): an iterable of Tensors that are the
             parameters of a model.
 
     Returns:
@@ -25,17 +25,16 @@ def parameters_to_vector(parameters: Iterable[torch.Tensor]) -> torch.Tensor:
 
 
 def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) -> None:
-    r"""Convert one vector to the parameters
+    r"""Copy slices of a vector into an iterable of parameters.
 
     Args:
-        vec (Tensor): a single vector represents the parameters of a model.
-        parameters (Iterable[Tensor]): an iterator of Tensors that are the
+        vec (Tensor): a single vector representing the parameters of a model.
+        parameters (Iterable[Tensor]): an iterable of Tensors that are the
             parameters of a model.
     """
     # Ensure vec of type Tensor
     if not isinstance(vec, torch.Tensor):
-        raise TypeError('expected torch.Tensor, but got: {}'
-                        .format(torch.typename(vec)))
+        raise TypeError(f'expected torch.Tensor, but got: {torch.typename(vec)}')
     # Flag for the device where the parameter is located
     param_device = None
 
@@ -55,10 +54,10 @@ def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) 
 
 
 def _check_param_device(param: torch.Tensor, old_param_device: Optional[int]) -> int:
-    r"""This helper function is to check if the parameters are located
-    in the same device. Currently, the conversion between model parameters
-    and single vector form is not supported for multiple allocations,
-    e.g. parameters in different GPUs, or mixture of CPU/GPU.
+    r"""Check if the parameters are located on the same device.
+
+    Currently, the conversion between model parameters and single vector form is not supported
+    for multiple allocations, e.g. parameters in different GPUs/PrivateUse1s, or mixture of CPU/GPU/PrivateUse1.
 
     Args:
         param ([Tensor]): a Tensor of a parameter of a model
@@ -68,13 +67,13 @@ def _check_param_device(param: torch.Tensor, old_param_device: Optional[int]) ->
     Returns:
         old_param_device (int): report device for the first time
     """
-
     # Meet the first parameter
+    support_device_types = ["cuda", torch._C._get_privateuse1_backend_name()]
     if old_param_device is None:
-        old_param_device = param.get_device() if param.is_cuda else -1
+        old_param_device = param.get_device() if param.device.type in support_device_types else -1
     else:
         warn = False
-        if param.is_cuda:  # Check if in same GPU
+        if param.device.type in support_device_types:  # Check if in same GPU/PrivateUse1
             warn = (param.get_device() != old_param_device)
         else:  # Check if in CPU
             warn = (old_param_device != -1)

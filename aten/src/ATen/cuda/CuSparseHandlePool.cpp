@@ -1,7 +1,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 namespace {
 
 void createCusparseHandle(cusparseHandle_t *handle) {
@@ -26,8 +26,8 @@ using CuSparsePoolType = DeviceThreadHandlePool<cusparseHandle_t, createCusparse
 } // namespace
 
 cusparseHandle_t getCurrentCUDASparseHandle() {
-  int device;
-  AT_CUDA_CHECK(cudaGetDevice(&device));
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
@@ -43,4 +43,4 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace at::cuda

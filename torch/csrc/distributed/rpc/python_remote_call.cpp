@@ -46,8 +46,8 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
 
   // remove the last elements from values and convert it back to an RRef
   TORCH_INTERNAL_ASSERT(
-      values.size() >= 3,
-      "Expect at least 3 elements in the unpickled values, but got ",
+      values.size() > 3,
+      "Expect at least 4 elements in the unpickled values, but got ",
       values.size());
   bool isAsyncExecution = values.back().toBool();
   values.pop_back();

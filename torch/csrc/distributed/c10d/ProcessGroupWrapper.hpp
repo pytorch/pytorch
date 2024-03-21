@@ -2,18 +2,17 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
 
-class TORCH_API ProcessGroupWrapper : public ProcessGroup {
+class TORCH_API ProcessGroupWrapper : public Backend {
  public:
   explicit ProcessGroupWrapper(
-      c10::intrusive_ptr<ProcessGroup> pg,
-      c10::intrusive_ptr<ProcessGroupGloo> glooPg);
+      c10::intrusive_ptr<Backend> backend,
+      c10::intrusive_ptr<Backend> glooBackend);
 
   const std::string getBackendName() const override;
 
@@ -111,26 +110,30 @@ class TORCH_API ProcessGroupWrapper : public ProcessGroup {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-    c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts) override;
 
-  c10::intrusive_ptr<ProcessGroup> getWrappedPg() const;
+  void startCoalescing() override;
+
+  c10::intrusive_ptr<Work> endCoalescing() override;
+
+  c10::intrusive_ptr<Backend> getWrappedPg() const;
 
  private:
   // Underlying process group that actual application collectives will be
   // dispatched to
-  c10::intrusive_ptr<ProcessGroup> pg_;
+  c10::intrusive_ptr<Backend> backend_;
   // Gloo process group responsible for internal coordination such as monitored
   // barrier, sequence number checking, collective fingerprint collecting.
-  c10::intrusive_ptr<ProcessGroupGloo> glooPg_;
+  c10::intrusive_ptr<Backend> glooBackend_;
   // Conducts several checks to ensure that the underlying collective is well
   // formed with the goal of notifying the user about incorrect collective use
   // in the application.
   void runCollectiveChecks(
       OpType op_type,
-      const std::vector<at::Tensor>& tensors) const;
+      const std::vector<at::Tensor>& tensors);
 };
 } // namespace c10d
 

@@ -5,7 +5,7 @@
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
@@ -30,7 +30,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
         // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
         // corresponding dimensions in self
         for (const auto j : c10::irange(index.dim())) {
-          int64_t srcIdx = result.size() + j;
+          int64_t srcIdx = static_cast<int64_t>(result.size() + j);
           if (index.size(j) != self.size(srcIdx)) {
             invalid_mask(self, srcIdx, index, j);
           }
@@ -41,19 +41,25 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
           result.emplace_back(nonzero.select(1, j));
         }
       } else {
-        result.emplace_back(std::move(index));
+        result.emplace_back(index);
       }
     }
   }
   return result;
 }
 
-static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices) {
+static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices, bool allow_int=false) {
   for (const auto& tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
-      if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
-          TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+      if (allow_int) {
+        if (scalarType != kLong && scalarType != kByte && scalarType != kBool && scalarType != kInt) {
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, int, byte or bool tensors");
+        }
+      } else {
+        if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+        }
       }
     }
   }
@@ -95,7 +101,7 @@ static C10_UNUSED bool hasContiguousSubspace(TensorList tl) {
 // returns
 // tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
 static C10_UNUSED std::tuple<Tensor, std::vector<Tensor>>
-transposeToFront(Tensor self, TensorList indices) {
+transposeToFront(const Tensor& self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
@@ -115,7 +121,7 @@ transposeToFront(Tensor self, TensorList indices) {
 }
 
 inline std::tuple<Tensor, std::vector<Tensor>, std::vector<int64_t>>
-transposeToFrontAndInvPerm(Tensor self, TensorList indices) {
+transposeToFrontAndInvPerm(const Tensor& self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<int64_t> invPerm;
   std::vector<Tensor> transposedIndices;
@@ -151,4 +157,4 @@ struct AdvancedIndex {
 };
 
 
-}}
+} //namespace at::native

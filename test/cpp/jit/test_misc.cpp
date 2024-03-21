@@ -491,10 +491,20 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HAS_ASANUBSAN 1
+#endif
+#endif
+
+#ifndef HAS_ASANUBSAN
+// This test fails vptr UBSAN checks
+
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
+#endif
 
 // test a few features that are not directly used in schemas yet
 TEST(SchemaParserTest, NestedArrays) {
@@ -1162,7 +1172,7 @@ TEST(RecordFunctionTest, Callbacks) {
         },
         [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-          TORCH_CHECK(ctx_ptr != nullptr);
+          TORCH_CHECK(ctx != nullptr);
           TORCH_CHECK(ctx->a == 123);
           TORCH_CHECK(ctx->b == "test_str");
         }));
@@ -1325,8 +1335,8 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TestThreadLocalDebugInfo() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~TestThreadLocalDebugInfo() override {}
 
  private:
   int model_id_ = 0;
@@ -1445,83 +1455,6 @@ TEST(TestSymInt, AddSymbolicInt) {
   c10::SymInt b(3);
   ASSERT_TRUE((a + b).expect_int() == 8);
 }
-
-#ifndef C10_MOBILE
-TEST(TestSymInt, TestIntrusive) {
-  auto a = c10::make_intrusive<c10::SymIntNodeImpl>();
-  auto b = c10::make_intrusive<c10::SymIntNodeImpl>();
-  ASSERT_EQ(a.use_count(), 1);
-  ASSERT_EQ(b.use_count(), 1);
-  auto as = a->toSymInt();
-  auto bs = b->toSymInt();
-  ASSERT_EQ(a.use_count(), 2);
-  ASSERT_EQ(b.use_count(), 2);
-  as = bs;
-  ASSERT_EQ(a.use_count(), 1);
-  ASSERT_EQ(b.use_count(), 3);
-}
-
-class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
- public:
-  TestSymIntNodeImpl(int64_t i) : i_(i) {}
-
-  bool bool_() override {
-    return static_cast<bool>(i_);
-  };
-
-#define OPDEF3(NAME, OP, RET)                                            \
-  RET NAME(const c10::SymIntNode& other) override {                      \
-    return make_intrusive<TestSymIntNodeImpl>(                           \
-        this->i_ OP dynamic_cast<TestSymIntNodeImpl*>(other.get())->i_); \
-  }
-
-#define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymIntNode)
-  OPDEF2(add, +)
-  OPDEF2(sub, -)
-  OPDEF2(mul, *)
-  OPDEF2(floordiv, /)
-  OPDEF2(mod, %)
-
-  OPDEF2(eq, ==)
-  OPDEF2(ne, !=)
-  OPDEF2(lt, <)
-  OPDEF2(le, <=)
-  OPDEF2(gt, >)
-  OPDEF2(ge, >=)
-#undef OPDEF2
-#undef OPDEF3
-
-  int64_t i_;
-};
-
-TEST(TestSymInt, TestSymIntToSymIntNodeDispatch) {
-  auto get = [](c10::SymInt si) {
-    auto node = si.toSymIntNodeImpl();
-    return dynamic_cast<TestSymIntNodeImpl*>(node.get())->i_;
-  };
-
-  std::vector<int64_t> inputs{0, 1, -1, 4, -4, 777, -777};
-  for (auto i : inputs) {
-    for (auto j : inputs) {
-      auto a = c10::make_intrusive<TestSymIntNodeImpl>(i)->toSymInt();
-      auto b = c10::make_intrusive<TestSymIntNodeImpl>(j)->toSymInt();
-      ASSERT_EQ(get(a + b), i + j);
-      ASSERT_EQ(get(a - b), i - j);
-      ASSERT_EQ(get(a * b), i * j);
-      if (j != 0) {
-        ASSERT_EQ(get(a / b), i / j);
-        ASSERT_EQ(get(a % b), i % j);
-      }
-      ASSERT_EQ(a == b, i == j);
-      ASSERT_EQ(a != b, i != j);
-      ASSERT_EQ(a < b, i < j);
-      ASSERT_EQ(a <= b, i <= j);
-      ASSERT_EQ(a > b, i > j);
-      ASSERT_EQ(a >= b, i >= j);
-    }
-  }
-}
-#endif
 
 TEST(FallbackGraphsTest, Basic) {
   auto x = at::randn({1}, at::kCPU);
@@ -2466,6 +2399,28 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat2, 1);
 }
 
+// Sparse CUDA tensor test
+TEST(FutureTest, SparseTensor) {
+  // Skip test if CUDA is not available.
+  bool has_cuda = at::globalContext().hasCUDA();
+  if (!has_cuda) {
+    LOG(INFO) << "CUDA not available, skipping test";
+  }
+  for (int i = 0; i < 2; ++i) {
+    auto f = c10::make_intrusive<Future>(TensorType::get());
+    at::TensorOptions opts = at::TensorOptions().device(at::DeviceType::CUDA);
+    auto sparse_tensor = i == 0 ? at::ones(10).to_sparse()
+                                : at::sparse_coo_tensor(
+                                      at::arange(10).unsqueeze(0).to(at::kLong),
+                                      at::ones({10, 10}),
+                                      opts);
+    // Runs storage extraction for sparse CUDA tensors
+    f->markCompleted(sparse_tensor);
+    ASSERT_TRUE(f->completed());
+    ASSERT_FALSE(f->hasError());
+  }
+}
+
 // Basic error cases.
 TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
@@ -3052,7 +3007,7 @@ graph(%x.1 : Tensor):
   return (%y))IR",
       &*graph);
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3065,7 +3020,7 @@ graph(%x.1 : Tensor):
         ->run(*g);
   }
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3094,7 +3049,7 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
-    // arange does not acually support complex, leave as
+    // arange does not actually support complex, leave as
     // union[int, float] for now
     if (schema->name() == "aten::arange") {
       continue;
@@ -3109,8 +3064,7 @@ TEST(TestShapeGraphLinting, Basic) {
 // fusion parameters
 class Composed : public ::testing::Test {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void SetUp() {
+  void SetUp() override {
     torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   }
 };
@@ -3176,6 +3130,31 @@ TEST_F(Composed, ComposedOp) {
   ASSERT_TRUE(at::allclose(inp_1, ref2));
   ASSERT_TRUE(at::allclose(inp_2, ref1));
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
+#endif
+}
+
+TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#ifdef USE_QNNPACK
+  const auto src = R"IR(
+    graph():
+        %none: NoneType = prim::Constant()
+        %dim: int = prim::Constant[value=3]()
+        %shape: int[] = prim::ListConstruct(%dim, %dim)
+        %weight: Tensor = aten::ones(%shape, %none, %none, %none, %none)
+        %scale: float = prim::Constant[value=1.]()
+        %zero_point: int = prim::Constant[value=0]()
+        %dtype: int = prim::Constant[value=12]()
+        %weight_q: Tensor = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
+        %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
+        return (%params)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  ConstantPropagation(graph);
+
+  testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
 #endif
 }
 

@@ -7,6 +7,8 @@
 #include <ATen/core/TorchDispatchUtils.h>
 #include <torch/library.h>
 
+#include <ATen/SparseCsrTensorUtils.h>
+
 
 // ${generated_comment}
 
@@ -35,7 +37,7 @@ using namespace torch::autograd::generated;
 using namespace torch::autograd::generated::details;
 
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 namespace VariableType {
 namespace{
@@ -60,4 +62,4 @@ ${wrapper_registrations}
 
 }
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

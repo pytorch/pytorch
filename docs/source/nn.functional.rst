@@ -40,6 +40,7 @@ Pooling functions
     max_unpool3d
     lp_pool1d
     lp_pool2d
+    lp_pool3d
     adaptive_max_pool1d
     adaptive_max_pool2d
     adaptive_max_pool3d
@@ -48,6 +49,18 @@ Pooling functions
     adaptive_avg_pool3d
     fractional_max_pool2d
     fractional_max_pool3d
+
+Attention Mechanisms
+-------------------------------
+
+The :mod:`torch.nn.attention.bias` module contains attention_biases that are designed to be used with
+scaled_dot_product_attention.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    scaled_dot_product_attention
 
 Non-linear activation functions
 -------------------------------

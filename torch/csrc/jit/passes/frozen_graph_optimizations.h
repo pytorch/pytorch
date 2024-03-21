@@ -8,6 +8,7 @@
  * - FoldFrozenConvBatchnorm
  * - FoldFrozenConvAddOrSub
  * - FoldFrozenConvMulOrDiv
+ * - FoldFrozenLinearBatchnorm
  */
 
 namespace torch {

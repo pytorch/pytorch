@@ -56,20 +56,18 @@ inline torch::Tensor parameters_to_vector(
 // Convert one vector to the parameters
 inline void vector_to_parameters(
     const torch::Tensor& vec,
-    std::vector<torch::Tensor> parameters) {
+    const std::vector<torch::Tensor>& parameters) {
   // Flag for the device where the parameter is located
   c10::optional<int64_t> param_device;
 
   // Pointer for slicing the vector for each parameter
   int64_t pointer = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t num_param;
-  for (torch::Tensor& param : parameters) {
+  for (const torch::Tensor& param : parameters) {
     // Ensure the parameters are located in the same device
     param_device = _check_param_device(param, param_device);
 
     // The length of the parameter
-    num_param = param.numel();
+    auto num_param = param.numel();
     // Slice the vector, reshape it, and replace the old data of the parameter
     param.set_data(
         vec.slice(0, pointer, pointer + num_param).view_as(param).data());

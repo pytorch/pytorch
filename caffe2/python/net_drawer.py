@@ -9,7 +9,6 @@ import json
 import logging
 from collections import defaultdict
 from caffe2.python import utils
-from future.utils import viewitems
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -375,11 +374,11 @@ def main():
         content = fid.read()
         graphs = utils.GetContentFromProtoString(
             content, {
-                caffe2_pb2.PlanDef: lambda x: GetOperatorMapForPlan(x),
+                caffe2_pb2.PlanDef: GetOperatorMapForPlan,
                 caffe2_pb2.NetDef: lambda x: {x.name: x.op},
             }
         )
-    for key, operators in viewitems(graphs):
+    for key, operators in graphs.items():
         if args.minimal:
             graph = GetPydotGraphMinimal(
                 operators,

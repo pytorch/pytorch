@@ -28,8 +28,7 @@
 #include <cstring>
 #include <ostream>
 
-namespace at {
-namespace vec {
+namespace at::vec {
 
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -70,7 +69,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 }
 
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -84,8 +83,19 @@ inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+template<>
+inline Vectorized<float> cast<float, int32_t>(const Vectorized<int32_t>& src) {
+  return _mm256_castsi256_ps(src);
+}
 
+template<>
+inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) {
+  return _mm256_castsi256_pd(src);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#ifndef _MSC_VER
+// MSVC is not working well on complex function overload.
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
@@ -97,23 +107,24 @@ std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
-
+#endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+#ifndef _MSC_VER
+// MSVC is not working well on complex function overload.
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
-                   const Vectorized<int64_t>& vindex, const Vectorized<double>& mask) {
+                   const Vectorized<int64_t>& vindex, Vectorized<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
-                   const Vectorized<int32_t>& vindex, const Vectorized<float>& mask) {
+                   const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
-
+#endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Only works for inputs in the range: [-2^51, 2^51]
@@ -132,6 +143,24 @@ template<>
 Vectorized<int32_t>
 inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
   return _mm256_cvttps_epi32(src);
+}
+
+// Only works for inputs in the range: [-2^51, 2^51]
+// From: https://stackoverflow.com/a/41148578
+template<>
+Vectorized<double>
+inline convert_to_fp_of_same_size<double>(const Vectorized<int64_t> &src) {
+  auto x = _mm256_add_epi64(src, _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+  return _mm256_sub_pd(
+    _mm256_castsi256_pd(x),
+    _mm256_set1_pd(0x0018000000000000)
+  );
+}
+
+template<>
+Vectorized<float>
+inline convert_to_fp_of_same_size<float>(const Vectorized<int32_t> &src) {
+  return _mm256_cvtepi32_ps(src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -222,6 +251,59 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
-#endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-}}}
+template<>
+inline Vectorized<float> flip(const Vectorized<float> & v) {
+  const __m256i mask_float = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  return _mm256_permutevar8x32_ps(v, mask_float);
+}
+
+template<>
+inline Vectorized<double> flip(const Vectorized<double> & v) {
+  return _mm256_permute4x64_pd(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
+}
+
+template<>
+inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
+  return _mm256_permute4x64_epi64(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
+}
+
+template<>
+inline Vectorized<int32_t> flip(const Vectorized<int32_t> & v) {
+  const __m256i mask_int32 = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  return _mm256_permutevar8x32_epi32(v, mask_int32);
+}
+
+template<>
+inline Vectorized<int16_t> flip(const Vectorized<int16_t> & v) {
+  const __m256i mask = _mm256_set_epi8(
+    1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
+    1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14
+  );
+  auto reversed = _mm256_shuffle_epi8(v, mask);
+  return _mm256_permute2x128_si256(reversed, reversed, 1);
+}
+
+inline __m256i flip8(const __m256i & v) {
+  const __m256i mask_int8 = _mm256_set_epi8(
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+  );
+  auto reversed = _mm256_shuffle_epi8(v, mask_int8);
+  return _mm256_permute2x128_si256(reversed, reversed, 1);
+}
+
+template<>
+inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
+  return flip8(v);
+}
+
+template<>
+inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
+  return flip8(v);
+}
+
+#endif // (defined(CPU_CAPABILITY_AVX2)
+
+}} // namepsace at::vec::CPU_CAPABILITY

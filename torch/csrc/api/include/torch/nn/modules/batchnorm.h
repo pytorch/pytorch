@@ -15,7 +15,6 @@ namespace nn {
 /// Base class for all (dimension-specialized) batchnorm and instancenorm
 /// modules.
 template <size_t D, typename Derived, typename DerivedOptions>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class NormImplBase : public torch::nn::Cloneable<Derived> {
  protected:
   virtual void _check_input_dim(const Tensor& input) = 0;
@@ -99,7 +98,6 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
 
 /// Base class for all (dimension-specialized) batchnorm modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
  public:
   using NormImplBase<D, Derived, BatchNormOptions>::NormImplBase;
@@ -139,14 +137,30 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
   }
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << std::boolalpha << "torch::nn::BatchNorm" << D << "d("
+           << this->options.num_features() << ", "
+           << "eps=" << this->options.eps() << ", "
+           << "momentum=";
+
+    if (this->options.momentum().has_value()) {
+      stream << this->options.momentum().value();
+    } else {
+      stream << "None";
+    }
+
+    stream << ", "
+           << "affine=" << this->options.affine() << ", "
+           << "track_running_stats=" << this->options.track_running_stats()
+           << ")";
+  }
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm1d
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn
@@ -157,7 +171,6 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 /// BatchNorm1d
 /// model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
  protected:
   void _check_input_dim(const Tensor& input) override;
@@ -177,7 +190,7 @@ TORCH_MODULE(BatchNorm1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn
@@ -188,7 +201,6 @@ TORCH_MODULE(BatchNorm1d);
 /// BatchNorm2d
 /// model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
  protected:
   void _check_input_dim(const Tensor& input) override;
@@ -208,7 +220,7 @@ TORCH_MODULE(BatchNorm2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn
@@ -219,7 +231,6 @@ TORCH_MODULE(BatchNorm2d);
 /// BatchNorm3d
 /// model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
   void _check_input_dim(const Tensor& input) override;

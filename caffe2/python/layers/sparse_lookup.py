@@ -133,7 +133,7 @@ class SparseLookup(ModelLayer):
                  name='sparse_lookup', regularizer=None, use_external_weights=False,
                  uniform_weight_init_scale_numerator=1.0, **kwargs):
 
-        super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         self.sparse_key = get_key(self.input_record)()
         logger.info("Setup the sparse lookup layer for " + self.sparse_key)

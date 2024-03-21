@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch.distributed.rpc as rpc
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -26,7 +28,7 @@ class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
         # FIXME Once we consolidate the error messages returned by the
         # TensorPipe agent put some more specific regex here.
         error_regexes = [".*"]
-        return "|".join(["({})".format(error_str) for error_str in error_regexes])
+        return "|".join([f"({error_str})" for error_str in error_regexes])
 
     def get_timeout_error_regex(self):
         return "RPC ran for more than"

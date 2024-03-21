@@ -1,8 +1,16 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Lerp.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
 
-namespace at {
-namespace meta {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/lerp_native.h>
+#endif
+
+namespace at::meta {
 
 TORCH_META_FUNC(lerp_Tensor)(
     const Tensor& self, const Tensor& end, const Tensor& weight) {
@@ -24,9 +32,9 @@ TORCH_META_FUNC(lerp_Scalar)(
   build_binary_op(maybe_get_output(), self, end);
 }
 
-}  // namespace meta
+}  // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(lerp_Tensor)(
     const Tensor& /*self*/, const Tensor& /*end*/, const Tensor& weight, const Tensor& /*out*/) {
@@ -41,5 +49,4 @@ TORCH_IMPL_FUNC(lerp_Scalar)(
 DEFINE_DISPATCH(lerp_kernel_scalar_weight);
 DEFINE_DISPATCH(lerp_kernel_tensor_weight);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

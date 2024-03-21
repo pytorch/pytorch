@@ -1,8 +1,10 @@
+#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_list.h>
+#include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 
 #include <ATen/ScalarOps.h>
 
@@ -12,8 +14,7 @@
 
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static thread_local bool allow_numbers_as_tensors = false;
 
@@ -38,6 +39,20 @@ void clear_registered_instances(void* ptr) {
     vh.set_instance_registered(false);
   }
   registered_instances.erase(ptr);
+}
+
+// WARNING: Precondition for this function is that, e.g., you have tested if a
+// SymIntList is in fact only ints, and if so, you called this with T=int64_t.
+// This precondition is NOT checked at runtime.
+template <typename T>
+IValue listToIValue(py::handle obj) {
+  c10::List<T> rs;
+  for (auto it = obj.begin(); it != obj.end(); it++) {
+    auto elm = *it;
+    rs.push_back(py::cast<T>(elm));
+  }
+  // Promises that we have decayed the list appropriately
+  return c10::impl::toList<T>(rs);
 }
 
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
@@ -66,12 +81,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
-        } else if (torch::is_symint_node(py::handle(obj))) {
+        } else if (torch::is_symint(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(7777777);
-        } else if (torch::is_symfloat_node(py::handle(obj))) {
+        } else if (torch::is_symfloat(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
+        } else if (torch::is_symbool(py::handle(obj))) {
+          save_symint = true;
+          scalar = at::Scalar(true);
         } else {
           throw py::cast_error(
               c10::str("Unable to cast ", py::str(obj), " to Tensor"));
@@ -93,6 +111,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::StorageType:
       return py::cast<at::Storage>(obj);
     case TypeKind::FloatType:
+      if (torch::is_symfloat(py::handle(obj))) {
+        return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
+      }
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -121,6 +142,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
         return static_cast<int8_t>(memory_format->memory_format);
       }
+      if (torch::is_symint(py::handle(obj))) {
+        return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
+      }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
       if (THPLayout_Check(obj.ptr())) {
@@ -147,15 +171,20 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return py::cast<int64_t>(obj);
     }
     case TypeKind::SymIntType:
-      if (torch::is_symint_node(obj.ptr())) {
+      if (torch::is_symint(obj.ptr())) {
         return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::SymFloatType:
-      if (torch::is_symfloat_node(obj.ptr())) {
+      if (torch::is_symfloat(obj.ptr())) {
         return py::cast<c10::SymFloat>(obj);
       }
       return py::cast<double>(obj);
+    case TypeKind::SymBoolType:
+      if (torch::is_symbool(obj.ptr())) {
+        return py::cast<c10::SymBool>(obj);
+      }
+      return py::cast<bool>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
@@ -163,6 +192,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       return {};
     case TypeKind::BoolType:
+      if (torch::is_symbool(obj.ptr())) {
+        return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
+      }
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
       py::tuple tuple = py::cast<py::tuple>(obj);
@@ -208,8 +240,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
-      auto stream = reinterpret_cast<THPStream*>(obj.ptr());
-      return static_cast<int64_t>(stream->cdata);
+      auto thp_stream = reinterpret_cast<THPStream*>(obj.ptr());
+      auto stream = c10::Stream::unpack3(
+          thp_stream->stream_id,
+          thp_stream->device_index,
+          static_cast<c10::DeviceType>(thp_stream->device_type));
+      return stream;
     }
     case TypeKind::ListType: {
       // If the object is a ScriptList, retrieve the c10::List
@@ -236,22 +272,50 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             return repeated;
           }
         case TypeKind::SymIntType: {
-          c10::List<c10::SymInt> symints;
+          bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            auto si = py::cast<c10::SymInt>(elm);
-            symints.push_back(si);
+            if (torch::is_symint(elm)) {
+              is_symbolic = true;
+              break;
+            }
           }
-          return symints;
+          if (is_symbolic) {
+            return listToIValue<c10::SymInt>(obj);
+          } else {
+            return listToIValue<int64_t>(obj);
+          }
         }
         case TypeKind::SymFloatType: {
-          c10::List<c10::SymFloat> symfloats;
+          bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            auto si = py::cast<c10::SymFloat>(elm);
-            symfloats.push_back(si);
+            // TODO: what about SymInt conversion to SymFloat?
+            if (torch::is_symfloat(elm)) {
+              is_symbolic = true;
+              break;
+            }
           }
-          return symfloats;
+          if (is_symbolic) {
+            return listToIValue<c10::SymFloat>(obj);
+          } else {
+            return listToIValue<double>(obj);
+          }
+        }
+        case TypeKind::SymBoolType: {
+          bool is_symbolic = false;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            if (torch::is_symbool(elm)) {
+              is_symbolic = true;
+              break;
+            }
+          }
+          if (is_symbolic) {
+            return listToIValue<c10::SymBool>(obj);
+          } else {
+            return listToIValue<bool>(obj);
+          }
         }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
@@ -406,13 +470,21 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
         return static_cast<int8_t>(layout->layout);
       }
-      if (py::isinstance<py::int_>(obj)) {
+      if (py::isinstance<py::bool_>(obj)) {
+        return py::cast<bool>(obj);
+      } else if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       } else if (PyComplex_CheckExact(obj.ptr())) {
         auto c_obj = py::cast<std::complex<double>>(obj.ptr());
         return static_cast<c10::complex<double>>(c_obj);
+      } else if (torch::is_symint(obj)) {
+        return py::cast<c10::SymInt>(obj);
+      } else if (torch::is_symfloat(obj)) {
+        return py::cast<c10::SymFloat>(obj);
+      } else if (torch::is_symbool(obj)) {
+        return py::cast<c10::SymBool>(obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
@@ -433,6 +505,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::FutureType: {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
+    }
+    case TypeKind::AwaitType: {
+      return obj.cast<std::shared_ptr<PythonAwaitWrapper>>()->aw_;
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
@@ -481,15 +556,15 @@ py::object toPyObject(IValue ivalue) {
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:
-          return py::cast(*tensor.data_ptr<bool>());
+          return py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
-          return py::cast(*tensor.data_ptr<int64_t>());
+          return py::cast(*tensor.const_data_ptr<int64_t>());
         case at::ScalarType::Double:
-          return py::cast(*tensor.data_ptr<double>());
+          return py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
           return py::cast(static_cast<std::complex<double>>(
-              *tensor.data_ptr<c10::complex<double>>()));
+              *tensor.const_data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
@@ -502,9 +577,9 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(autograd::Variable(std::move(tensor)));
     }
   } else if (ivalue.isStorage()) {
-    return py::cast(ivalue.toStorage());
+    return py::cast(std::move(ivalue).toStorage());
   } else if (ivalue.isGenerator()) {
-    return py::cast(ivalue.toGenerator());
+    return py::cast(std::move(ivalue).toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -515,7 +590,13 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isBool()) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
-    return py::cast(std::move(ivalue).toStringRef());
+    if (getUTF8DecodingIgnore()) {
+      std::string s = std::move(ivalue).toStringRef();
+      PyObject* pyObj = PyUnicode_DecodeUTF8(s.data(), s.length(), "ignore");
+      return py::reinterpret_steal<py::object>(pyObj);
+    } else {
+      return py::cast(std::move(ivalue).toStringRef());
+    }
   } else if (ivalue.isList()) {
     auto list = std::move(ivalue).toList();
     py::list t{list.size()};
@@ -534,11 +615,10 @@ py::object toPyObject(IValue ivalue) {
 
     // If we have a NamedTuple
     if (tuple->type() && tuple->type()->schema() &&
-        tuple->type()->schema()->name() != "") {
+        !tuple->type()->schema()->name().empty()) {
       auto unqualName = tuple->type()->name()->name();
 
-      const std::vector<Argument>& tuple_args =
-          tuple->type()->schema()->arguments();
+      std::vector<Argument> tuple_args = tuple->type()->schema()->arguments();
 
       std::vector<pybind11::object> defaults;
       auto it = std::find_if(
@@ -562,6 +642,8 @@ py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
+  } else if (ivalue.isStream()) {
+    return py::cast(std::move(ivalue).toStream());
   } else if (ivalue.isGenericDict()) {
     auto dict = std::move(ivalue).toGenericDict();
     py::dict py_dict;
@@ -610,6 +692,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(c10::Capsule(ivalue.toCapsule()));
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
+  } else if (ivalue.isAwait()) {
+    return py::cast(std::make_shared<PythonAwaitWrapper>(ivalue.toAwait()));
   } else if (ivalue.isEnum()) {
     auto enum_holder = ivalue.toEnumHolder();
     auto py_class = getScriptedClassOrError(enum_holder->type());
@@ -623,8 +707,11 @@ py::object toPyObject(IValue ivalue) {
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
-    auto si = ivalue.toSymInt();
-    return py::cast(si);
+    return py::cast(std::move(ivalue).toSymInt());
+  } else if (ivalue.isSymFloat()) {
+    return py::cast(std::move(ivalue).toSymFloat());
+  } else if (ivalue.isSymBool()) {
+    return py::cast(std::move(ivalue).toSymBool());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -644,7 +731,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     stack = createStackForSchema(
         op->schema(), std::move(args), kwargs, c10::nullopt);
 
-    return std::make_pair(op, stack);
+    return std::make_pair(std::move(op), std::move(stack));
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -659,14 +746,14 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     }
     if (!found_op) {
       std::stringstream ss;
-      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      ss << "Overloaded torch operator invoked from Python failed to match any schema:\n";
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
       throw std::runtime_error(ss.str());
     }
 
-    return std::make_pair(found_op, stack);
+    return std::make_pair(std::move(found_op), std::move(stack));
   }
 }
 
@@ -675,9 +762,7 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk) {
-  auto opWithStack = getOpWithStack(operations, args, kwargs);
-  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
-  Stack stack = std::get<1>(opWithStack);
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {
@@ -697,7 +782,7 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     c10::optional<c10::DispatchKey> dk) {
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
     is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
@@ -721,8 +806,7 @@ py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0 ||
-      at::impl::PythonTorchFunctionTLS::get_mode()) {
+  if (!overloaded_args.empty() || at::impl::torch_function_mode_enabled()) {
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();
@@ -732,7 +816,7 @@ py::object _get_operation_for_overload_or_packet(
                          .attr(method_name.c_str());
     if (is_overload) {
       auto overload_name = operations[0]->schema().overload_name();
-      if (overload_name == "") {
+      if (overload_name.empty()) {
         self_func = self_func.attr("default");
       } else {
         self_func = self_func.attr(overload_name.c_str());
@@ -752,5 +836,4 @@ py::object _get_operation_for_overload_or_packet(
   return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

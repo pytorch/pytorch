@@ -15,7 +15,7 @@ using torch::jit::Operator;
 // A ScriptRemoteCall instance represents an invocation of `dist.remote` on a
 // builtin operator. Currently, it does not support using RRef as arguments yet.
 // Besides the operator and a vector of arguments, ScriptRemoteCall also
-// caontains the RRefId and the ForkId of the return value RRef.
+// contains the RRefId and the ForkId of the return value RRef.
 class TORCH_API ScriptRemoteCall final : public ScriptCall {
  public:
   // Constructor for builitin operator call.

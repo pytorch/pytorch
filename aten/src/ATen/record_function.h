@@ -5,18 +5,20 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <c10/util/variant.h>
 
 #include <array>
-#include <atomic>
 #include <functional>
 #include <memory>
+#include <variant>
 
 namespace c10 {
 class TORCH_API OperatorHandle;
 }
 
 namespace at {
+
+// Function name to record NCCL metadata
+extern TORCH_API const std::string kParamCommsCallName;
 
 // Kind of record function scope;
 enum class C10_API_ENUM RecordScope : uint8_t {
@@ -91,10 +93,10 @@ constexpr std::size_t kSoftLimitCallbacks = 4;
 // An abstract base class for various observer contexts that can be attached to
 // the RecordFunction.
 struct ObserverContext {
-  virtual ~ObserverContext() {}
+  virtual ~ObserverContext() = default;
 
  protected:
-  ObserverContext() {}
+  ObserverContext() = default;
 };
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
@@ -241,7 +243,7 @@ constexpr CallbackHandle INVALID_CALLBACK_HANDLE{0};
 // thread-local function callbacks. Moreover, it prevents saving to
 // ThreadLocalState because std::atomic is non-copyable.
 struct RecordFunctionCallbacksEntry {
-  RecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+  RecordFunctionCallbacksEntry(RecordFunctionCallback cb, CallbackHandle h)
       : callback_(cb), handle_(h) {}
 
   RecordFunctionCallback callback_;
@@ -392,8 +394,14 @@ struct TORCH_API RecordFunction {
   // profiling.
   void _setAsync();
 
-  // Returns whether this RecordFunction corresponds to an async event orn ot.
+  // Returns whether this RecordFunction corresponds to an async event or not.
   bool isAsync() const;
+
+  // Returns whether this RecordFunction corresponds to NCCL metadata collection
+  // or not.
+  bool isNcclMeta() const {
+    return is_nccl_meta_;
+  }
 
   // Internal-only, used to denote out variant used for Static Runtime execution
   void _setStaticRuntimeOutVariant();
@@ -456,13 +464,13 @@ struct TORCH_API RecordFunction {
   // Stores various ObserverContext objects with event metadata for callbacks.
   ObserverContextList ctx_;
 
-  c10::variant<std::string, schema_ref_t> fn_;
+  std::variant<std::string, schema_ref_t> fn_;
 
   int64_t sequence_nr_ = -1;
   c10::ArrayRef<const IValue> inputs_;
   std::vector<c10::IValue> outputs_;
 
-  // For backward functions - thread id of the the forward function
+  // For backward functions - thread id of the forward function
   uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
@@ -483,6 +491,9 @@ struct TORCH_API RecordFunction {
   // Whether this RecordFunction is used for an out variant run with
   // Static Runtime
   bool is_static_runtime_out_variant_{false};
+
+  // Whether this RecordFunction is used for NCCL metadata collection
+  bool is_nccl_meta_{false};
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
@@ -561,12 +572,30 @@ void record_function_with_scope_and_debug_handle(
         guard, fn, inputs, ##__VA_ARGS__);                 \
   }
 
+#define RECORD_FUNCTION_WITH_SCOPE_INPUTS_OUTPUTS( \
+    scope, fn, inputs, outputs, ...)               \
+  at::RecordFunction guard(scope);                 \
+  if (guard.isActive()) {                          \
+    if (guard.needsInputs()) {                     \
+      guard.before(fn, inputs, ##__VA_ARGS__);     \
+    } else {                                       \
+      guard.before(fn, ##__VA_ARGS__);             \
+    }                                              \
+    if (guard.needsOutputs()) {                    \
+      guard.setOutputs(outputs);                   \
+    }                                              \
+  }
+
 #define RECORD_FUNCTION(fn, inputs, ...) \
   RECORD_FUNCTION_WITH_SCOPE(            \
       at::RecordScope::FUNCTION, fn, inputs, ##__VA_ARGS__)
 
 #define RECORD_TORCHSCRIPT_FUNCTION(mn, inputs) \
   RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::TORCHSCRIPT_FUNCTION, mn, inputs)
+
+#define RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(fn, inputs, outputs, ...) \
+  RECORD_FUNCTION_WITH_SCOPE_INPUTS_OUTPUTS(                          \
+      at::RecordScope::FUNCTION, fn, inputs, outputs, ##__VA_ARGS__)
 
 // Custom user scopes in C++; similar to Python's 'with record_function("..."):'
 #define RECORD_USER_SCOPE(fn) \
@@ -592,6 +621,16 @@ void record_function_with_scope_and_debug_handle(
     fn, debug_handle, inputs)                           \
   RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \
       at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
+
+// Bookend to the RECORD_FUNCTION macros.  Use this after the kernel
+// launch to let the profiler bind the outputs to the op that produced
+// them.  Note that guard is declared by RECORD_FUNCTION so this macro
+// needs to be called from the same scope as RECORD_FUNCTION
+#define RECORD_OUTPUTS(outputs)                                    \
+  if (guard.needsOutputs()) {                                      \
+    guard.setOutputs(                                              \
+        std::vector<c10::IValue>(outputs.begin(), outputs.end())); \
+  }
 
 /**
  * addThreadLocalCallback adds a thread local callback to run with
@@ -681,7 +720,7 @@ class TORCH_API RecordFunctionGuard {
 class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
  public:
   DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
-  virtual ~DisableRecordFunctionGuard() {}
+  ~DisableRecordFunctionGuard() override = default;
 };
 
 struct TORCH_API RecordFunctionTLS {

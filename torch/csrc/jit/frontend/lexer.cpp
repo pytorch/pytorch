@@ -6,8 +6,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static const std::unordered_map<int, int> binary_prec = {
     {TK_IF, 1},
@@ -79,7 +78,7 @@ C10_EXPORT int stringToKind(const std::string& str) {
   }();
   try {
     return str_to_kind.at(str);
-  } catch (std::out_of_range& err) {
+  } catch (std::out_of_range&) {
     throw std::out_of_range("unknown token in stringToKind");
   }
 }
@@ -94,7 +93,7 @@ C10_EXPORT std::string kindToString(int kind) {
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("Unknown kind: " + c10::guts::to_string(kind));
+      throw std::runtime_error("Unknown kind: " + std::to_string(kind));
   }
 }
 
@@ -103,5 +102,4 @@ C10_EXPORT SharedParserData& sharedParserData() {
   return data;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

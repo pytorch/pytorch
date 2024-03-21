@@ -1,16 +1,26 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
 #include <ATen/native/im2col.h>
 #include <ATen/native/vol2col.h>
-#include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <tuple>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/slow_conv_dilated2d_native.h>
+#include <ATen/ops/slow_conv_dilated3d_native.h>
+#endif
+
+namespace at::native {
 namespace {
 
 // hyper-volume to column, CPU
@@ -209,8 +219,8 @@ void slow_conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Long, at::ScalarType::BFloat16, input.scalar_type(), "slow_conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(
+        at::ScalarType::Long, at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
@@ -248,7 +258,7 @@ void slow_conv_dilated_all_cpu_template(
         }
         // Extract columns:
         hvol2col<scalar_t, dim>(
-            input_n.data_ptr<scalar_t>(),
+            input_n.const_data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -256,7 +266,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            columns.data_ptr<scalar_t>(),
+            columns.mutable_data_ptr<scalar_t>(),
             is_channels_last);
         /*
           Compute:
@@ -294,12 +304,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/columns.size(0),
               /*     k=*/columns.size(1),
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/weight.data_ptr<scalar_t>(),
+              /*     A=*/weight.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/columns.data_ptr<scalar_t>(),
+              /*     B=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/output_n.data_ptr<scalar_t>(),
+              /*     C=*/output_n.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/nOutputPlane);
         } else {
           cpublas::gemm(
@@ -309,12 +319,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/nOutputPlane,
               /*     k=*/columns.size(0),
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/columns.data_ptr<scalar_t>(),
+              /*     A=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/weight.data_ptr<scalar_t>(),
+              /*     B=*/weight.const_data_ptr<scalar_t>(),
               /*   ldb=*/columns.size(0),
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/output_n.data_ptr<scalar_t>(),
+              /*     C=*/output_n.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         }
       } else {
@@ -360,12 +370,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/columns.size(0),
               /*     k=*/nOutputPlane,
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/weight.data_ptr<scalar_t>(),
+              /*     A=*/weight.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   ldb=*/nOutputPlane,
               /*  beta=*/static_cast<scalar_t>(0),
-              /*     C=*/columns.data_ptr<scalar_t>(),
+              /*     C=*/columns.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         } else {
           cpublas::gemm(
@@ -375,12 +385,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/columns.size(0),
               /*     k=*/nOutputPlane,
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     A=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/weight.data_ptr<scalar_t>(),
+              /*     B=*/weight.const_data_ptr<scalar_t>(),
               /*   ldb=*/columns.size(0),
               /*  beta=*/static_cast<scalar_t>(0),
-              /*     C=*/columns.data_ptr<scalar_t>(),
+              /*     C=*/columns.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         }
         // Unpack columns back into input:
@@ -403,7 +413,7 @@ void slow_conv_dilated_all_cpu_template(
       if (grad_weight.defined()) {
         // Extract columns:
         hvol2col<scalar_t, dim>(
-            input_n.data_ptr<scalar_t>(),
+            input_n.const_data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -411,7 +421,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            columns.data_ptr<scalar_t>(),
+            columns.mutable_data_ptr<scalar_t>(),
             is_channels_last);
         scalar_t scale = 1; // TODO: expose as argument?
         /*
@@ -450,12 +460,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/nOutputPlane,
               /*     k=*/columns.size(0),
               /* alpha=*/static_cast<scalar_t>(scale),
-              /*     A=*/columns.data_ptr<scalar_t>(),
+              /*     A=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   ldb=*/nOutputPlane,
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/grad_weight.data_ptr<scalar_t>(),
+              /*     C=*/grad_weight.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         } else {
           cpublas::gemm(
@@ -465,12 +475,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/nOutputPlane,
               /*     k=*/columns.size(1),
               /* alpha=*/static_cast<scalar_t>(scale),
-              /*     A=*/columns.data_ptr<scalar_t>(),
+              /*     A=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   ldb=*/columns.size(1),
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/grad_weight.data_ptr<scalar_t>(),
+              /*     C=*/grad_weight.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(0));
         }
       }
@@ -617,7 +627,7 @@ Tensor slow_conv_dilated3d_cpu(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -676,7 +686,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -734,5 +744,4 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
 REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cpu);
 REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cpu);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

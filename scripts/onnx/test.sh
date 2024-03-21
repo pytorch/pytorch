@@ -24,15 +24,8 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-if [[ $PARALLEL == 1 ]]; then
-    pip install pytest-xdist
-fi
-
-# pytest, scipy, hypothesis: these may not be necessary
-# pytest-cov: installing since `coverage run -m pytest ..` doesn't work
-# parameterized: parameterizing test class
-pip install pytest scipy hypothesis pytest-cov parameterized
-pip install -e tools/coverage_plugins_package # allows coverage to run w/o failing due to a missing plug-in
+# allows coverage to run w/o failing due to a missing plug-in
+pip install -e tools/coverage_plugins_package
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -48,45 +41,49 @@ args+=("--cov-report")
 args+=("xml:test/coverage.xml")
 args+=("--cov-append")
 
-args_parallel=()
-if [[ $PARALLEL == 1 ]]; then
-  args_parallel+=("-n")
-  args_parallel+=("auto")
+time python "${top_dir}/test/run_test.py" --onnx --shard "$SHARD_NUMBER" 2 --verbose
+
+if [[ "$SHARD_NUMBER" == "2" ]]; then
+  # xdoctests on onnx
+  xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 fi
 
-# onnxruntime only support py3
-# "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "${SHARD_NUMBER}" == "1" ]]; then
-  # These exclusions are for tests that take a long time / a lot of GPU
-  # memory to run; they should be passing (and you will test them if you
-  # run them locally
-  pytest "${args[@]}" "${args_parallel[@]}" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
-    --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
-    --ignore "$top_dir/test/onnx/test_custom_ops.py" \
-    --ignore "$top_dir/test/onnx/test_utility_funs.py" \
-    --ignore "$top_dir/test/onnx/test_models.py" \
-    --ignore "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
-    "${test_paths[@]}"
+if [[ "$SHARD_NUMBER" == "2" ]]; then
+  # Sanity check on torchbench w/ onnx
+  pip install pandas
+  log_folder="test/.torchbench_logs"
+  device="cpu"
+  modes=("accuracy" "performance")
+  compilers=("dynamo-onnx" "torchscript-onnx")
+  suites=("huggingface" "timm_models")
 
-  # Heavy memory usage tests that cannot run in parallel.
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_utility_funs.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "not TestModelsONNXRuntime"
-fi
-
-if [[ "${SHARD_NUMBER}" == "2" ]]; then
-  # Heavy memory usage tests that cannot run in parallel.
-  # TODO(#79802): Parameterize test_models.py
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_models.py" \
-    "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
-
-  pytest "${args[@]}" "${args_parallel[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
+  mkdir -p "${log_folder}"
+  for mode in "${modes[@]}"; do
+    for compiler in "${compilers[@]}"; do
+      for suite in "${suites[@]}"; do
+        output_file="${log_folder}/${compiler}_${suite}_float32_inference_${device}_${mode}.csv"
+        bench_file="benchmarks/dynamo/${suite}.py"
+        bench_args=("--${mode}" --float32 "-d${device}" "--output=${output_file}" "--output-directory=${top_dir}" --inference -n5 "--${compiler}" --no-skip --dashboard --batch-size 1)
+        # Run only selected model for each suite to quickly validate the benchmark suite works as expected.
+        case "$suite" in
+            "torchbench")
+                bench_args+=(-k resnet18)
+                ;;
+            "huggingface")
+                bench_args+=(-k ElectraForQuestionAnswering)
+                ;;
+            "timm_models")
+                bench_args+=(-k lcnet_050)
+                ;;
+            *)
+                echo "Unknown suite: ${suite}"
+                exit 1
+                ;;
+        esac
+        python "${top_dir}/${bench_file}" "${bench_args[@]}"
+      done
+    done
+  done
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/

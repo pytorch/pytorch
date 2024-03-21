@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
-// Test that tensor type specializations are availabie in
+// Test that tensor type specializations are available in
 // the custom passes
 
 namespace torch {
@@ -65,7 +65,7 @@ graph(%a.1 : Tensor,
   };
   run(graph, stack);
 
-  // Priofiling mode will not be run with simple executor
+  // Profiling mode will not be run with simple executor
   if (!getExecutorMode()) {
     EXPECT_TRUE(hasSpecializations);
   }

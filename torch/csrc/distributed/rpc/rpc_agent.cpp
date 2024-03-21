@@ -14,8 +14,6 @@ RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
                                .def(torch::init<std::string, int64_t>());
 }
 
-constexpr size_t WorkerInfo::MAX_NAME_LEN;
-
 WorkerInfo::WorkerInfo(std::string name, int64_t id)
     : WorkerInfo(std::move(name), (worker_id_t)id) {
   TORCH_CHECK(
@@ -178,7 +176,7 @@ void RpcAgent::retryExpiredRpcs() {
     }
 
     // If there are no more RPC's set to be retried at the current timepoint,
-    // we can remove the corresponsing unordered_set from the retry map.
+    // we can remove the corresponding unordered_set from the retry map.
     if (earliestRpcList.empty()) {
       rpcRetryMap_.erase(earliestTimeout);
     }

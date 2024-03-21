@@ -38,13 +38,14 @@ class PairwiseDistance(Module):
         >>> input2 = torch.randn(100, 128)
         >>> output = pdist(input1, input2)
     """
+
     __constants__ = ['norm', 'eps', 'keepdim']
     norm: float
     eps: float
     keepdim: bool
 
     def __init__(self, p: float = 2., eps: float = 1e-6, keepdim: bool = False) -> None:
-        super(PairwiseDistance, self).__init__()
+        super().__init__()
         self.norm = p
         self.eps = eps
         self.keepdim = keepdim
@@ -74,12 +75,13 @@ class CosineSimilarity(Module):
         >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
         >>> output = cos(input1, input2)
     """
+
     __constants__ = ['dim', 'eps']
     dim: int
     eps: float
 
     def __init__(self, dim: int = 1, eps: float = 1e-8) -> None:
-        super(CosineSimilarity, self).__init__()
+        super().__init__()
         self.dim = dim
         self.eps = eps
 

@@ -28,12 +28,12 @@ from collections import deque
 from contextlib import contextmanager
 import threading
 from typing import (
-    TYPE_CHECKING,
     Any,
     Deque,
     Generator,
     List,
     Optional,
+    Protocol,
     Union,
     Sequence,
     Tuple
@@ -47,7 +47,9 @@ from .dependency import fork, join
 from .microbatch import Batch
 from .phony import get_phony
 
-__all__ = ["is_checkpointing", "is_recomputing"]
+__all__ = ["Function", "checkpoint", "Checkpointing", "ThreadLocal", "enable_checkpointing",
+           "enable_recomputing", "is_checkpointing", "is_recomputing", "Context", "save_rng_states",
+           "restore_rng_states", "Checkpoint", "Recompute"]
 
 
 Tensors = Sequence[Tensor]
@@ -58,12 +60,6 @@ Recomputed = Tuple[TensorOrTensors, Tensors]  # (output, input_leaf)
 RNGStates = Tuple[Tensor, Optional[Tensor]]  # (cpu_rng_state, gpu_rng_state)
 
 
-if TYPE_CHECKING:
-    from typing_extensions import Protocol
-else:
-    Protocol = object
-
-
 # Protocol with __call__ instead of Callable can be used as an attribute type.
 # See: https://github.com/python/mypy/issues/708#issuecomment-561735949
 class Function(Protocol):
@@ -72,7 +68,7 @@ class Function(Protocol):
 
 
 def checkpoint(function: Function, input):
-    """Makes a checkpoint with a simple interface like
+    """Make a checkpoint with a simple interface like
     :func:`torch.utils.checkpoint.checkpoint`. It's only used to test or debug
     :class:`Checkpoint` and :class:`Recompute` without boilerplate.
     """
@@ -98,7 +94,7 @@ class Checkpointing:
         self.rng_states: Deque[RNGStates] = deque(maxlen=1)
 
     def checkpoint(self) -> Batch:
-        """Returns a batch applied by :class:`Checkpoint`."""
+        """Return a batch applied by :class:`Checkpoint`."""
         input_atomic = self.batch.atomic
         inputs = tuple(self.batch)
 
@@ -116,7 +112,7 @@ class Checkpointing:
         return Batch(output)
 
     def recompute(self, batch: Batch) -> None:
-        """Applies :class:`Recompute` to the batch in place."""
+        """Apply :class:`Recompute` to the batch in place."""
         input_atomic = self.batch.atomic
         inputs = tuple(self.batch)
 
@@ -140,7 +136,7 @@ thread_local = ThreadLocal()
 
 @contextmanager
 def enable_checkpointing() -> Generator[None, None, None]:
-    """Makes :func:`is_checkpointing` return :data:`True` within a context."""
+    """Make :func:`is_checkpointing` return :data:`True` within a context."""
     orig = thread_local.is_checkpointing
     thread_local.is_checkpointing = True
     try:
@@ -171,8 +167,9 @@ def is_checkpointing() -> bool:
 
 
 def is_recomputing() -> bool:
-    """Whether the current forward propagation is under checkpoint
-    recomputation. Use this to prevent duplicated side-effects at forward
+    """Whether the current forward propagation is under checkpoint recomputation.
+
+    Use this to prevent duplicated side-effects at forward
     propagation::
 
         class Counter(nn.Module):
@@ -195,9 +192,7 @@ def is_recomputing() -> bool:
 
 
 class Context:
-    """The common interface between the :class:`Checkpoint` and
-    :class:`Recompute` context.
-    """
+    """The common interface between the :class:`Checkpoint` and :class:`Recompute` context."""
 
     recomputed: Deque[Recomputed]
     rng_states: Deque[RNGStates]
@@ -212,7 +207,10 @@ class Context:
 
 
 def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None:
-    """:meth:`Checkpoint.forward` captures the current PyTorch's random number
+    """:
+    Capture the current random number generator states.
+
+    meth:`Checkpoint.forward` captures the current PyTorch's random number
     generator states at CPU and GPU to reuse in :meth:`Recompute.backward`.
 
     .. seealso:: :ref:`Referential Transparency`
@@ -231,7 +229,10 @@ def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None
 
 @contextmanager
 def restore_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> Generator[None, None, None]:
-    """:meth:`Recompute.backward` restores the random number generator states
+    """:
+    Restore the random number generator state.
+
+    meth:`Recompute.backward` restores the random number generator states
     captured by :func:`save_rng_states` within its context.
 
     .. seealso:: :ref:`Referential Transparency`

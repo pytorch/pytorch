@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -93,7 +94,7 @@ void JitLoggingConfig::parse() {
   files_to_levels.clear();
   std::string line;
   while (std::getline(in_ss, line, ':')) {
-    if (line.size() == 0) {
+    if (line.empty()) {
       continue;
     }
 

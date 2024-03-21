@@ -6,11 +6,10 @@
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
-
+#include <ATen/cpu/vec/functional.h>
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // Load vector from a smaller type (more elements) to a larger type (fewer elements),
@@ -83,10 +82,15 @@ struct CastLoadPolicy<scalar_t, scalar_t>:
 };
 
 // For inner sum, load full vec_t then sum partials down to vacc_t size
+template <typename vec_t, typename vacc_t, typename = void>
+struct InnerSumCastLoadPolicy;
+
 template <typename vec_t, typename vacc_t>
-struct InnerSumCastLoadPolicy {
-  using scalar_t = typename vec_t::value_type;
-  using acc_t = typename vacc_t::value_type;
+struct InnerSumCastLoadPolicy <vec_t, vacc_t,
+  std::enable_if_t<(!is_reduced_floating_point_v<vechold_type<vec_t>>) &&
+                    !std::is_same_v<vec_t, vacc_t>>> {
+  using scalar_t = vechold_type<vec_t>;
+  using acc_t = vechold_type<vacc_t>;
 
   static constexpr int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();
@@ -101,32 +105,37 @@ struct InnerSumCastLoadPolicy {
 };
 
 template <typename scalar_t>
-struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
+struct InnerSumCastLoadPolicy<scalar_t, scalar_t, void>:
     LoadPolicy<scalar_t> {
 };
 
-template <>
-struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
+template <typename vec_t, typename vacc_t>
+struct InnerSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_floating_point_v<vechold_type<vec_t>>>> {
+  using scalar_t = vechold_type<vec_t>;
 
   static constexpr int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
     vacc_t first, second;
-    vec::load_fp32_from_bf16(ptr, first, second);
+    vec::load_to_float<scalar_t>(ptr, first, second);
     return first + second;
   }
 };
 
 // For outer sum, load a partial vec_t of size vacc_t then cast to vacc_t
+template <typename vec_t, typename vacc_t, typename = void>
+struct OuterSumCastLoadPolicy;
+
 template <typename vec_t, typename vacc_t>
-struct OuterSumCastLoadPolicy {
-  using scalar_t = typename vec_t::value_type;
-  using acc_t = typename vacc_t::value_type;
+struct OuterSumCastLoadPolicy <vec_t, vacc_t,
+  std::enable_if_t<(!is_reduced_floating_point_v<vechold_type<vec_t>>) &&
+                    !std::is_same_v<vec_t, vacc_t>>> {
+
+  using scalar_t = vechold_type<vec_t>;
+  using acc_t = vechold_type<vacc_t>;
 
   static constexpr int64_t memsize() {
     return sizeof(scalar_t) * vacc_t::size();
@@ -147,25 +156,24 @@ struct OuterSumCastLoadPolicy {
   }
 };
 
-template <>
-struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
+template <typename vec_t, typename vacc_t>
+struct OuterSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_floating_point_v<vechold_type<vec_t>>>> {
+  using scalar_t = vechold_type<vec_t>;
 
   static constexpr int64_t memsize() {
-    return sizeof(c10::BFloat16) * vacc_t::size();
+    return sizeof(scalar_t) * vacc_t::size();
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
     vacc_t values;
-    vec::load_fp32_from_bf16(ptr, values);
+    vec::load_to_float<scalar_t>(ptr, values);
     return values;
   }
 };
 
 template <typename scalar_t>
-struct OuterSumCastLoadPolicy<scalar_t, scalar_t>:
+struct OuterSumCastLoadPolicy<scalar_t, scalar_t, void>:
     LoadPolicy<scalar_t> {
 };
 
@@ -211,10 +219,15 @@ struct NanSumCastLoadPolicy {
   }
 };
 
+template <typename vec_t, typename vacc_t, typename = void>
+struct InnerNanSumCastLoadPolicy;
+
 template <typename vec_t, typename vacc_t>
-struct InnerNanSumCastLoadPolicy {
-  using scalar_t = typename vec_t::value_type;
-  using acc_t = typename vacc_t::value_type;
+struct InnerNanSumCastLoadPolicy <vec_t, vacc_t,
+  std::enable_if_t<(!is_reduced_floating_point_v<vechold_type<vec_t>>) &&
+                    !std::is_same_v<vec_t, vacc_t>>> {
+  using scalar_t = vechold_type<vec_t>;
+  using acc_t = vechold_type<vacc_t>;
 
   static constexpr int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();
@@ -229,23 +242,22 @@ struct InnerNanSumCastLoadPolicy {
 };
 
 template <typename scalar_t>
-struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t> :
+struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t, void>:
     NanSumLoadPolicy<scalar_t> {
 };
 
-template <>
-struct InnerNanSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
+template <typename vec_t, typename vacc_t>
+struct InnerNanSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_floating_point_v<vechold_type<vec_t>>>> {
+  using scalar_t = vechold_type<vec_t>;
 
   static constexpr int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
     vacc_t first, second;
-    vec::load_fp32_from_bf16(ptr, first, second);
+    vec::load_to_float<scalar_t>(ptr, first, second);
     const vacc_t zero(0);
     return (vacc_t::blendv(first, zero, first.isnan()) +
             vacc_t::blendv(second, zero, second.isnan()));
@@ -552,18 +564,16 @@ void cascade_sum(TensorIterator &iter) {
           char* ptrs[3] = { data[0], data[0], data[1] };
           // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
-          c10::guts::if_constexpr<ignore_nan>(
-            [&](auto) {
+          if constexpr (ignore_nan) {
               basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) {
                 auto a_notnan = at::_isnan(a) ? scalar_t(0) : a;
                 auto b_notnan = at::_isnan(b) ? scalar_t(0) : b;
                 return a_notnan + b_notnan;
               });
-            },
-            [&](auto) {
+          } else {
               basic_loop(ptrs, inner_strides, 0, size0,
                          [](scalar_t a, scalar_t b) { return a + b; });
-            });
+          }
         });
         return;
       }
@@ -632,14 +642,10 @@ void nansum_kernel_impl(TensorIterator &iter) {
 
 }  // namespace (anonymous)
 
-REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
-
 // nansum on Float16 has poor accuracy with AVX2, and more so with AVX512.
 // So until it's fixed, it won't be dispatched with AVX512. GH issue 59415.
-#ifndef CPU_CAPABILITY_AVX512
+// Besides, these kernels are slower with AVX512 than with AVX2.
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(nansum_stub);
-#endif
+REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 
-}}  // namespace at::native
+}  // namespace at::native

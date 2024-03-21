@@ -1,36 +1,16 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "onnx::MatMul_1"
     input: "onnx::MatMul_2"
-    output: "onnx::Mul_5"
-    name: "MatMul_0"
+    output: "onnx::Mul_4"
+    name: "MatMul_2"
     op_type: "MatMul"
   }
   node {
-    output: "onnx::Mul_11"
-    name: "Constant_1"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 1
-        raw_data: "\000\000\200?"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::Mul_5"
-    input: "onnx::Mul_11"
-    output: "onnx::Add_7"
-    name: "Mul_2"
-    op_type: "Mul"
-  }
-  node {
-    output: "onnx::Mul_12"
+    output: "onnx::Mul_10"
     name: "Constant_3"
     op_type: "Constant"
     attribute {
@@ -43,20 +23,40 @@ graph {
     }
   }
   node {
-    input: "onnx::Mul_0"
-    input: "onnx::Mul_12"
-    output: "onnx::Add_9"
+    input: "onnx::Mul_4"
+    input: "onnx::Mul_10"
+    output: "onnx::Add_6"
     name: "Mul_4"
     op_type: "Mul"
   }
   node {
-    input: "onnx::Add_7"
-    input: "onnx::Add_9"
-    output: "10"
-    name: "Add_5"
+    output: "onnx::Mul_11"
+    name: "Constant_5"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\200?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Mul_0"
+    input: "onnx::Mul_11"
+    output: "onnx::Add_8"
+    name: "Mul_6"
+    op_type: "Mul"
+  }
+  node {
+    input: "onnx::Add_6"
+    input: "onnx::Add_8"
+    output: "9"
+    name: "Add_7"
     op_type: "Add"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Mul_0"
     type {
@@ -115,7 +115,7 @@ graph {
     }
   }
   output {
-    name: "10"
+    name: "9"
     type {
       tensor_type {
         elem_type: 1
@@ -135,5 +135,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

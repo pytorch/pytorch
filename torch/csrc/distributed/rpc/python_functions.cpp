@@ -1,5 +1,4 @@
 #include <ATen/ThreadLocalState.h>
-#include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>

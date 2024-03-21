@@ -74,5 +74,5 @@ def barrier(
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.
     """
-    data = f"{rank}".encode(encoding="UTF-8")
+    data = f"{rank}".encode()
     synchronize(store, data, rank, world_size, key_prefix, barrier_timeout)

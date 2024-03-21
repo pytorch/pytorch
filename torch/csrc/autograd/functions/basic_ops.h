@@ -20,6 +20,11 @@ struct TORCH_API Error : public Node {
 
   variable_list apply(variable_list&& inputs) override;
 
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
+
   std::string msg;
 };
 
@@ -39,7 +44,7 @@ struct TORCH_API NotImplemented : public Error {
 // Identity in forward, Error in backward. Used to implement
 // @once_differentiable
 struct TORCH_API DelayedError : public Node {
-  DelayedError(std::string msg, int num_inputs) : msg(std::move(msg)) {
+  DelayedError(std::string msg, int64_t num_inputs) : msg(std::move(msg)) {
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (const auto i : c10::irange(num_inputs)) {
       (void)i; // Suppress unused variable warning
@@ -66,10 +71,16 @@ struct TORCH_API UndefinedGradBackward : public Node {
   UndefinedGradBackward() = default;
 
   variable_list apply(variable_list&& inputs) override;
+
+  void compiled_args(CompiledNodeArgs& args) override {}
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override {
+    return apply(variable_list(inputs));
+  }
 };
 
 struct TORCH_API GraphRoot : public Node {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)), outputs(std::move(inputs)) {
     // Ensures calls to stream() on a GraphRoot instance reflect current
@@ -83,6 +94,11 @@ struct TORCH_API GraphRoot : public Node {
   variable_list apply(variable_list&& inputs) override {
     return outputs;
   }
+
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   variable_list outputs;
 };

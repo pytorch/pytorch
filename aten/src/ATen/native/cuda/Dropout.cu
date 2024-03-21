@@ -25,8 +25,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at{
-namespace native{
+namespace at::native {
 
 namespace {
 
@@ -414,5 +413,4 @@ Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
   return dropout_backward_cuda<uint8_t>(self, mask, scale);
 }
 
-}
-}
+} // namespace at::native

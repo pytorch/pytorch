@@ -1,16 +1,16 @@
-import numpy as np
 import copy
-import time
-from functools import partial, reduce
-from future.utils import viewitems, viewkeys
-from hypothesis import assume, given, settings, HealthCheck
-import hypothesis.strategies as st
-import unittest
 import threading
+import time
+import unittest
+from functools import partial, reduce
 
-from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
 from caffe2.proto import caffe2_pb2
+
+from caffe2.python import core, dyndep, tt_core, workspace
+from hypothesis import assume, given, HealthCheck, settings
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -61,7 +61,7 @@ def _tensor_and_indices(min_dim=1, max_dim=4, dtype=np.float32,
 _NUMPY_TYPE_TO_ENUM = {
     np.float32: core.DataType.FLOAT,
     np.int32: core.DataType.INT32,
-    np.bool: core.DataType.BOOL,
+    bool: core.DataType.BOOL,
     np.uint8: core.DataType.UINT8,
     np.int8: core.DataType.INT8,
     np.uint16: core.DataType.UINT16,
@@ -85,7 +85,10 @@ def _test_binary(name, ref, filter_=None, gcs=hu.gcs,
                 elements=hu.elements_of_type(dtype, filter_=filter_))),
         out=st.sampled_from(('Y', 'X1', 'X2') if allow_inplace else ('Y',)),
         **gcs)
-    @settings(max_examples=20, deadline=None)
+    @settings(
+        max_examples=20,
+        deadline=None,
+        suppress_health_check=[HealthCheck.filter_too_much])
     def test_binary(self, inputs, out, gc, dc):
         op = core.CreateOperator(name, ["X1", "X2"], [out])
         X1, X2 = inputs
@@ -106,7 +109,10 @@ def _test_binary_broadcast(name, ref, filter_=None,
             elements=hu.elements_of_type(dtype, filter_=filter_))),
         in_place=(st.booleans() if allow_inplace else st.just(False)),
         **gcs)
-    @settings(max_examples=3, deadline=100)
+    @settings(
+        max_examples=3,
+        deadline=100,
+        suppress_health_check=[HealthCheck.filter_too_much])
     def test_binary_broadcast(self, inputs, in_place, gc, dc):
         op = core.CreateOperator(
             name, ["X1", "X2"], ["X1" if in_place else "Y"], broadcast=1)
@@ -130,7 +136,7 @@ class TestOperators(hu.HypothesisTestCase):
                "LE": lambda x1, x2: [x1 <= x2],
                "GT": lambda x1, x2: [x1 > x2],
                "GE": lambda x1, x2: [x1 >= x2]}
-        for name, ref in viewitems(ops):
+        for name, ref in ops.items():
             _test_binary(name, ref, gcs=hu.gcs_cpu_only)(self)
             _test_binary_broadcast(name, ref, gcs=hu.gcs_cpu_only)(self)
 
@@ -208,6 +214,7 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
         _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
+    @settings(suppress_health_check=[HealthCheck.too_slow])
     def test_div(self):
         def ref(x, y):
             return (x / y, )
@@ -507,7 +514,7 @@ class TestOperators(hu.HypothesisTestCase):
         import numpy.testing as npt
         npt.assert_almost_equal(output, new_output, decimal=5)
 
-    @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, np.bool]))
+    @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, bool]))
     @settings(deadline=1000)
     def test_print(self, dtype):
         data = np.random.permutation(6).astype(dtype)
@@ -583,7 +590,7 @@ class TestOperators(hu.HypothesisTestCase):
     @staticmethod
     def _dense_ftrl(alpha, beta, lambda1, lambda2, w, nz, g):
         if isinstance(alpha, np.ndarray):
-            alpha = np.asscalar(alpha)
+            alpha = alpha.item()
         n = np.take(nz, 0, axis=-1)
         z = np.take(nz, 1, axis=-1)
         # python port of Sigrid's implementation
@@ -629,7 +636,7 @@ class TestOperators(hu.HypothesisTestCase):
     @staticmethod
     def _dense_gftrl(alpha, beta, lambda1, lambda2, w, nz, g):
         if isinstance(alpha, np.ndarray):
-            alpha = np.asscalar(alpha)
+            alpha = alpha.item()
 
         old_shape = g.shape
 
@@ -1624,8 +1631,8 @@ class TestOperators(hu.HypothesisTestCase):
         c0 = np.ones([10, 1, 2, 16]).astype(np.float32)
         c1 = np.ones([10, 16, 2, 16]).astype(np.float32)
         c2 = np.ones([10, 16, 2, 1]).astype(np.float32)
-        # index = np.array([0, 1, 2, 1, 4], dtype=np.int)
-        # lengths = np.array([3, 2], dtype=np.int)
+        # index = np.array([0, 1, 2, 1, 4], dtype=int)
+        # lengths = np.array([3, 2], dtype=int)
         index = np.array([0, 1, 2, 1, 4], np.int64)
         lengths = np.array([3, 2], np.int32)
 
@@ -2116,8 +2123,8 @@ class TestOperators(hu.HypothesisTestCase):
 
 
     @given(a=hu.tensor(),
-           src=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
-           dst=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
+           src=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM.keys())),
+           dst=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM.keys())),
            use_name=st.booleans(),
            **hu.gcs)
     @settings(deadline=1000)
@@ -2127,7 +2134,7 @@ class TestOperators(hu.HypothesisTestCase):
         # Casting from a float type outside the range of the integral
         # type is UB.
         ftypes = [np.float32, np.float64]
-        if src in ftypes and dst not in ftypes and dst is not np.bool:
+        if src in ftypes and dst not in ftypes and dst is not bool:
             info = np.iinfo(dst)
             a = np.clip(a, info.min, info.max)
 
@@ -2182,7 +2189,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [a], [0])
         self.assertReferenceChecks(gc, op, [a], ref)
 
-    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, bool]).
            flatmap(lambda dtype: hu.tensor(
                min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
            has_input=st.booleans(),
@@ -2194,9 +2201,9 @@ class TestOperators(hu.HypothesisTestCase):
     def test_constant_fill(self, data, has_input, has_extra_shape, extra_shape,
                            gc, dc):
         dtype = data.dtype.type
-        # in opt mode, np.bool is converted into np.bool_
-        if data.dtype == np.dtype(np.bool):
-            dtype = np.bool
+        # in opt mode, bool is converted into np.bool_
+        if data.dtype == np.dtype(bool):
+            dtype = bool
 
         value = data.item(0)
         gt_shape = data.shape
@@ -2229,15 +2236,15 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
-    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, bool]).
         flatmap(lambda dtype: hu.tensor(
             min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
         **hu.gcs)
     @settings(deadline=1000)
     def test_constant_fill_from_tensor(self, data, gc, dc):
         dtype = data.dtype.type
-        if data.dtype == np.dtype(np.bool):
-            dtype = np.bool
+        if data.dtype == np.dtype(bool):
+            dtype = bool
 
         value = np.array([data.item(0)], dtype=dtype)
         inputs = [data, value]
@@ -2284,7 +2291,7 @@ class TestOperators(hu.HypothesisTestCase):
         backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
             step_net.Proto().op, {"hidden_t": "hidden_t_grad"})
         backward_mapping = {
-            str(k): str(v) for k, v in viewitems(backward_mapping)
+            str(k): str(v) for k, v in backward_mapping.items()
         }
         backward_step_net = core.Net("ElmanBackward")
         del backward_step_net.Proto().op[:]

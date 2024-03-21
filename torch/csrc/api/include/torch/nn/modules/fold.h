@@ -11,7 +11,7 @@ namespace torch {
 namespace nn {
 
 /// Applies fold over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Fold to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Fold to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::FoldOptions` class to learn what
@@ -22,7 +22,6 @@ namespace nn {
 /// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2,
 /// 1}).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FoldImpl : public torch::nn::Cloneable<FoldImpl> {
  public:
   FoldImpl(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
@@ -50,7 +49,7 @@ TORCH_MODULE(Fold);
 // ============================================================================
 
 /// Applies unfold over a 4-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Unfold to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Unfold to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::UnfoldOptions` class to learn what
@@ -60,7 +59,6 @@ TORCH_MODULE(Fold);
 /// ```
 /// Unfold model(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API UnfoldImpl : public Cloneable<UnfoldImpl> {
  public:
   UnfoldImpl(ExpandingArray<2> kernel_size)

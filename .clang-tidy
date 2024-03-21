@@ -1,13 +1,21 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
+# The check bugprone-unchecked-optional-access is also turned off atm
+# because it causes clang-tidy to hang randomly. The tracking issue
+# can be found at https://github.com/llvm/llvm-project/issues/69369.
 InheritParentConfig: true
 Checks: '
 bugprone-*,
+-bugprone-easily-swappable-parameters,
 -bugprone-forward-declaration-namespace,
 -bugprone-macro-parentheses,
 -bugprone-lambda-function-name,
 -bugprone-reserved-identifier,
+-bugprone-swapped-arguments,
+-bugprone-unchecked-optional-access,
+clang-diagnostic-missing-prototypes,
 cppcoreguidelines-*,
+-cppcoreguidelines-avoid-do-while,
 -cppcoreguidelines-avoid-magic-numbers,
 -cppcoreguidelines-avoid-non-const-global-variables,
 -cppcoreguidelines-interfaces-global-init,
@@ -26,8 +34,15 @@ cppcoreguidelines-*,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
+misc-*,
+-misc-const-correctness,
+-misc-use-anonymous-namespace,
+-misc-unused-parameters,
+-misc-no-recursion,
+-misc-non-private-member-variables-in-classes,
+-misc-confusable-identifiers,
 modernize-*,
--modernize-concat-nested-namespaces,
+-modernize-macro-to-enum,
 -modernize-return-braced-init-list,
 -modernize-use-auto,
 -modernize-use-default-member-init,
@@ -35,11 +50,16 @@ modernize-*,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
 performance-*,
--performance-noexcept-move-constructor,
--performance-unnecessary-value-param,
+readability-container-size-empty,
+readability-delete-null-pointer,
+readability-duplicate-include
+readability-misplaced-array-index,
+readability-redundant-function-ptr-dereference,
+readability-redundant-smartptr-get,
+readability-simplify-subscript-expr,
+readability-string-compare,
 '
-HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
+HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
-CheckOptions:
 ...

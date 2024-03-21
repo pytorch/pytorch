@@ -3,14 +3,6 @@
     overflow: scroll;
 }
 
-div.container a.header-logo {
-  height: 80px;
-  width: 160px;
-  background-image: url("../images/functorch.svg");
-  background-size: 160px;
-  background-position-y: -50%;
-}
-
 .highlight pre {
   border: 1px solid rgba(0,0,0,0.15);
   border-radius: 4px;

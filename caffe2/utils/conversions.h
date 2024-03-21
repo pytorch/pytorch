@@ -28,8 +28,8 @@ CONVERSIONS_DECL OUT Get(IN x) {
   return static_cast<OUT>(x);
 }
 
-}; // namespace convert
+} // namespace convert
 
-}; // namespace caffe2
+} // namespace caffe2
 
 #undef CONVERSIONS_DECL

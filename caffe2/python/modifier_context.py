@@ -9,7 +9,7 @@
 DEFAULT_MODIFIER = 'DEFAULT'
 
 
-class ModifierContext(object):
+class ModifierContext:
     """
     provide context to allow param_info to have different modifiers
     """
@@ -40,7 +40,7 @@ class ModifierContext(object):
         self._rebuild_modifiers()
 
 
-class UseModifierBase(object):
+class UseModifierBase:
     '''
     context class to allow setting the current context.
     Example usage with layer:

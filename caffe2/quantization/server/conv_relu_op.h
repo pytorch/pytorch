@@ -20,7 +20,7 @@ class ConvReluOp final : public ConvPoolOpBase<Context> {
       TORCH_CHECK_NOTNULL(local_output_blobs_.back());
     }
   }
-  ~ConvReluOp() {}
+  ~ConvReluOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;

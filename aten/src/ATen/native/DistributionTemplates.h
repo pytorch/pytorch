@@ -1,8 +1,10 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Generator.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -12,9 +14,16 @@
 #include <limits>
 #include <cmath>
 
-namespace at {
-namespace native {
-namespace templates {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/view_as_real.h>
+#endif
+
+namespace at::native::templates {
 
 // ==================================================== Random ========================================================
 
@@ -64,8 +73,16 @@ int64_t update_to(int64_t to) {
   return to;
 }
 
+// Return earlier for not invoking kernel.
+// See https://github.com/pytorch/pytorch/issues/103418 for more details
+#define CHECK_EMPTY_AND_RETURN(tensor) \
+  if (tensor.numel() == 0) {  \
+    return tensor;  \
+  }
+
 template<template<typename> class random_kernel, typename RNG>
 at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
+  CHECK_EMPTY_AND_RETURN(self);
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   random_kernel<RNG>()(iter, generator);
   return self;
@@ -94,13 +111,21 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       WARN_OUT_OF_BOUNDS(from, "from", digits, dtype);
       WARN_OUT_OF_BOUNDS(to_inc, "to - 1", digits, dtype);
     });
+  } else if (scalar_type == kUInt64) {
+    // When you do a comparison between int64_t and uint64_t, the usual
+    // arithmetic conversions say that the int64_t value is promoted to
+    // unsigned. But this conversion wraps around: if I had -1 as my int64_t,
+    // then it will promote to 0xFFFFFFFFFFFFFFFF in uint64_t. This is never
+    // the right thing to do.
+    CHECK_OUT_OF_BOUNDS(from, "from", 0, INT64_MAX, dtype);
+    CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", 0, INT64_MAX, dtype);
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
+    AT_DISPATCH_V2(scalar_type, "check_random_integral_bounds", AT_WRAP([&]() {
       const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
       CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES), kUInt16, kUInt32, kBool);
   } else {
     TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
   }
@@ -122,6 +147,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
       });
     }
     check_from_to_in_range(from, to - 1, self.dtype());
+    CHECK_EMPTY_AND_RETURN(self);
     range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
     random_from_to_kernel<RNG>()(iter, range, from, generator);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
@@ -135,22 +161,24 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
       });
     } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-      AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
-        if (std::is_same<scalar_t, bool>::value) {
+      AT_DISPATCH_V2(self.scalar_type(), "random_from_to_range_calc", AT_WRAP([&] {
+        if constexpr (std::is_same_v<scalar_t, bool>) {
           to_inc = static_cast<int64_t>(true);
         } else {
           to_inc = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
         }
-      });
+      }), AT_EXPAND(AT_INTEGRAL_TYPES_V2), kBool);
     } else {
       TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
     }
     check_from_to_in_range(from, to_inc, self.dtype());
+    CHECK_EMPTY_AND_RETURN(self);
     range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
     random_from_to_kernel<RNG>()(iter, range, from, generator);
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
     // range = 2^64
+    CHECK_EMPTY_AND_RETURN(self);
     random_from_to_kernel<RNG>()(iter, generator);
   }
   return self;
@@ -174,6 +202,8 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
+  CHECK_EMPTY_AND_RETURN(self);
+
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
@@ -255,6 +285,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generato
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
   if (self.is_complex()) {
+    CHECK_EMPTY_AND_RETURN(self);
     auto float_tensor = at::view_as_real(self);
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
   } else {
@@ -272,6 +303,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
       from = std::min(std::max(from, min), max);
       to = std::max(std::min(to, max), min);
     });
+    CHECK_EMPTY_AND_RETURN(self);
     auto iter = at::TensorIterator::borrowing_nullary_op(self);
     uniform_kernel<RNG>()(iter, from, to, generator);
   }
@@ -283,6 +315,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
 template<template<typename> class log_normal_kernel, typename RNG>
 at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   log_normal_kernel<RNG>()(iter, mean, std, gen);
   return self;
@@ -293,6 +326,7 @@ at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::opt
 template<template<typename> class geometric_kernel, typename RNG>
 Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   geometric_kernel<RNG>()(iter, p, gen);
   return self;
@@ -302,7 +336,8 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
+  CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   exponential_kernel<RNG>()(iter, lambda, gen);
   return self;
@@ -312,6 +347,11 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 
 template<template<typename> class cauchy_kernel, typename RNG>
 Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  // TODO: instead of variable name 'sigma', use 'gamma' or 'scale'
+  // the variance, squared sigma, is undefined for cauchy distribution
+  TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", self.dtype());
+  CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   cauchy_kernel<RNG>()(iter, median, sigma, gen);
   return self;
@@ -321,6 +361,7 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   NoNamesGuard guard;
   at::assert_no_internal_overlap(self);
   bernoulli_tensor_kernel<RNG>()(self, p_, gen);
@@ -330,6 +371,7 @@ Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator>
 template<template<typename> class bernoulli_scalar_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  CHECK_EMPTY_AND_RETURN(self);
   at::assert_no_internal_overlap(self);
   bernoulli_scalar_kernel<RNG>()(self, p, gen);
   return self;
@@ -349,4 +391,4 @@ Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Gen
 #undef CHECK_OUT_OF_BOUNDS
 #undef WARN_OUT_OF_BOUNDS
 
-}}}
+} // namespace at::native::templates

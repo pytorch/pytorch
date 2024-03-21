@@ -1,5 +1,7 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -7,8 +9,15 @@
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/avg_pool2d_native.h>
+#endif
+
 #include <c10/util/irange.h>
-#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -178,10 +187,9 @@ Tensor q_avg_pool2d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int kW, kH, dW, dH, padW, padH;
-  std::tie(kW, kH) = get_kernel(kernel_size);
-  std::tie(dW, dH) = get_stride(stride, kW, kH);
-  std::tie(padW, padH) = get_padding(padding);
+  auto [kW, kH] = get_kernel(kernel_size);
+  auto [dW, dH] = get_stride(stride, kW, kH);
+  auto [padW, padH] = get_padding(padding);
 
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
@@ -258,12 +266,9 @@ Tensor qnnpack_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  Tensor output;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int kW, kH, dW, dH, padW, padH;
-  std::tie(kW, kH) = get_kernel(kernel_size);
-  std::tie(dW, dH) = get_stride(stride, kW, kH);
-  std::tie(padW, padH) = get_padding(padding);
+  auto [kW, kH] = get_kernel(kernel_size);
+  auto [dW, dH] = get_stride(stride, kW, kH);
+  auto [padW, padH] = get_padding(padding);
   TORCH_CHECK(
       input.ndimension() == 4,
       "qnnpack_avg_pool2d(): Expected input to be 4-dimensional: got ",
@@ -294,7 +299,7 @@ Tensor qnnpack_avg_pool2d(
       oH > 0 && oW > 0,
       "qnnpack_avg_pool2d(): the resulting output Tensor size should be >= 0");
   // NHWC output
-  output = at::_empty_affine_quantized(
+  auto output = at::_empty_affine_quantized(
       output_shape,
       at::device(kCPU).dtype(kQUInt8),
       scale,

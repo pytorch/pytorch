@@ -2,13 +2,12 @@ import functools
 import time
 from abc import ABC, abstractmethod
 
-from metrics.MetricsLogger import MetricsLogger
-
 import torch
+
+from metrics.MetricsLogger import MetricsLogger
 
 
 class TrainerBase(ABC):
-
     BATCH_LEVEL_METRIC = "batch_level_metric"
     BATCH_ALL = "batch_all"
     FORWARD_METRIC = "forward_metric"
@@ -40,12 +39,7 @@ class TrainerBase(ABC):
             name (str): description of the metric
             cuda (bool): indicator to determine if this is a CUDA metric
         """
-        self.__metrics_logger.record_start(
-            type,
-            key,
-            name,
-            cuda
-        )
+        self.__metrics_logger.record_start(type, key, name, cuda)
 
     def record_end(self, type, key):
         r"""
@@ -54,10 +48,7 @@ class TrainerBase(ABC):
             type (str): group id for metric
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(
-            type,
-            key
-        )
+        self.__metrics_logger.record_end(type, key)
 
     def record_batch_start(self, key, cuda=True):
         r"""
@@ -69,10 +60,7 @@ class TrainerBase(ABC):
             cuda (bool): indicator to determine if this is a CUDA metric
         """
         self.__metrics_logger.record_start(
-            self.BATCH_LEVEL_METRIC,
-            key,
-            self.BATCH_ALL,
-            cuda
+            self.BATCH_LEVEL_METRIC, key, self.BATCH_ALL, cuda
         )
 
     def record_batch_end(self, key):
@@ -83,10 +71,7 @@ class TrainerBase(ABC):
         Args:
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(
-            self.BATCH_LEVEL_METRIC,
-            key
-        )
+        self.__metrics_logger.record_end(self.BATCH_LEVEL_METRIC, key)
 
     def record_forward_start(self, key, cuda=True):
         r"""
@@ -98,10 +83,7 @@ class TrainerBase(ABC):
             cuda (bool): indicator to determine if this is a CUDA metric
         """
         self.__metrics_logger.record_start(
-            self.FORWARD_METRIC,
-            key,
-            self.FORWARD_PASS,
-            cuda
+            self.FORWARD_METRIC, key, self.FORWARD_PASS, cuda
         )
 
     def record_forward_end(self, key):
@@ -112,10 +94,7 @@ class TrainerBase(ABC):
         Args:
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(
-            self.FORWARD_METRIC,
-            key
-        )
+        self.__metrics_logger.record_end(self.FORWARD_METRIC, key)
 
     def record_backward_start(self, key, cuda=True):
         r"""
@@ -127,10 +106,7 @@ class TrainerBase(ABC):
             cuda (bool): indicator to determine if this is a CUDA metric
         """
         self.__metrics_logger.record_start(
-            self.BACKWARD_METRIC,
-            key,
-            self.BACKWARD,
-            cuda
+            self.BACKWARD_METRIC, key, self.BACKWARD, cuda
         )
 
     def record_backward_end(self, key):
@@ -141,10 +117,7 @@ class TrainerBase(ABC):
         Args:
             key (str): unique id for metric within a group
         """
-        self.__metrics_logger.record_end(
-            self.BACKWARD_METRIC,
-            key
-        )
+        self.__metrics_logger.record_end(self.BACKWARD_METRIC, key)
 
     @staticmethod
     def methodmetric(name, type="method_metric", cuda=True):
@@ -155,6 +128,7 @@ class TrainerBase(ABC):
             type (str): group id for metric
             cuda (bool): indicator to determine if this is a CUDA metric
         """
+
         def decorator(function):
             @functools.wraps(function)
             def wrapper(self, *args):
@@ -163,7 +137,9 @@ class TrainerBase(ABC):
                 result = function(self, *args)
                 self.__metrics_logger.record_end(type, key)
                 return result
+
             return wrapper
+
         return decorator
 
     def get_metrics(self):
@@ -180,7 +156,6 @@ class TrainerBase(ABC):
 
 
 class DdpTrainer(TrainerBase):
-
     def __init__(
         self,
         process_group,
@@ -193,7 +168,7 @@ class DdpTrainer(TrainerBase):
         create_ddp_model,
         hook_state_class,
         hook,
-        iteration_step
+        iteration_step,
     ):
         r"""
         A trainer that implements a DDP training algorithm using a simple hook that performs allreduce
@@ -259,6 +234,13 @@ class DdpTrainer(TrainerBase):
                 print(f"train epoch={epoch}")
             for index, batch in enumerate(data):
                 self.iteration_step(
-                    self, ddp_model, criterion, optimizer, hook_state, epoch, index, batch
+                    self,
+                    ddp_model,
+                    criterion,
+                    optimizer,
+                    hook_state,
+                    epoch,
+                    index,
+                    batch,
                 )
         torch.cuda.synchronize(self.rank)

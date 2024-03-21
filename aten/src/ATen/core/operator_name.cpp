@@ -1,7 +1,5 @@
 #include <ATen/core/operator_name.h>
 
-#include <sstream>
-
 namespace c10 {
 
 std::string toString(const OperatorName& opName) {
@@ -12,10 +10,10 @@ std::string toString(const OperatorName& opName) {
 
 std::ostream& operator<<(std::ostream& os, const OperatorName& opName) {
   os << opName.name;
-  if (opName.overload_name.size() != 0) {
+  if (!opName.overload_name.empty()) {
     os << "." << opName.overload_name;
   }
   return os;
 }
 
-}
+} // namespace c10

@@ -1,6 +1,6 @@
-#include <c10/mobile/CPUCachingAllocator.h>
-
 #include <c10/core/impl/alloc_cpu.h>
+#include <c10/mobile/CPUCachingAllocator.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 
@@ -16,7 +16,7 @@ inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
   void* ptr;
   try {
     ptr = c10::alloc_cpu(bytes);
-  } catch (c10::Error& e) {
+  } catch (c10::Error&) {
     // If allocation fails, try freeing cached available blocks.
     // For now free all available cached blocks.
     free_cached();
@@ -97,8 +97,8 @@ CPUCachingAllocator* GetThreadLocalCachingAllocator() {
 }
 
 WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard(
-    CPUCachingAllocator* allocator) {
-  prev_caching_allocator_ptr_ = GetThreadLocalCachingAllocator();
+    CPUCachingAllocator* allocator)
+    : prev_caching_allocator_ptr_(GetThreadLocalCachingAllocator()) {
   caching_allocator_ptr = allocator;
 }
 

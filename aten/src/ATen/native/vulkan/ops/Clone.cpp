@@ -1,6 +1,13 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#endif
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -14,7 +21,7 @@ Tensor clone(
   TORCH_CHECK(
       (c10::MemoryFormat::Preserve == memory_format) ||
           (c10::MemoryFormat::Contiguous == memory_format),
-      "Vulkan supports Preserve and Contiguous memory foramts");
+      "Vulkan supports Preserve and Contiguous memory formats");
 
   Tensor self;
   if (memory_format == MemoryFormat::Preserve) {

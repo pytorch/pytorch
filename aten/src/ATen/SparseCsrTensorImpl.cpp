@@ -3,7 +3,6 @@
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/Resize.h>
 
@@ -56,7 +55,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
                   "to https://github.com/pytorch/pytorch/issues.");
 
   TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
-                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)),
+                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)
+                         || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)),
                         "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
 
   set_storage_access_should_throw();
@@ -99,22 +99,19 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   col_indices_.resize_(col_indices_values_size);
   values_.resize_(col_indices_values_size);
   sizes_and_strides_.set_sizes(size);
+  refresh_numel();
 }
 
-void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size) {
+void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
-  TORCH_CHECK(sparse_dim >= 2, "resize_and_clear_ sparse dimensionality must be at least 2, got ", sparse_dim);
-  TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
-              sparse_dim, "), got ", size.size());
-  auto batch_dim = sparse_dim - 2;
+      "resize_and_clear_ called on tensor with symbolic shape");
+  TORCH_CHECK(sparse_dim == 2, "resize_and_clear_ sparse dimensionality must be 2, got ", sparse_dim);
+  TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim + dense_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
+              sparse_dim, ") plus dense dimensionality (=", dense_dim, "), got ", size.size());
+  auto batch_dim = size.size() - sparse_dim - dense_dim;
   auto batchsize = size.slice(0, batch_dim);
-  auto densesize = size.slice(batch_dim + 2, size.size() - batch_dim - 2);
-
-  auto values_size = DimVector(batchsize);
-  values_size.push_back(0); // nse
-  values_size.append(densesize.begin(), densesize.end());
+  auto densesize = size.slice(batch_dim + sparse_dim, dense_dim);
 
   auto col_indices_size = DimVector(batchsize);
   col_indices_size.push_back(0); // nse
@@ -123,14 +120,26 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
                                                                         [&] () -> int64_t { return size[batch_dim]; },
                                                                         [&] () -> int64_t { return size[batch_dim + 1]; }
                                                                         );
+  auto values_size = DimVector(batchsize);
+  values_size.push_back(0); // nse
+  // WARNING: in the case of block tensors, the block size is defined
+  // by the existing values shape.
+  int64_t block_factor = 1;
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout_,
                                               "resize_and_clear_",
                                               [] () {},
                                               [&] () {
                                                 auto blocksize = this->values_.sizes().slice(this->batch_dim() + 1, 2);
                                                 values_size.append(blocksize.begin(), blocksize.end());
-                                                n_compressed_indices /= blocksize[(the_layout == kSparseBsr ? 0 : 1)];
+                                                block_factor = blocksize[(the_layout == kSparseBsr ? 0 : 1)];
+
                                               });
+  TORCH_CHECK(n_compressed_indices % block_factor == 0,
+              "The size of the compressed dimension (=", n_compressed_indices,
+              ") must be divisible with the corresponding block size (=", block_factor,")");
+  n_compressed_indices /= block_factor;
+  values_size.append(densesize.begin(), densesize.end());
+
   auto crow_indices_size = DimVector(batchsize);
   crow_indices_size.push_back(n_compressed_indices + 1);
 
@@ -142,23 +151,40 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
   refresh_numel();
 }
 
-void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
+void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
+    const Tensor& src) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
-  set_layout(src.layout());
-  crow_indices_ = at::empty_like(
-      src.crow_indices(),
-      src.crow_indices().options(),
-      src.crow_indices().suggest_memory_format());
-  col_indices_ = at::empty_like(
-      src.col_indices(),
-      src.col_indices().options(),
-      src.col_indices().suggest_memory_format());
-  values_ = at::empty_like(
-      src.values(),
-      src.values().options(),
-      src.values().suggest_memory_format());
+      "resize_as_sparse_compressed_tensor_ called on tensor with symbolic shape");
+
+  // We cannot resize as other layout and preserve the invariants for self
+  // layout
+  TORCH_CHECK(
+      src.layout() == layout_,
+      "resize_as_sparse_compressed_tensor_: self and src must have the same layout, but got: self (",
+      layout_,
+      ") and source (",
+      src.layout(),
+      ")");
+
+  auto [compressed_indices, plain_indices] =
+      sparse_csr::getCompressedPlainIndices(src);
+  // reuse self indices storage
+  if (crow_indices_.sizes() != compressed_indices.sizes()) {
+    crow_indices_.resize_as_(compressed_indices);
+  }
+  if (col_indices_.sizes() != plain_indices.sizes()) {
+    col_indices_.resize_as_(plain_indices);
+  }
+  // Update indices data to ensure result is valid under invariants check
+  if ((sizes() != src.sizes()) || (dense_dim() != src.dense_dim())) {
+    crow_indices_.copy_(compressed_indices);
+    col_indices_.copy_(plain_indices);
+  }
+  // Reuse values storage
+  if (values_.sizes() != src.values().sizes()) {
+    values_.resize_as_(src.values());
+  }
   sizes_and_strides_.set_sizes(src.sizes());
   refresh_numel();
 }
@@ -167,7 +193,7 @@ void SparseCsrTensorImpl::set_member_tensors(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
-    IntArrayRef size) {
+    c10::SymIntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
       "set_member_tensors called on tensor with symbolic shape");
@@ -184,7 +210,7 @@ void SparseCsrTensorImpl::set_member_tensors(
   col_indices_ = col_indices;
   values_ = values;
 
-  sizes_and_strides_.set_sizes(size);
+  sizes_and_strides_.set_sizes(C10_AS_INTARRAYREF_SLOW(size));
   refresh_numel();
   // TODO: If this check ever shows up as a bottleneck, which is unlikely given that
   // comparing devices only involves comparing the type and index (two integers), we
@@ -196,6 +222,14 @@ void SparseCsrTensorImpl::set_member_tensors(
               at::sparse_csr::plainIndicesName(layout_), " need to be on the same device.");
   TORCH_CHECK(values_.device() == device(),
               "Values and compressed tensor instance need to be on the same device.");
+}
+
+void SparseCsrTensorImpl::set_member_tensors(
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
+    const Tensor& values,
+    IntArrayRef size) {
+  set_member_tensors(crow_indices, col_indices, values, c10::fromIntArrayRefSlow(size));
 }
 
 IntArrayRef SparseCsrTensorImpl::strides_custom() const {

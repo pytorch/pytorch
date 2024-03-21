@@ -20,7 +20,7 @@ namespace onednn {
 // Ref: https://spec.oneapi.io/onednn-graph/latest/programming_model.html#engine
 struct Engine {
   // CPU engine singleton
-  static dnnl::graph::engine& getEngine();
+  static dnnl::engine& getEngine();
   Engine(const Engine&) = delete;
   void operator=(const Engine&) = delete;
 };
@@ -30,7 +30,7 @@ struct Engine {
 // stream for execution.
 struct Stream {
   // CPU stream singleton
-  static dnnl::graph::stream& getStream();
+  static dnnl::stream& getStream();
   Stream(const Stream&) = delete;
   void operator=(const Stream&) = delete;
 };
@@ -68,9 +68,6 @@ struct LlgaTensorDesc {
     }
   }
 
-  // TODO: llga need set input/output type constraints while it seems that we
-  // cannot get the dtype during compile time, hard-coded to fp32 for now to be
-  // able to add_op
   LlgaTensorDesc(const torch::jit::Value* v)
       : LlgaTensorDesc(
             v->unique(),
@@ -80,6 +77,10 @@ struct LlgaTensorDesc {
             get_property_type(v)) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
       auto tt = v->type()->cast<TensorType>();
+
+      if (tt->scalarType()) {
+        dtype_ = getLlgaDataType(tt->scalarType().value());
+      }
 
       auto sizes = tt->sizes();
       if (sizes.sizes()) {
@@ -98,6 +99,8 @@ struct LlgaTensorDesc {
   }
 
   LlgaTensorDesc supplementTensorInfo(const at::Tensor& t) const;
+
+  desc::data_type getLlgaDataType(at::ScalarType dt) const;
 
   at::ScalarType aten_scalar_type() const;
 

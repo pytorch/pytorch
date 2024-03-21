@@ -1,9 +1,13 @@
 import torch
 from torch.nn.parameter import Parameter
+from typing import List
 
+__all__: List[str] = []
 
 class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
-    r""" This is an extension of the FakeQuantize module in fake_quantize.py, which
+    r"""Generalized extension of the FakeQuantize module in fake_quantize.py.
+
+    This is an extension of the FakeQuantize module in fake_quantize.py, which
     supports more generalized lower-bit quantization and support learning of the scale
     and zero point parameters through backpropagation. For literature references,
     please see the class _LearnableFakeQuantizePerTensorOp.
@@ -28,7 +32,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
     """
     def __init__(self, observer, quant_min=0, quant_max=255, scale=1., zero_point=0., channel_len=-1,
                  use_grad_scaling=False, **observer_kwargs):
-        super(_LearnableFakeQuantize, self).__init__()
+        super().__init__()
         assert quant_min < quant_max, 'quant_min must be strictly less than quant_max.'
         self.quant_min = quant_min
         self.quant_max = quant_max
@@ -63,7 +67,9 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_param_learning(self):
-        r"""Enables learning of quantization parameters and
+        r"""Enable parameter learning over static observer estimates.
+
+        Enables learning of quantization parameters and
         disables static observer estimates. Forward path returns fake quantized X.
         """
         self.toggle_qparam_learning(enabled=True) \
@@ -73,7 +79,9 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_estimate(self):
-        r"""Enables static observer estimates and disbales learning of
+        """Enable static estimates of quantization parameters.
+
+        Enables static observer estimates and disables learning of
         quantization parameters. Forward path returns fake quantized X.
         """
         self.toggle_qparam_learning(enabled=False) \
@@ -82,7 +90,9 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_observation(self):
-        r"""Enables static observer accumulating data from input but doesn't
+        """Enable accumulation of data without updating quantization parameters.
+
+        Enables static observer accumulating data from input but doesn't
         update the quantization parameters. Forward path returns the original X.
         """
         self.toggle_qparam_learning(enabled=False) \
@@ -112,8 +122,8 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def observe_quant_params(self):
-        print('_LearnableFakeQuantize Scale: {}'.format(self.scale.detach()))
-        print('_LearnableFakeQuantize Zero Point: {}'.format(self.zero_point.detach()))
+        print(f'_LearnableFakeQuantize Scale: {self.scale.detach()}')
+        print(f'_LearnableFakeQuantize Zero Point: {self.zero_point.detach()}')
 
     @torch.jit.export
     def calculate_qparams(self):

@@ -4,29 +4,58 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import torch
+
 # pointwise operators can go through a faster pathway
 
-tensor_magic_methods = [
-    'add',
-    ''
-]
+tensor_magic_methods = ["add", ""]
 pointwise_magic_methods_with_reverse = (
-    'add', 'sub', 'mul', 'floordiv', 'div', 'truediv', 'mod',
-    'pow', 'lshift', 'rshift', 'and', 'or', 'xor'
+    "add",
+    "sub",
+    "mul",
+    "floordiv",
+    "div",
+    "truediv",
+    "mod",
+    "pow",
+    "lshift",
+    "rshift",
+    "and",
+    "or",
+    "xor",
 )
 pointwise_magic_methods = (
-    *(x for m in pointwise_magic_methods_with_reverse for x in (m, 'r' + m)),
-    'eq', 'gt', 'le', 'lt', 'ge', 'gt', 'ne', 'neg', 'pos',
-    'abs', 'invert',
-    'iadd', 'isub', 'imul', 'ifloordiv', 'idiv',
-    'itruediv', 'imod', 'ipow', 'ilshift', 'irshift', 'iand',
-    'ior', 'ixor',
-    'int', 'long', 'float', 'complex',
+    *(x for m in pointwise_magic_methods_with_reverse for x in (m, "r" + m)),
+    "eq",
+    "gt",
+    "le",
+    "lt",
+    "ge",
+    "gt",
+    "ne",
+    "neg",
+    "pos",
+    "abs",
+    "invert",
+    "iadd",
+    "isub",
+    "imul",
+    "ifloordiv",
+    "idiv",
+    "itruediv",
+    "imod",
+    "ipow",
+    "ilshift",
+    "irshift",
+    "iand",
+    "ior",
+    "ixor",
+    "int",
+    "long",
+    "float",
+    "complex",
 )
 
-pointwise_methods = (
-    *(f'__{m}__' for m in pointwise_magic_methods),
-)
+pointwise_methods = (*(f"__{m}__" for m in pointwise_magic_methods),)
 
 pointwise = (
     *(getattr(torch.Tensor, m) for m in pointwise_methods),

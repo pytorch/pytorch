@@ -13,7 +13,7 @@ using namespace api::utils;
 Tensor pad2d(
     const Tensor& self_arg,
     IntArrayRef padding,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
   const int input_dim = input_size.size();
@@ -38,7 +38,7 @@ Tensor pad2d(
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
-  c10::SmallVector<int64_t, 4> output_size(input_dim);
+  std::vector<int64_t> output_size(input_dim);
   for (const auto d : c10::irange(input_dim)) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
@@ -52,7 +52,7 @@ Tensor pad2d(
   vTensor v_output{
       context,
       output_size,
-      v_self.options(),
+      v_self.dtype(),
   };
 
   const struct Block final {

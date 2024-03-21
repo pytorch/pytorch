@@ -19,7 +19,7 @@ namespace nn {
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.L1Loss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.L1Loss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::L1LossOptions` class to learn what
@@ -29,9 +29,8 @@ namespace nn {
 /// ```
 /// L1Loss model(L1LossOptions(torch::kNone));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API L1LossImpl : Cloneable<L1LossImpl> {
-  explicit L1LossImpl(const L1LossOptions& options_ = {});
+  explicit L1LossImpl(L1LossOptions options_ = {});
 
   void reset() override;
 
@@ -55,7 +54,7 @@ TORCH_MODULE(L1Loss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// The Kullback-Leibler divergence loss measure
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.KLDivLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.KLDivLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::KLDivLossOptions` class to learn what
@@ -65,9 +64,8 @@ TORCH_MODULE(L1Loss);
 /// ```
 /// KLDivLoss model(KLDivLossOptions().reduction(torch::kNone));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
-  explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});
+  explicit KLDivLossImpl(KLDivLossOptions options_ = {});
 
   void reset() override;
 
@@ -91,7 +89,7 @@ TORCH_MODULE(KLDivLoss);
 
 /// Creates a criterion that measures the mean squared error (squared L2 norm)
 /// between each element in the input :math:`x` and target :math:`y`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MSELoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MSELoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MSELossOptions` class to learn what
@@ -101,9 +99,8 @@ TORCH_MODULE(KLDivLoss);
 /// ```
 /// MSELoss model(MSELossOptions(torch::kNone));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MSELossImpl : Cloneable<MSELossImpl> {
-  explicit MSELossImpl(const MSELossOptions& options_ = {});
+  explicit MSELossImpl(MSELossOptions options_ = {});
 
   void reset() override;
 
@@ -127,7 +124,7 @@ TORCH_MODULE(MSELoss);
 
 /// Creates a criterion that measures the Binary Cross Entropy
 /// between the target and the output.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BCELoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BCELoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BCELossOptions` class to learn what
@@ -137,9 +134,8 @@ TORCH_MODULE(MSELoss);
 /// ```
 /// BCELoss model(BCELossOptions().reduction(torch::kNone).weight(weight));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API BCELossImpl : Cloneable<BCELossImpl> {
-  explicit BCELossImpl(const BCELossOptions& options_ = {});
+  explicit BCELossImpl(BCELossOptions options_ = {});
 
   void reset() override;
 
@@ -164,7 +160,7 @@ TORCH_MODULE(BCELoss);
 
 /// Creates a criterion that measures the loss given an input tensor :math:`x`
 /// and a labels tensor :math:`y` (containing 1 or -1).
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.HingeEmbeddingLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.HingeEmbeddingLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::HingeEmbeddingLossOptions` class to
@@ -175,10 +171,8 @@ TORCH_MODULE(BCELoss);
 /// HingeEmbeddingLoss
 /// model(HingeEmbeddingLossOptions().margin(4).reduction(torch::kNone));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API HingeEmbeddingLossImpl : Cloneable<HingeEmbeddingLossImpl> {
-  explicit HingeEmbeddingLossImpl(
-      const HingeEmbeddingLossOptions& options_ = {});
+  explicit HingeEmbeddingLossImpl(HingeEmbeddingLossOptions options_ = {});
 
   void reset() override;
 
@@ -205,7 +199,7 @@ TORCH_MODULE(HingeEmbeddingLoss);
 /// loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
 /// and output :math:`y` (which is a 1D tensor of target class indices, :math:`0
 /// \leq y \leq \text{x.size}(1)-1`). See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.MultiMarginLoss to learn
+/// https://pytorch.org/docs/main/nn.html#torch.nn.MultiMarginLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiMarginLossOptions` class to learn
@@ -215,9 +209,8 @@ TORCH_MODULE(HingeEmbeddingLoss);
 /// ```
 /// MultiMarginLoss model(MultiMarginLossOptions().margin(2).weight(weight));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MultiMarginLossImpl : public Cloneable<MultiMarginLossImpl> {
-  explicit MultiMarginLossImpl(const MultiMarginLossOptions& options_ = {});
+  explicit MultiMarginLossImpl(MultiMarginLossOptions options_ = {});
 
   void reset() override;
 
@@ -245,7 +238,7 @@ TORCH_MODULE(MultiMarginLoss);
 /// -1. This is used for measuring whether two inputs are similar or
 /// dissimilar, using the cosine distance, and is typically used for learning
 /// nonlinear embeddings or semi-supervised learning.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.CosineEmbeddingLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.CosineEmbeddingLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CosineEmbeddingLossOptions` class to
@@ -255,11 +248,9 @@ TORCH_MODULE(MultiMarginLoss);
 /// ```
 /// CosineEmbeddingLoss model(CosineEmbeddingLossOptions().margin(0.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API CosineEmbeddingLossImpl
     : public Cloneable<CosineEmbeddingLossImpl> {
-  explicit CosineEmbeddingLossImpl(
-      const CosineEmbeddingLossOptions& options_ = {});
+  explicit CosineEmbeddingLossImpl(CosineEmbeddingLossOptions options_ = {});
 
   void reset() override;
 
@@ -289,7 +280,7 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// element-wise error falls below beta and an L1 term otherwise.
 /// It is less sensitive to outliers than the `MSELoss` and in some cases
 /// prevents exploding gradients (e.g. see the paper `Fast R-CNN` by Ross
-/// Girshick). See https://pytorch.org/docs/master/nn.html#torch.nn.SmoothL1Loss
+/// Girshick). See https://pytorch.org/docs/main/nn.html#torch.nn.SmoothL1Loss
 /// to learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SmoothL1LossOptions` class to learn
@@ -299,9 +290,8 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// ```
 /// SmoothL1Loss model(SmoothL1LossOptions().reduction(torch::kNone).beta(0.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
-  explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
+  explicit SmoothL1LossImpl(SmoothL1LossOptions options = {});
 
   void reset() override;
 
@@ -326,7 +316,7 @@ TORCH_MODULE(SmoothL1Loss);
 
 /// Creates a criterion that uses a squared term if the absolute
 /// element-wise error falls below delta and a delta-scaled L1 term otherwise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.HuberLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.HuberLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::HuberLossOptions` class to learn what
@@ -336,9 +326,8 @@ TORCH_MODULE(SmoothL1Loss);
 /// ```
 /// HuberLoss model(HuberLossOptions().reduction(torch::kNone).delta(0.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API HuberLossImpl : public Cloneable<HuberLossImpl> {
-  explicit HuberLossImpl(const HuberLossOptions& options_ = {});
+  explicit HuberLossImpl(HuberLossOptions options_ = {});
 
   void reset() override;
 
@@ -365,7 +354,7 @@ TORCH_MODULE(HuberLoss);
 /// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch
 /// `Tensor`) and output :math:`y` (which is a 2D `Tensor` of target class
 /// indices). See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.MultiLabelMarginLoss to
+/// https://pytorch.org/docs/main/nn.html#torch.nn.MultiLabelMarginLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiLabelMarginLossOptions` class to
@@ -375,11 +364,9 @@ TORCH_MODULE(HuberLoss);
 /// ```
 /// MultiLabelMarginLoss model(MultiLabelMarginLossOptions(torch::kNone));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MultiLabelMarginLossImpl
     : public Cloneable<MultiLabelMarginLossImpl> {
-  explicit MultiLabelMarginLossImpl(
-      const MultiLabelMarginLossOptions& options_ = {});
+  explicit MultiLabelMarginLossImpl(MultiLabelMarginLossOptions options_ = {});
 
   void reset() override;
 
@@ -405,7 +392,7 @@ TORCH_MODULE(MultiLabelMarginLoss);
 /// Creates a criterion that optimizes a two-class classification
 /// logistic loss between input tensor :math:`x` and target tensor :math:`y`
 /// (containing 1 or -1).
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.SoftMarginLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.SoftMarginLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SoftMarginLossOptions` class to learn
@@ -415,9 +402,8 @@ TORCH_MODULE(MultiLabelMarginLoss);
 /// ```
 /// SoftMarginLoss model(SoftMarginLossOptions(torch::kNone));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API SoftMarginLossImpl : public Cloneable<SoftMarginLossImpl> {
-  explicit SoftMarginLossImpl(const SoftMarginLossOptions& options_ = {});
+  explicit SoftMarginLossImpl(SoftMarginLossOptions options_ = {});
 
   /// Pretty prints the `SoftMarginLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -443,7 +429,7 @@ TORCH_MODULE(SoftMarginLoss);
 /// Creates a criterion that optimizes a multi-label one-versus-all
 /// loss based on max-entropy, between input :math:`x` and target :math:`y` of
 /// size :math:`(N, C)`. See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.MultiLabelSoftMarginLoss to
+/// https://pytorch.org/docs/main/nn.html#torch.nn.MultiLabelSoftMarginLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiLabelSoftMarginLossOptions` class
@@ -454,11 +440,10 @@ TORCH_MODULE(SoftMarginLoss);
 /// MultiLabelSoftMarginLoss
 /// model(MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MultiLabelSoftMarginLossImpl
     : public Cloneable<MultiLabelSoftMarginLossImpl> {
   explicit MultiLabelSoftMarginLossImpl(
-      const MultiLabelSoftMarginLossOptions& options_ = {});
+      MultiLabelSoftMarginLossOptions options_ = {});
 
   /// Pretty prints the `MultiLabelSoftMarginLoss` module into the given
   /// `stream`.
@@ -488,7 +473,7 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 /// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`,
 /// `positive examples` and `negative examples` respectively). The
 /// shapes of all input tensors should be :math:`(N, D)`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.TripletMarginLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::TripletMarginLossOptions` class to
@@ -499,10 +484,9 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 /// TripletMarginLoss
 /// model(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API TripletMarginLossImpl
     : public Cloneable<TripletMarginLossImpl> {
-  explicit TripletMarginLossImpl(const TripletMarginLossOptions& options_ = {});
+  explicit TripletMarginLossImpl(TripletMarginLossOptions options_ = {});
 
   void reset() override;
 
@@ -536,7 +520,7 @@ TORCH_MODULE(TripletMarginLoss);
 /// and positive example ("positive distance") and the anchor and negative
 /// example ("negative distance").
 /// See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginWithDistanceLoss
+/// https://pytorch.org/docs/main/nn.html#torch.nn.TripletMarginWithDistanceLoss
 /// to learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::TripletMarginWithDistanceLossOptions`
@@ -547,7 +531,6 @@ TORCH_MODULE(TripletMarginLoss);
 /// TripletMarginWithDistanceLoss
 /// model(TripletMarginWithDistanceLossOptions().margin(3).swap(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API TripletMarginWithDistanceLossImpl
     : public Cloneable<TripletMarginWithDistanceLossImpl> {
   explicit TripletMarginWithDistanceLossImpl(
@@ -580,7 +563,7 @@ TORCH_MODULE(TripletMarginWithDistanceLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CTCLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// The Connectionist Temporal Classification loss.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.CTCLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CTCLossOptions` class to learn what
@@ -591,9 +574,8 @@ TORCH_MODULE(TripletMarginWithDistanceLoss);
 /// CTCLoss
 /// model(CTCLossOptions().blank(42).zero_infinity(false).reduction(torch::kSum));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
-  explicit CTCLossImpl(const CTCLossOptions& options_ = {});
+  explicit CTCLossImpl(CTCLossOptions options_ = {});
 
   void reset() override;
 
@@ -621,7 +603,7 @@ TORCH_MODULE(CTCLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Negative log likelihood loss with Poisson distribution of target.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.PoissonNLLLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.PoissonNLLLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::PoissonNLLLossOptions` class to learn
@@ -632,9 +614,8 @@ TORCH_MODULE(CTCLoss);
 /// PoissonNLLLoss
 /// model(PoissonNLLLossOptions().log_input(false).full(true).eps(0.42).reduction(torch::kSum));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
-  explicit PoissonNLLLossImpl(const PoissonNLLLossOptions& options_ = {});
+  explicit PoissonNLLLossImpl(PoissonNLLLossOptions options_ = {});
 
   void reset() override;
 
@@ -660,7 +641,7 @@ TORCH_MODULE(PoissonNLLLoss);
 /// Creates a criterion that measures the loss given
 /// inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
 /// and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MarginRankingLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MarginRankingLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MarginRankingLossOptions` class to
@@ -671,10 +652,9 @@ TORCH_MODULE(PoissonNLLLoss);
 /// MarginRankingLoss
 /// model(MarginRankingLossOptions().margin(0.5).reduction(torch::kSum));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API MarginRankingLossImpl
     : public Cloneable<MarginRankingLossImpl> {
-  explicit MarginRankingLossImpl(const MarginRankingLossOptions& options_ = {});
+  explicit MarginRankingLossImpl(MarginRankingLossOptions options_ = {});
 
   void reset() override;
 
@@ -701,7 +681,7 @@ TORCH_MODULE(MarginRankingLoss);
 
 /// The negative log likelihood loss. It is useful to train a classification
 /// problem with `C` classes.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::NLLLossOptions` class to learn what
@@ -711,9 +691,8 @@ TORCH_MODULE(MarginRankingLoss);
 /// ```
 /// NLLLoss model(NLLLossOptions().ignore_index(-100).reduction(torch::kMean));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
-  explicit NLLLossImpl(const NLLLossOptions& options_ = {});
+  explicit NLLLossImpl(NLLLossOptions options_ = {});
 
   /// Pretty prints the `NLLLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -741,7 +720,7 @@ TORCH_MODULE(NLLLoss);
 
 /// Creates a criterion that computes cross entropy loss between input and
 /// target. See
-/// https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLoss to learn
+/// https://pytorch.org/docs/main/nn.html#torch.nn.CrossEntropyLoss to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CrossEntropyLossOptions` class to
@@ -752,9 +731,8 @@ TORCH_MODULE(NLLLoss);
 /// CrossEntropyLoss
 /// model(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
-  explicit CrossEntropyLossImpl(const CrossEntropyLossOptions& options_ = {});
+  explicit CrossEntropyLossImpl(CrossEntropyLossOptions options_ = {});
 
   void reset() override;
 
@@ -784,7 +762,7 @@ TORCH_MODULE(CrossEntropyLoss);
 /// class. This version is more numerically stable than using a plain `Sigmoid`
 /// followed by a `BCELoss` as, by combining the operations into one layer,
 /// we take advantage of the log-sum-exp trick for numerical stability.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BCEWithLogitsLoss to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BCEWithLogitsLoss to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BCEWithLogitsLossOptions` class to
@@ -795,10 +773,9 @@ TORCH_MODULE(CrossEntropyLoss);
 /// BCEWithLogitsLoss
 /// model(BCEWithLogitsLossOptions().reduction(torch::kNone).weight(weight));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API BCEWithLogitsLossImpl
     : public Cloneable<BCEWithLogitsLossImpl> {
-  explicit BCEWithLogitsLossImpl(const BCEWithLogitsLossOptions& options_ = {});
+  explicit BCEWithLogitsLossImpl(BCEWithLogitsLossOptions options_ = {});
 
   void reset() override;
 

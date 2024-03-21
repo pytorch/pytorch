@@ -11,10 +11,10 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 // See note [Jiterator]
-const char gcd_name[] = "gcd";
+CONSTEXPR_EXCEPT_WIN_CUDA char gcd_name[] = "gcd";
 void gcd_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "gcd_cuda", [&]() {
@@ -33,7 +33,7 @@ void gcd_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // See note [Jiterator]
-const char lcm_name[] = "lcm";
+CONSTEXPR_EXCEPT_WIN_CUDA char lcm_name[] = "lcm";
 void lcm_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cuda", [&]() {
@@ -55,4 +55,4 @@ void lcm_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

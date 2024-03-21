@@ -15,13 +15,18 @@
 
 #pragma once
 
-#include <c10/util/C++17.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <iterator>
+#include <ostream>
+#include <type_traits>
 #include <vector>
 
 namespace c10 {
@@ -93,9 +98,9 @@ class ArrayRef final {
 
   template <
       typename Container,
-      typename = std::enable_if_t<std::is_same<
+      typename = std::enable_if_t<std::is_same_v<
           std::remove_const_t<decltype(std::declval<Container>().data())>,
-          T*>::value>>
+          T*>>>
   /* implicit */ ArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();
@@ -120,6 +125,7 @@ class ArrayRef final {
 
   /// Construct an ArrayRef from a C array.
   template <size_t N>
+  // NOLINTNEXTLINE(*c-arrays*)
   /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   /// Construct an ArrayRef from a std::initializer_list.
@@ -203,7 +209,9 @@ class ArrayRef final {
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  constexpr ArrayRef<T> slice(size_t N) const {
+  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N) const {
+    TORCH_CHECK(
+        N <= size(), "ArrayRef: invalid slice, N = ", N, "; size = ", size());
     return slice(N, size() - N);
   }
 
@@ -230,16 +238,17 @@ class ArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
-  operator=(U&& Temporary) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
-  operator=(std::initializer_list<U>) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
+      std::initializer_list<U>) = delete;
 
   /// @}
   /// @name Expensive Operations
@@ -255,7 +264,7 @@ template <typename T>
 std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
   int i = 0;
   out << "[";
-  for (auto e : list) {
+  for (const auto& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
@@ -323,6 +332,7 @@ ArrayRef<T>& makeArrayRef(ArrayRef<T>& Vec) {
 
 /// Construct an ArrayRef from a C array.
 template <typename T, size_t N>
+// NOLINTNEXTLINE(*c-arrays*)
 ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }

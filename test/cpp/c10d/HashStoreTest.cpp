@@ -6,8 +6,8 @@
 #include <iostream>
 #include <thread>
 
-#include <c10d/HashStore.hpp>
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 
@@ -39,7 +39,7 @@ void testGetSet(std::string prefix = "") {
     EXPECT_FALSE(delFailure);
     auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
     store.setTimeout(timeout);
-    EXPECT_THROW(store.get("key0"), std::runtime_error);
+    EXPECT_THROW(store.get("key0"), c10::DistStoreError);
   }
 
   // get() waits up to timeout_.

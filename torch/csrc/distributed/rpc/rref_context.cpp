@@ -20,8 +20,8 @@ void confirmPendingUser(
     auto msgPtr = jitFuture.constValue().toCustomClass<Message>();
     auto msgType = msgPtr->type();
     auto rpc = deserializeResponse(*msgPtr, msgType);
-    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
-    TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+    auto& rr = dynamic_cast<RemoteRet&>(*rpc);
+    TORCH_INTERNAL_ASSERT(rr.forkId() == expectedForkId);
   } else {
     // Handle errors, such as timeouts, by invoking the error handler on the
     // rref.
@@ -62,12 +62,12 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
     auto msgPtr = jitFuture.constValue().toCustomClass<Message>();
     auto msgType = msgPtr->type();
     auto rpc = deserializeResponse(*msgPtr, msgType);
-    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
+    auto& rr = dynamic_cast<RemoteRet&>(*rpc);
     TORCH_INTERNAL_ASSERT(
-        rr->rrefId() == rr->forkId(),
+        rr.rrefId() == rr.forkId(),
         "Expecting an OwnerRRef as RemoteRet but got a fork.");
     auto& ctx = RRefContext::getInstance();
-    auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+    auto deletedRRef = ctx.delForkOfOwner(rr.rrefId(), rr.rrefId());
     return deletedRRef;
   }
 }
@@ -123,7 +123,7 @@ void RRefContext::handleExceptionSilent(const JitFuture& jitFuture) {
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)), destroyed_(false) {}
+    : agent_(std::move(agent)) {}
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
@@ -247,7 +247,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
   {
     std::unique_lock<std::mutex> lock(mutex_);
     bool noPending = deleteAllUsersCV_.wait_for(lock, timeoutMillis, [this]() {
-      return pendingUsers_.size() == 0 && pendingChildren_.size() == 0;
+      return pendingUsers_.empty() && pendingChildren_.empty();
     });
     if (!noPending) {
       LOG(ERROR)
@@ -297,7 +297,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
   {
     std::unique_lock<std::mutex> lock(mutex_);
     bool noOwner = deleteAllUsersCV_.wait_for(
-        lock, timeoutMillis, [this]() { return owners_.size() == 0; });
+        lock, timeoutMillis, [this]() { return owners_.empty(); });
     if (!noOwner) {
       LOG(ERROR) << "Timed out waiting for pending OwnerRRefs to be deleted.";
     }

@@ -1,7 +1,8 @@
-import operator_benchmark as op_bench
 import benchmark_caffe2 as op_bench_c2
 from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa: F401
 from caffe2.python import core
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for element-wise Add operator. Supports both Caffe2/PyTorch."""
@@ -10,9 +11,9 @@ from caffe2.python import core
 add_long_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
     N=range(2, 10, 3),
-    K=[2 ** x for x in range(0, 3)],
+    K=[2**x for x in range(0, 3)],
     dtype=["int", "float"],
-    tags=["long"]
+    tags=["long"],
 )
 
 
@@ -25,6 +26,7 @@ add_short_configs = op_bench.config_list(
     attr_names=["M", "N", "K", "dtype"],
     tags=["short"],
 )
+
 
 class AddBenchmark(op_bench_c2.Caffe2BenchmarkBase):
     def init(self, M, N, K, dtype):

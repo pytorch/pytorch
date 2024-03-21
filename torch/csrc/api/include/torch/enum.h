@@ -1,10 +1,10 @@
 #pragma once
 
 #include <string>
+#include <variant>
 
 #include <ATen/core/Reduction.h>
 #include <c10/util/Exception.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/Export.h>
 
 #define TORCH_ENUM_DECLARE(name)                                      \
@@ -42,7 +42,7 @@
 //
 // ```
 // struct TORCH_API SomeOptions {
-//   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>
+//   typedef std::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>
 //   reduction_t; SomeOptions(reduction_t reduction = torch::kMean) :
 //   reduction_(reduction) {}
 //
@@ -86,14 +86,14 @@
 // `SomeOptions options = {}` can work.
 #define TORCH_OPTIONS_CTOR_VARIANT_ARG3(                                       \
     OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3)                               \
-  OPTIONS_NAME() {}                                                            \
+  OPTIONS_NAME() = default;                                                    \
   OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
   OPTIONS_NAME(torch::enumtype::TYPE2 ARG_NAME) : ARG_NAME##_(torch::TYPE2) {} \
   OPTIONS_NAME(torch::enumtype::TYPE3 ARG_NAME) : ARG_NAME##_(torch::TYPE3) {}
 
 #define TORCH_OPTIONS_CTOR_VARIANT_ARG4(                                       \
     OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3, TYPE4)                        \
-  OPTIONS_NAME() {}                                                            \
+  OPTIONS_NAME() = default;                                                    \
   OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
   OPTIONS_NAME(torch::enumtype::TYPE2 ARG_NAME) : ARG_NAME##_(torch::TYPE2) {} \
   OPTIONS_NAME(torch::enumtype::TYPE3 ARG_NAME) : ARG_NAME##_(torch::TYPE3) {} \
@@ -188,16 +188,16 @@ struct _compute_enum_name {
 
 template <typename V>
 std::string get_enum_name(V variant_enum) {
-  return c10::visit(enumtype::_compute_enum_name{}, variant_enum);
+  return std::visit(enumtype::_compute_enum_name{}, variant_enum);
 }
 
 template <typename V>
 at::Reduction::Reduction reduction_get_enum(V variant_enum) {
-  if (c10::get_if<enumtype::kNone>(&variant_enum)) {
+  if (std::holds_alternative<enumtype::kNone>(variant_enum)) {
     return at::Reduction::None;
-  } else if (c10::get_if<enumtype::kMean>(&variant_enum)) {
+  } else if (std::holds_alternative<enumtype::kMean>(variant_enum)) {
     return at::Reduction::Mean;
-  } else if (c10::get_if<enumtype::kSum>(&variant_enum)) {
+  } else if (std::holds_alternative<enumtype::kSum>(variant_enum)) {
     return at::Reduction::Sum;
   } else {
     TORCH_CHECK(

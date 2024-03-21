@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/resize.h>
 #endif
 
 namespace at {
@@ -51,6 +52,10 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   int64_t nnz() const {
     return values_.size(0);
   }
+
+  c10::SymInt sym_nnz() const {
+    return values_.sym_size(0);
+  }
   int64_t sparse_dim() const {
     return sparse_dim_;
   }
@@ -85,7 +90,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "raw_resize_ called on tensor with symbolic shape")
-    sizes_and_strides_.set_sizes(size);
+    set_sizes_and_strides(size, std::vector<int64_t>(size.size()));
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
     refresh_numel();
@@ -116,7 +121,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   // 4. When we attempt to shrink the size of any of the sparse dimensions on a
   // non-empty sparse tensor (this could make some of the stored indices
   // out-of-bound and thus unsafe).
-  void resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
+  template <typename T>
+  void _resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<T> size) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "resize_ ",
@@ -160,7 +166,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
 
       bool shrinking_sparse_dims = false;
       bool shrinking_dense_dim = false;
-      auto sparse_size_original = sizes().slice(0, sparse_dim);
+      auto sparse_size_original = generic_sizes<T>().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
       for (const auto i : c10::irange(sparse_dim)) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
@@ -168,7 +174,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           break;
         }
       }
-      auto dense_size_original = sizes().slice(sparse_dim);
+      auto dense_size_original = generic_sizes<T>().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
       for (const auto i : c10::irange(dense_dim)) {
         if (dense_size_new[i] < dense_size_original[i]) {
@@ -196,7 +202,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           alt_options_msg);
     }
 
-    IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
+    auto sizes_and_strides = generic_sizes<T>();
     const bool size_equals_sizes = std::equal(
         size.begin(),
         size.end(),
@@ -204,21 +210,32 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         sizes_and_strides.end());
     if ((!size_equals_sizes) || (sparse_dim != sparse_dim_) ||
         (dense_dim != dense_dim_)) {
-      auto nnz = values().size(0);
-      std::vector<int64_t> values_size = {nnz};
+      auto nnz = at::symint::sizes<T>(values())[0];
+      std::vector<T> values_size = {nnz};
       auto dense_size = size.slice(sparse_dim);
       values_size.insert(
           values_size.end(), dense_size.begin(), dense_size.end());
-      values_.resize_(values_size);
-      indices_.resize_({sparse_dim, nnz});
+      at::symint::resize_<T>(values_, values_size);
+      at::symint::resize_<T>(indices_, {T(sparse_dim), nnz});
     }
 
     if (!size_equals_sizes) {
-      sizes_and_strides_.set_sizes(size);
+      set_sizes_and_strides(size, std::vector<T>(size.size()));
     }
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
     refresh_numel();
+  }
+
+  void resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size) {
+    return _resize_(sparse_dim, dense_dim, size);
+  }
+
+  void resize_(
+      int64_t sparse_dim,
+      int64_t dense_dim,
+      ArrayRef<c10::SymInt> size) {
+    return _resize_(sparse_dim, dense_dim, size);
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices`
@@ -243,7 +260,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         "), but got ",
         size.size());
 
-    sizes_and_strides_.set_sizes(size);
+    set_sizes_and_strides(size, std::vector<int64_t>(size.size()));
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
 
@@ -300,8 +317,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_sparse_impl=*/this,
+        /*dest_sparse_impl=*/impl.get(),
         /*version_counter=*/version_counter,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -319,8 +336,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_sparse_impl=*/this,
+        /*dest_sparse_impl=*/impl.get(),
         /*version_counter=*/std::move(version_counter),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -337,8 +354,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
     AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_metadata(
-        /*src_impl=*/sparse_impl,
-        /*dest_impl=*/this,
+        /*src_sparse_impl=*/sparse_impl,
+        /*dest_sparse_impl=*/this,
         /*version_counter=*/version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
     refresh_numel();
@@ -361,12 +378,12 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   static void copy_tensor_metadata(
       const SparseTensorImpl* src_sparse_impl,
       SparseTensorImpl* dest_sparse_impl,
-      const c10::VariableVersion& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_metadata(
         src_sparse_impl,
         dest_sparse_impl,
-        version_counter,
+        std::move(version_counter),
         allow_tensor_metadata_change);
 
     // Sparse-specific fields

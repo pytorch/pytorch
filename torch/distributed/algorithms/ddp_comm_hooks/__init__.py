@@ -2,7 +2,6 @@ from enum import Enum
 from functools import partial
 
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 
 from . import (
     debugging_hooks as debugging,
@@ -26,6 +25,8 @@ def _powerSGD_comm_hook_wrapper(
     start_powerSGD_iter=1_000,
 ):
     """
+    Wrap PowerSGD communication hook.
+
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
     which will be wrapped up with other state info.
     """
@@ -39,6 +40,8 @@ def _powerSGD_comm_hook_wrapper(
 
 class DDPCommHookType(Enum):
     """
+    Enumerate ``ddp_comm_hooks`` and ``ddp_comm_hook_wrapper`` communucation hook types.
+
     DDPCommHookType enumerates the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
     as names and ``ddp_comm_hook_wrapper`` partials with hook specified. As an example,
     you can register allreduce hook by
@@ -87,9 +90,11 @@ class DDPCommHookType(Enum):
 
 
 def register_ddp_comm_hook(
-    comm_hook_type: DDPCommHookType, model: DistributedDataParallel, state=None
+    comm_hook_type: DDPCommHookType, model, state=None
 ):
     """
+    Register ``ddp_comm_hooks`` to DDP model.
+
     Registers the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
     to the DDP model. User can specify the type of hook as an enum
     ``DDPCommHookType`` type using ``comm_hook_type`` input. State input will

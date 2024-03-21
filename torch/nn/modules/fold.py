@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from .module import Module
 from .. import functional as F
 
@@ -8,8 +7,7 @@ from ..common_types import _size_any_t
 __all__ = ['Fold', 'Unfold']
 
 class Fold(Module):
-    r"""Combines an array of sliding local blocks into a large containing
-    tensor.
+    r"""Combines an array of sliding local blocks into a large containing tensor.
 
     Consider a batched :attr:`input` tensor containing sliding local blocks,
     e.g., patches of images, of shape :math:`(N, C \times  \prod(\text{kernel\_size}), L)`,
@@ -50,13 +48,13 @@ class Fold(Module):
         output_size (int or tuple): the shape of the spatial dimensions of the
                                     output (i.e., ``output.sizes()[2:]``)
         kernel_size (int or tuple): the size of the sliding blocks
-        stride (int or tuple): the stride of the sliding blocks in the input
-                               spatial dimensions. Default: 1
-        padding (int or tuple, optional): implicit zero padding to be added on
-                                          both sides of input. Default: 0
         dilation (int or tuple, optional): a parameter that controls the
                                            stride of elements within the
                                            neighborhood. Default: 1
+        padding (int or tuple, optional): implicit zero padding to be added on
+                                          both sides of input. Default: 0
+        stride (int or tuple): the stride of the sliding blocks in the input
+                               spatial dimensions. Default: 1
 
     * If :attr:`output_size`, :attr:`kernel_size`, :attr:`dilation`,
       :attr:`padding` or :attr:`stride` is an int or a tuple of length 1 then
@@ -119,6 +117,7 @@ class Fold(Module):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
 
     """
+
     __constants__ = ['output_size', 'kernel_size', 'dilation', 'padding',
                      'stride']
     output_size: _size_any_t
@@ -135,7 +134,7 @@ class Fold(Module):
         padding: _size_any_t = 0,
         stride: _size_any_t = 1
     ) -> None:
-        super(Fold, self).__init__()
+        super().__init__()
         self.output_size = output_size
         self.kernel_size = kernel_size
         self.dilation = dilation
@@ -192,13 +191,13 @@ class Unfold(Module):
 
     Args:
         kernel_size (int or tuple): the size of the sliding blocks
-        stride (int or tuple, optional): the stride of the sliding blocks in the input
-                                         spatial dimensions. Default: 1
-        padding (int or tuple, optional): implicit zero padding to be added on
-                                          both sides of input. Default: 0
         dilation (int or tuple, optional): a parameter that controls the
                                            stride of elements within the
                                            neighborhood. Default: 1
+        padding (int or tuple, optional): implicit zero padding to be added on
+                                          both sides of input. Default: 0
+        stride (int or tuple, optional): the stride of the sliding blocks in the input
+                                         spatial dimensions. Default: 1
 
     * If :attr:`kernel_size`, :attr:`dilation`, :attr:`padding` or
       :attr:`stride` is an int or a tuple of length 1, their values will be
@@ -275,6 +274,7 @@ class Unfold(Module):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
 
     """
+
     __constants__ = ['kernel_size', 'dilation', 'padding', 'stride']
     kernel_size: _size_any_t
     dilation: _size_any_t
@@ -288,7 +288,7 @@ class Unfold(Module):
         padding: _size_any_t = 0,
         stride: _size_any_t = 1
     ) -> None:
-        super(Unfold, self).__init__()
+        super().__init__()
         self.kernel_size = kernel_size
         self.dilation = dilation
         self.padding = padding

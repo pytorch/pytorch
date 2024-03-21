@@ -364,8 +364,8 @@ class TestFakeQuantizeOps(TestCase):
     def _test_backward_per_tensor_cachemask_impl(self, device):
         float_types = (torch.float32, torch.float16, torch.float64)
         torch_types = (torch.qint8, torch.quint8)
-        tensor_qparam = (True, False)
-        for float_type, torch_type, tensor_qparam in itertools.product(float_types, torch_types, tensor_qparam):
+        tensor_qparams = (True, False)
+        for float_type, torch_type, tensor_qparam in itertools.product(float_types, torch_types, tensor_qparams):
             X = torch.randn(4, 8).to(device).to(float_type)
             X.requires_grad_()
             # pick the scale + zp so that some values get clipped
@@ -629,7 +629,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fake_quant_preserves_qparam_shapes_for_activations(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 4)
 
             def forward(self, x):
@@ -879,7 +879,7 @@ class TestFakeQuantizeOps(TestCase):
             Y_prime.backward(dout)
             np.testing.assert_allclose(
                 dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-            assert(X.grad.dtype == float_type)
+            assert X.grad.dtype == float_type
 
 
     def test_backward_per_channel_cachemask_cpu(self):
@@ -1083,7 +1083,7 @@ class TestFusedObsFakeQuant(TestCase):
 
             self.assertEqual(in_running_min_ref, in_running_min_op)
             self.assertEqual(in_running_max_ref, in_running_max_op)
-            torch.testing.assert_allclose(out, x_in)
+            torch.testing.assert_close(out, x_in)
 
         # Test empty input works
         x = torch.empty(0, 5, device=device)
@@ -1176,7 +1176,7 @@ class TestFusedObsFakeQuant(TestCase):
                     x_in = x
                 self.assertEqual(in_running_min_ref, in_running_min_op)
                 self.assertEqual(in_running_max_ref, in_running_max_op)
-                torch.testing.assert_allclose(out, x_in)
+                torch.testing.assert_close(out, x_in)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
     @settings(deadline=None)
@@ -1218,7 +1218,7 @@ class TestFusedObsFakeQuant(TestCase):
             False,
         )
         # verify the output matches
-        torch.testing.assert_allclose(out, x_fake_quant)
+        torch.testing.assert_close(out, x_fake_quant)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)
@@ -1264,7 +1264,7 @@ class TestFusedObsFakeQuant(TestCase):
             False,
         )
         # verify the output matches
-        torch.testing.assert_allclose(out, x)
+        torch.testing.assert_close(out, x)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)

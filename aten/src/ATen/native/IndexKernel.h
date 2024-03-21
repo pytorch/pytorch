@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/ArrayRef.h>
 
 namespace at {
 class Tensor;
@@ -12,7 +13,7 @@ namespace c10 {
 class Scalar;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using index_fn = void(*)(TensorIteratorBase &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, const Scalar& source);
@@ -37,4 +38,4 @@ DECLARE_DISPATCH(masked_select_fn, masked_select_serial_stub);
 DECLARE_DISPATCH(masked_select_fn, masked_select_stub);
 DECLARE_DISPATCH(masked_scatter_fn, masked_scatter_stub);
 
-}} // namespace at::native
+} // namespace at::native

@@ -27,7 +27,7 @@ const float PI = 3.14159265358979323846;
 // weights: weights [wx, wy, ww, wh] for the deltas
 // bbox_xform_clip: minimum bounding box width and height in log-space after
 //     transofmration
-// correct_transform_coords: Correct bounding box transform coordates. Set to
+// correct_transform_coords: Correct bounding box transform coordinates. Set to
 //     true to match the detectron code, set to false for backward compatibility
 // return: pixel coordinates of the bounding boxes
 //     size (M, 4), format [x1; y1; x2; y2]
@@ -148,12 +148,12 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_rotated(
     // targets by bbox_transform_inv.
     const int period = angle_bound_hi - angle_bound_lo;
     CAFFE_ENFORCE(period > 0 && period % 180 == 0);
-    auto angles = pred_boxes.col(4);
-    for (const auto i : c10::irange(angles.size())) {
-      if (angles[i] < angle_bound_lo) {
-        angles[i] += T(period);
-      } else if (angles[i] > angle_bound_hi) {
-        angles[i] -= T(period);
+    auto angles_2 = pred_boxes.col(4);
+    for (const auto i : c10::irange(angles_2.size())) {
+      if (angles_2[i] < angle_bound_lo) {
+        angles_2[i] += T(period);
+      } else if (angles_2[i] > angle_bound_hi) {
+        angles_2[i] -= T(period);
       }
     }
   }

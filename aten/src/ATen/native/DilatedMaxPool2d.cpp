@@ -1,12 +1,20 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/Pool.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#endif
 
-namespace at {
-namespace meta {
-using namespace native;
+namespace at::meta {
+using namespace at::native;
 TORCH_META_FUNC(max_pool2d_with_indices)
 (const Tensor& input,
 IntArrayRef kernel_size,
@@ -22,14 +30,14 @@ bool ceil_mode) {
 
   // NB: stride default is not expressible as an integer constant, so we accept
   // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
+    "max_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
@@ -95,14 +103,14 @@ const Tensor& indices) {
 
   // NB: stride default is not expressible as an integer constant, so we accept
   // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
+    "max_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
@@ -147,9 +155,9 @@ const Tensor& indices) {
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format),
              input.has_names() ? input.names() : DimnameList{});
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_out_cpu)
 (const Tensor& input,
@@ -204,5 +212,4 @@ const Tensor& gradInput) {
 DEFINE_DISPATCH(max_pool2d_kernel);
 DEFINE_DISPATCH(max_pool2d_backward_kernel);
 
-} // at::native
 } // at

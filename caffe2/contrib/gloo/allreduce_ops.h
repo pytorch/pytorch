@@ -32,7 +32,7 @@ class AllreduceOp final : public Operator<Context> {
     }
   }
 
-  virtual ~AllreduceOp() {}
+  ~AllreduceOp() override {}
 
   bool RunOnDevice() override {
     std::call_once(once_, [&] { initialize(); });

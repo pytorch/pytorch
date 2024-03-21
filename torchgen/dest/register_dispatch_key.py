@@ -1,9 +1,7 @@
 import itertools
 import textwrap
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
-
-from typing_extensions import Literal
+from typing import List, Literal, Optional, Tuple, Union
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -224,11 +222,11 @@ def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
 class RegisterDispatchKey:
     backend_index: BackendIndex
 
-    target: Union[
-        Literal[Target.ANONYMOUS_DEFINITION],
-        Literal[Target.NAMESPACED_DEFINITION],
-        Literal[Target.NAMESPACED_DECLARATION],
-        Literal[Target.REGISTRATION],
+    target: Literal[
+        Target.ANONYMOUS_DEFINITION,
+        Target.NAMESPACED_DEFINITION,
+        Target.NAMESPACED_DECLARATION,
+        Target.REGISTRATION,
     ]
 
     # Selector object to determine which operators to generate
@@ -237,6 +235,11 @@ class RegisterDispatchKey:
 
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
+
+    # Whether or not to generate symint registrations or not.  External users
+    # of codegen who don't care about symints can set this to false to get
+    # non-SymInt codegen
+    symint: bool
 
     # The class that all unstructured native functions live under. This is used to improve
     # compiler error messages when a kernel writer adds a native function with the wrong signature.
@@ -289,7 +292,9 @@ class RegisterDispatchKey:
     ) -> Union[NativeSignature, DispatcherSignature]:
         # The prefix is just to ensure uniqueness. The Dispatcher API doesn't guarantee unique kernel names.
         return DispatcherSignature.from_schema(
-            f.func, prefix=f"wrapper_{f.func.name.overload_name}_"
+            f.func,
+            prefix=f"wrapper_{self.backend_index.dispatch_key}_{f.func.name.overload_name}_",
+            symint=self.symint,
         )
 
     def gen_out_inplace_wrapper(
@@ -316,10 +321,21 @@ class RegisterDispatchKey:
                 for i, ret_name in enumerate(return_names)
             )
             returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
-        else:
+        elif len(return_names) == 1:
             ret_name = return_names[0]
             updates = f"{copy_op}({func_res}, {ret_name});"
             returns = ret_name
+        else:
+            assert len(f.func.arguments.out) == 1
+            returns = ""
+            out_arg = f.func.arguments.out[0]
+            if out_arg.type.is_list_like():
+                updates = f"""\
+    for (int64_t i = 0; i < {func_res}.size(); ++i) {{
+        {copy_op}({func_res}[i], {out_arg.name}[i]);
+    }}"""
+            else:
+                updates = f"{copy_op}({func_res}, {out_arg.name});"
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
         wrapper_name = sig.name()
@@ -354,6 +370,7 @@ class RegisterDispatchKey:
             self.target,
             self.selector,
             self.rocm,
+            self.symint,
             self.class_method_name,
             self.skip_dispatcher_op_registration,
             g,
@@ -411,7 +428,7 @@ class RegisterDispatchKey:
             # TODO: dedupe this with the structured codegen
             if self.target is Target.NAMESPACED_DECLARATION:
                 result = ""
-                for cpp_sig in cpp_sig_group.signatures():
+                for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
                     result += f"TORCH_API {cpp_sig.decl()};\n"
                 return result
             elif self.target is Target.NAMESPACED_DEFINITION:
@@ -424,7 +441,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 """
 
                 result = ""
-                for cpp_sig in cpp_sig_group.signatures():
+                for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
                     result += generate_defn(cpp_sig)
                 return result
 
@@ -560,7 +577,6 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             set_output_super = ""
 
         def gen_set_output_function(name: str, maybe_create_proxy: bool) -> str:
-            maybe_star = "*" if k is SchemaKind.functional else ""
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
@@ -568,7 +584,7 @@ void set_output_{name}(
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
     if (!names.empty()) {{
-      namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
+      namedinference::propagate_names(outputs_[output_idx], names);
     }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
@@ -604,7 +620,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             create_proxy = """
 auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
 if (C10_UNLIKELY(maybe_proxy.has_value())) {
-    proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
+    proxy_outputs_[output_idx] = std::move(maybe_proxy).value();
 }
 """
         else:
@@ -666,17 +682,17 @@ resize_out(out, sizes, strides, options);
         generate_super: bool,
     ) -> str:
         if k is SchemaKind.functional:
-            output_type = "c10::ExclusivelyOwned<Tensor>"
-            output_value = "*outputs_[output_idx]"
+            output_type = "Tensor"
+            output_value = "outputs_[output_idx]"
             proxy_field = ""
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
+            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
+            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
@@ -701,10 +717,10 @@ resize_out(out, sizes, strides, options);
             f"{textwrap.indent(class_ctor_str, indent)}",
             f"{textwrap.indent(self.gen_class_set_output_functions(k, parent_class, generate_super), indent)}",
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
-            f"      return {output_value};\n",
+            f"      return {output_value};\n",  # type: ignore[possibly-undefined]  # TODO: audit
             "    }",
-            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
-            f"{textwrap.indent(proxy_field, indent)}",
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",  # type: ignore[possibly-undefined]  # TODO: audit
+            f"{textwrap.indent(proxy_field, indent)}",  # type: ignore[possibly-undefined]  # TODO: audit
             f"{textwrap.indent(guard_field, indent)}",
             "};",
         )
@@ -754,13 +770,13 @@ resize_out(out, sizes, strides, options);
         kern = self.backend_index.get_kernel(f)
         sig = NativeSignature(
             f.func,
-            prefix="wrapper_",
+            prefix=f"wrapper_{self.backend_index.dispatch_key}_",
             symint=kern is not None and kern.supports_symint(),
         )
 
         if self.target is Target.NAMESPACED_DECLARATION:
             result = ""
-            for cpp_sig in cpp_sig_group.signatures():
+            for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
                 result += f"TORCH_API {cpp_sig.decl()};\n"
             return result
 
@@ -774,12 +790,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 """
 
             result = ""
-            for cpp_sig in cpp_sig_group.signatures():
+            for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
                 result += generate_defn(cpp_sig)
             return result
 
         elif self.target is Target.ANONYMOUS_DEFINITION:
-
             k = f.func.kind()
 
             # Construct the body of the wrapper function with signature sig
@@ -870,8 +885,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if k is SchemaKind.out:
                     expr = f"op.maybe_get_output({i})"
                 else:
-                    maybe_star = "*" if k is SchemaKind.functional else ""
-                    expr = f"{maybe_star}op.outputs_[{i}]"
+                    expr = f"op.outputs_[{i}]"
 
                 context.append(
                     Expr(
@@ -926,17 +940,17 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             if k is SchemaKind.out or k is SchemaKind.inplace:
                 for i in range(len(f.func.returns)):
                     sig_body.append(
-                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);"
+                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(*op.proxy_outputs_[{i}]);"
                     )
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead
             if k is SchemaKind.functional:
                 if len(f.func.returns) == 1:
-                    ret_expr = "std::move(op.outputs_[0]).take()"  # small optimization
+                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
                 else:
                     moved = ", ".join(
-                        f"std::move(op.outputs_[{i}]).take()"
+                        f"std::move(op.outputs_[{i}])"
                         for i in range(len(f.func.returns))
                     )
                     ret_expr = f"std::make_tuple({moved})"
@@ -948,7 +962,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 else:
                     refs = ", ".join(a.name for a in f.func.arguments.out)
                     ret_expr = f"std::forward_as_tuple({refs})"
-            sig_body.append(f"return {ret_expr};")
+            sig_body.append(f"return {ret_expr};")  # type: ignore[possibly-undefined]  # TODO: audit
 
             sig_body_str = "\n".join(sig_body)
 

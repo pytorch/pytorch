@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@//third_party:sleef.bzl", "sleef_cc_library")
+load("@pytorch//third_party:sleef.bzl", "sleef_cc_library")
 
 SLEEF_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -38,6 +38,7 @@ SLEEF_PUBLIC_HEADERS = [
 SLEEF_PRIVATE_INCLUDES = [
     "-Iexternal/sleef/src/arch",
     "-Iexternal/sleef/src/common",
+    "-Iexternal/sleef/src/libm",
 ]
 
 SLEEF_PUBLIC_INCLUDES = [
@@ -201,8 +202,6 @@ cc_library(
     srcs = [
         "src/libm/rempitab.c",
         "src/libm/sleefdp.c",
-        "src/libm/sleefld.c",
-        "src/libm/sleefqp.c",
         "src/libm/sleefsp.c",
     ],
     hdrs = SLEEF_PUBLIC_HEADERS,

@@ -1,9 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
-#include <math.h>
+#include <cmath>
 #include <ATen/native/cuda/Loops.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_unsafe_view_native.h>
+#include <ATen/ops/any.h>
+#include <ATen/ops/gt.h>
+#include <ATen/ops/lt.h>
+#endif
 
 namespace at {
 namespace native {
@@ -47,7 +57,7 @@ void quantize_tensor_per_tensor_affine_cuda(
             iter,
             [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
               int64_t qvalue =
-                  static_cast<int64_t>(nearbyint(raw_val / scale) + zero_point);
+                  static_cast<int64_t>(std::nearbyint(raw_val / scale) + zero_point);
               qvalue = std::max<int64_t>(qvalue, qmin);
               qvalue = std::min<int64_t>(qvalue, qmax);
               quantized_val.val_ = qvalue;
@@ -108,7 +118,7 @@ void quantize_tensor_per_channel_affine_cuda(
           [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val, double scale, int64_t zero_point) -> scalar_t {
 
             int64_t qvalue =
-                static_cast<int64_t>(nearbyint(raw_val/scale) + zero_point);
+                static_cast<int64_t>(std::nearbyint(raw_val/scale) + zero_point);
             qvalue = std::max<int64_t>(qvalue, qmin);
             qvalue = std::min<int64_t>(qvalue, qmax);
             quantized_val.val_ = qvalue;

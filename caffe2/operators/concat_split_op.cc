@@ -147,7 +147,7 @@ OPERATOR_SCHEMA(Split)
 Split an `input` tensor into a list of tensors, along the axis specified by the `axis` dimension. The lengths of the split can be specified using argument `split` or optional second input blob to the operator. Otherwise, the tensor is split to equal sized parts.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/concat_split_op.cc
 
 <details>
 
@@ -460,8 +460,8 @@ all input tensors.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.cc
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/concat_split_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/concat_split_op.h
 
 
 <details>

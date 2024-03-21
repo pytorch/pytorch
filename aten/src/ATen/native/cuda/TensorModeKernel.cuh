@@ -198,7 +198,7 @@ template <typename T, unsigned int Power2Size>
 __launch_bounds__(1024, 1)
 #endif
 __global__ void compute_mode(
-    T* input,
+    const T* input,
     at::cuda::detail::TensorInfo<T, unsigned int> values,
     at::cuda::detail::TensorInfo<int64_t, unsigned int> indices,
     int64_t sliceSize,

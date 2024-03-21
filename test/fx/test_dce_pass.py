@@ -119,9 +119,6 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return x + 7
 
@@ -136,9 +133,6 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 a = y + 2
                 return x + 7
@@ -172,9 +166,6 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 torch._assert(torch.equal(a, a), "a must equal a")
                 return a * 2

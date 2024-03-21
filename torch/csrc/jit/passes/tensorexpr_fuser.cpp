@@ -23,7 +23,8 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/utils/memory.h>
+
+#include <utility>
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -41,7 +42,7 @@ namespace jit {
 
 static bool texpr_reductions_enabled = false;
 
-bool isSupportedForBlock(Node* node) {
+static bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
     case aten::add:
     case aten::mul:
@@ -185,7 +186,7 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-void removeProfileNodesAndSpecializeTypes(Block* b) {
+static void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
       GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
@@ -273,7 +274,7 @@ bool hasTensorTypeSpecialization(Value* v) {
   return true;
 }
 
-void removeTensorTypeSpecialization(Value* v) {
+static void removeTensorTypeSpecialization(Value* v) {
   if (hasTensorTypeSpecialization(v)) {
     v->setType(TensorType::get());
   }
@@ -320,9 +321,10 @@ void insertTypeGuard(
       continue;
     }
     inputs_to_check.push_back(input);
-    guard_types.push_back(type_converter(input->type()->expect<TensorType>()));
+    guard_types.emplace_back(
+        type_converter(input->type()->expect<TensorType>()));
   }
-  if (!inputs_to_check.size()) {
+  if (inputs_to_check.empty()) {
     return;
   }
 
@@ -339,7 +341,7 @@ void insertTypeGuard(
       guarded_node->owningGraph()
           ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
           ->insertBefore(guarded_node);
-  typecheck_node->tys_(attr::types, guard_types);
+  typecheck_node->tys_(attr::types, std::move(guard_types));
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
 
   std::unordered_map<Value*, Value*> typechecked_inputs;
@@ -547,7 +549,7 @@ class TensorExprFuser {
   }
 
   void run() {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    aliasDb_ = std::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());
@@ -680,7 +682,7 @@ class TensorExprFuser {
 
     // Try to merge adjacent fusion groups together. Because we have only merged
     // by looking at graph inputs, without this we would not attempt to merge
-    // adjacent fusion groups that don't have a depdency on each other
+    // adjacent fusion groups that don't have a dependency on each other
 
     std::vector<Node*> initial_fusion_groups;
     for (Node* n : block->nodes()) {
@@ -690,13 +692,13 @@ class TensorExprFuser {
     }
 
     Node* prev_fusion_group =
-        initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
+        !initial_fusion_groups.empty() ? initial_fusion_groups[0] : nullptr;
 
     for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
-      // If merging suceeded, save the merged group as the "previous" fusion
+      // If merging succeeded, save the merged group as the "previous" fusion
       // group so that we can try to merge the next one into it.
 
       Node* fusion_group = initial_fusion_groups[i];
@@ -855,11 +857,6 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
-#ifndef C10_MOBILE
-      if (fuser::cuda::isEnabled()) {
-        return false;
-      }
-#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
@@ -936,10 +933,14 @@ class TensorExprFuser {
         // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
         // additionally disable it until we either move to a more stable version
         // or find workarounds.
-        if ((*st == c10::ScalarType::Half ||
-             *st == c10::ScalarType::BFloat16) &&
-            *device == c10::kCPU) {
+        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
           return false;
+        }
+
+        if (*st == c10::ScalarType::BFloat16 && *device == c10::kCPU) {
+#ifndef TORCH_ENABLE_LLVM
+          return false;
+#endif
         }
 
         // These operators only support floats, because integer divisors need to
@@ -1035,6 +1036,40 @@ class TensorExprFuser {
         }
       }
 
+      bool is_reduced_precision =
+          node->kind() == aten::_autocast_to_reduced_precision;
+      bool is_full_precision =
+          node->kind() == aten::_autocast_to_full_precision;
+      auto self_tensor = node->inputs()[0]; // input tensor
+
+      if (auto const& tt = self_tensor->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st.has_value()) {
+          return false;
+        }
+
+        auto device = tt->device();
+        if (!device.has_value()) {
+          return false;
+        }
+
+        bool is_cpu = device->is_cpu();
+
+        if (*st != at::kFloat && is_reduced_precision && is_cpu) {
+          // Regarding CPU, aten would do nothing if the data type is
+          // float. Then the aten performance is better than NNC. So NNC
+          // does not pull it into its fusion group.
+          return false;
+        }
+
+        if (*st != at::kBFloat16 && is_full_precision && is_cpu) {
+          // Regarding CPU, aten would do nothing if the data type is
+          // BFloat16. Then the aten performance is better than NNC. So NNC
+          // does not pull it into its fusion group.
+          return false;
+        }
+      }
+
       if (has_unsupported_pin_memory(node)) {
         return false;
       }
@@ -1110,7 +1145,7 @@ class TensorExprFuser {
     REQ(tensorexpr::isSupported(node));
     REQ(typesAreSupported(node));
 
-    // A hook to optimizations limitter to allow bisecting the pass
+    // A hook to optimizations limiter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
     if (fuse_to_dynamic_shapes_) {
@@ -1274,7 +1309,7 @@ class TensorExprFuser {
 
     std::string line;
     while (std::getline(in_ss, line, ':')) {
-      if (line.size() == 0) {
+      if (line.empty()) {
         continue;
       }
       operators_not_to_fuse.insert(c10::Symbol::aten(line));
@@ -1323,7 +1358,7 @@ void FuseTensorExprs(
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
-Operation createTensorExprOp(const Node* node) {
+static Operation createTensorExprOp(const Node* node) {
   bool dynamic_shape_fusion_node =
       node->hasAttribute(attr::striding_inputs_desc);
   if (!dynamic_shape_fusion_node) {

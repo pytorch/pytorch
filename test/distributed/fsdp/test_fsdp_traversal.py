@@ -11,10 +11,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     NestedWrappedModule,
 )
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -41,19 +38,21 @@ class TestTraversal(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
         )
         modules = FSDP.fsdp_modules(nested_wrapped_module)
-        self.assertEquals(
-            modules, [
+        self.assertEqual(
+            modules,
+            [
                 nested_wrapped_module.module.get_submodule("1"),
                 nested_wrapped_module.module.get_submodule("1").get_submodule("0"),
                 nested_wrapped_module.module.get_submodule("2"),
-            ]
+            ],
         )
         modules = FSDP.fsdp_modules(nested_wrapped_module, root_only=True)
         self.assertEqual(
-            modules, [
+            modules,
+            [
                 nested_wrapped_module.module.get_submodule("1"),
                 nested_wrapped_module.module.get_submodule("2"),
-            ]
+            ],
         )
 
 

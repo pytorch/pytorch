@@ -247,6 +247,8 @@ class TestDependencyAPI(PackageTestCase):
                 * Module did not match against any action pattern. Extern, mock, or intern it.
                     package_a
                     package_a.subpackage
+
+                Set debug=True when invoking PackageExporter for a visualization of where broken modules are coming from!
                 """
             ),
         )
@@ -294,6 +296,8 @@ class TestDependencyAPI(PackageTestCase):
                 * Module is a C extension module. torch.package supports Python modules only.
                     foo
                     bar
+
+                Set debug=True when invoking PackageExporter for a visualization of where broken modules are coming from!
                 """
             ),
         )
@@ -313,6 +317,8 @@ class TestDependencyAPI(PackageTestCase):
                 * Dependency resolution failed.
                     foo
                       Context: attempted relative import beyond top-level package
+
+                Set debug=True when invoking PackageExporter for a visualization of where broken modules are coming from!
                 """
             ),
         )

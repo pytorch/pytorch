@@ -6,7 +6,6 @@ Automatic Mixed Precision package - torch.amp
 
 .. Both modules below are missing doc entry. Adding them here for now.
 .. This does not add anything to the rendered page
-.. py:module:: torch.cpu
 .. py:module:: torch.cpu.amp
 .. py:module:: torch.cuda.amp
 
@@ -20,9 +19,9 @@ are much faster in ``lower_precision_fp``. Other ops, like reductions, often req
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
 Ordinarily, "automatic mixed precision training" with datatype of ``torch.float16`` uses :class:`torch.autocast` and
-:class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
+:class:`torch.cpu.amp.GradScaler` or :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
 and `CUDA Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
-However, :class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` are modular, and may be used separately if desired.
+However, :class:`torch.autocast` and :class:`torch.GradScaler` are modular, and may be used separately if desired.
 As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed precision training/inference" on CPU with
 datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
 
@@ -30,6 +29,10 @@ For CUDA and CPU, APIs are also provided separately:
 
 * ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``.
 * ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``. For CPU, only lower precision floating point datatype of ``torch.bfloat16`` is supported for now.
+* ``torch.GradScaler("cuda", args...)`` is equivalent to ``torch.cuda.amp.GradScaler(args...)``.
+* ``torch.GradScaler("cpu", args...)`` is equivalent to ``torch.cpu.amp.GradScaler(args...)``.
+
+:class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 
 .. contents:: :local:
 
@@ -73,6 +76,15 @@ so they don't flush to zero.
 
 Each parameter's gradient (``.grad`` attribute) should be unscaled before the optimizer
 updates the parameters, so the scale factor does not interfere with the learning rate.
+
+.. note::
+
+  AMP/fp16 may not work for every model! For example, most bf16-pretrained models cannot operate in
+  the fp16 numerical range of max 65504 and will cause gradients to overflow instead of underflow. In
+  this case, the scale factor may decrease under 1 as an attempt to bring gradients to a number
+  representable in the fp16 dynamic range. While one may expect the scale to always be above 1, our
+  GradScaler does NOT make this guarantee to maintain performance. If you encounter NaNs in your loss
+  or gradients when running with AMP/fp16, verify your model is compatible.
 
 .. currentmodule:: torch.cuda.amp
 
@@ -294,7 +306,6 @@ CPU Ops that can autocast to ``float32``
 ``cholesky_solve``,
 ``inverse``,
 ``lu_solve``,
-``matrix_rank``,
 ``orgqr``,
 ``inverse``,
 ``ormqr``,
@@ -375,3 +386,14 @@ Some ops not listed here (e.g., binary ops like ``add``) natively promote
 inputs without autocasting's intervention.  If inputs are a mixture of ``bfloat16``
 and ``float32``, these ops run in ``float32`` and produce ``float32`` output,
 regardless of whether autocast is enabled.
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.amp.autocast_mode
+.. py:module:: torch.cpu.amp.autocast_mode
+.. py:module:: torch.cuda.amp.autocast_mode
+.. py:module:: torch.cuda.amp.common
+.. py:module:: torch.amp.grad_scaler
+.. py:module:: torch.cpu.amp.grad_scaler
+.. py:module:: torch.cuda.amp.grad_scaler

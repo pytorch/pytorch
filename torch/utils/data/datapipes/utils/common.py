@@ -1,4 +1,5 @@
 import fnmatch
+import functools
 import inspect
 import os
 import warnings
@@ -7,9 +8,7 @@ from io import IOBase
 
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
-
-
-from torch.utils.data._utils.serialization import DILL_AVAILABLE
+from torch.utils._import_utils import dill_available
 
 __all__ = [
     "validate_input_col",
@@ -23,13 +22,14 @@ __all__ = [
 
 def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
     """
-    Checks that function used in a callable datapipe works with the input column
+    Check that function used in a callable datapipe works with the input column.
 
     This simply ensures that the number of positional arguments matches the size
     of the input column. The function must not contain any non-default
     keyword-only arguments.
 
     Examples:
+        >>> # xdoctest: +SKIP("Failing on some CI machines")
         >>> def f(a, b, *, c=1):
         >>>     return a + b + c
         >>> def f_def(a, b=1, *, c=1):
@@ -60,8 +60,6 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     else:
         input_col_size = 1
 
-    fn_name = str(fn)
-
     pos = []
     var_positional = False
     non_default_kw_only = []
@@ -76,6 +74,11 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                 non_default_kw_only.append(p)
         else:
             continue
+
+    if isinstance(fn, functools.partial):
+        fn_name = getattr(fn.func, "__name__", repr(fn.func))
+    else:
+        fn_name = getattr(fn, "__name__", repr(fn))
 
     if len(non_default_kw_only) > 0:
         raise ValueError(
@@ -117,10 +120,12 @@ def _is_local_fn(fn):
             return "<locals>" in fn_type.__qualname__
     return False
 
+
 def _check_unpickable_fn(fn: Callable):
     """
-    Checks function is pickable or not. If it is a lambda or local function, a UserWarning
-    will be raised. If it's not a callable function, a TypeError will be raised.
+    Check function is pickable or not.
+
+    If it is a lambda or local function, a UserWarning will be raised. If it's not a callable function, a TypeError will be raised.
     """
     if not callable(fn):
         raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
@@ -131,7 +136,7 @@ def _check_unpickable_fn(fn: Callable):
         fn = fn.func
 
     # Local function
-    if _is_local_fn(fn) and not DILL_AVAILABLE:
+    if _is_local_fn(fn) and not dill_available():
         warnings.warn(
             "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
@@ -139,7 +144,7 @@ def _check_unpickable_fn(fn: Callable):
         return
 
     # Lambda function
-    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not dill_available():
         warnings.warn(
             "Lambda function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
@@ -207,8 +212,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: O
 
     for pathname in pathnames:
         if not isinstance(pathname, str):
-            raise TypeError("Expected string type for pathname, but got {}"
-                            .format(type(pathname)))
+            raise TypeError(f"Expected string type for pathname, but got {type(pathname)}")
         yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
@@ -227,21 +231,7 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
 
 
 # Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
-_iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
-                                                      {"old_class_name": "FSSpecFileOpener",
-                                                       "deprecation_version": "0.4.0",
-                                                       "removal_version": "0.6.0",
-                                                       "old_functional_name": "open_file_by_fsspec",
-                                                       "new_functional_name": "open_files_by_fsspec",
-                                                       "deprecate_functional_name_only": True},
-                                                      "open_file_by_iopath":
-                                                      {"old_class_name": "IoPathFileOpener",
-                                                       "deprecation_version": "0.4.0",
-                                                       "removal_version": "0.6.0",
-                                                       "old_functional_name": "open_file_by_iopath",
-                                                       "new_functional_name": "open_files_by_iopath",
-                                                       "deprecate_functional_name_only": True}}
-
+_iter_deprecated_functional_names: Dict[str, Dict] = {}
 _map_deprecated_functional_names: Dict[str, Dict] = {}
 
 
@@ -297,10 +287,11 @@ def _deprecation_warning(
 
 class StreamWrapper:
     """
-    StreamWrapper is introduced to wrap file handler generated by
-    DataPipe operation like `FileOpener`. StreamWrapper would guarantee
-    the wrapped file handler is closed when it's out of scope.
+    StreamWrapper is introduced to wrap file handler generated by DataPipe operation like `FileOpener`.
+
+    StreamWrapper would guarantee the wrapped file handler is closed when it's out of scope.
     """
+
     session_streams: Dict[Any, int] = {}
     debug_unclosed_streams: bool = False
 
@@ -313,7 +304,7 @@ class StreamWrapper:
         self.closed = False
         if parent_stream is not None:
             if not isinstance(parent_stream, StreamWrapper):
-                raise RuntimeError('Parent stream should be StreamWrapper, {} was given'.format(type(parent_stream)))
+                raise RuntimeError(f'Parent stream should be StreamWrapper, {type(parent_stream)} was given')
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
         if StreamWrapper.debug_unclosed_streams:
@@ -321,9 +312,7 @@ class StreamWrapper:
 
     @classmethod
     def close_streams(cls, v, depth=0):
-        """
-        Traverse structure and attempts to close all found StreamWrappers on best effort basis.
-        """
+        """Traverse structure and attempts to close all found StreamWrappers on best effort basis."""
         if depth > 10:
             return
         if isinstance(v, StreamWrapper):
@@ -331,9 +320,9 @@ class StreamWrapper:
         else:
             # Traverse only simple structures
             if isinstance(v, dict):
-                for kk, vv in v.items():
+                for vv in v.values():
                     cls.close_streams(vv, depth=depth + 1)
-            elif isinstance(v, list) or isinstance(v, tuple):
+            elif isinstance(v, (list, tuple)):
                 for vv in v:
                     cls.close_streams(vv, depth=depth + 1)
 
@@ -342,6 +331,8 @@ class StreamWrapper:
         return getattr(file_obj, name)
 
     def close(self, *args, **kwargs):
+        if self.closed:
+            return
         if StreamWrapper.debug_unclosed_streams:
             del StreamWrapper.session_streams[self]
         if hasattr(self, "parent_stream") and self.parent_stream is not None:
@@ -355,26 +346,22 @@ class StreamWrapper:
         self.closed = True
 
     def autoclose(self):
-        """
-        Close steam if there is no children, or make it to be automatically closed as soon as
-        all child streams are closed.
-        """
+        """Automatically close stream when all child streams are closed or if there are none."""
+        self.close_on_last_child = True
         if self.child_counter == 0:
             self.close()
-        self.close_on_last_child = True
 
     def __dir__(self):
         attrs = list(self.__dict__.keys()) + list(StreamWrapper.__dict__.keys())
         attrs += dir(self.file_obj)
-        return list(set(list(attrs)))
+        return list(set(attrs))
 
     def __del__(self):
         if not self.closed:
             self.close()
 
     def __iter__(self):
-        for line in self.file_obj:
-            yield line
+        yield from self.file_obj
 
     def __next__(self):
         return next(self.file_obj)

@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
-#include <c10/util/C++17.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
@@ -125,7 +124,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
     return asFuture(std::current_exception());
   }
 
-  // After sync exection or failed async execution return the value as-is.
+  // After sync execution or failed async execution return the value as-is.
   if (pythonRpcHandler.isRemoteException(result) || !isAsyncExecution) {
     return asFuture(
         c10::ivalue::ConcretePyObjectHolder::create(result),

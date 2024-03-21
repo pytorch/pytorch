@@ -1,13 +1,25 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_fft_c2c_native.h>
+#include <ATen/ops/_fft_c2r_native.h>
+#include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/empty.h>
+#endif
+
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 
 namespace at { namespace native {
 // In real-to-complex transform, MKL FFT only fills half of the values due to
@@ -188,7 +200,7 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
 }
 
 }} // namespace at::native
-#endif /* AT_MKL_ENALED() || AT_POCKETFFT_ENABLED() */
+#endif /* AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED() */
 
 #if AT_POCKETFFT_ENABLED()
 #include <pocketfft_hdronly.h>
@@ -217,7 +229,7 @@ inline std::complex<T> *tensor_cdata(Tensor& t) {
 
 template<typename T>
 inline const std::complex<T> *tensor_cdata(const Tensor& t) {
-  return reinterpret_cast<const std::complex<T>*>(t.data_ptr<c10::complex<T>>());
+  return reinterpret_cast<const std::complex<T>*>(t.const_data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
@@ -279,11 +291,11 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kFloat) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data_ptr<float>(),
+                   self.const_data_ptr<float>(),
                    tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data_ptr<double>(),
+                   self.const_data_ptr<double>(),
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
@@ -295,6 +307,10 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
+  if (dim.empty()) {
+    return self.clone();
+  }
+
   auto out = at::empty(self.sizes(), self.options());
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kComplexFloat) {
@@ -313,16 +329,9 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }}
 
 #elif AT_MKL_ENABLED()
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Utils.h>
-
-#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
-#include <vector>
 #include <numeric>
 #include <cmath>
 
@@ -475,9 +484,9 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   // run the FFT
   if (forward) {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
   } else {
-    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
   }
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
@@ -551,6 +560,10 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 // n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
+  if (dim.empty()) {
+    return self.clone();
+  }
+
   const auto sorted_dims = _sort_dims(self, dim);
   auto out = at::empty(self.sizes(), self.options());
   return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);

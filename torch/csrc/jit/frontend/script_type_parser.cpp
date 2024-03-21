@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 
 bool isTorch(const Expr& expr) {
@@ -38,7 +37,7 @@ TypePtr ScriptTypeParser::subscriptToType(
       // i.e. `typing.Tuple[()]`. Allow for parsing an empty tuple literal
       // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
       auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
-      if (tup_literal.inputs().size() > 0) {
+      if (!tup_literal.inputs().empty()) {
         throw ErrorReport(tup_literal.range())
             << "Tuple literal in Tuple type annotation must not "
             << "have any elements!";
@@ -86,6 +85,15 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return FutureType::create(elem_type);
+  } else if (typeName == "Await" || typeName == "torch.jit._Await") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
+    return AwaitType::create(elem_type);
   } else if (typeName == "RRef") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -225,6 +233,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
+  if (expr.kind() == '|') {
+    auto converted = pep604union_to_union(expr);
+    return parseTypeFromExpr(converted);
+  }
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text().str(), expr.range())) {
@@ -235,6 +247,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  if (expr.kind() == '|') {
+    auto converted = pep604union_to_union(expr);
+    return parseTypeFromExprImpl(converted);
+  }
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -316,7 +332,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // We then run constant prop on this graph and check the results are
   // constant. This approach avoids having to have separate handling of
   // default arguments from standard expressions by piecing together existing
-  // machinery for graph generation, constant propgation, and constant
+  // machinery for graph generation, constant propagation, and constant
   // extraction.
   auto tuple_type = Subscript::create(
       r,
@@ -458,6 +474,10 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
     throw ErrorReport(assign.range())
         << "Expected to a variable for class constant";
   }
+  if (!assign.type().present()) {
+    throw ErrorReport(assign.range())
+        << "Expected a type to present for class constant";
+  }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();
   if (final_type.kind() != TK_SUBSCRIPT) {
@@ -484,5 +504,4 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   return *default_val.begin();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,6 +1,15 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/miopen_batch_norm_native.h>
+#include <ATen/ops/miopen_batch_norm_backward_native.h>
+#endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
@@ -117,8 +126,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
       at::maybe_data_ptr(running_mean),
       at::maybe_data_ptr(running_var),
       epsilon,
-      save_mean.data_ptr(),
-      save_var.data_ptr()));
+      save_mean.mutable_data_ptr(),
+      save_var.mutable_data_ptr()));
   } else {
     save_mean = at::empty({0}, weight_t.options());
     save_var = at::empty({0}, weight_t.options());

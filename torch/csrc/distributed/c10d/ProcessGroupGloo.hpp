@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <gloo/rendezvous/store.h>
 #include <gloo/algorithm.h>
 #include <gloo/common/error.h>
 #include <gloo/context.h>
@@ -18,10 +17,10 @@
 
 #include <c10/util/hash.h>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -50,7 +49,7 @@ constexpr const char* GLOO_BACKEND_NAME = "gloo";
 // number can be automatically tuned, but only if we let a single
 // process take charge, and have it broadcast the limits.
 //
-class TORCH_API ProcessGroupGloo : public ProcessGroup {
+class TORCH_API ProcessGroupGloo : public Backend {
  public:
   // AsyncWork is the Gloo specific superclass for asynchronous work items.
   // We can split asynchronous work into 3 phases:
@@ -66,14 +65,17 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // operations using the new AsyncWork base class. Over time we will port
   // all operations and perform needed cleanup.
   //
-  // FIXME: This probably should be called WorkGloo since the work is executed in sync mode
-  // by a background thread.
+  // FIXME: This probably should be called WorkGloo since the work is executed
+  // in sync mode by a background thread.
   class TORCH_API AsyncWork : public Work {
    public:
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
+        OpType opType,
+        uint64_t seq,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
 
     ~AsyncWork() override = default;
 
@@ -84,6 +86,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     std::vector<at::Tensor> result() override;
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+    uint64_t getSequencenumber() const override;
 
    protected:
     friend class ProcessGroupGloo;
@@ -98,6 +101,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
     std::function<void()> recordFunctionBeforeCallback_;
+    const uint64_t seq_;
   };
 
   // Wrap c10d store as Gloo store
@@ -125,14 +129,49 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     }
 
     void wait(const std::vector<std::string>& keys) override {
-      store_->wait(keys, Store::kDefaultTimeout);
+      store_->wait(keys, ::c10d::Store::kDefaultTimeout);
     }
 
     void wait(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout) override {
+        const std::vector<std::string>& keys,
+        const std::chrono::milliseconds& timeout) override {
       store_->wait(keys, timeout);
     }
+
+#ifdef GLOO_STORE_HAS_STORE_V2
+    bool has_v2_support() override {
+      return store_->hasExtendedApi();
+    }
+
+    std::vector<std::vector<char>> multi_get(
+        const std::vector<std::string>& keys) override {
+      std::vector<std::vector<char>> res;
+      for (auto& value : store_->multiGet(keys)) {
+        res.emplace_back(std::vector<char>(value.begin(), value.end()));
+      }
+      return res;
+    }
+
+    void multi_set(
+        const std::vector<std::string>& keys,
+        const std::vector<std::vector<char>>& values) override {
+      std::vector<std::vector<uint8_t>> u_values;
+      for (auto& value : values) {
+        u_values.emplace_back(std::vector<uint8_t>(value.begin(), value.end()));
+      }
+      store_->multiSet(keys, u_values);
+    }
+
+    void append(const std::string& key, const std::vector<char>& value)
+        override {
+      std::vector<uint8_t> tmp(value.begin(), value.end());
+      return store_->append(key, tmp);
+    }
+
+    int64_t add(const std::string& key, int64_t value) override {
+      return store_->add(key, value);
+    }
+#endif
 
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
@@ -148,15 +187,19 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
    public:
     explicit SendWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        uint64_t seq);
 
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
+    uint64_t getSequencenumber() const override;
+
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+    const uint64_t seq_;
   };
 
   class TORCH_API RecvWork : public Work {
@@ -164,6 +207,8 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     explicit RecvWork(
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        OpType opType,
+        uint64_t seq,
         const char* profilingTitle = nullptr);
 
     int sourceRank() const override;
@@ -172,19 +217,22 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
 
     void abort() override;
 
+    uint64_t getSequencenumber() const override;
+
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
     int srcRank_;
+    const uint64_t seq_;
   };
 
-  struct TORCH_API Options : public ProcessGroup::Options {
+  struct TORCH_API Options : public Backend::Options {
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout) {
       return c10::make_intrusive<Options>(timeout);
     }
 
@@ -214,13 +262,20 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // falls back to binding to the loopback address.
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
+  // Create ProcessGroupGloo instance.
+  static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
+      const c10::intrusive_ptr<Store>& store,
+      int rank,
+      int size,
+      std::chrono::milliseconds timeout);
+
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
       c10::intrusive_ptr<Options> options = Options::create());
 
-  virtual ~ProcessGroupGloo();
+  ~ProcessGroupGloo() override;
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
@@ -234,6 +289,10 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override;
+
   c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
@@ -243,19 +302,29 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> _allgather_base(
+      at::Tensor& output_tensor,
+      at::Tensor& input_tensor,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const AllgatherOptions& opts = AllgatherOptions()) override;
-
   c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   c10::intrusive_ptr<Work> gather(
@@ -271,6 +340,11 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<Work> alltoall_base(
@@ -296,6 +370,8 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
 
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  void enableCollectivesTiming() override;
 
   const std::unique_ptr<::gloo::rendezvous::Store>& _getStore() const {
     return store_;
@@ -364,6 +440,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   std::mutex workMutex_;
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
+  uint64_t seq_{0};
 };
 
 } // namespace c10d

@@ -1,22 +1,23 @@
 #include <c10/util/Backtrace.h>
+#include <c10/util/Logging.h>
 #include <c10/util/signal_handler.h>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
 // Normal signal handler implementation.
-#include <cxxabi.h>
 #include <dirent.h>
-#include <dlfcn.h>
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <unwind.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <unordered_set>
+#include <mutex>
 
 #ifdef C10_ANDROID
 #ifndef SYS_gettid
@@ -57,7 +58,7 @@ void hookupHandler() {
   if (hookedUpCount++) {
     return;
   }
-  struct sigaction sa;
+  struct sigaction sa {};
   // Setup the handler
   sa.sa_handler = &handleSignal;
   // Restart the system call, if at all possible
@@ -78,7 +79,7 @@ void unhookHandler() {
   if (--hookedUpCount > 0) {
     return;
   }
-  struct sigaction sa;
+  struct sigaction sa {};
   // Setup the sighub handler
   sa.sa_handler = SIG_DFL;
   // Restart the system call, if at all possible
@@ -106,15 +107,17 @@ FatalSignalHandler& FatalSignalHandler::getInstance() {
   return *handler;
 }
 
-FatalSignalHandler::~FatalSignalHandler() {}
+FatalSignalHandler::~FatalSignalHandler() = default;
 
 FatalSignalHandler::FatalSignalHandler()
     : fatalSignalHandlersInstalled(false),
       fatalSignalReceived(false),
       fatalSignalName("<UNKNOWN>"),
-      writingCond(PTHREAD_COND_INITIALIZER),
-      writingMutex(PTHREAD_MUTEX_INITIALIZER) {}
+      writingCond(),
+      writingMutex(),
+      signalReceived(false) {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 FatalSignalHandler::signal_handler FatalSignalHandler::kSignalHandlers[] = {
     {"SIGABRT", SIGABRT, {}},
     {"SIGINT", SIGINT, {}},
@@ -159,10 +162,12 @@ void FatalSignalHandler::callPreviousSignalHandler(
 
 // needsLock signals whether we need to lock our writing mutex.
 void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
+  std::unique_lock<std::mutex> ul(writingMutex, std::defer_lock);
   if (needsLock) {
-    pthread_mutex_lock(&writingMutex);
+    ul.lock();
+    signalReceived = true;
   }
-  pid_t tid = syscall(SYS_gettid);
+  pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
   std::string backtrace = fmt::format(
       "{}({}), PID: {}, Thread {}: \n {}",
       fatalSignalName,
@@ -172,8 +177,8 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
       c10::get_backtrace());
   std::cerr << backtrace << std::endl;
   if (needsLock) {
-    pthread_mutex_unlock(&writingMutex);
-    pthread_cond_signal(&writingCond);
+    ul.unlock();
+    writingCond.notify_all();
   }
 }
 
@@ -204,25 +209,34 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
   DIR* procDir = opendir("/proc/self/task");
   if (procDir) {
     pid_t pid = getpid();
-    pid_t currentTid = syscall(SYS_gettid);
-    struct dirent* entry;
-    pthread_mutex_lock(&writingMutex);
+    pid_t currentTid = static_cast<pid_t>(syscall(SYS_gettid));
+    struct dirent* entry = nullptr;
+    std::unique_lock<std::mutex> ul(writingMutex);
     while ((entry = readdir(procDir)) != nullptr) {
       if (entry->d_name[0] == '.') {
         continue;
       }
       pid_t tid = atoi(entry->d_name);
       // If we've found the current thread then we'll jump into the SIGUSR2
-      // handler before calling pthread_cond_wait thus deadlocking, so branch
-      // our directly to the backtrace handler instead of signaling it.
+      // handler instead of signaling to avoid deadlocking.
       if (tid != currentTid) {
+        signalReceived = false;
         syscall(SYS_tgkill, pid, tid, SIGUSR2);
-        pthread_cond_wait(&writingCond, &writingMutex);
+        auto now = std::chrono::system_clock::now();
+        using namespace std::chrono_literals;
+        // we use wait_until instead of wait because on ROCm there was
+        // a single thread that wouldn't receive the SIGUSR2
+        if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
+          if (!signalReceived) {
+            std::cerr << "signal lost waiting for stacktrace " << pid << ":"
+                      << tid << std::endl;
+            break;
+          }
+        }
       } else {
         stacktraceSignalHandler(false);
       }
     }
-    pthread_mutex_unlock(&writingMutex);
   } else {
     perror("Failed to open /proc/self/task");
   }
@@ -263,7 +277,7 @@ void FatalSignalHandler::installFatalSignalHandlers() {
     return;
   }
   fatalSignalHandlersInstalled = true;
-  struct sigaction sa;
+  struct sigaction sa {};
   sigemptyset(&sa.sa_mask);
   // Since we'll be in an exiting situation it's possible there's memory
   // corruption, so make our own stack just in case.
@@ -325,18 +339,16 @@ SignalHandler::~SignalHandler() {
 // function was called.
 bool SignalHandler::GotSIGINT() {
   uint64_t count = sigintCount;
-  bool result = (count != my_sigint_count_);
-  my_sigint_count_ = count;
-  return result;
+  uint64_t localCount = my_sigint_count_.exchange(count);
+  return (localCount != count);
 }
 
 // Return true iff a SIGHUP has been received since the last time this
 // function was called.
 bool SignalHandler::GotSIGHUP() {
   uint64_t count = sighupCount;
-  bool result = (count != my_sighup_count_);
-  my_sighup_count_ = count;
-  return result;
+  uint64_t localCount = my_sighup_count_.exchange(count);
+  return (localCount != count);
 }
 
 SignalHandler::Action SignalHandler::CheckForSignals() {

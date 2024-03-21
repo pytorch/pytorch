@@ -181,9 +181,14 @@ if __name__ == '__main__':
         ),
         help="location to output new bundled licenses file",
     )
-
+    parser.add_argument(
+        "--include-files",
+        action="store_true",
+        default=False,
+        help="include actual license terms to the output",
+    )
     args = parser.parse_args()
     fname = args.out_file
     print(f"+ Writing bundled licenses to {args.out_file}")
     with open(fname, 'w') as fid:
-        create_bundled(third_party, fid)
+        create_bundled(third_party, fid, args.include_files)

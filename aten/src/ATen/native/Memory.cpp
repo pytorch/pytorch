@@ -1,8 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_debug_has_internal_overlap_native.h>
+#include <ATen/ops/_pin_memory.h>
+#include <ATen/ops/is_pinned_native.h>
+#include <ATen/ops/pin_memory_native.h>
+#endif
+
+namespace at::native {
 
 // Exposes at::has_internal_overlap as an operator for testing purposes
 int64_t _debug_has_internal_overlap(const Tensor& self) {
@@ -26,5 +36,4 @@ Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
   return at::_pin_memory(self, device);
 }
 
-}
-}
+} // namespace at::native

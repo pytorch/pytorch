@@ -1,7 +1,7 @@
 #pragma once
 
-#if !defined(_MSC_VER) && __cplusplus < 201402L
-#error C++14 or later compatible compiler is required to use ATen.
+#if !defined(_MSC_VER) && __cplusplus < 201703L
+#error C++17 or later compatible compiler is required to use ATen.
 #endif
 
 #include <ATen/Context.h>
@@ -31,3 +31,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
+
+// TODO: try to remove this
+// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#include <ATen/NativeFunctions.h>

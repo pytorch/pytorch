@@ -13,5 +13,8 @@ VariableHooksInterface* GetVariableHooks() {
   TORCH_CHECK(hooks, "Support for autograd has not been loaded; have you linked against libtorch.so?")
   return hooks;
 }
+bool HasVariableHooks() {
+  return hooks != nullptr;
+}
 
 }} // namespace at::impl

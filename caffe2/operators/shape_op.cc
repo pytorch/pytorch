@@ -31,7 +31,7 @@ If called with an optional argument `axes`, the result will only
 contain the dimensions of specified axes.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/shape_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/shape_op.cc
 
 <details>
 

@@ -18,8 +18,7 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -52,8 +51,8 @@ __global__ void max_unpooling2d_forward_kernel(
 
 template <typename T>
 __global__ void max_unpooling3d_forward_kernel(
-    PackedTensorAccessor64<T, 4> input,
-    PackedTensorAccessor64<int64_t, 4> indices,
+    PackedTensorAccessor64<const T, 4> input,
+    PackedTensorAccessor64<const int64_t, 4> indices,
     T* output,
     const int64_t oT,
     const int64_t oH,
@@ -65,8 +64,8 @@ __global__ void max_unpooling3d_forward_kernel(
   int64_t slice = (blockIdx.z + offsetZ) / input.size(1); // input slice/feature
   int64_t outputImageSize = oT * oH * oW;
   if (iRow < input.size(2) && iColumn < input.size(3)) {
-    T val = input[slice][iFrame][iRow][iColumn];
-    int64_t index = indices[slice][iFrame][iRow][iColumn];
+    const T val = input[slice][iFrame][iRow][iColumn];
+    const int64_t index = indices[slice][iFrame][iRow][iColumn];
     CUDA_KERNEL_ASSERT(index >= 0 && index < outputImageSize);
     output[slice * oT * oH * oW + index] = val;
   }
@@ -94,7 +93,7 @@ __global__ void max_unpooling2d_backward_kernel(
 
 template <typename T>
 __global__ void max_unpooling3d_backward_kernel(
-    T* gradOutputData,
+    const T* gradOutputData,
     int64_t oT,
     int64_t oH,
     int64_t oW,
@@ -148,7 +147,7 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
       "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
   TORCH_CHECK(
       output_size.size() == 2,
-      "There should be exactly two elements (width, height) in output_size, but got ", output_size.size(), " elements.");
+      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
 
   int64_t dimw = 2;
   int64_t dimh = 1;
@@ -184,14 +183,14 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
               self.numel(),
-              self.data_ptr<scalar_t>(),
-              indices.data_ptr<int64_t>(),
+              self.const_data_ptr<scalar_t>(),
+              indices.const_data_ptr<int64_t>(),
               numChannels,
               inputHeight,
               inputWidth,
               oheight,
               owidth,
-              output.data_ptr<scalar_t>());
+              output.mutable_data_ptr<scalar_t>());
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }));
   }
@@ -371,9 +370,9 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              self.packed_accessor64<scalar_t, 4>(),
-              indices.packed_accessor64<int64_t, 4>(),
-              output.data_ptr<scalar_t>(),
+              self.packed_accessor64<const scalar_t, 4>(),
+              indices.packed_accessor64<const int64_t, 4>(),
+              output.mutable_data_ptr<scalar_t>(),
               oT,
               oH,
               oW,
@@ -475,14 +474,14 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             count,
-            grad_output.data_ptr<scalar_t>(),
-            indices.data_ptr<int64_t>(),
+            grad_output.const_data_ptr<scalar_t>(),
+            indices.const_data_ptr<int64_t>(),
             nInputPlane,
             nInputRows,
             nInputCols,
             oheight,
             owidth,
-            grad_input.data_ptr<scalar_t>());
+            grad_input.mutable_data_ptr<scalar_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }));
   return grad_input;
@@ -582,7 +581,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              grad_output.data_ptr<scalar_t>(),
+              grad_output.const_data_ptr<scalar_t>(),
               oT,
               oH,
               oW,
@@ -610,5 +609,4 @@ at::Tensor max_unpooling3d_backward_cuda(
   return grad_input;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

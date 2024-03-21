@@ -1,15 +1,17 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/enum_type.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
+#include <array>
 #include <iostream>
+#include <utility>
 
 namespace std {
 template<>
@@ -39,13 +41,13 @@ static_assert(
     sizeof(SingletonOrSharedTypePtr<void>) == sizeof(std::shared_ptr<void>) && sizeof(std::shared_ptr<void>) == 2 * sizeof(void*),
     "std::shared_ptr has an unexpected representation on this platform!");
 static_assert(
-    std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
+    std::is_same_v<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -246,6 +248,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofSymInts() {
+  static auto value = ListType::create(SymIntType::get());
+  return value;
+}
 ListTypePtr ListType::ofComplexDoubles() {
   static auto value = ListType::create(ComplexType::get());
   return value;
@@ -262,6 +268,10 @@ ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
   return value;
 }
+ListTypePtr ListType::ofNumbers() {
+  static auto value = ListType::create(NumberType::get());
+  return value;
+}
 
 TypePtr OptionalType::get(TypePtr inner) {
   static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
@@ -276,7 +286,7 @@ TypePtr OptionalType::get(TypePtr inner) {
   return containerTypePtrs[inner];
 }
 
-TypePtr ListType::get(std::string identifier, TypePtr inner) {
+TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -290,7 +300,7 @@ TypePtr ListType::get(std::string identifier, TypePtr inner) {
   return containerTypePtrs[key];
 }
 
-TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -298,10 +308,25 @@ TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
   auto map_key = std::make_tuple(identifier, key, value);
   std::lock_guard<std::mutex> lock(mutex);
   if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
-    TypePtr t = DictType::create(key, value);
+    TypePtr t = DictType::create(std::move(key), std::move(value));
     containerTypePtrs.emplace(map_key, std::move(t));
   }
   return containerTypePtrs[map_key];
+}
+
+std::string DictType::annotation_str_impl(const TypePrinter& printer) const {
+  auto keyAnnotation = getKeyType()->annotation_str(printer);
+  auto valueAnnotation = getValueType()->annotation_str(printer);
+
+  std::string result;
+  result.reserve(5 /* "Dict[" */ + keyAnnotation.size() + 2 /* ", " */ + valueAnnotation.size() + 1 /* "]" */);
+  result = "Dict[";
+  result += keyAnnotation;
+  result.push_back(',');
+  result.push_back(' ');
+  result += valueAnnotation;
+  result.push_back(']');
+  return result;
 }
 
 AnyListTypePtr AnyListType::get() {
@@ -334,7 +359,12 @@ SymFloatTypePtr SymFloatType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
+SymBoolTypePtr SymBoolType::get() {
+  static SymBoolTypePtr value(new SymBoolType());
+  return value;
+}
+
+static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, const TypePtr& type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(*t2)) {
     return t2;
@@ -416,8 +446,8 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
-  auto unified = unifyTypesImpl(t1, t2, default_to_union, std::move(type_hint));
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, const TypePtr& type_hint) {
+  auto unified = unifyTypesImpl(t1, t2, default_to_union, type_hint);
 
   if (default_to_union && !unified) {
     return UnionType::create({t1, t2});
@@ -430,8 +460,8 @@ c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
     bool default_to_union,
-    TypePtr type_hint) {
-  if (elements.size() == 0) {
+    const TypePtr& type_hint) {
+  if (elements.empty()) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
   }
@@ -532,6 +562,19 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->repr_str();
+      return ss.str();
+    }
+  } else if (auto lt_formal = formal->castRaw<AwaitType>()) {
+    if (auto lt_actual = actual->castRaw<AwaitType>()) {
+      auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match an await to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
@@ -738,7 +781,7 @@ TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& 
       /*arguments=*/std::move(arguments),
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
-      field_types, qualName, schema)); // NOLINT(modernize-make-shared)
+      field_types, qualName, std::move(schema))); // NOLINT(modernize-make-shared)
 }
 
 c10::optional<std::vector<c10::string_view>> TupleType::names() const {
@@ -781,14 +824,13 @@ TupleType::TupleType(
     std::shared_ptr<FunctionSchema> schema)
     : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
-      schema_(std::move(schema)) {
-  has_free_variables_ =
-      std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+      has_free_variables_(std::any_of(elements_.begin(), elements_.end(), [](const TypePtr& v) {
         if (!v) {
           throw std::runtime_error("Can not create tuple with None type");
         }
         return v->hasFreeVariables();
-      });
+      })), schema_(std::move(schema)) {
+
   if (schema_) {
     for (const Argument& arg : schema_->arguments()) {
       checkNoAny(*this, "attribute", arg.name(), arg.type());
@@ -874,27 +916,55 @@ std::string TupleType::str() const {
   }
   return ss.str();
 }
-std::string TupleType::annotation_str_impl(TypePrinter printer) const {
-  std::stringstream ss;
+std::string TupleType::annotation_str_impl(const TypePrinter& printer) const {
   if (schema_ && name()) {
-    ss << name()->qualifiedName();
-  } else {
-    ss << "Tuple[";
-    if (elements().size() == 0) {
-      // `typing.Tuple` special-cases the annotation syntax for empty tuple
-      // with `typing.Tuple[()]`. See
-      // https://docs.python.org/3/library/typing.html#typing.Tuple
-      ss << "()";
-    } else {
-      for (size_t i = 0; i < elements().size(); ++i) {
-        if (i > 0)
-          ss << ", ";
-        ss << elements()[i]->annotation_str(printer);
-      }
-    }
-    ss << "]";
+    return name()->qualifiedName();
   }
-  return ss.str();
+
+  if (elements().empty()) {
+    // `typing.Tuple` special-cases the annotation syntax for empty tuple
+    // with `typing.Tuple[()]`. See
+    // https://docs.python.org/3/library/typing.html#typing.Tuple
+    return "Tuple[()]";
+  }
+
+  // Fast path for expectedly-small Tuples.
+  const auto elts = elements();
+  if (elts.size() <= 3) {
+    std::array<std::string, 3> elements_strs;
+    size_t total_length = 0;
+    int idx = 0;
+    for (const auto& element: elts) {
+      elements_strs[idx] = element->annotation_str(printer);
+      total_length += elements_strs[idx].size();
+      idx++;
+    }
+    std::string result;
+    result.reserve(strlen("Tuple[") + strlen(", ") * (elts.size() - 1) + total_length + 1);
+    result.append("Tuple[");
+    for (const auto ii : c10::irange(elts.size())) {
+      if (ii > 0) {
+        result.push_back(',');
+        result.push_back(' ');
+      }
+      result.append(elements_strs[ii]);
+    }
+    result.push_back(']');
+    return result;
+  }
+
+  std::ostringstream ss;
+  ss << "Tuple[";
+  size_t i = 0;
+  for (const auto& element: elts) {
+    if (i > 0) {
+      ss << ", ";
+    }
+    ss << element->annotation_str(printer);
+    i++;
+  }
+  ss << ']';
+  return std::move(ss).str();
 }
 
 InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {

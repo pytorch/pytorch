@@ -1,12 +1,19 @@
 // Returns the frequency of elements of input non-negative integer tensor.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 
-#include <tuple>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/bincount_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
-namespace at { namespace native {
+namespace at::native {
 
 ///////////////// bincount /////////////////
 namespace {
@@ -27,8 +34,8 @@ Tensor _bincount_cpu_template(
   }
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.size(0) != self.size(0)) {
-    AT_ERROR("input and weights should have the same length");
+  if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
+    AT_ERROR("weights should be 1-d and have the same length as input");
   }
 
   Tensor output;
@@ -75,4 +82,4 @@ _bincount_cpu(const Tensor& self, const c10::optional<Tensor>& weights_opt, int6
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

@@ -23,7 +23,7 @@ from typing import Any
 def read_sub_write(path: str, prefix_pat: str, new_default: int) -> None:
     with open(path, encoding="utf-8") as f:
         content_str = f.read()
-    content_str = re.sub(prefix_pat, r"\g<1>{}".format(new_default), content_str)
+    content_str = re.sub(prefix_pat, rf"\g<1>{new_default}", content_str)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content_str)
     print("modified", path)
@@ -107,6 +107,9 @@ def main(args: Any) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--skip_build", action="store_true", help="Skip building pytorch"
+        "--skip-build",
+        "--skip_build",
+        action="store_true",
+        help="Skip building pytorch",
     )
     main(parser.parse_args())

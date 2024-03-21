@@ -51,7 +51,7 @@ def _getGradientOrNone(op_proto):
 
 # necessary to support converting jagged lists into numpy arrays
 def _transformList(l):
-    ret = np.empty(len(l), dtype=np.object)
+    ret = np.empty(len(l), dtype=object)
     for (i, arr) in enumerate(l):
         ret[i] = arr
     return ret
@@ -232,7 +232,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
         outputs_to_check=None,
         ensure_outputs_are_inferred=False,
     ):
-        outs = super(SerializedTestCase, self).assertReferenceChecks(
+        outs = super().assertReferenceChecks(
             device_option,
             op,
             inputs,

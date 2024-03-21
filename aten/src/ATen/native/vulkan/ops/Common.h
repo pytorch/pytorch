@@ -2,9 +2,13 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <c10/util/ArrayRef.h>
+
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/impl/Common.h>
+#include <ATen/native/vulkan/ops/Convert.h>
 
 namespace at {
 namespace native {
@@ -41,19 +45,13 @@ struct Layout final {
     static constexpr size_t height = 0u;
     static constexpr size_t width = 1u;
   };
-};
 
-/*
- * Maps a semantic dimension name to an integer that corresponds to its
- * innermost ordering in a 4D tensor in NCHW format. Width is the innermost
- * dimension, so it corresponds to 1, height is the next innermost, so it
- * corresponds to 2, and so on.
- */
-struct Dim4D {
-  static constexpr uint32_t Width = 1u;
-  static constexpr uint32_t Height = 2u;
-  static constexpr uint32_t Channel = 3u;
-  static constexpr uint32_t Batch = 4u;
+  // Parameters (Pooling Kernels, Dilation, Padding, Stride, etc.)
+  struct BatchMatrices final {
+    static constexpr size_t batch = 0u;
+    static constexpr size_t height = 1u;
+    static constexpr size_t width = 2u;
+  };
 };
 
 /*
@@ -65,7 +63,7 @@ struct Dim4D {
 template <uint32_t N>
 uint32_t get_dim(const IntArrayRef sizes) {
   const uint32_t dims = sizes.size();
-  return dims < N ? 1 : sizes[dims - N];
+  return dims < N ? 1 : api::utils::safe_downcast<uint32_t>(sizes[dims - N]);
 }
 
 template <uint32_t N>
@@ -91,9 +89,6 @@ inline c10::optional<Scalar> get_optional_scalar(
   return gen_list.get(idx).isScalar() ? gen_list.get(idx).toScalar()
                                       : c10::optional<Scalar>();
 }
-
-api::utils::uvec3 adaptive_work_group_size(
-    const api::utils::uvec3& global_work_group);
 
 } // namespace ops
 } // namespace vulkan

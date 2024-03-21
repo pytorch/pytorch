@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <c10/util/string_view.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 
@@ -15,7 +16,7 @@ enum class TransposeType;
 
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
@@ -280,7 +281,8 @@ DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
 using unpack_pivots_fn = void(*)(
   TensorIterator& iter,
-  const int64_t dim_size);
+  const int64_t dim_size,
+  const int64_t max_pivot);
 DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
 
 using lu_solve_fn = void (*)(
@@ -316,4 +318,4 @@ using ldl_solve_fn = void (*)(
     bool /*upper*/,
     bool /*hermitian*/);
 DECLARE_DISPATCH(ldl_solve_fn, ldl_solve_stub);
-}} // namespace at::native
+} // namespace at::native

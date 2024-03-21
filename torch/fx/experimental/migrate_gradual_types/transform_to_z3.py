@@ -51,7 +51,7 @@ try:
                     return transformed_lhs == transformed_rhs, counter
 
                 elif is_dim(constraint.lhs) and is_dim(constraint.rhs):
-                    # with dimension tranformations we consider the encoding
+                    # with dimension transformations we consider the encoding
                     lhs, counter = transform_dimension(constraint.lhs, counter, dimension_dict)
                     rhs, counter = transform_dimension(constraint.rhs, counter, dimension_dict)
                     return lhs == rhs, counter
@@ -311,7 +311,7 @@ try:
 
         negation_transformed_condition_constraint = z3.Not(transformed_condition_constraint)
 
-        return z3.And([transformed, transformed_condition_constraint]),\
+        return z3.And([transformed, transformed_condition_constraint]), \
             z3.And([transformed, negation_transformed_condition_constraint])
 
 

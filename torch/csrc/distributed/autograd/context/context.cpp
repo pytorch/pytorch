@@ -90,14 +90,11 @@ void DistAutogradContext::accumulateGrad(
   // CUDA stream restoration from autograd function. Hence, we manually
   // call it here to get the streams correct.
   auto forward_stream =
-      torch::autograd::impl::grad_accumulator(variable)->stream(
-          grad.device().type());
+      torch::autograd::impl::grad_accumulator(variable)->stream();
   c10::OptionalStreamGuard stream_guard(forward_stream);
 
   // No higher order gradients supported in distributed autograd.
   AutoGradMode grad_mode(false);
-
-  at::Tensor new_grad = AccumulateGrad::callHooks(variable, grad);
 
   // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
   // distributed autograd as part of
@@ -105,11 +102,8 @@ void DistAutogradContext::accumulateGrad(
   AccumulateGrad::accumulateGrad(
       variable,
       old_grad,
-      new_grad,
-      // Add +1 here since we can't std::move(grad) when call
-      // AccumulateGrad::callHooks, since it is a const ref, and that incurs a
-      // refcount bump for the new_grad.
-      num_expected_refs + 1,
+      grad,
+      num_expected_refs,
       [this, &variable](at::Tensor&& grad_update) {
         auto device = grad_update.device();
         accumulatedGrads_.insert(variable, std::move(grad_update));

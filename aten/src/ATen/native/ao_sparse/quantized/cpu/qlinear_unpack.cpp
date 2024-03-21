@@ -1,9 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <torch/custom_class.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/from_blob.h>
+#endif
 
 namespace ao {
 namespace sparse {
@@ -25,12 +35,12 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
     at::Tensor scales = at::empty(
         {static_cast<long>(w_scale.size())},
         at::device(c10::kCPU).dtype(c10::kFloat));
-    std::copy(w_scale.begin(), w_scale.end(), scales.data_ptr<float>());
+    std::copy(w_scale.begin(), w_scale.end(), scales.mutable_data_ptr<float>());
 
     at::Tensor zero_points = at::empty(
         {static_cast<long>(w_zp.size())},
         at::device(c10::kCPU).dtype(c10::kInt));
-    std::copy(w_zp.begin(), w_zp.end(), zero_points.data_ptr<int>());
+    std::copy(w_zp.begin(), w_zp.end(), zero_points.mutable_data_ptr<int>());
 
     weight_origin = at::_empty_per_channel_affine_quantized(
         {N, K},
@@ -75,7 +85,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
     std::copy(
         w_scales_ptr,
         w_scales_ptr + output_channels_,
-        scales.data_ptr<float>());
+        scales.mutable_data_ptr<float>());
 
     at::Tensor zero_points = at::empty(
         {static_cast<long>(output_channels_)},
@@ -83,7 +93,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
     std::transform(
         w_zero_points_.begin(),
         w_zero_points_.begin() + output_channels_,
-        zero_points.data_ptr<int>(),
+        zero_points.mutable_data_ptr<int>(),
         [](uint8_t v) { return static_cast<int>(v) - 128; });
 
     weight_origin = at::_empty_per_channel_affine_quantized(
@@ -123,6 +133,7 @@ class QLinearUnpackWeightInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(sparse, CatchAll, m) {
+  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("sparse::qlinear_unpack"),
       TORCH_FN(QLinearUnpackWeightInt8::run));

@@ -24,7 +24,7 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
@@ -63,7 +63,9 @@ void aminmax_kernel_impl(
     const Tensor& self, int64_t dim, bool keepdim, Tensor& min_result, Tensor& max_result) {
   at::TensorIterator iter = make_reduction("aminmax_cuda", min_result,
                                            max_result, self, dim, keepdim, self.scalar_type());
-  aminmax_launch_kernel(iter);
+  if (iter.numel() != 0) {
+    aminmax_launch_kernel(iter);
+  }
 }
 
 void min_all_kernel_impl(Tensor& result, const Tensor& input) {
@@ -97,4 +99,4 @@ REGISTER_CUDA_DISPATCH(aminmax_stub, &aminmax_kernel_impl);
 
 REGISTER_CUDA_DISPATCH(norm_stub, &norm_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

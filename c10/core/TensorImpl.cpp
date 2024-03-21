@@ -1,14 +1,18 @@
 #include <c10/core/TensorImpl.h>
 
-#include <c10/core/Backend.h>
+#include <c10/core/Contiguity.h>
+#include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#include <utility>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -70,9 +74,7 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-TensorImpl::~TensorImpl() {
-  destroy_pyobj_if_needed();
-}
+TensorImpl::~TensorImpl() = default;
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -109,9 +111,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-      pyobj_interpreter_(nullptr),
-      pyobj_(nullptr),
-      storage_offset_(0),
+
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
@@ -123,12 +123,12 @@ TensorImpl::TensorImpl(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
-    // NOLINTNEXTLINE(performance-move-const-arg)
-    : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
+    : TensorImpl({}, key_set, data_type, device_opt) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
@@ -137,9 +137,7 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-      pyobj_interpreter_(nullptr),
-      pyobj_(nullptr),
-      storage_offset_(0),
+
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
@@ -210,7 +208,7 @@ void TensorImpl::HandleResize() {
   // will create the data storage.
   bool reset_tensor = false;
   if (reserved_) {
-    // If tensor is reserved then don't claim its memeory unless nbytes()
+    // If tensor is reserved then don't claim its memory unless nbytes()
     // is smaller than new size
     reset_tensor =
         storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();
@@ -227,119 +225,59 @@ void TensorImpl::HandleResize() {
   }
 }
 
-bool TensorImpl::compute_contiguous() const {
-  bool is_contiguous = true;
-  if (is_empty())
-    return is_contiguous;
-  int64_t z = 1;
-  for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
-    if (size_d != 1) {
-      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
-        z *= size_d;
-      } else {
-        is_contiguous = false;
-        break;
-      }
-    }
+bool TensorImpl::compute_contiguous(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
   }
-  return is_contiguous;
+  return _compute_contiguous<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref(),
+      numel_);
 }
 
-bool TensorImpl::compute_channels_last_contiguous_2d() const {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
-  switch (sizes_and_strides_.size()) {
-    case 4: {
-      int64_t expected = 1;
-      for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
-        if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
-            return false;
-          }
-          expected *= size_d;
-        }
-      }
-      return true;
-    }
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case 3:
-      // TODO dim == 3 case will be enabled once it is fully tested
-      return false;
-    default:
-      return false;
+bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
   }
+  return _compute_channels_last_contiguous_2d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_channels_last_contiguous_3d() const {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
-  switch (sizes_and_strides_.size()) {
-    case 5: {
-      int64_t expected = 1;
-      for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
-        if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
-            return false;
-          }
-          expected *= size_d;
-        }
-      }
-      return true;
-    }
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case 4:
-      // TODO dim == 4 case will be enabled once it is fully tested
-      return false;
-    default:
-      return false;
+bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
   }
+  return _compute_channels_last_contiguous_3d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_2d() const {
-  return is_channels_last_strides_2d(
-      TensorImpl::sizes(), TensorImpl::strides());
+bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
+  }
+  return is_channels_last_strides_2d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_3d() const {
-  return is_channels_last_strides_3d(
-      TensorImpl::sizes(), TensorImpl::strides());
+bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
+  }
+  return is_channels_last_strides_3d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_non_overlapping_and_dense() const {
-  if (dim() == 1) {
-    return sizes_and_strides_.size_at_unchecked(0) < 2 ||
-        sizes_and_strides_.stride_at_unchecked(0) == 1;
+bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
   }
-  SmallVector<int64_t, 5> perm;
-  perm.resize(dim());
-  for (const auto i : c10::irange(dim())) {
-    perm[i] = i;
-  }
-  // Sort by strides, leaving 0 and 1 sized dims at the end of the array
-  std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-    if (sizes_and_strides_.size_at_unchecked(a) < 2) {
-      return false;
-    } else if (sizes_and_strides_.size_at_unchecked(b) < 2) {
-      return true;
-    }
-    return sizes_and_strides_.stride_at_unchecked(a) <
-        sizes_and_strides_.stride_at_unchecked(b);
-  });
-  int64_t require_stride = 1;
-  for (const auto i : c10::irange(dim())) {
-    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
-    if (size_perm_i < 2) {
-      return true;
-    }
-    if (sizes_and_strides_.stride_at_unchecked(perm[i]) != require_stride) {
-      return false;
-    }
-    require_stride *= size_perm_i;
-  }
-  return true;
+  return _compute_non_overlapping_and_dense<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
 void TensorImpl::release_resources() {
@@ -347,23 +285,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  destroy_pyobj_if_needed();
-}
-
-void TensorImpl::destroy_pyobj_if_needed() {
-  if (owns_pyobj()) {
-    TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
-    TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    (*pyobj_interpreter_.load(std::memory_order_acquire))
-        ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
-    // NB: this destructor can only be entered when there are no
-    // references to this C++ object (obviously), NOR any references
-    // to the PyObject (if there are references to the PyObject,
-    // then the PyObject holds an owning reference to the tensor).
-    // So it is OK to clear pyobj_ here as it is impossible for it to
-    // be used again (modulo weak reference races)
-    pyobj_ = nullptr; // for safety
-  }
+  pyobj_slot_.maybe_destroy_pyobj();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -372,90 +294,116 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      false, "Cannot call ", meth, "() on tensor with symbolic sizes/strides");
+}
+
 void TensorImpl::throw_storage_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-impl::PyInterpreter& TensorImpl::load_pyobj_interpreter() const {
-  auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
-  if (interpreter) {
-    return *interpreter;
+void TensorImpl::throw_data_ptr_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
   }
   TORCH_CHECK(
-      false,
-      "cannot access PyObject for Tensor on interpreter ",
-      (*pyobj_interpreter_.load())->name());
+      false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    // TODO: pass memory_format to is_contiguous call
-    return load_pyobj_interpreter()->is_contiguous(this);
+    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+        this, memory_format);
   }
   return is_contiguous_default(memory_format);
 }
 
+bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+    return pyobj_slot_.load_pyobj_interpreter()->is_strides_like(
+        this, memory_format);
+  }
+  return is_strides_like_default(memory_format);
+}
+
+bool TensorImpl::is_non_overlapping_and_dense_custom() const {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+    return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
+        this);
+  }
+  return is_non_overlapping_and_dense_default();
+}
+
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return load_pyobj_interpreter()->sizes(this);
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
+          has_symbolic_sizes_strides_)) {
+    return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
   }
   return sizes_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return load_pyobj_interpreter()->sym_sizes(this);
+    return pyobj_slot_.load_pyobj_interpreter()->sym_sizes(this);
   }
   return sym_sizes_default();
 }
 
 c10::SymInt TensorImpl::sym_numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return load_pyobj_interpreter()->sym_numel(this);
+    return pyobj_slot_.load_pyobj_interpreter()->sym_numel(this);
   }
   return sym_numel_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return load_pyobj_interpreter()->sym_strides(this);
+    return pyobj_slot_.load_pyobj_interpreter()->sym_strides(this);
   }
   return sym_strides_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
   if (C10_UNLIKELY(python_custom_device_)) {
-    return load_pyobj_interpreter()->device(this);
+    return pyobj_slot_.load_pyobj_interpreter()->device(this);
   }
   return device_default();
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return load_pyobj_interpreter()->strides(this);
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
+          has_symbolic_sizes_strides_)) {
+    return pyobj_slot_.load_pyobj_interpreter()->strides(this);
   }
   return strides_default();
 }
 
 int64_t TensorImpl::dim_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return load_pyobj_interpreter()->dim(this);
+    return pyobj_slot_.load_pyobj_interpreter()->dim(this);
   }
   return dim_default();
 }
 
 int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    // TODO: fix this
-    return load_pyobj_interpreter()->sym_numel(this).expect_int();
+    return pyobj_slot_.load_pyobj_interpreter()->numel(this);
   }
   return numel_default();
 }
 
 c10::Layout TensorImpl::layout_custom() const {
   if (C10_UNLIKELY(python_custom_layout_)) {
-    return load_pyobj_interpreter()->layout(this);
+    return pyobj_slot_.load_pyobj_interpreter()->layout(this);
   }
   // TODO: fix this
   TORCH_CHECK(
@@ -466,14 +414,16 @@ c10::Layout TensorImpl::layout_custom() const {
 int64_t TensorImpl::storage_offset_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     // TODO: fix this
-    return load_pyobj_interpreter()->sym_storage_offset(this).expect_int();
+    return pyobj_slot_.load_pyobj_interpreter()
+        ->sym_storage_offset(this)
+        .guard_int(__FILE__, __LINE__);
   }
   return storage_offset_default();
 }
 
 c10::SymInt TensorImpl::sym_storage_offset_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return load_pyobj_interpreter()->sym_storage_offset(this);
+    return pyobj_slot_.load_pyobj_interpreter()->sym_storage_offset(this);
   }
   return sym_storage_offset_default();
 }
@@ -546,16 +496,17 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   c10::intrusive_ptr<TensorImpl> r;
-  const auto& maybe_torch_dispatch_mode_state =
-      c10::impl::TorchDispatchModeTLS::get_state();
+  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   // TODO: do we have to exclude after Python dispatch key set?
-  if (maybe_torch_dispatch_mode_state &&
+  if (mode_stack_len > 0 &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = maybe_torch_dispatch_mode_state->pyinterpreter()->detach(this);
+    const auto& cur_torch_dispatch_mode_state =
+        c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+    r = cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
   } else if (
       key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
+    r = (pyobj_slot_.load_pyobj_interpreter())->detach(this);
   }
   if (r) {
     r->set_version_counter(std::forward<VariableVersion>(version_counter));
@@ -574,13 +525,6 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-
-  // We currently don't support refresh_numel() and refresh_contiguous(). It's
-  // plausible that we could support it, but currently done to unblock.
-  if (!has_symbolic_sizes_strides()) {
-    impl->refresh_numel();
-    impl->refresh_contiguous();
-  }
   return impl;
 }
 
@@ -630,12 +574,13 @@ void TensorImpl::copy_generic_tensor_metadata(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
+  dest_impl->numel_ = src_impl->numel_;
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
   }
 
-  // NB: symbolic sizes and strides are copied, but custom policy is
-  // NOT (you have no Python object to dispatch to!)
+  // NB: symbolic sizes and strides are copied as is custom policy, but python
+  // policy is NOT (you have no Python object to dispatch to!)
   // NB: subclass relevant policy doesn't have to be copied; the
   // constructor sets this up
 
@@ -721,10 +666,11 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   newCapacity[0] = std::max(
       newDims[0],
       static_cast<int64_t>(std::ceil(
-          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
-  auto oldData = std::move(storage_.data_ptr());
+          static_cast<float>(sizes_and_strides_.size_at_unchecked(0)) *
+          (1 + growthPct / 100))));
+  auto oldData = std::move(storage_.mutable_data_ptr());
   auto oldSize = numel_;
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
     TORCH_CHECK(
@@ -772,11 +718,11 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
     return;
   }
   // Old data is discarded
-  storage_.data_ptr().clear();
+  storage_.mutable_data_ptr().clear();
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);
   sizes_and_strides_.set_sizes(oldDims);
@@ -885,31 +831,12 @@ void TensorImpl::ShareExternalPointer(
   }
 }
 
-bool _compute_contiguous(const ExtraMeta& extra_meta, std::vector<int> order) {
-  if (order.size() != extra_meta.sizes_.size())
-    return false;
-  bool is_contiguous = true;
-  if (extra_meta.numel_ == 0)
-    return is_contiguous;
-  SymInt z = 1;
-  for (auto d : order) {
-    const auto size_d = extra_meta.sizes_.at(d);
-    if (size_d != 1) {
-      if (extra_meta.strides_.at(d) == z) {
-        z *= size_d;
-      } else {
-        is_contiguous = false;
-        break;
-      }
-    }
+static void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
+  dst.clear();
+  dst.reserve(src.size());
+  for (const auto& i : src) {
+    dst.emplace_back(i.clone());
   }
-  return is_contiguous;
-}
-
-bool _compute_contiguous(const ExtraMeta& extra_meta) {
-  std::vector<int> order(extra_meta.sizes_.size());
-  std::iota(order.rbegin(), order.rend(), 0);
-  return _compute_contiguous(extra_meta, order);
 }
 
 // NB: this doesn't check that the sizes/strides/offset are in bound for the
@@ -923,36 +850,135 @@ void TensorImpl::set_sizes_and_strides(
   auto int_sizes = asIntArrayRefSlowOpt(sizes);
   auto int_strides = asIntArrayRefSlowOpt(strides);
   if (int_sizes && int_strides &&
-      (!storage_offset.has_value() || !storage_offset->is_symbolic()) &&
+      // NB: storage_offset guaranteed to be positive
+      (!storage_offset.has_value() || !storage_offset->is_heap_allocated()) &&
       !has_symbolic_sizes_strides_) {
     set_sizes_and_strides(*int_sizes, *int_strides);
     if (storage_offset.has_value())
       set_storage_offset(storage_offset->as_int_unchecked());
     return;
   }
+  TORCH_CHECK(
+      allow_tensor_metadata_change(),
+      "set_sizes_and_strides ",
+      err_msg_tensor_metadata_change_not_allowed);
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
   if (!extra_meta_) {
     extra_meta_ = std::make_unique<ExtraMeta>();
+    extra_meta_->symbolic_shape_meta_ =
+        std::make_unique<c10::SymbolicShapeMeta>();
+    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
     if (!storage_offset.has_value()) {
-      extra_meta_->storage_offset_ = storage_offset_;
+      extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
   }
-  extra_meta_->sizes_ = sizes;
-  extra_meta_->strides_ = strides;
+
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  clone_symvec(sizes, sym_shape_meta.sizes_);
+  clone_symvec(strides, sym_shape_meta.strides_);
   if (storage_offset.has_value())
-    extra_meta_->storage_offset_ = std::move(*storage_offset);
-  SymInt numel = 1;
-  for (const auto& s : sizes) {
-    numel *= s;
+    sym_shape_meta.storage_offset_ = storage_offset->clone();
+
+  refresh_numel();
+  refresh_contiguous();
+}
+
+void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
+  auto int_sizes = asIntArrayRefSlowOpt(sizes);
+  if (int_sizes.has_value()) {
+    set_sizes_contiguous(*int_sizes);
+    return;
   }
-  extra_meta_->numel_ = numel;
-  extra_meta_->is_contiguous_ = _compute_contiguous(*extra_meta_);
-  extra_meta_->is_channels_last_contiguous_ =
-      _compute_contiguous(*extra_meta_, {1, 3, 2, 0});
-  extra_meta_->is_channels_last_3d_contiguous_ =
-      _compute_contiguous(*extra_meta_, {1, 4, 3, 2, 0});
+
+  TORCH_CHECK(
+      allow_tensor_metadata_change(),
+      "generic_set_sizes_contiguous ",
+      err_msg_tensor_metadata_change_not_allowed);
+
+  has_symbolic_sizes_strides_ = true;
+  refresh_sizes_strides_policy();
+  auto& extra_meta{get_extra_meta()};
+  if (extra_meta.symbolic_shape_meta_ == nullptr) {
+    extra_meta_->symbolic_shape_meta_ =
+        std::make_unique<c10::SymbolicShapeMeta>();
+    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+  }
+
+  clone_symvec(sizes, symbolic_shape_meta().sizes_);
+  refresh_numel();
+  empty_tensor_restride_symint(
+      MemoryFormat::Contiguous); // calls refresh_contiguous()
+}
+
+void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
+  TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
+  auto& sym_shape_meta{symbolic_shape_meta()};
+  switch (memory_format) {
+    case MemoryFormat::Contiguous: {
+      // TODO: figure out if the non-symint version can also devirtualize;
+      // the last time we tried it was probably a narrowing problem
+      const auto dim_ = sym_shape_meta.dim();
+      sym_shape_meta.strides_.resize(dim_);
+      if (dim_ > 0) {
+        const auto last_idx = dim_ - 1;
+        sym_shape_meta.strides_[last_idx] = c10::SymInt(1);
+        for (auto i = last_idx - 1; i >= 0; --i) {
+          sym_shape_meta.strides_[i] = sym_shape_meta.strides_[i + 1] *
+              sym_shape_meta.sizes_[i + 1].max(1);
+        }
+      }
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      TORCH_CHECK(
+          dim() == 4, "required rank 4 tensor to use channels_last format");
+      clone_symvec(
+          get_channels_last_strides_2d(sym_sizes()), sym_shape_meta.strides_);
+      break;
+    }
+    case MemoryFormat::ChannelsLast3d: {
+      TORCH_CHECK(
+          dim() == 5, "required rank 5 tensor to use channels_last_3d format");
+      clone_symvec(
+          get_channels_last_strides_3d(sym_sizes()), sym_shape_meta.strides_);
+      break;
+    }
+    case MemoryFormat::Preserve:
+      TORCH_CHECK(false, "unsupported memory format ", memory_format);
+      // Cleaning warning messages, no need to break as TORCH_CHECK(false)
+      // terminates flow.
+      // break;
+    case MemoryFormat::NumOptions:
+      TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
+  }
+  // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
+  // exclusive see #24090
+  refresh_contiguous();
+  // hard code some known true settings, for unbacked case
+  // TODO: avoid chundering into the guards for computing these
+  switch (memory_format) {
+    case MemoryFormat::Contiguous: {
+      sym_shape_meta.assume_contiguous();
+      sym_shape_meta.assume_non_overlapping_and_dense();
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      sym_shape_meta.assume_channels_last_contiguous();
+      sym_shape_meta.assume_channels_last();
+      sym_shape_meta.assume_non_overlapping_and_dense();
+      break;
+    }
+    case MemoryFormat::ChannelsLast3d: {
+      sym_shape_meta.assume_channels_last_3d_contiguous();
+      sym_shape_meta.assume_channels_last_3d();
+      sym_shape_meta.assume_non_overlapping_and_dense();
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 namespace impl {

@@ -17,6 +17,8 @@ Tensors
     is_nonzero
     set_default_dtype
     get_default_dtype
+    set_default_device
+    get_default_device
     set_default_tensor_type
     numel
     set_printoptions
@@ -47,9 +49,14 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    sparse_csr_tensor
+    sparse_csc_tensor
+    sparse_bsr_tensor
+    sparse_bsc_tensor
     asarray
     as_tensor
     as_strided
+    from_file
     from_numpy
     from_dlpack
     frombuffer
@@ -103,6 +110,7 @@ Indexing, Slicing, Joining, Mutating Ops
     movedim
     moveaxis
     narrow
+    narrow_copy
     nonzero
     permute
     reshape
@@ -126,6 +134,7 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unravel_index
     unsqueeze
     vsplit
     vstack
@@ -265,9 +274,9 @@ Examples::
 
     no_grad
     enable_grad
-    set_grad_enabled
+    autograd.grad_mode.set_grad_enabled
     is_grad_enabled
-    inference_mode
+    autograd.grad_mode.inference_mode
     is_inference_mode_enabled
 
 Math operations
@@ -378,6 +387,7 @@ Pointwise Ops
     sin
     sinc
     sinh
+    softmax
     sqrt
     square
     sub
@@ -566,13 +576,11 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
-    lstsq
     lu
     lu_solve
     lu_unpack
     matmul
     matrix_power
-    matrix_rank
     matrix_exp
     mm
     mv
@@ -584,13 +592,79 @@ BLAS and LAPACK Operations
     svd
     svd_lowrank
     pca_lowrank
-    symeig
     lobpcg
     trapz
     trapezoid
     cumulative_trapezoid
     triangular_solve
     vdot
+
+Foreach Operations
+~~~~~~~~~~~~~~~~~~
+
+.. warning::
+    This API is in beta and subject to future changes.
+    Forward-mode AD is not supported.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    _foreach_abs
+    _foreach_abs_
+    _foreach_acos
+    _foreach_acos_
+    _foreach_asin
+    _foreach_asin_
+    _foreach_atan
+    _foreach_atan_
+    _foreach_ceil
+    _foreach_ceil_
+    _foreach_cos
+    _foreach_cos_
+    _foreach_cosh
+    _foreach_cosh_
+    _foreach_erf
+    _foreach_erf_
+    _foreach_erfc
+    _foreach_erfc_
+    _foreach_exp
+    _foreach_exp_
+    _foreach_expm1
+    _foreach_expm1_
+    _foreach_floor
+    _foreach_floor_
+    _foreach_log
+    _foreach_log_
+    _foreach_log10
+    _foreach_log10_
+    _foreach_log1p
+    _foreach_log1p_
+    _foreach_log2
+    _foreach_log2_
+    _foreach_neg
+    _foreach_neg_
+    _foreach_tan
+    _foreach_tan_
+    _foreach_sin
+    _foreach_sin_
+    _foreach_sinh
+    _foreach_sinh_
+    _foreach_round
+    _foreach_round_
+    _foreach_sqrt
+    _foreach_sqrt_
+    _foreach_lgamma
+    _foreach_lgamma_
+    _foreach_frac
+    _foreach_frac_
+    _foreach_reciprocal
+    _foreach_reciprocal_
+    _foreach_sigmoid
+    _foreach_sigmoid_
+    _foreach_trunc
+    _foreach_trunc_
+    _foreach_zero_
 
 Utilities
 ----------------------------------
@@ -614,6 +688,62 @@ Utilities
     vmap
     _assert
 
+Symbolic Numbers
+----------------
+.. autoclass:: SymInt
+    :members:
+
+.. autoclass:: SymFloat
+    :members:
+
+.. autoclass:: SymBool
+    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sym_float
+    sym_int
+    sym_max
+    sym_min
+    sym_not
+    sym_ite
+
+Export Path
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+    export
+    generated/exportdb/index
+
+Control Flow
+------------
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cond
+
+Optimizations
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compile
+
+`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
+
 Operator Tags
 ------------------------------------
 .. autoclass:: Tag
@@ -623,12 +753,20 @@ Operator Tags
 .. py:module:: torch.contrib
 .. py:module:: torch.utils.backcompat
 
-.. This submodule is split manually without a top level page.
-.. py:module:: torch.utils
-
 .. This module is only used internally for ROCm builds.
 .. py:module:: torch.utils.hipify
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+.. py:module:: torch.utils.viz
+.. py:module:: torch.functional
+.. py:module:: torch.quasirandom
+.. py:module:: torch.return_types
+.. py:module:: torch.serialization
+.. py:module:: torch.signal.windows.windows
+.. py:module:: torch.sparse.semi_structured
+.. py:module:: torch.storage
+.. py:module:: torch.torch_version
+.. py:module:: torch.types
+.. py:module:: torch.version

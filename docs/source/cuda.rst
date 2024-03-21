@@ -33,6 +33,9 @@ torch.cuda
     stream
     synchronize
     utilization
+    temperature
+    power_draw
+    clock_rate
     OutOfMemoryError
 
 Random Number Generator
@@ -87,6 +90,8 @@ Graphs (beta)
     graph
     make_graphed_callables
 
+.. _cuda-memory-management-api:
+
 Memory management
 -----------------
 .. autosummary::
@@ -111,6 +116,9 @@ Memory management
      reset_peak_memory_stats
      caching_allocator_alloc
      caching_allocator_delete
+     get_allocator_backend
+     CUDAPluggableAllocator
+     change_current_allocator
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved
@@ -125,6 +133,7 @@ NVIDIA Tools Extension (NVTX)
     nvtx.mark
     nvtx.range_push
     nvtx.range_pop
+    nvtx.range
 
 Jiterator (beta)
 -----------------------------
@@ -145,3 +154,18 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
     :hidden:
 
     cuda._sanitizer
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.cuda.comm
+.. py:module:: torch.cuda.error
+.. py:module:: torch.cuda.graphs
+.. py:module:: torch.cuda.jiterator
+.. py:module:: torch.cuda.memory
+.. py:module:: torch.cuda.nccl
+.. py:module:: torch.cuda.nvtx
+.. py:module:: torch.cuda.profiler
+.. py:module:: torch.cuda.random
+.. py:module:: torch.cuda.sparse
+.. py:module:: torch.cuda.streams

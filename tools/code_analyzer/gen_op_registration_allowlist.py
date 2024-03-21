@@ -24,7 +24,7 @@ def canonical_name(opname: str) -> str:
 
 
 def load_op_dep_graph(fname: str) -> DepGraph:
-    with open(fname, "r") as stream:
+    with open(fname) as stream:
         result = defaultdict(set)
         for op in yaml.safe_load(stream):
             op_name = canonical_name(op["name"])
@@ -36,7 +36,7 @@ def load_op_dep_graph(fname: str) -> DepGraph:
 
 def load_root_ops(fname: str) -> List[str]:
     result = []
-    with open(fname, "r") as stream:
+    with open(fname) as stream:
         for op in yaml.safe_load(stream):
             result.append(canonical_name(op))
     return result
@@ -48,7 +48,7 @@ def gen_transitive_closure(
     train: bool = False,
 ) -> List[str]:
     result = set(root_ops)
-    queue = root_ops[:]
+    queue = root_ops.copy()
 
     # The dependency graph might contain a special entry with key = `__BASE__`
     # and value = (set of `base` ops to always include in custom build).

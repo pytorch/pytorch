@@ -38,14 +38,14 @@ def transform_file_name(
     remove_patterns: Set[str] = {".DEFAULT.cpp", ".AVX.cpp", ".AVX2.cpp"}
     for pattern in remove_patterns:
         file_path = file_path.replace(pattern, "")
-    # if user has specifiled interested folder
+    # if user has specified interested folder
     if interested_folders:
         for folder in interested_folders:
             if folder in file_path:
                 return file_path[file_path.find(folder) :]
     # remove pytorch base folder path
     if platform == TestPlatform.OSS:
-        from package.oss.utils import get_pytorch_folder
+        from package.oss.utils import get_pytorch_folder  # type: ignore[import]
 
         pytorch_foler = get_pytorch_folder()
         assert file_path.startswith(pytorch_foler)
@@ -57,7 +57,7 @@ def is_intrested_file(
     file_path: str, interested_folders: List[str], platform: TestPlatform
 ) -> bool:
     ignored_patterns = ["cuda", "aten/gen_aten", "aten/aten_", "build/"]
-    if any([pattern in file_path for pattern in ignored_patterns]):
+    if any(pattern in file_path for pattern in ignored_patterns):
         return False
 
     # ignore files that are not belong to pytorch
@@ -66,7 +66,7 @@ def is_intrested_file(
 
         if not file_path.startswith(get_pytorch_folder()):
             return False
-    # if user has specifiled interested folder
+    # if user has specified interested folder
     if interested_folders:
         for folder in interested_folders:
             intersted_folder_path = folder if folder.endswith("/") else f"{folder}/"

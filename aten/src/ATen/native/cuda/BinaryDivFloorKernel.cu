@@ -8,14 +8,14 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/generic_math.h>
 #include <ATen/native/cuda/BinaryInternal.h>
 #include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
 #include <type_traits>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace binary_internal {
 
 void div_floor_kernel_cuda(TensorIteratorBase& iter) {
@@ -30,17 +30,8 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(
           iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-            if (c10::signs_differ(a, b)) {
-              // Subtracts one from the results of truncation division if the
-              // divisor and dividend have different sign(bit)s and the
-              // remainder of the division is nonzero
-              const auto quot = a / b;
-              const auto rem = a % b;
-              return rem ? quot - 1 : quot;
-            }
-
-            return a / b;
-          });
+            return c10::div_floor_integer(a, b);
+      });
     });
   } else if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
@@ -80,26 +71,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
           gpu_kernel_with_scalars(
               iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-                if (C10_UNLIKELY(b == 0)) {
-                  return a / b;
-                }
-
-                auto mod = std::fmod(a, b);
-                auto div = (a - mod) / b;
-                if ((mod != 0) && (b < 0) != (mod < 0)) {
-                  div -= scalar_t(1);
-                }
-
-                scalar_t floordiv;
-                if (div != 0) {
-                  floordiv = std::floor(div);
-                  if (div - floordiv > scalar_t(0.5)) {
-                    floordiv += scalar_t(1.0);
-                  }
-                } else {
-                  floordiv = c10::cuda::compat::copysign(scalar_t(0), a / b);
-                }
-                return floordiv;
+                return c10::div_floor_floating(a, b);
               });
         });
   }
@@ -108,5 +80,4 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(div_floor_stub, &binary_internal::div_floor_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -290,7 +290,7 @@ if(INTERN_BUILD_ATEN_OPS)
       if(MSVC)
         list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
       else(MSVC)
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma -mf16c ${CPU_NO_AVX256_SPLIT_FLAGS}")
       endif(MSVC)
     endif()
   endif(CXX_AVX2_FOUND)
@@ -325,7 +325,7 @@ if(INTERN_BUILD_ATEN_OPS)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
       # Disable certain warnings for GCC-9.X
-      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))
           # See https://github.com/pytorch/pytorch/issues/38855
           set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-uninitialized")
@@ -350,7 +350,7 @@ if(INTERN_BUILD_ATEN_OPS)
 endif()
 
 function(append_filelist name outputvar)
-  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
+  set(_rootdir "${Torch_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
       ${PROJECT_SOURCE_DIR}/build_variables.bzl

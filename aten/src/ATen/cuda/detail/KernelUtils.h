@@ -1,8 +1,9 @@
 #pragma once
 
 #include <limits>
+#include <c10/util/Exception.h>
 
-namespace at { namespace cuda { namespace detail {
+namespace at::cuda::detail {
 
 // CUDA: grid stride looping
 //
@@ -33,4 +34,4 @@ inline int GET_BLOCKS(const int64_t N, const int64_t max_threads_per_block=CUDA_
   return static_cast<int>(block_num);
 }
 
-}}}  // namespace at::cuda::detail
+}  // namespace at::cuda::detail

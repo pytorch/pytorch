@@ -81,6 +81,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// The name of the submodule is inferred via RTTI (if possible) the first
   /// time `.name()` is invoked.
   Module();
+  Module(const Module&) = default;
+  Module& operator=(const Module&) = default;
+  Module(Module&&) noexcept = default;
+  Module& operator=(Module&&) noexcept = default;
 
   virtual ~Module() = default;
 
@@ -302,7 +306,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` value of each registered parameter.
-  virtual void zero_grad(bool set_to_none = false);
+  virtual void zero_grad(bool set_to_none = true);
 
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///

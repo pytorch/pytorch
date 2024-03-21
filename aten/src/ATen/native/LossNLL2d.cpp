@@ -1,14 +1,26 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#include <ATen/ops/nll_loss2d_forward.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
+#include <ATen/ops/nll_loss2d_native.h>
+#include <ATen/ops/zeros_like.h>
+
+#include <utility>
+#endif
+
+namespace at::native {
 
 namespace {
 
@@ -23,7 +35,11 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+  if constexpr (std::is_const<scalar_t>::value) {
+    return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
+  } else {
+    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+  }
 }
 
 inline void check_inputs_nll_loss2d(
@@ -97,7 +113,7 @@ static void nll_loss2d_forward_out_frame(
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None) {
     const int64_t batch_size = input.size(0);
@@ -105,9 +121,9 @@ static void nll_loss2d_forward_out_frame(
     const int64_t W = input.size(3);
 
     at::native::resize_output(output, {batch_size, H, W});
-    auto input_acc = input.accessor<scalar_t, 4>();
+    auto input_acc = input.accessor<const scalar_t, 4>();
     auto output_acc = output.accessor<scalar_t, 3>();
-    auto target_acc = target.accessor<int64_t, 3>();
+    auto target_acc = target.accessor<const int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto b : c10::irange(start, end)) {
@@ -158,8 +174,8 @@ static void nll_loss2d_forward_out_frame(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
 
-  const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
 
   const int64_t batch_size = input.size(0);
   const int64_t map_size = input.size(2) * input.size(3);
@@ -319,7 +335,7 @@ static void nll_loss2d_backward_out_frame(
   const auto target_contiguous = target.contiguous();
   const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
 
-  scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
+  scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   const int64_t batch_size = input.size(0);
   const int64_t n_classes = input.size(1);
@@ -473,13 +489,21 @@ Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const c10::o
   return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
 }
 
-} // namespace native
-} // namespace at
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
+static Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
+}
+
+} // namespace at::native

@@ -194,7 +194,7 @@ class TestBundledInputs(TestCase):
 
         # Check helper that work on all functions
         all_info = loaded.get_bundled_inputs_functions_and_info()
-        self.assertEqual(set(all_info.keys()), set(['forward', 'foo']))
+        self.assertEqual(set(all_info.keys()), {'forward', 'foo'})
         self.assertEqual(all_info['forward']['get_inputs_function_name'], ['get_all_bundled_inputs_for_forward'])
         self.assertEqual(all_info['foo']['get_inputs_function_name'], ['get_all_bundled_inputs_for_foo'])
         self.assertEqual(all_info['forward']['info'], info)

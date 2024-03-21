@@ -4,15 +4,15 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <c10d/debug.h>
+#include <torch/csrc/distributed/c10d/debug.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <string>
 
-#include <c10d/exception.h>
-#include <c10d/logging.h>
+#include <torch/csrc/distributed/c10d/exception.h>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 namespace c10d {
 namespace detail {
@@ -42,8 +42,8 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    throw C10dError{
-        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL."};
+    throw std::invalid_argument(
+        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL.");
   }
 
   C10D_INFO("The debug level is set to {}.", level_str);

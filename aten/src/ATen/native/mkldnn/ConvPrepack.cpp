@@ -91,10 +91,10 @@ ContextConv create(
       {stride_expanded.begin(), stride_expanded.end()},
       {dilation_expanded.begin(), dilation_expanded.end()},
       groups,
-      std::move(attr)};
+      attr};
 }
 
-void _mkldnn_convolution_out(
+static void _mkldnn_convolution_out(
     const ideep::tensor& x,
     ideep::tensor& y,
     const ideep::tensor& w,
@@ -143,7 +143,7 @@ void _mkldnn_convolution_out(
   }
 }
 
-void mkldnn_convolution_out(
+static void mkldnn_convolution_out(
     const Tensor& input,
     ideep::tensor& mkldnn_output,
     const ideep::tensor& mkldnn_weight,
@@ -178,7 +178,7 @@ void mkldnn_convolution_out(
       attr);
 }
 
-std::vector<int64_t> get_output_sizes(
+static std::vector<int64_t> get_output_sizes(
     ContextConv& context,
     const Tensor& input) {
   const ideep::tensor& mkldnn_weight = context.weight_packed_;

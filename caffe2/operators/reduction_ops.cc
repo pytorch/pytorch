@@ -27,7 +27,7 @@ OPERATOR_SCHEMA(SumElements)
 Sums the elements of the input tensor. Tensor type must be float32.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduction_ops.cc
 
 <details>
 
@@ -120,8 +120,8 @@ OPERATOR_SCHEMA(RowwiseMax)
 Compute row-wise max reduction of the input tensor. This op takes one input, $X$, of shape $BxMxN$, where $B$ is the batch size, $M$ is number of rows, and $N$ is number of columns. The output of this op, $Y$, is a matrix of shape $BxM$, with one row for each element of the batch, and the same number of columns as the number of rows of the input tensor.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduction_ops.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduction_ops.cc
 
 <details>
 
@@ -208,8 +208,8 @@ OPERATOR_SCHEMA(ColwiseMax)
 Compute column-wise max reduction of the input tensor. This op takes one input, $X$, of shape $BxMxN$, where $B$ is the batch size, $M$ is number of rows, and $N$ is number of columns. The output of this op, $Y$, is a matrix of shape $BxN$, with one row for each element of the batch, and the same number of columns as the input tensor.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduction_ops.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduction_ops.cc
 
 <details>
 

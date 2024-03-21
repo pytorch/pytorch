@@ -190,7 +190,7 @@ static void compressContiguous(
 
 // Launches the requested fusion on the given device with the given inputs.
 // Output pointers are stored in outputs (to be put on the stack later).
-void launchFusion(
+static void launchFusion(
     const FusedKernel& fusion,
     const at::Device device,
     const at::ArrayRef<at::Tensor>& inputs,

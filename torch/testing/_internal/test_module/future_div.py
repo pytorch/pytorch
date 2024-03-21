@@ -1,4 +1,5 @@
-from __future__ import division
+# mypy: ignore-errors
+
 
 
 def div_int_future():

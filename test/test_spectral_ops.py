@@ -11,16 +11,17 @@ import inspect
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
-     make_tensor)
+     make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch.testing._internal.common_cuda import SM53OrLater
+from torch._prims_common import corresponding_complex_dtype
 
-from setuptools import distutils
 from typing import Optional, List
+from packaging import version
 
 
 if TEST_NUMPY:
@@ -37,11 +38,10 @@ try:
 except ModuleNotFoundError:
     pass
 
-LooseVersion = distutils.version.LooseVersion
 REFERENCE_NORM_MODES = (
     (None, "forward", "backward", "ortho")
-    if LooseVersion(np.__version__) >= '1.20.0' and (
-        not has_scipy_fft or LooseVersion(scipy.__version__) >= '1.6.0')
+    if version.parse(np.__version__) >= version.parse('1.20.0') and (
+        not has_scipy_fft or version.parse(scipy.__version__) >= version.parse('1.6.0'))
     else (None, "ortho"))
 
 
@@ -120,8 +120,6 @@ def skip_helper_for_fft(device, dtype):
 
     if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 are not supported on CPU")
-    if TEST_WITH_ROCM:
-        raise unittest.SkipTest("half and complex32 are not supported on ROCM")
     if not SM53OrLater:
         raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
 
@@ -325,12 +323,13 @@ class TestFFT(TestCase):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
+        default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
-            err_msg = "Unsupported dtype "
+            err_msg = default_msg
         elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
             err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
         else:
-            err_msg = "Unsupported dtype "
+            err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
@@ -444,11 +443,12 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
-
-        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
+        # FIXME: https://github.com/pytorch/pytorch/issues/108205
+        errMsg = "dims must be unique"
+        with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
+        with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(2, -1))
 
         with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):
@@ -459,6 +459,31 @@ class TestFFT(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "tensor only has 3 dimensions"):
             op(a, s=(10, 10, 10, 10))
+
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_fftn_noop_transform(self, device, dtype):
+        skip_helper_for_fft(device, dtype)
+        RESULT_TYPE = {
+            torch.half: torch.chalf,
+            torch.float: torch.cfloat,
+            torch.double: torch.cdouble,
+        }
+
+        for op in [
+            torch.fft.fftn,
+            torch.fft.ifftn,
+            torch.fft.fft2,
+            torch.fft.ifft2,
+        ]:
+            inp = make_tensor((10, 10), device=device, dtype=dtype)
+            out = torch.fft.fftn(inp, dim=[])
+
+            expect_dtype = RESULT_TYPE.get(inp.dtype, inp.dtype)
+            expect = inp.to(expect_dtype)
+            self.assertEqual(expect, out)
+
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
@@ -737,11 +762,7 @@ class TestFFT(TestCase):
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
-        complex_dtype = {
-            torch.float16: torch.complex32,
-            torch.float32: torch.complex64,
-            torch.float64: torch.complex128
-        }[dtype]
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, dtype=complex_dtype, device=device))
@@ -814,8 +835,10 @@ class TestFFT(TestCase):
                 plan_cache = torch.backends.cuda.cufft_plan_cache[device]
             original = plan_cache.max_size
             plan_cache.max_size = n
-            yield
-            plan_cache.max_size = original
+            try:
+                yield
+            finally:
+                plan_cache.max_size = original
 
         with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
             self._test_fft_ifft_rfft_irfft(devices[0], dtype)
@@ -874,7 +897,24 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
+    @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_cufft_context(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/109448
+        x = torch.randn(32, dtype=dtype, device=device, requires_grad=True)
+        dout = torch.zeros(32, dtype=dtype, device=device)
+
+        # compute iFFT(FFT(x))
+        out = torch.fft.ifft(torch.fft.fft(x))
+        out.backward(dout, retain_graph=True)
+
+        dx = torch.fft.fft(torch.fft.ifft(dout))
+
+        self.assertTrue((x.grad - dx).abs().max() == 0)
+        self.assertFalse((x.grad - x).abs().max() == 0)
+
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
+    @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
@@ -948,6 +988,7 @@ class TestFFT(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    @skipIfTorchDynamo("double")
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
@@ -1181,9 +1222,24 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     def test_stft_requires_complex(self, device):
         x = torch.rand(100)
-        y = x.stft(10, pad_mode='constant')
-        # with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
-        #     y = x.stft(10, pad_mode='constant')
+        with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
+            y = x.stft(10, pad_mode='constant')
+
+    # stft and istft are currently warning if a window is not provided
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_stft_requires_window(self, device):
+        x = torch.rand(100)
+        with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
+            y = x.stft(10, pad_mode='constant', return_complex=True)
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_istft_requires_window(self, device):
+        stft = torch.rand((51, 5), dtype=torch.cdouble)
+        # 51 = 2 * n_fft + 1, 5 = number of frames
+        with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
+            x = torch.istft(stft, n_fft=100, length=100)
 
     @skipCPUIfNoFFT
     def test_fft_input_modification(self, device):
@@ -1387,24 +1443,27 @@ class TestFFT(TestCase):
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
 
+    @skipIfTorchDynamo("Failed running call_function")
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
+        complex_dtype = corresponding_complex_dtype(dtype)
+
         def _test(amplitude, L, n):
             # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
             x = torch.arange(2 * L + 1, device=device, dtype=dtype)
             original = amplitude * torch.sin(2 * math.pi / L * x * n)
             # stft = torch.stft(original, L, hop_length=L, win_length=L,
             #                   window=torch.ones(L), center=False, normalized=False)
-            stft = torch.zeros((L // 2 + 1, 2, 2), device=device, dtype=dtype)
+            stft = torch.zeros((L // 2 + 1, 2), device=device, dtype=complex_dtype)
             stft_largest_val = (amplitude * L) / 2.0
             if n < stft.size(0):
-                stft[n, :, 1] = -stft_largest_val
+                stft[n].imag = torch.tensor(-stft_largest_val, dtype=dtype)
 
             if 0 <= L - n < stft.size(0):
                 # symmetric about L // 2
-                stft[L - n, :, 1] = stft_largest_val
+                stft[L - n].imag = torch.tensor(stft_largest_val, dtype=dtype)
 
             inverse = torch.istft(
                 stft, L, hop_length=L, win_length=L,
@@ -1426,11 +1485,12 @@ class TestFFT(TestCase):
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(data_size, kwargs):
             for i in range(num_trials):
-                tensor1 = torch.randn(data_size, device=device, dtype=dtype)
-                tensor2 = torch.randn(data_size, device=device, dtype=dtype)
+                tensor1 = torch.randn(data_size, device=device, dtype=complex_dtype)
+                tensor2 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 a, b = torch.rand(2, dtype=dtype, device=device)
                 # Also compare method vs. functional call signature
                 istft1 = tensor1.istft(**kwargs)
@@ -1441,7 +1501,7 @@ class TestFFT(TestCase):
         patterns = [
             # hann_window, centered, normalized, onesided
             (
-                (2, 7, 7, 2),
+                (2, 7, 7),
                 {
                     'n_fft': 12,
                     'window': torch.hann_window(12, device=device, dtype=dtype),
@@ -1452,7 +1512,7 @@ class TestFFT(TestCase):
             ),
             # hann_window, centered, not normalized, not onesided
             (
-                (2, 12, 7, 2),
+                (2, 12, 7),
                 {
                     'n_fft': 12,
                     'window': torch.hann_window(12, device=device, dtype=dtype),
@@ -1463,7 +1523,7 @@ class TestFFT(TestCase):
             ),
             # hamming_window, centered, normalized, not onesided
             (
-                (2, 12, 7, 2),
+                (2, 12, 7),
                 {
                     'n_fft': 12,
                     'window': torch.hamming_window(12, device=device, dtype=dtype),
@@ -1474,7 +1534,7 @@ class TestFFT(TestCase):
             ),
             # hamming_window, not centered, not normalized, onesided
             (
-                (2, 7, 3, 2),
+                (2, 7, 3),
                 {
                     'n_fft': 12,
                     'window': torch.hamming_window(12, device=device, dtype=dtype),
@@ -1491,13 +1551,13 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     def test_batch_istft(self, device):
         original = torch.tensor([
-            [[4., 0.], [4., 0.], [4., 0.], [4., 0.], [4., 0.]],
-            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]],
-            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]]
-        ], device=device)
+            [4., 4., 4., 4., 4.],
+            [0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0.]
+        ], device=device, dtype=torch.complex64)
 
-        single = original.repeat(1, 1, 1, 1)
-        multi = original.repeat(4, 1, 1, 1)
+        single = original.repeat(1, 1, 1)
+        multi = original.repeat(4, 1, 1)
 
         i_original = torch.istft(original, n_fft=4, length=4)
         i_single = torch.istft(single, n_fft=4, length=4)

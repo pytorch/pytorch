@@ -17,7 +17,7 @@ import torch
 from .microbatch import Batch
 from .stream import AbstractStream, use_device, use_stream
 
-__all__: List[str] = []
+__all__: List[str] = ["Task", "worker", "create_workers", "spawn_workers"]
 
 
 ExcInfo = Tuple[Type[BaseException], BaseException, TracebackType]
@@ -67,7 +67,7 @@ class Task:
 
 
 def worker(in_queue: InQueue, out_queue: OutQueue, device: torch.device) -> None:
-    """The main loop of a worker thread."""
+    """Main loop of a worker thread."""
     with use_device(device):
         while True:
             task = in_queue.get()

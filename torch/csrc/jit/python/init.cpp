@@ -7,13 +7,13 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
+// #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
 #include <torch/csrc/jit/codegen/onednn/interface.h>
 #endif
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -40,6 +39,7 @@
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_folding.h>
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -52,6 +52,7 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/metal_rewrite.h>
+#include <torch/csrc/jit/passes/mobile_optimizer_type.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
@@ -83,6 +84,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/python_tree_views.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/decomposition_registry.h>
@@ -99,7 +101,6 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
-#include <c10/core/SymFloat.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
@@ -118,187 +119,17 @@
 #include <tuple>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using c10::AliasInfo;
 using c10::Argument;
 using c10::FunctionSchema;
 using c10::SchemaArgType;
 using c10::SchemaArgument;
-using c10::SymFloat;
-using c10::SymFloatNode;
-using c10::SymIntNode;
+using c10::SymNode;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using torch::utils::SchemaInfo;
-
-static c10::SymIntNode toSymIntNode(c10::SymIntNode a, py::object b) {
-  return torch::is_symint_node(b) ? b.cast<c10::SymIntNode>()
-                                  : a->wrap(b.cast<int64_t>());
-}
-
-static c10::SymFloatNode toSymFloatNode(c10::SymFloatNode a, py::object b) {
-  return torch::is_symfloat_node(b) ? b.cast<c10::SymFloatNode>()
-                                    : a->wrap(b.cast<double>());
-}
-
-class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
- public:
-  PythonSymIntNodeImpl(py::object pyobj) : c10::SymIntNodeImpl() {
-    pyobj_ = std::make_shared<c10::SafePyObject>(
-        pyobj.release().ptr(), getPyInterpreter());
-  };
-
-  virtual SymIntNode wrap(int64_t num) override {
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr("wrap")(num);
-    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
-  }
-
-  virtual bool bool_() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__bool__")().is(py::handle(Py_True));
-  }
-
-  virtual int64_t guard_int(const char* file, int64_t line) override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
-  }
-
-  virtual int64_t int_() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__int__")().cast<int64_t>();
-  }
-
-  // TODO: virtualize
-  SymFloat sym_float();
-
-  virtual std::string str() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__str__")().cast<std::string>();
-  }
-
-  virtual SymIntNode dispatch_common_(
-      const char* fname,
-      const SymIntNode& other) {
-    auto pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
-    TORCH_CHECK(pother);
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
-  }
-
-  virtual SymIntNode add(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode sub(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode mul(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymFloatNode truediv(const SymIntNode& other) override;
-
-  virtual SymIntNode floordiv(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode mod(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode eq(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode gt(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode lt(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode le(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode ge(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
-  }
-  std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
-};
-
-class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
- public:
-  PythonSymFloatNodeImpl(py::object pyobj) : c10::SymFloatNodeImpl() {
-    pyobj_ = std::make_shared<c10::SafePyObject>(
-        pyobj.release().ptr(), getPyInterpreter());
-  };
-
-  virtual SymFloatNode wrap(double num) override {
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr("wrap")(num);
-    return c10::make_intrusive<PythonSymFloatNodeImpl>(r);
-  }
-
-  virtual std::string str() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__str__")().cast<std::string>();
-  }
-
-  SymFloatNode dispatch_common_(const char* fname, const SymFloatNode& other) {
-    auto pother = dynamic_cast<PythonSymFloatNodeImpl*>(other.get());
-    TORCH_CHECK(pother);
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return c10::make_intrusive<PythonSymFloatNodeImpl>(r);
-  }
-
-  SymFloatNode add(const SymFloatNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  SymFloatNode sub(const SymFloatNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  SymFloatNode mul(const SymFloatNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  SymFloatNode truediv(const SymFloatNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
-  }
-  std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
-};
-
-SymFloatNode PythonSymIntNodeImpl::truediv(const SymIntNode& other) {
-  auto pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
-  TORCH_CHECK(pother);
-  py::gil_scoped_acquire acquire;
-  auto r = getPyObj().attr("truediv")(pother->getPyObj());
-  return c10::make_intrusive<PythonSymFloatNodeImpl>(r);
-}
-
-SymFloat PythonSymIntNodeImpl::sym_float() {
-  py::gil_scoped_acquire acquire;
-  return c10::make_intrusive<PythonSymFloatNodeImpl>(
-             getPyObj().attr("__sym_float__")())
-      ->toSymFloat();
-}
 
 namespace {
 
@@ -312,6 +143,12 @@ bool loadPythonClasses() {
   // PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
+}
+
+static bool opAllowsNumbersAsTensors(c10::Symbol symbol) {
+  return symbol.is_prims() || symbol.is_nvprims() ||
+      (symbol.is_aten() &&
+       torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 }
 
 c10::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
@@ -333,7 +170,11 @@ void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
 
-  static py::exception<JITException> exc(m, "JITException");
+  // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
+  static py::handle exc =
+      py::exception<JITException>(m, "JITException").release();
 
   py::register_exception_translator([](std::exception_ptr p) {
     try {
@@ -347,7 +188,11 @@ void initJITBindings(PyObject* module) {
       const auto& originalMsg = e.getOriginalMsg();
       JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
       JITException::setCaughtPythonClassName(className.value_or(""));
-      exc(e.what());
+      // If we still had the py::exception<JITException> object, we could
+      // just call it. But we must get a handle to leak it and there is no
+      // way I can find to re-create it from the handle. So setting the
+      // exception manually
+      PyErr_SetString(exc.ptr(), e.what());
     }
   });
 
@@ -568,6 +413,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
+      .def("_jit_pass_fold_frozen_linear_bn", &FoldFrozenLinearBatchnorm)
       .def("_jit_pass_convert_frozen_ops_to_mkldnn", &ConvertFrozenOpsToMKLDNN)
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
@@ -811,9 +657,9 @@ void initJITBindings(PyObject* module) {
             std::vector<TypePtr> input_types;
             for (Value* v : g->inputs()) {
               if (auto tt = v->type()->cast<TensorType>()) {
-                input_types.push_back(tt);
+                input_types.emplace_back(tt);
               } else {
-                input_types.push_back(nullptr);
+                input_types.emplace_back(nullptr);
               }
             }
             EraseShapeInformation(g);
@@ -826,7 +672,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](const std::shared_ptr<Graph>& graph, py::object threshold) {
-            if (threshold.is(py::none())) {
+            if (threshold.is_none()) {
               CreateAutodiffSubgraphs(graph);
             } else {
               CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
@@ -911,61 +757,69 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_nvfuser_skip_node_kind",
-          // Args:
-          //     `op_name`: Symbol of op;
-          //     `flip`: flag indicating whether to flip the given op in the
-          //             skip list.
-          // Returns:
-          //     a bool flag indicating if `op_name` was already in the skip
-          //     list.
           [](const std::string& op_name, bool flip = true) {
-            return fuser::cuda::skipNode(op_name, flip);
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_skip_node_kind is deprecated and a no-op");
           })
-      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
-      .def("_jit_nvfuser_can_be_enabled", &fuser::cuda::canBeEnabled)
+      .def(
+          "_jit_set_nvfuser_enabled",
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_enabled is deprecated and a no-op");
+          })
+      .def(
+          "_jit_nvfuser_can_be_enabled",
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_can_be_enabled is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_single_node_mode",
-          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_single_node_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_single_node_mode",
-          []() { return fuser::cuda::getSingletonFusion(); })
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_single_node_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_horizontal_mode",
-          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_horizontal_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_horizontal_mode",
-          []() { return fuser::cuda::getHorizontalFusion(); })
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_horizontal_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_guard_mode",
-          [](bool profiling_flag) {
-            bool oldState = fuser::cuda::getCudaFusionGuardMode();
-            fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
-            return oldState;
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_guard_mode is deprecated and a no-op");
           })
-      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
+      .def(
+          "_jit_nvfuser_enabled",
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_enabled is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_set_comparison_callback",
-          [](bool run_fallback, py::function fn) {
-            // If set, then the callback will be run after each nvfuser fusion
-            // group is executed. Can be used for testing accuracy.
-            // If run_fallback == True, then a fallback will be run and
-            // unfused_outputs will be nonempty, showing the result if the
-            // fusion didn't take place. Otherwise, unfused_outputs will
-            // be empty
-            auto fn_ptr = std::make_shared<py::function>(fn);
-            auto callback_lambda = [fn_ptr](
-                                       const Stack& fused_outputs,
-                                       const Stack& unfused_outputs,
-                                       const std::string& graph_ir) {
-              py::gil_scoped_acquire acquire{};
-              (*fn_ptr)(fused_outputs, unfused_outputs, graph_ir);
-            };
-            setCudaFuserComparisonCallback({run_fallback, callback_lambda});
+          [](bool, py::function) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_clear_comparison_callback",
           []() {
-            setCudaFuserComparisonCallback({false, nullptr});
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_clear_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_set_profiling_mode",
@@ -1161,7 +1015,7 @@ void initJITBindings(PyObject* module) {
 #ifdef TORCH_ENABLE_LLVM
             return true;
 #else
-        return false;
+            return false;
 #endif
           })
       .def(
@@ -1251,8 +1105,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
           [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blocklist,
              std::vector<std::string>& preserved_methods) {
-            return vulkanOptimizeForMobile(module, preserved_methods);
+            return vulkanOptimizeForMobile(
+                module, optimization_blocklist, preserved_methods);
           })
       .def(
           "_jit_pass_metal_insert_prepacked_ops",
@@ -1290,208 +1146,166 @@ void initJITBindings(PyObject* module) {
             return retval;
           })
       .def("_jit_pass_batch_mm", BatchMM)
-      .def("_jit_decay_packed_param_input_types", [](Graph& g) {
-        for (Value* i : g.inputs()) {
-          if (i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
-              i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
-              i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
-            // Dummy CompleteTensorType to appease ONNX validator.
-            i->setType(TensorType::create(
-                at::kQInt8,
-                c10::kCPU,
-                std::vector<int64_t>{1},
-                std::vector<int64_t>{1},
-                c10::nullopt));
-          }
-        }
-      });
-
-  auto symint_class =
-      py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
-          .def_static(
-              "new_symint",
-              [](py::object obj) -> c10::SymIntNode {
-                return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
-              })
-          .def(
-              "get_pyobj",
-              [](c10::SymIntNode a) -> py::object {
-                if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
-                  return py::reinterpret_borrow<py::object>(psn->getPyObj());
-                }
-                return py::none();
-              })
-          .def(
-              "__add__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->add(snb);
-              })
-          .def(
-              "__radd__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->add(snb);
-              })
-          .def(
-              "__sub__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->sub(snb);
-              })
-          .def(
-              "__mul__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->mul(snb);
-              })
-          .def(
-              "__rmul__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->mul(snb);
-              })
-          .def(
-              "__truediv__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymFloatNode {
-                auto snb = toSymIntNode(a, b);
-                return a->truediv(snb);
-              })
-          .def(
-              "__rtruediv__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymFloatNode {
-                auto snb = toSymIntNode(a, b);
-                return snb->truediv(a);
-              })
-          .def(
-              "__floordiv__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->floordiv(snb);
-              })
-          .def(
-              "__rfloordiv__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return snb->floordiv(a);
-              })
-          .def(
-              "__mod__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->mod(snb);
-              })
-          .def(
-              "__eq__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->eq(snb);
-              })
-          .def(
-              "__gt__",
-              [](c10::SymIntNode a, py::object b) {
-                auto snb = toSymIntNode(a, b);
-                return a->gt(snb);
-              })
-          .def(
-              "__lt__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->lt(snb);
-              })
-          .def(
-              "__le__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->le(snb);
-              })
-          .def(
-              "__ge__",
-              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-                auto snb = toSymIntNode(a, b);
-                return a->ge(snb);
-              })
-          .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
-          .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
-          // Intentionally don't set file line, as the Python backtrace matters
-          // more here
-          .def(
-              "guard_int",
-              [](c10::SymIntNode a) { return a->guard_int(nullptr, 0); })
-          .def(
-              "__sym_float__",
-              [](c10::SymIntNode a) {
-                // TODO: remove dynamic cast when sym_float is in base class
-                auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get());
-                TORCH_INTERNAL_ASSERT(psn);
-                return psn->sym_float();
-              })
-          .def("__str__", [](c10::SymIntNode a) { return a->str(); })
-          .def("__repr__", [](c10::SymIntNode a) { return a->str(); });
-
-  py::class_<c10::SymFloatNodeImpl, c10::SymFloatNode>(m, "SymFloatNode")
-      .def_static(
-          "new_symfloat",
-          [](py::object obj) -> c10::SymFloatNode {
-            return c10::make_intrusive<PythonSymFloatNodeImpl>(obj);
-          })
       .def(
-          "__add__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return a->add(snb);
-          })
-      .def(
-          "__radd__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return a->add(snb);
-          })
-      .def(
-          "__sub__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return a->sub(snb);
-          })
-      .def(
-          "__mul__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return a->mul(snb);
-          })
-      .def(
-          "__rmul__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return a->mul(snb);
-          })
-      .def(
-          "__truediv__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return a->truediv(snb);
-          })
-      .def(
-          "__rtruediv__",
-          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
-            auto snb = toSymFloatNode(a, b);
-            return snb->truediv(a);
-          })
-      .def(
-          "get_pyobj",
-          [](c10::SymFloatNode a) -> py::object {
-            if (auto* psn = dynamic_cast<PythonSymFloatNodeImpl*>(a.get())) {
-              return py::reinterpret_borrow<py::object>(psn->getPyObj());
+          "_jit_decay_packed_param_input_types",
+          [](Graph& g) {
+            for (Value* i : g.inputs()) {
+              if (i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
+                  i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+                  i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
+                // Dummy CompleteTensorType to appease ONNX validator.
+                i->setType(TensorType::create(
+                    at::kQInt8,
+                    c10::kCPU,
+                    std::vector<int64_t>{1},
+                    std::vector<int64_t>{1},
+                    c10::nullopt));
+              }
             }
-            return py::none();
           })
-      .def("__str__", [](c10::SymFloatNode a) { return a->str(); });
+      .def("_jit_set_utf8_decoding_ignore", &setUTF8DecodingIgnore);
+
+  // NB: This isn't actually used for regular PyTorch symbolic tracing;
+  // XLA is what needs this
+#define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
+#define SYMNODE_BINARY(n) \
+  .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
+#define SYMNODE_SIZES_STRIDES(n)                \
+  .def(                                         \
+      #n,                                       \
+      [](c10::SymNode a,                        \
+         c10::ArrayRef<c10::SymNode> sizes,     \
+         c10::ArrayRef<c10::SymNode> strides) { \
+        return a->n(sizes, strides);            \
+      })
+  auto symnode_class =
+      py::class_<c10::SymNodeImpl, c10::SymNode>(m, "_SymNode")
+      // clang-format off
+      // These DO NOT install magic methods; the SymInt/SymFloat wrapper in
+      // Python is responsible for this
+      SYMNODE_UNARY(clone)
+      SYMNODE_UNARY(is_int)
+      SYMNODE_UNARY(is_float)
+      SYMNODE_UNARY(is_bool)
+      SYMNODE_UNARY(bool_)
+      SYMNODE_UNARY(int_)
+      SYMNODE_UNARY(sym_float)
+      SYMNODE_BINARY(add)
+      SYMNODE_BINARY(sub)
+      SYMNODE_BINARY(mul)
+      SYMNODE_BINARY(truediv)
+      SYMNODE_BINARY(pow)
+      SYMNODE_BINARY(floordiv)
+      SYMNODE_BINARY(mod)
+      SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(ne)
+      SYMNODE_BINARY(gt)
+      SYMNODE_BINARY(lt)
+      SYMNODE_BINARY(le)
+      SYMNODE_BINARY(ge)
+      SYMNODE_BINARY(sym_min)
+      SYMNODE_BINARY(sym_max)
+      SYMNODE_BINARY(sym_and)
+      SYMNODE_BINARY(sym_or)
+      SYMNODE_UNARY(sym_not)
+      SYMNODE_UNARY(ceil)
+      SYMNODE_UNARY(floor)
+      SYMNODE_UNARY(neg)
+      SYMNODE_SIZES_STRIDES(is_contiguous)
+      SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_2d)
+      SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_3d)
+      SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
+      SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
+      SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
+      .def(
+          "guard_int",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_int(file, line);
+          })
+      .def(
+          "guard_bool",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_bool(file, line);
+          })
+      .def(
+          "guard_float",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_float(file, line);
+          })
+      .def(
+          "expect_true",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_true(file, line);
+          })
+      .def(
+          "expect_size",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_size(file, line);
+          })
+      .def(
+          "guard_size_oblivious",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_size_oblivious(file, line);
+          })
+      .def(
+          "has_hint",
+          [](c10::SymNode a) {
+            return a->has_hint();
+          })
+      .def(
+          "wrap_int",
+          [](c10::SymNode a, int64_t b) {
+            return a->wrap_int(b);
+          })
+      .def(
+          "wrap_float",
+          [](c10::SymNode a, double b) {
+            return a->wrap_float(b);
+          })
+      .def(
+          "wrap_bool",
+          [](c10::SymNode a, bool b) {
+            return a->wrap_bool(b);
+          })
+      .def(
+          "__str__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "__repr__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "is_constant",
+          [](const c10::SymNode& node){
+            return node->is_constant();
+          })
+      .def(
+          "is_nested_int",
+          [](const c10::SymNode& node) {
+            return node->is_nested_int();
+          })
+      .def(
+          "is_symbolic",
+          [](const c10::SymNode& node) {
+            return node->is_symbolic();
+          })
+      .def(
+          "nested_int",
+          [](const c10::SymNode& node) {
+            return node->nested_int();
+          })
+      .def(
+          "nested_int_coeff",
+          [](const c10::SymNode& node) {
+            return node->nested_int_coeff();
+          });
+
+  // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -1565,10 +1379,11 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
-          // Writting an empty file is a noop
+          // Writing an empty file is a noop
           if (size == 0) {
             return size;
           }
+          py::gil_scoped_acquire acquire;
           auto memory_view = py::memoryview::from_memory(
               reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(memory_view));
@@ -1582,24 +1397,57 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
-      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
+             size_t size) {
+            // Since we don't know where the data come from, we cannot
+            // release the GIL in this overload
+            return self.writeRecord(name, data, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             py::bytes data,
+             size_t size) {
+            // It is not clear from the doc but according to CPython own code,
+            // it is ok to use the result of PyBytes_AsString without the GIL
+            // being held
+            // https://github.com/python/cpython/blob/e2a3e4b7488aff6fdc704a0f258bc315e96c1d6e/Objects/stringlib/join.h#L67
+            const char* data_str = PyBytes_AsString(data.ptr());
+            py::gil_scoped_release release;
+            return self.writeRecord(name, data_str, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             c10::Storage data,
+             size_t size) {
+            // Reading Tensor data is always ok without the GIL held
+            py::gil_scoped_release release;
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data.data()), size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
              uintptr_t data,
              size_t size) {
+            TORCH_WARN_ONCE(
+                "write_record(): Passing Storage by data pointer is deprecated and will be an error in ",
+                "the future, please pass the Storage object instead.");
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           })
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
 
-  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+  py::enum_<MobileOptimizerType>(m, "_MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
       .value(
           "INSERT_FOLD_PREPACK_OPS",
@@ -1609,7 +1457,9 @@ void initJITBindings(PyObject* module) {
       .value(
           "HOIST_CONV_PACKED_PARAMS",
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
-      .export_values();
+      .value(
+          "VULKAN_AUTOMATIC_GPU_TRANSFER",
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER);
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -1653,6 +1503,7 @@ void initJITBindings(PyObject* module) {
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
           int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
+          Py_DECREF(res);
           if (i > 0) {
             return i;
           }
@@ -1684,9 +1535,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
-            at::DataPtr data;
-            size_t size = 0;
-            std::tie(data, size) = self.getRecord(key);
+            auto [data, size] = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(
@@ -1717,9 +1566,15 @@ void initJITBindings(PyObject* module) {
                     at::CPU(scalar_type).typeMeta());
             return at::Tensor(std::move(ptr));
           })
-      .def("get_all_records", [](PyTorchStreamReader& self) {
-        return self.getAllRecords();
-      });
+      .def("serialization_id", &PyTorchStreamReader::serializationId)
+      .def(
+          "get_all_records",
+          [](PyTorchStreamReader& self) { return self.getAllRecords(); })
+      .def(
+          "get_record_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordOffset(key);
+          });
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
@@ -1779,10 +1634,7 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               auto func =
@@ -1815,36 +1667,60 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_jit_resolve_packet",
+      [](const char* op_name, py::args args, py::kwargs kwargs) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
+          ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
+          const auto overloads = getAllSortedOperatorsFor(symbol);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
+          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          auto result = overload->schema().overload_name();
+          if (result == "") {
+            result = "default";
+          }
+          return result;
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
+          const auto sortedOps = getAllSortedOperatorsFor(symbol);
+          if (sortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
+
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
 
-          for (const auto& op : operations) {
+          for (const auto& op : sortedOps) {
             docstring << "  " << op->schema() << "\n";
           }
 
           py::list overload_names;
-          for (const auto& op : operations) {
+          for (const auto& op : sortedOps) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
 
           auto func = py::cpp_function(
-              [operations, symbol, allow_numbers_as_tensors](
+              [sortedOps, symbol, allow_numbers_as_tensors](
                   py::args args, py::kwargs kwargs) {
                 ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
-                    operations, symbol, args, kwargs, false);
+                    sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
@@ -1983,7 +1859,19 @@ void initJITBindings(PyObject* module) {
             return self == other;
           })
       .def(
+          "__hash__",
+          [](const FunctionSchema& self) {
+            return std::hash<FunctionSchema>{}(self);
+          })
+      .def(
           "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def(
+          "__repr__",
           [](FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
@@ -1994,6 +1882,8 @@ void initJITBindings(PyObject* module) {
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
+      .def_property_readonly(
+          "real_type", [](Argument& self) { return self.real_type(); })
       .def_property_readonly(
           "N",
           [](Argument& self) -> py::object {
@@ -2121,6 +2011,44 @@ void initJITBindings(PyObject* module) {
                 return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
+
+  py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
+      m, "_Await")
+      .def(
+          "wait",
+          &PythonAwaitWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def("fn", &PythonAwaitWrapper::fn)
+      .def("args", &PythonAwaitWrapper::args)
+      .def("type", &PythonAwaitWrapper::type)
+      .def("is_nowait", &PythonAwaitWrapper::is_nowait)
+      .def(
+          "__getattr__",
+          [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
+            // In eager mode allow Await[W] to be used as W, redirecting getattr
+            // to the result of delayed function.
+            return py::getattr(self.wait(), name.c_str(), py::none());
+          })
+      .def(
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonAwaitWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.jit._Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
+          py::call_guard<py::gil_scoped_release>());
+
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
     c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
     c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
@@ -2141,8 +2069,25 @@ void initJITBindings(PyObject* module) {
     }
     return self_value->overlaps(*other_value);
   });
-  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
+  m.def("_awaitable", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
+    py::tuple args_tup(args.size() - 1);
+    for (const auto i : c10::irange(1, args.size())) {
+      args_tup[i - 1] = args[i];
+    }
+    return std::make_shared<PythonAwaitWrapper>(
+        py::cast<py::function>(args[0]), std::move(args_tup));
+  });
+  m.def("_awaitable_nowait", [](py::handle input) {
+    return std::make_shared<PythonAwaitWrapper>(std::move(input));
+  });
+  m.def(
+      "_awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
+        TORCH_CHECK(py_aw, "Await can't be None");
+        return py_aw->wait();
+      });
+  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
+    AT_ASSERT(!args.empty());
 
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);
@@ -2253,7 +2198,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
-  initNvFuserPythonBindings(module);
+  // initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
@@ -2271,5 +2216,5 @@ void initJITBindings(PyObject* module) {
   atexit.attr("register")(
       py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

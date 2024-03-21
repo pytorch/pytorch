@@ -1,11 +1,10 @@
 #include <ATen/detail/ORTHooksInterface.h>
 
-#include <c10/util/Exception.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <memory>
-#include <mutex>
 
 namespace at {
 namespace detail {
@@ -17,9 +16,7 @@ const ORTHooksInterface& getORTHooks() {
   c10::call_once(once, [] {
     ort_hooks = ORTHooksRegistry()->Create("ORTHooks", {});
     if (!ort_hooks) {
-      ort_hooks =
-          // NOLINTNEXTLINE(modernize-make-unique)
-          std::unique_ptr<ORTHooksInterface>(new ORTHooksInterface());
+      ort_hooks = std::make_unique<ORTHooksInterface>();
     }
   });
   return *ort_hooks;

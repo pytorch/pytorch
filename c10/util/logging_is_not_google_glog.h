@@ -4,9 +4,9 @@
 #include <chrono>
 #include <climits>
 #include <ctime>
-#include <fstream>
 #include <iomanip>
 #include <map>
+#include <ostream>
 #include <set>
 #include <sstream>
 #include <string>
@@ -49,7 +49,7 @@ class C10_API MessageLogger {
 // is not used" and "statement has no effect".
 class C10_API LoggerVoidify {
  public:
-  LoggerVoidify() {}
+  LoggerVoidify() = default;
   // This has to be an operator with a precedence lower than << but
   // higher than ?:
   void operator&(const std::ostream& s) {}

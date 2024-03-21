@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/register_ops_common_utils.h>
@@ -27,15 +26,15 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/Generator.h>
 #include <ATen/core/ivalue.h>
+#include <c10/core/Device.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 constexpr inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
@@ -123,7 +122,7 @@ double radians(double x);
 
 // Equivalent to list.at(idx)
 template <typename T>
-T getItem(const c10::List<T>& list, int64_t idx) {
+decltype(auto) getItem(const c10::List<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
@@ -302,8 +301,8 @@ inline bool tensor_list_equal(
   }
 
   for (const auto i : c10::irange(a.size())) {
-    at::Tensor a_element = a[i];
-    at::Tensor b_element = b[i];
+    const at::Tensor& a_element = a[i];
+    const at::Tensor& b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
@@ -878,5 +877,8 @@ struct OperatorGeneratorArgs {
           aten_op, op, op, op, bool),                                    \
       DEFINE_STR_CMP_OP(aten_op, op)
 
-} // namespace jit
-} // namespace torch
+TORCH_API at::Generator make_generator_for_device(
+    c10::Device device,
+    c10::optional<int64_t> seed = c10::nullopt);
+
+} // namespace torch::jit

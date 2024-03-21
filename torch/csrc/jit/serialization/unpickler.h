@@ -14,7 +14,7 @@ using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 using ObjLoader = std::function<
-    c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
+    c10::intrusive_ptr<c10::ivalue::Object>(const at::StrongTypePtr&, IValue)>;
 
 class DeserializationStorageContext;
 
@@ -23,7 +23,7 @@ class DeserializationStorageContext;
 // deleted at some point, the Pickler doesn't produce it and it's only around to
 // support models saved before 1.1
 class TORCH_API Unpickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
   using TypeParserT = c10::TypePtr (*)(const std::string&);
 
@@ -42,6 +42,20 @@ class TORCH_API Unpickler {
       : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
+        use_storage_device_(false),
+        type_parser_(type_parser),
+        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+
+  Unpickler(
+      std::function<size_t(char*, size_t)> reader,
+      TypeResolver type_resolver,
+      c10::ArrayRef<at::Tensor> tensor_table,
+      ObjLoader obj_loader,
+      TypeParserT type_parser = defaultTypeParser)
+      : reader_(std::move(reader)),
+        tensor_table_(tensor_table),
+        type_resolver_(std::move(type_resolver)),
+        obj_loader_(std::move(obj_loader)),
         use_storage_device_(false),
         type_parser_(type_parser),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
@@ -120,6 +134,7 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
@@ -130,6 +145,7 @@ class TORCH_API Unpickler {
   }
   std::string readString();
   void readList(IValue list_ivalue);
+  void readListElements(IValue list_ivalue, size_t start);
   void setInput(size_t memo_id);
   void run();
 
@@ -176,6 +192,9 @@ class TORCH_API Unpickler {
 
   // See [type tag serialization]
   uint64_t version_;
+
+  // See [NOTE] skip_next_read_global
+  uint8_t skip_next_read_global = 0;
 };
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);

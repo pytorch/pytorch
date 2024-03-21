@@ -55,6 +55,12 @@ class TORCH_API MetricData {
     return repr_fn_(value);
   }
 
+  void Reset();
+
+  bool IsValid() const {
+    return TotalSamples() > 0;
+  }
+
  private:
   mutable std::mutex lock_;
   MetricReprFn repr_fn_;
@@ -81,6 +87,10 @@ class TORCH_API CounterData {
     value_ = 0;
   }
 
+  bool IsValid() const {
+    return value_ > 0;
+  }
+
  private:
   std::atomic<int64_t> value_;
 };
@@ -89,7 +99,8 @@ class TORCH_API MetricsArena {
  public:
   static MetricsArena* Get();
 
-  void Reset();
+  void ResetCounters();
+  void ResetMetrics();
 
   // Registers a new metric in the global arena.
   void RegisterMetric(
@@ -216,6 +227,11 @@ class TORCH_API Counter {
 // Creates a report with the current metrics statistics.
 TORCH_API std::string CreateMetricReport();
 
+// Creates a report with the selected metrics statistics.
+TORCH_API std::string CreateMetricReport(
+    const std::vector<std::string>& counter_names,
+    const std::vector<std::string>& metric_names);
+
 // Returns the currently registered metric names. Note that the list can grow
 // since metrics are usually function intialized (they are static function
 // variables).
@@ -261,6 +277,10 @@ class TORCH_API TimedSection {
   static torch::lazy::Metric* timed_metric =                    \
       new torch::lazy::Metric(name, torch::lazy::MetricFnTime); \
   torch::lazy::TimedSection timed_section(timed_metric)
+
+#define TORCH_LAZY_FN_COUNTER_TIMED_TRACING(ns) \
+  TORCH_LAZY_FN_COUNTER(ns);                    \
+  TORCH_LAZY_TIMED("LazyTracing")
 
 } // namespace lazy
 } // namespace torch

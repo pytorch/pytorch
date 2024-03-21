@@ -1,7 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/miopen_convolution_add_relu_native.h>
+#include <ATen/ops/miopen_convolution_native.h>
+#include <ATen/ops/miopen_convolution_relu_native.h>
+#include <ATen/ops/miopen_convolution_transpose_native.h>
+#include <ATen/ops/miopen_depthwise_convolution_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
@@ -170,7 +187,7 @@ struct ConvolutionParams
 };
 // ConvolutionParams must be a POD because we read out its memory
 // contenst as char* when hashing
-static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
+static_assert(std::is_standard_layout<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 void setConvolutionParams(
     ConvolutionParams* params, miopenHandle_t handle,
@@ -702,7 +719,7 @@ void raw_miopen_convolution_forward_out(
   args.idesc.set(input);
   args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   if (benchmark) {
       miopenConvFwdAlgorithm_t fwdAlg;
@@ -810,7 +827,7 @@ void raw_miopen_depthwise_convolution_forward_out(
   args.idesc.set(input);
   args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   if (benchmark) {
       miopenConvFwdAlgorithm_t fwdAlg;
@@ -965,7 +982,7 @@ void raw_miopen_convolution_backward_weight_out(
   args.idesc.set(input);
   args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   if (benchmark) {
       miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
@@ -1009,7 +1026,7 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   args.idesc.set(input);
   args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   if (benchmark) {
       miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
@@ -1214,7 +1231,7 @@ void raw_miopen_convolution_backward_input_out(
   args.idesc.set(grad_input);
   args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   if (benchmark) {
       miopenConvBwdDataAlgorithm_t bwdDataAlg;
@@ -1228,7 +1245,7 @@ void raw_miopen_convolution_backward_input_out(
           &one, args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
   }
   else {
       uint64_t solution_id;
@@ -1239,7 +1256,7 @@ void raw_miopen_convolution_backward_input_out(
           args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(),
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size, solution_id));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1323,7 +1340,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   args.idesc.set(grad_input);
   args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   if (benchmark) {
       miopenConvBwdDataAlgorithm_t bwdDataAlg;
@@ -1337,7 +1354,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
           &one, args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(), bwdDataAlg, &zero,
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size));
   }
   else {
       uint64_t solution_id;
@@ -1348,7 +1365,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
           args.odesc.desc(), grad_output.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
           args.cdesc.desc(),
-          args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size, solution_id));
+          args.idesc.desc(), grad_input.mutable_data_ptr(), workspace.data, workspace.size, solution_id));
   }
 }
 
@@ -1485,7 +1502,7 @@ void raw_miopen_convolution_relu_out(
   args.idesc.set(input);
   args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
-  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, deterministic);
 
   TensorDescriptor bdesc;
   bdesc.set(bias.expand({1, bias.size(0)}), output.dim());

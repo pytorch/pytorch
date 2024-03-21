@@ -81,7 +81,7 @@ struct Vectorized<c10::qint32> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
@@ -119,6 +119,20 @@ struct Vectorized<c10::qint32> {
     return {Vectorized<float>{
         vec_madd(scale_vec0, float_vals0, scale_zp_premul0),
         vec_madd(scale_vec1, float_vals1, scale_zp_premul1)}};
+  }
+
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    vfloat32 float_vals0 = vec_float(_vec0);
+    vfloat32 float_vals1 = vec_float(_vec1);
+    vfloat32 scale_vec0 = scale.vec0();
+    vfloat32 scale_vec1 = scale.vec1();
+    vfloat32 zero_point0 = zero_point.vec0();
+    vfloat32 zero_point1 = zero_point.vec1();
+    return {Vectorized<float>{
+        (float_vals0 - zero_point0) * scale_vec0,
+        (float_vals1 - zero_point1) * scale_vec1}};
   }
 
   static Vectorized<c10::qint32> quantize(

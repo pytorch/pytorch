@@ -1,6 +1,13 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/equal.h>
+#endif
 
 namespace at {
 
@@ -24,7 +31,9 @@ namespace at {
 //    or returning a regular non-Tensor-subclass Tensor!
 
 constexpr auto kFunctorchWrappedTensors = DispatchKeySet(
-    {DispatchKey::FuncTorchGradWrapper, DispatchKey::FuncTorchBatched});
+    {DispatchKey::FuncTorchGradWrapper,
+     DispatchKey::FuncTorchBatched,
+     DispatchKey::Functionalize});
 
 constexpr auto kTensorSubclassLike =
     kFunctorchWrappedTensors |
@@ -34,8 +43,7 @@ constexpr auto kTensorSubclassLike =
          // no matter the backend component
          DispatchKey::Batched,
          DispatchKey::Sparse,
-         DispatchKey::SparseCsrCPU,
-         DispatchKey::SparseCsrCUDA,
+         DispatchKey::SparseCsr,
          DispatchKey::Python}) |
     DispatchKeySet(BackendComponent::MetaBit);
 

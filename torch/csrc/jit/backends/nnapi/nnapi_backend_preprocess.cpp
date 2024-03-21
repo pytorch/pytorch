@@ -60,7 +60,7 @@ c10::IValue preprocess(
       }
     }
   }
-  if (error.size() != 0) {
+  if (!error.empty()) {
     throw std::runtime_error(
         error +
         "\nmethod_compile_spec should contain a Tensor or Tensor List which bundles input parameters:"

@@ -15,9 +15,9 @@ constexpr size_t dim_bitset_size = 64;
 
 static inline std::bitset<dim_bitset_size> dim_list_to_bitset(
     OptionalIntArrayRef opt_dims,
-    int64_t ndims) {
+    size_t ndims) {
   TORCH_CHECK(
-      ndims <= (int64_t)dim_bitset_size,
+      ndims <= dim_bitset_size,
       "only tensors with up to ",
       dim_bitset_size,
       " dims are supported");
@@ -25,7 +25,7 @@ static inline std::bitset<dim_bitset_size> dim_list_to_bitset(
   if (opt_dims.has_value()) {
     auto dims = opt_dims.value();
     for (const auto i : c10::irange(dims.size())) {
-      size_t dim = maybe_wrap_dim(dims[i], ndims);
+      size_t dim = maybe_wrap_dim(dims[i], static_cast<int64_t>(ndims));
       TORCH_CHECK(
           !seen[dim],
           "dim ",
@@ -34,7 +34,7 @@ static inline std::bitset<dim_bitset_size> dim_list_to_bitset(
       seen[dim] = true;
     }
   } else {
-    for (int64_t dim = 0; dim < ndims; dim++) {
+    for (size_t dim = 0; dim < ndims; dim++) {
       seen[dim] = true;
     }
   }

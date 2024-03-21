@@ -1,6 +1,5 @@
 #pragma once
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
@@ -428,11 +427,11 @@ struct Lexer {
   }
   // Return the current token, and then move to the next one
   Token next() {
-    if (next_tokens.size() == 0)
+    if (next_tokens.empty())
       reportError("Lexer invariant violated: empty token queue");
     Token r = std::move(next_tokens.front());
     next_tokens.erase(next_tokens.begin());
-    if (next_tokens.size() == 0) {
+    if (next_tokens.empty()) {
       lex();
     }
     return r;
@@ -517,9 +516,8 @@ struct Lexer {
           while (indent_stack.back() != depth) {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
-            if (indent_stack.size() == 0) {
-              reportError(
-                  "invalid indent level " + c10::guts::to_string(depth), r);
+            if (indent_stack.empty()) {
+              reportError("invalid indent level " + std::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens

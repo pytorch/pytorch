@@ -12,14 +12,12 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct Node;
 struct Value;
 struct Graph;
@@ -179,7 +177,6 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;
@@ -192,16 +189,14 @@ struct TORCH_API NoWarn {
     }
   }
   std::shared_ptr<TracingState> state;
-  bool prev;
+  bool prev{false};
 };
 
 struct WithNestedTracingFrame {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
@@ -279,7 +274,21 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const at::OptionalSymIntArrayRef& opt_value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,
@@ -372,13 +381,13 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
 
 template <
     typename T,
-    typename = torch::enable_if_t<(
-        !std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
-        !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
-        !std::is_convertible<torch::decay_t<T>, at::Tensor>::value &&
-        !std::is_convertible<
-            torch::decay_t<T>,
-            c10::intrusive_ptr<c10::ivalue::Object>>::value)>>
+    typename = torch::enable_if_t<
+        (!std::is_convertible_v<torch::decay_t<T>, at::TensorList> &&
+         !std::is_convertible_v<torch::decay_t<T>, c10::List<at::Tensor>> &&
+         !std::is_convertible_v<torch::decay_t<T>, at::Tensor> &&
+         !std::is_convertible_v<
+             torch::decay_t<T>,
+             c10::intrusive_ptr<c10::ivalue::Object>>)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ",
@@ -400,5 +409,4 @@ TORCH_API autograd::Variable getSizeOf(
 TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
 
 } // namespace tracer
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

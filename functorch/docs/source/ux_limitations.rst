@@ -290,5 +290,5 @@ Under "same" randomness, elements in a batch produce same random values. For ins
 .. note::
     Finally, our randomness differs from JAX because we aren't using a stateless PRNG, in part because PyTorch
     doesn't have full support for a stateless PRNG. Instead, we've introduced a flag system to allow for the
-    most common forms of randmoness that we see. If your use case does not fit these forms of randomness, please
+    most common forms of randomness that we see. If your use case does not fit these forms of randomness, please
     file an issue.

@@ -136,7 +136,7 @@ Here's our model definition:
 ```python
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
         self.dropout1 = nn.Dropout(0.25)
@@ -283,4 +283,4 @@ This concludes our brief introduction to LT. Hopefully, you'll remember the main
 * It's really tricky to produce such graphs without overburdening a user too much. Think, torch.jit.script, torch.jit.trace! Also, think ifs, fors, "Lions, and Tigers, and Bears, Oh My" We digressed.
 
 
-Please give LT a try and tell us what you think on Github! We are **eager, not lazy** (haha!) to hear from you!
+Please give LT a try and tell us what you think on GitHub! We are **eager, not lazy** (haha!) to hear from you!

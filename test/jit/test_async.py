@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: jit"]
 
-import io
 import os
 import sys
 
@@ -15,6 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from typing import List
 from torch import Tensor
+from torch.jit import Future
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -88,7 +88,7 @@ class TestAsync(JitTestCase):
             __constants__ = ['const']
 
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.const = 42
                 self.param = nn.Parameter(torch.randn(2, 2))
 
@@ -245,15 +245,12 @@ class TestAsync(JitTestCase):
     @_inline_everything
     def test_async_script_trace(self):
         class Traced(nn.Module):
-            def __init__(self):
-                super(Traced, self).__init__()
-
             def forward(self, x):
                 return (torch.neg(x), x)
 
         class Mod(torch.jit.ScriptModule):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 x = torch.rand(3, 3)
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
 
@@ -274,7 +271,7 @@ class TestAsync(JitTestCase):
 
         class TupleCl(nn.Module):
             def __init__(self):
-                super(TupleCl, self).__init__()
+                super().__init__()
                 self.module = Mod()
 
             def forward(self, x):
@@ -420,28 +417,11 @@ class TestAsync(JitTestCase):
         self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
 
-    def test_trace_fork_wait_inline_onnx(self):
-        def fork_body(x):
-            return torch.neg(x), torch.neg(x)
-
-        class MyMod(torch.nn.Module):
-            def forward(self, x):
-                fut = torch.jit._fork(fork_body, x)
-                val = torch.jit._wait(fut)
-                return val[1]
-
-        # smoke test for ONNX export
-        f = io.BytesIO()
-        torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
-
     def test_trace_fork_wait_list_modulecalls(self):
         def add_one(input):
             return input + torch.ones(input.size())
 
         class TestListFutureModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 input_list = []
                 for i in range(3):
@@ -473,9 +453,6 @@ class TestAsync(JitTestCase):
             return input + torch.ones(input.size())
 
         class DifferentOutputModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 fut_res = torch.jit._fork(add_one, (input))
 

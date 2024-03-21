@@ -7,7 +7,7 @@ from torch import nn
 class NeuralNetwork(nn.Module):
 
     def __init__(self):
-        super(NeuralNetwork, self).__init__()
+        super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(28 * 28, 512),
@@ -26,3 +26,11 @@ class NeuralNetwork(nn.Module):
 if __name__ == '__main__':
     jit_module = torch.jit.script(NeuralNetwork())
     torch.jit.save(jit_module, sys.argv[1])
+    orig_module = nn.Sequential(
+        nn.Linear(28 * 28, 512),
+        nn.ReLU(),
+        nn.Linear(512, 512),
+        nn.ReLU(),
+        nn.Linear(512, 10),
+    )
+    torch.save(orig_module, sys.argv[1] + ".orig")

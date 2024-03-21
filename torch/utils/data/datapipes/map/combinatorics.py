@@ -47,6 +47,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         the order of data order for the sake of random reads, but ``IterDataPipe`` depends on the order
         of data during data-processing.
     """
+
     datapipe: MapDataPipe[T_co]
     _enabled: bool
     _seed: Optional[int]
@@ -93,8 +94,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         return len(self.datapipe)
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
         state = (
             self.datapipe,
             self.indices,
@@ -105,6 +104,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):

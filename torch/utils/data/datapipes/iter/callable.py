@@ -22,6 +22,7 @@ T_co = TypeVar("T_co", covariant=True)
 class MapperIterDataPipe(IterDataPipe[T_co]):
     r"""
     Applies a function over each item from the source DataPipe (functional name: ``map``).
+
     The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
 
@@ -57,6 +58,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         >>> list(map_dp_2)
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     """
+
     datapipe: IterDataPipe
     fn: Callable
 
@@ -126,7 +128,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(
-            "{} instance doesn't have valid length".format(type(self).__name__)
+            f"{type(self).__name__} instance doesn't have valid length"
         )
 
 
@@ -154,8 +156,8 @@ def _collate_helper(conversion, item):
             try:
                 import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
-            except Exception:
-                raise Exception("unable to import default collation function from the TorchArrrow")
+            except Exception as e:
+                raise Exception("unable to import default collation function from the TorchArrow") from e
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])
@@ -172,6 +174,7 @@ def _collate_helper(conversion, item):
 class CollatorIterDataPipe(MapperIterDataPipe):
     r"""
     Collates samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
+
     By default, it uses :func:`torch.utils.data.default_collate`.
 
     .. note::
@@ -183,7 +186,9 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         collate_fn: Customized collate function to collect and combine data or a batch of data.
             Default function collates to Tensor(s) based on data type.
 
-    Example: Convert integer data to float Tensor
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Convert integer data to float Tensor
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
         ...     def __init__(self, start, end):
         ...         super(MyIterDataPipe).__init__()
@@ -203,7 +208,6 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
         ...
-        >>> # xdoctest: +SKIP
         >>> collated_ds = CollateIterDataPipe(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]

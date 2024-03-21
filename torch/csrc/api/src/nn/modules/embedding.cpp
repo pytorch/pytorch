@@ -13,8 +13,8 @@ namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
-EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_)
-    : options(options_) { // NOLINT(modernize-pass-by-value)
+EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -89,8 +89,8 @@ torch::Tensor EmbeddingImpl::forward(const Tensor& input) {
       options.sparse());
 }
 
-EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_)
-    : options(options_) { // NOLINT(modernize-pass-by-value)
+EmbeddingBagImpl::EmbeddingBagImpl(EmbeddingBagOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -167,7 +167,7 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   if (options.sparse()) {
     stream << ", sparse=" << std::boolalpha << options.sparse();
   }
-  if (!c10::get_if<enumtype::kMean>(&options.mode())) {
+  if (!std::get_if<enumtype::kMean>(&options.mode())) {
     stream << ", mode=" << torch::enumtype::get_enum_name(options.mode());
   }
   if (options.include_last_offset()) {

@@ -7,7 +7,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -15,8 +15,7 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
@@ -66,17 +65,17 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_pod<ArgumentInfo>::value,
+    std::is_standard_layout<ArgumentInfo>::value,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code =
-        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs)
+      : hash_code(c10::hash_combine(
+            num_flat_tensor_inputs,
+            num_flat_optional_inputs)) {
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
@@ -101,7 +100,8 @@ struct ArgumentSpec {
     // https://github.com/zdevito/pytorch/commit/21e7200a0a0fc456bea2f10e95b1781f83933d10
     // show overhead in extra refcounting along this path
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
-    if ((arg.defined_ = t->defined())) {
+    arg.defined_ = t->defined();
+    if (arg.defined_) {
       arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
       arg.dim_ = t->dim();
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
@@ -134,7 +134,7 @@ struct ArgumentSpec {
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (tensor_args.size() == 0)
+    if (tensor_args.empty())
       return true;
     return std::memcmp(
                tensor_args.data(),
@@ -466,8 +466,7 @@ inline c10::optional<int8_t> convertOptional(
                 : c10::optional<int8_t>{};
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 

@@ -4,12 +4,13 @@
 #include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/cpu/WeightNormKernel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -69,8 +70,7 @@ inline void sum_norm_per_row(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec out_fvec0 = fVec::loadu(out_ptr + d) + v_fvec0 * v_fvec0;
     fVec out_fvec1 = fVec::loadu(out_ptr + d + fVec::size()) + v_fvec1 * v_fvec1;
@@ -108,8 +108,7 @@ inline void apply_norm_per_row(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec w_fvec0 = fVec::loadu(a_ptr + d) * v_fvec0;
     fVec w_fvec1 = fVec::loadu(a_ptr + d + fVec::size()) * v_fvec1;
@@ -248,11 +247,9 @@ inline void sum_product_per_row(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec grad_w_bvec = bVec::loadu(grad_w_ptr + d);
-    fVec grad_w_fvec0, grad_w_fvec1;
-    std::tie(grad_w_fvec0, grad_w_fvec1) = convert_bfloat16_float(grad_w_bvec);
+    auto [grad_w_fvec0, grad_w_fvec1] = convert_bfloat16_float(grad_w_bvec);
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec out_fvec0 = fVec::loadu(out_ptr + d) + grad_w_fvec0 * v_fvec0;
     fVec out_fvec1 = fVec::loadu(out_ptr + d + fVec::size()) + grad_w_fvec1 * v_fvec1;
@@ -297,11 +294,9 @@ inline void apply_per_row_backward(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec grad_w_bvec = bVec::loadu(grad_w_ptr + d);
-    fVec grad_w_fvec0, grad_w_fvec1;
-    std::tie(grad_w_fvec0, grad_w_fvec1) = convert_bfloat16_float(grad_w_bvec);
+    auto [grad_w_fvec0, grad_w_fvec1] = convert_bfloat16_float(grad_w_bvec);
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec grad_v_fvec0 = fVec::loadu(a_ptr + d) * grad_w_fvec0 - fVec::loadu(b_ptr + d) * v_fvec0;
     fVec grad_v_fvec1 = fVec::loadu(a_ptr + d + fVec::size()) * grad_w_fvec1
@@ -402,7 +397,7 @@ void weight_norm_kernel(
       "fused kernels can only be applied for first or last dim");
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, v.scalar_type(),
       "weight_norm_kernel", [&]() {
-    using accscalar_t = vec::vec_scalar_t<scalar_t>;
+    using accscalar_t = at::opmath_type<scalar_t>;
     if (dim == 0) {
       int64_t M = v.size(0);
       int64_t N = v.numel() / M;
@@ -427,7 +422,7 @@ void weight_norm_backward_kernel(
       "fused kernels can only be applied for first or last dim");
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, saved_v.scalar_type(),
       "weight_norm_backward_kernel", [&]() {
-    using accscalar_t = vec::vec_scalar_t<scalar_t>;
+    using accscalar_t = at::opmath_type<scalar_t>;
     if (dim == 0) {
       int64_t M = saved_v.size(0);
       int64_t N = saved_v.numel() / M;
@@ -445,4 +440,4 @@ void weight_norm_backward_kernel(
 REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
 REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
 
-}} // at::native
+} // at::native

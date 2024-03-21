@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <memory>
+#include <utility>
 
 namespace at {
 
@@ -132,8 +133,8 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
       Tensor zero_points,
       int64_t axis)
       : AffineQuantizer(scalar_type),
-        scales_(scales),
-        zero_points_(zero_points),
+        scales_(std::move(scales)),
+        zero_points_(std::move(zero_points)),
         axis_(axis) {}
 
   QScheme qscheme() const override {

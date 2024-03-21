@@ -625,15 +625,12 @@ macro(cuda_unset_include_and_libraries)
   unset(CUDA_CUDART_LIBRARY CACHE)
   unset(CUDA_CUDA_LIBRARY CACHE)
   # Make sure you run this before you unset CUDA_VERSION.
-  if(CUDA_VERSION VERSION_EQUAL "3.0")
-    # This only existed in the 3.0 version of the CUDA toolkit
-    unset(CUDA_CUDARTEMU_LIBRARY CACHE)
-  endif()
   unset(CUDA_cudart_static_LIBRARY CACHE)
   unset(CUDA_cudadevrt_LIBRARY CACHE)
   unset(CUDA_cublas_LIBRARY CACHE)
   unset(CUDA_cublas_device_LIBRARY CACHE)
   unset(CUDA_cublasemu_LIBRARY CACHE)
+  unset(CUDA_cublasLt_LIBRARY CACHE)
   unset(CUDA_cufft_LIBRARY CACHE)
   unset(CUDA_cufftemu_LIBRARY CACHE)
   unset(CUDA_cupti_LIBRARY CACHE)
@@ -715,24 +712,27 @@ if(CMAKE_CROSSCOMPILING)
   SET (CUDA_TOOLKIT_ROOT $ENV{CUDA_TOOLKIT_ROOT})
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "armv7-a")
     # Support for NVPACK
-    set (CUDA_TOOLKIT_TARGET_NAME "armv7-linux-androideabi")
+    set (CUDA_TOOLKIT_TARGET_NAMES "armv7-linux-androideabi")
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     # Support for arm cross compilation
-    set(CUDA_TOOLKIT_TARGET_NAME "armv7-linux-gnueabihf")
+    set(CUDA_TOOLKIT_TARGET_NAMES "armv7-linux-gnueabihf")
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
     # Support for aarch64 cross compilation
     if (ANDROID_ARCH_NAME STREQUAL "arm64")
-      set(CUDA_TOOLKIT_TARGET_NAME "aarch64-linux-androideabi")
+      set(CUDA_TOOLKIT_TARGET_NAMES "aarch64-linux-androideabi")
     else()
-      set(CUDA_TOOLKIT_TARGET_NAME "aarch64-linux")
+      set(CUDA_TOOLKIT_TARGET_NAMES "aarch64-linux" "sbsa-linux")
     endif (ANDROID_ARCH_NAME STREQUAL "arm64")
   endif()
 
-  if (EXISTS "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}")
-    set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}" CACHE PATH "CUDA Toolkit target location.")
-    SET (CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT})
-    mark_as_advanced(CUDA_TOOLKIT_TARGET_DIR)
-  endif()
+  foreach(CUDA_TOOLKIT_TARGET_NAME IN LISTS CUDA_TOOLKIT_TARGET_NAMES)
+    if (EXISTS "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}")
+      set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT}/targets/${CUDA_TOOLKIT_TARGET_NAME}" CACHE PATH "CUDA Toolkit target location.")
+      SET (CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT} CACHE PATH "Toolkit location." FORCE)
+      mark_as_advanced(CUDA_TOOLKIT_TARGET_DIR)
+      break()
+    endif()
+  endforeach()
 
   # add known CUDA targetr root path to the set of directories we search for programs, libraries and headers
   set( CMAKE_FIND_ROOT_PATH "${CUDA_TOOLKIT_TARGET_DIR};${CMAKE_FIND_ROOT_PATH}")
@@ -767,19 +767,6 @@ else()
   # Search default search paths, after we search our own set of paths.
   cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
 endif()
-
-# FAST_NVCC
-if(USE_FAST_NVCC AND CUDA_NVCC_EXECUTABLE AND NOT CUDA_NVCC_EXECUTABLE_ORIGIN)
-  set(CUDA_NVCC_EXECUTABLE_ORIGIN "${CUDA_NVCC_EXECUTABLE}")
-  set(FAST_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/fast_nvcc.py")
-  configure_file(${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh.in "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh")
-  file(COPY "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh"
-    DESTINATION "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/"
-    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-  )
-  set(CUDA_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh")
-endif()
-mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
   # Compute the version.
@@ -817,11 +804,7 @@ find_path(CUDA_TOOLKIT_INCLUDE
 find_path(CUDA_TOOLKIT_INCLUDE device_functions.h)
 mark_as_advanced(CUDA_TOOLKIT_INCLUDE)
 
-if (CUDA_VERSION VERSION_GREATER "7.0" OR EXISTS "${CUDA_TOOLKIT_INCLUDE}/cuda_fp16.h")
-  set(CUDA_HAS_FP16 TRUE)
-else()
-  set(CUDA_HAS_FP16 FALSE)
-endif()
+set(CUDA_HAS_FP16 TRUE)
 
 # Set the user list of include dir to nothing to initialize it.
 set (CUDA_NVCC_INCLUDE_DIRS_USER "")
@@ -865,18 +848,9 @@ endmacro()
 
 # CUDA_LIBRARIES
 cuda_find_library_local_first(CUDA_CUDART_LIBRARY cudart "\"cudart\" library")
-if(CUDA_VERSION VERSION_EQUAL "3.0")
-  # The cudartemu library only existed for the 3.0 version of CUDA.
-  cuda_find_library_local_first(CUDA_CUDARTEMU_LIBRARY cudartemu "\"cudartemu\" library")
-  mark_as_advanced(
-    CUDA_CUDARTEMU_LIBRARY
-    )
-endif()
 
-if(NOT CUDA_VERSION VERSION_LESS "5.5")
-  cuda_find_library_local_first(CUDA_cudart_static_LIBRARY cudart_static "static CUDA runtime library")
-  mark_as_advanced(CUDA_cudart_static_LIBRARY)
-endif()
+cuda_find_library_local_first(CUDA_cudart_static_LIBRARY cudart_static "static CUDA runtime library")
+mark_as_advanced(CUDA_cudart_static_LIBRARY)
 
 
 if(CUDA_cudart_static_LIBRARY)
@@ -893,10 +867,8 @@ else()
   set(CUDA_CUDART_LIBRARY_VAR CUDA_CUDART_LIBRARY)
 endif()
 
-if(NOT CUDA_VERSION VERSION_LESS "5.0")
-  cuda_find_library_local_first(CUDA_cudadevrt_LIBRARY cudadevrt "\"cudadevrt\" library")
-  mark_as_advanced(CUDA_cudadevrt_LIBRARY)
-endif()
+cuda_find_library_local_first(CUDA_cudadevrt_LIBRARY cudadevrt "\"cudadevrt\" library")
+mark_as_advanced(CUDA_cudadevrt_LIBRARY)
 
 if(CUDA_USE_STATIC_CUDA_RUNTIME)
   if(UNIX)
@@ -932,11 +904,8 @@ if(CUDA_USE_STATIC_CUDA_RUNTIME)
   endif()
 endif()
 
-# CUPTI library showed up in cuda toolkit 4.0
-if(NOT CUDA_VERSION VERSION_LESS "4.0")
-  cuda_find_library_local_first_with_path_ext(CUDA_cupti_LIBRARY cupti "\"cupti\" library" "extras/CUPTI/")
-  mark_as_advanced(CUDA_cupti_LIBRARY)
-endif()
+cuda_find_library_local_first_with_path_ext(CUDA_cupti_LIBRARY cupti "\"cupti\" library" "extras/CUPTI/")
+mark_as_advanced(CUDA_cupti_LIBRARY)
 
 # Set the CUDA_LIBRARIES variable.  This is the set of stuff to link against if you are
 # using the CUDA runtime.  For the dynamic version of the runtime, most of the
@@ -979,71 +948,44 @@ macro(FIND_CUDA_HELPER_LIBS _name)
   mark_as_advanced(CUDA_${_name}_LIBRARY)
 endmacro()
 
-#######################
-# Disable emulation for v3.1 onward
-if(CUDA_VERSION VERSION_GREATER "3.0")
-  if(CUDA_BUILD_EMULATION)
-    message(FATAL_ERROR "CUDA_BUILD_EMULATION is not supported in version 3.1 and onwards.  You must disable it to proceed.  You have version ${CUDA_VERSION}.")
-  endif()
+if(CUDA_BUILD_EMULATION)
+  message(FATAL_ERROR "CUDA_BUILD_EMULATION is not supported in version 3.1 and onwards.  You must disable it to proceed.  You have version ${CUDA_VERSION}.")
 endif()
 
-# Search for additional CUDA toolkit libraries.
-if(CUDA_VERSION VERSION_LESS "3.1")
-  # Emulation libraries aren't available in version 3.1 onward.
-  find_cuda_helper_libs(cufftemu)
-  find_cuda_helper_libs(cublasemu)
-endif()
 find_cuda_helper_libs(cufft)
 find_cuda_helper_libs(cublas)
-if(NOT CUDA_VERSION VERSION_LESS "3.2")
-  # cusparse showed up in version 3.2
-  find_cuda_helper_libs(cusparse)
-  find_cuda_helper_libs(curand)
-  if (WIN32)
-    find_cuda_helper_libs(nvcuvenc)
-    find_cuda_helper_libs(nvcuvid)
-  endif()
-endif()
-if(CUDA_VERSION VERSION_GREATER "5.0" AND CUDA_VERSION VERSION_LESS "9.2")
-  # In CUDA 9.2 cublas_device was deprecated
-  find_cuda_helper_libs(cublas_device)
+find_cuda_helper_libs(cublasLt)
+# cusparse showed up in version 3.2
+find_cuda_helper_libs(cusparse)
+find_cuda_helper_libs(curand)
+if (WIN32)
+  find_cuda_helper_libs(nvcuvenc)
+  find_cuda_helper_libs(nvcuvid)
 endif()
 
-if(NOT CUDA_VERSION VERSION_LESS "9.0")
-  # In CUDA 9.0 NPP was nppi was removed
-  find_cuda_helper_libs(nppc)
-  find_cuda_helper_libs(nppial)
-  find_cuda_helper_libs(nppicc)
-  find_cuda_helper_libs(nppicom)
-  find_cuda_helper_libs(nppidei)
-  find_cuda_helper_libs(nppif)
-  find_cuda_helper_libs(nppig)
-  find_cuda_helper_libs(nppim)
-  find_cuda_helper_libs(nppist)
-  find_cuda_helper_libs(nppisu)
-  find_cuda_helper_libs(nppitc)
-  find_cuda_helper_libs(npps)
-  set(CUDA_npp_LIBRARY "${CUDA_nppc_LIBRARY};${CUDA_nppial_LIBRARY};${CUDA_nppicc_LIBRARY};${CUDA_nppicom_LIBRARY};${CUDA_nppidei_LIBRARY};${CUDA_nppif_LIBRARY};${CUDA_nppig_LIBRARY};${CUDA_nppim_LIBRARY};${CUDA_nppist_LIBRARY};${CUDA_nppisu_LIBRARY};${CUDA_nppitc_LIBRARY};${CUDA_npps_LIBRARY}")
-elseif(CUDA_VERSION VERSION_GREATER "5.0")
-  # In CUDA 5.5 NPP was split into 3 separate libraries.
-  find_cuda_helper_libs(nppc)
-  find_cuda_helper_libs(nppi)
-  find_cuda_helper_libs(npps)
-  set(CUDA_npp_LIBRARY "${CUDA_nppc_LIBRARY};${CUDA_nppi_LIBRARY};${CUDA_npps_LIBRARY}")
-elseif(NOT CUDA_VERSION VERSION_LESS "4.0")
-  find_cuda_helper_libs(npp)
-endif()
-if(NOT CUDA_VERSION VERSION_LESS "7.0")
-  # cusolver showed up in version 7.0
-  find_cuda_helper_libs(cusolver)
-endif()
+# In CUDA 9.0 NPP was nppi was removed
+find_cuda_helper_libs(nppc)
+find_cuda_helper_libs(nppial)
+find_cuda_helper_libs(nppicc)
+find_cuda_helper_libs(nppicom)
+find_cuda_helper_libs(nppidei)
+find_cuda_helper_libs(nppif)
+find_cuda_helper_libs(nppig)
+find_cuda_helper_libs(nppim)
+find_cuda_helper_libs(nppist)
+find_cuda_helper_libs(nppisu)
+find_cuda_helper_libs(nppitc)
+find_cuda_helper_libs(npps)
+set(CUDA_npp_LIBRARY "${CUDA_nppc_LIBRARY};${CUDA_nppial_LIBRARY};${CUDA_nppicc_LIBRARY};${CUDA_nppicom_LIBRARY};${CUDA_nppidei_LIBRARY};${CUDA_nppif_LIBRARY};${CUDA_nppig_LIBRARY};${CUDA_nppim_LIBRARY};${CUDA_nppist_LIBRARY};${CUDA_nppisu_LIBRARY};${CUDA_nppitc_LIBRARY};${CUDA_npps_LIBRARY}")
+# cusolver showed up in version 7.0
+find_cuda_helper_libs(cusolver)
 
 if (CUDA_BUILD_EMULATION)
   set(CUDA_CUFFT_LIBRARIES ${CUDA_cufftemu_LIBRARY})
   set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublasemu_LIBRARY})
 else()
   set(CUDA_CUFFT_LIBRARIES ${CUDA_cufft_LIBRARY})
-  set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY})
+  set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY} ${CUDA_cublasLt_LIBRARY})
 endif()
 
 ########################
@@ -1342,11 +1284,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   if(CUDA_HOST_COMPILATION_CPP)
     set(CUDA_C_OR_CXX CXX)
   else()
-    if(CUDA_VERSION VERSION_LESS "3.0")
-      set(nvcc_flags ${nvcc_flags} --host-compilation C)
-    else()
-      message(WARNING "--host-compilation flag is deprecated in CUDA version >= 3.0.  Removing --host-compilation C flag" )
-    endif()
+    message(WARNING "--host-compilation flag is deprecated in CUDA version >= 3.0.  Removing --host-compilation C flag" )
     set(CUDA_C_OR_CXX C)
   endif()
 
@@ -1467,14 +1405,6 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       # nvcc chokes on -g3 in versions previous to 3.0, so replace it with -g
       set(_cuda_fix_g3 FALSE)
 
-      if(CMAKE_COMPILER_IS_GNUCC)
-        if (CUDA_VERSION VERSION_LESS  "3.0" OR
-            CUDA_VERSION VERSION_EQUAL "4.1" OR
-            CUDA_VERSION VERSION_EQUAL "4.2"
-            )
-          set(_cuda_fix_g3 TRUE)
-        endif()
-      endif()
       set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS_${config_upper}}")
       _filter_blocklisted_host_flags(_cuda_C_FLAGS)
       if(_cuda_fix_g3)
@@ -2024,7 +1954,7 @@ macro(CUDA_ADD_CUBLAS_TO_TARGET target)
   if (CUDA_BUILD_EMULATION)
     target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublasemu_LIBRARY})
   else()
-    target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY})
+    target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY} ${CUDA_cublasLt_LIBRARY})
   endif()
 endmacro()
 

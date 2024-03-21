@@ -58,7 +58,7 @@ inline Tensor embedding(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingFuncOptions`
@@ -126,17 +126,6 @@ inline Tensor embedding_bag(
     TORCH_CHECK(
         offsets_.defined(), "offsets has to be a 1D Tensor but got null");
     TORCH_CHECK(offsets_.dim() == 1, "offsets has to be a 1D Tensor");
-    TORCH_CHECK(
-        offsets_[0].item<int64_t>() == 0,
-        "offsets[0] has to be 0, i.e., the first sequence in the mini-batch has to start from position 0. However, got ",
-        offsets_[0].item<int64_t>());
-    TORCH_CHECK(
-        offsets_[-1].item<int64_t>() <= input_.size(0),
-        "offsets[-1] can not be greater than input's length({",
-        input_.size(0),
-        "}), but got offsets[-1] of {",
-        offsets_[-1].item<int64_t>(),
-        "}");
   } else {
     TORCH_CHECK(
         false,
@@ -146,11 +135,11 @@ inline Tensor embedding_bag(
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int mode_enum;
-  if (c10::get_if<enumtype::kSum>(&mode)) {
+  if (std::holds_alternative<enumtype::kSum>(mode)) {
     mode_enum = 0;
-  } else if (c10::get_if<enumtype::kMean>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kMean>(mode)) {
     mode_enum = 1;
-  } else if (c10::get_if<enumtype::kMax>(&mode)) {
+  } else if (std::holds_alternative<enumtype::kMax>(mode)) {
     mode_enum = 2;
     TORCH_CHECK(
         !scale_grad_by_freq,
@@ -166,7 +155,7 @@ inline Tensor embedding_bag(
   }
 
   TORCH_CHECK(
-      !per_sample_weights_.defined() || c10::get_if<enumtype::kSum>(&mode),
+      !per_sample_weights_.defined() || std::get_if<enumtype::kSum>(&mode),
       "embedding_bag: per_sample_weights was not null. ",
       "per_sample_weights is only supported for mode='kSum' (got mode='",
       torch::enumtype::get_enum_name(mode),
@@ -187,7 +176,7 @@ inline Tensor embedding_bag(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding_bag
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding_bag
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingBagFuncOptions`

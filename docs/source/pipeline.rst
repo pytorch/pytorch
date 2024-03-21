@@ -8,7 +8,10 @@ Pipeline parallelism was original introduced in the
 technique to train large models on multiple GPUs.
 
 .. warning ::
-     Pipeline Parallelism is experimental and subject to change.
+     torch.distributed.pipeline is deprecated, so is this document. For
+     up-to-date pipeline parallel implementation, please refer to the
+     `PiPPy <https://github.com/pytorch/PiPPy>`__ library under the PyTorch
+     organization (Pipeline Parallelism for PyTorch).
 
 Model Parallelism using multiple GPUs
 -------------------------------------
@@ -50,12 +53,13 @@ Pipe APIs in PyTorch
 Skip connections
 ^^^^^^^^^^^^^^^^
 
-Certain models like ResNeXt are not completely sequential and have skip
-connections between layers. Naively implementing as part of pipeline
-parallelism would imply that we need to copy outputs for certain layers through
-multiple GPUs till we eventually reach the GPU where the layer for the skip
-connection resides. To avoid this copy overhead, we provide APIs below to stash
-and pop Tensors in different layers of the model.
+Certain models like `ResNeXt <https://pytorch.org/hub/pytorch_vision_resnext/>`__
+are not completely sequential and have skip connections between layers.
+Naively implementing as part of pipeline parallelism would imply that
+we need to copy outputs for certain layers through multiple GPUs till
+we eventually reach the GPU where the layer for the skip connection resides.
+To avoid this copy overhead, we provide APIs below to stash and pop Tensors
+in different layers of the model.
 
 .. autofunction:: torch.distributed.pipeline.sync.skip.skippable.skippable
 .. autoclass:: torch.distributed.pipeline.sync.skip.skippable.stash

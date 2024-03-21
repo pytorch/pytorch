@@ -34,22 +34,22 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   Conv2dOpContext(
       at::Tensor&& weight,
       c10::optional<at::Tensor>&& bias,
-      const std::vector<int64_t>& stride,
-      const std::vector<int64_t>& padding,
-      const std::vector<int64_t>& dilation,
+      std::vector<int64_t> stride,
+      std::vector<int64_t> padding,
+      std::vector<int64_t> dilation,
       int64_t groups,
-      const c10::optional<Scalar>& output_min,
-      const c10::optional<Scalar>& output_max)
+      c10::optional<Scalar> output_min,
+      c10::optional<Scalar> output_max)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
-        stride_(stride),
-        padding_(padding),
-        dilation_(dilation),
+        stride_(std::move(stride)),
+        padding_(std::move(padding)),
+        dilation_(std::move(dilation)),
         groups_(groups),
-        output_min_(output_min),
-        output_max_(output_max) {}
+        output_min_(std::move(output_min)),
+        output_max_(std::move(output_max)) {}
 
-  ~Conv2dOpContext() {
+  ~Conv2dOpContext() override {
     if (releaseCallback_) {
       releaseCallback_(conv2dOp_);
     }
@@ -137,14 +137,14 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   LinearOpContext(
       at::Tensor&& weight,
       c10::optional<at::Tensor>&& bias,
-      const c10::optional<Scalar>& output_min,
-      const c10::optional<Scalar>& output_max)
+      c10::optional<Scalar> output_min,
+      c10::optional<Scalar> output_max)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
-        output_min_(output_min),
-        output_max_(output_max) {}
+        output_min_(std::move(output_min)),
+        output_max_(std::move(output_max)) {}
 
-  ~LinearOpContext() {
+  ~LinearOpContext() override {
     if (releaseCallback_) {
       releaseCallback_(opaqueOpPtr_);
     }

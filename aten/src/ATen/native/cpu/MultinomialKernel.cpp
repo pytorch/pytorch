@@ -15,12 +15,12 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t>
-void multinomial_with_replacement_apply(
+typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, void>
+multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
@@ -122,8 +122,9 @@ void multinomial_with_replacement_apply(
   }
 }
 
-template <>
-void multinomial_with_replacement_apply<BFloat16>(
+template <typename scalar_t>
+typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, void>
+multinomial_with_replacement_apply(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
@@ -139,7 +140,7 @@ void multinomial_with_replacement_apply<BFloat16>(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options().dtype(kFloat));
 
-  const BFloat16* const self_ptr = self.data_ptr<BFloat16>();
+  const scalar_t* const self_ptr = self.data_ptr<scalar_t>();
   float* const cum_dist_ptr = cum_dist.data_ptr<float>();
   int64_t* const result_ptr = result.data_ptr<int64_t>();
 
@@ -241,5 +242,4 @@ static void multinomial_with_replacement_kernel_impl(
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-} // namespace native
-} // namespace at
+} // namespace at::native

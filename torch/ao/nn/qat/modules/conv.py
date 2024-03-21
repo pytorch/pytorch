@@ -1,9 +1,15 @@
 import torch
 import torch.nn as nn
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.intrinsic import _FusedModule
+from torch.ao.nn.intrinsic import _FusedModule
 from typing import Tuple, TypeVar, Union
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
+
+__all__ = [
+    "Conv1d",
+    "Conv2d",
+    "Conv3d"
+]
 
 MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
 

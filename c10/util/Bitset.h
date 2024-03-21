@@ -1,14 +1,11 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
-#include <c10/util/Optional.h>
+#include <cstddef>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
 
-namespace c10 {
-namespace utils {
+namespace c10::utils {
 
 /**
  * This is a simple bitset class with sizeof(long long int) bits.
@@ -33,7 +30,7 @@ struct bitset final {
     return 8 * sizeof(bitset_type);
   }
 
-  constexpr bitset() noexcept : bitset_(0) {}
+  constexpr bitset() noexcept = default;
   constexpr bitset(const bitset&) noexcept = default;
   constexpr bitset(bitset&&) noexcept = default;
   // there is an issure for gcc 5.3.0 when define default function as constexpr
@@ -109,12 +106,11 @@ struct bitset final {
     return lhs.bitset_ == rhs.bitset_;
   }
 
-  bitset_type bitset_;
+  bitset_type bitset_{0};
 };
 
 inline bool operator!=(bitset lhs, bitset rhs) noexcept {
   return !(lhs == rhs);
 }
 
-} // namespace utils
-} // namespace c10
+} // namespace c10::utils

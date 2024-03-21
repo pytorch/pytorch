@@ -77,8 +77,8 @@ This op supports $p$ values of 1 or 2. If the average argument is set, the norm 
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lpnorm_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lpnorm_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/lpnorm_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/lpnorm_op.cc
 
 
 <details>
@@ -152,7 +152,7 @@ supports l1 and l2 norm) determined by the argument p.
     .Arg("p", "Order of the norm in p-norm")
     .Arg(
         "average",
-        "whehther we calculate norm or averaged_norm."
+        "whether we calculate norm or averaged_norm."
         "The Lp_averaged_norm(x) is defined as"
         "Lp_averaged_normgradient(x) = LpNormGradient(x) / size(x)");
 

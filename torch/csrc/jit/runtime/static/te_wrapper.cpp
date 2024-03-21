@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using namespace torch::jit::tensorexpr;
 
@@ -29,7 +28,7 @@ void TEWrapper::call(const std::vector<void*>& args) {
   cg->call_raw(args);
 }
 
-void optimizePointwise(LoopNest* ln, Tensor target, int width) {
+static void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
@@ -37,7 +36,7 @@ void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   ln->vectorize(inner);
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     Tensor out,
     std::vector<CodeGen::BufferArg> args,
@@ -54,7 +53,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   return wrap;
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     LoopNest* ln,
     std::vector<CodeGen::BufferArg> args) {
@@ -69,7 +68,7 @@ void TEWrapper::call(const std::vector<void*>& args) {
   DCHECK(0 && "Invalid call");
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     Tensor out,
     std::vector<CodeGen::BufferArg> args,
@@ -77,7 +76,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   return wrap;
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     LoopNest* ln,
     std::vector<CodeGen::BufferArg> args) {
@@ -93,8 +92,8 @@ std::mutex& getNNCCacheMutex() {
   return nncCacheMutex;
 }
 
-FastMap<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
-  static FastMap<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
+c10::FastMap<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
+  static c10::FastMap<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
   return nncCache;
 }
 
@@ -311,5 +310,4 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   return wrap;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

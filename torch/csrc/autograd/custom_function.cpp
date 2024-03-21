@@ -3,31 +3,12 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-namespace torch {
-namespace autograd {
+#include <utility>
 
-VariableInfo::VariableInfo(const Variable& var)
-    : layout(var.layout()),
-      device(var.device()),
-      scalar_type(var.scalar_type()),
-      size(var.sizes().vec()),
-      requires_grad(var.requires_grad()),
-      is_empty(false) {}
-
-VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
-
-Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  if (is_empty) {
-    // Return undefined tensor.
-    return at::Tensor();
-  } else {
-    return at::zeros(
-        size, at::TensorOptions(scalar_type).device(device).layout(layout));
-  }
-}
+namespace torch::autograd {
 
 // This function has two main goals:
-//  1) Use the user-provided jvp function to populate the the outputs' forward
+//  1) Use the user-provided jvp function to populate the outputs' forward
 //  gradient 2) Perform error checking to ensure that view and inplace ops are
 //  properly handled
 //
@@ -44,14 +25,14 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
 //  sure that its
 //    forward grad was also modified inplace and already present on the
 //    corresponding output.
-void _process_forward_mode_AD(
+static void _process_forward_mode_AD(
     const variable_list& inputs,
     std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const optional_variable_list& outputs,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    _jvp_fn_t jvp_user_function) {
+    const _jvp_fn_t& jvp_user_function) {
   // TODO handle multiple levels here
   uint64_t level = 0;
 
@@ -113,7 +94,7 @@ void _process_forward_mode_AD(
   torch::autograd::variable_list forward_grads;
   {
     at::AutoFwGradMode fw_grad_mode(false);
-    forward_grads = jvp_user_function(inputs, input_grads);
+    forward_grads = jvp_user_function(inputs, std::move(input_grads));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -129,21 +110,27 @@ void _process_forward_mode_AD(
       ")");
 
   for (const auto i : c10::irange(num_outputs)) {
+    if (!raw_outputs[i].has_value()) {
+      continue;
+    }
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
+    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
+    bool is_differentiable =
+        (non_differentiable.count(out_tensor_impl) == 0 &&
+         isDifferentiableType(raw_outputs[i].value().scalar_type()));
     const auto& out_grad = forward_grads[i];
-    if (!out.defined()) {
+    if (!out.defined() || !is_differentiable) {
       TORCH_CHECK(
           !out_grad.defined(),
           "Function's jvp returned a gradient at position ",
           i,
           ", but "
-          " the corresponding forward output is not a differentiable Tensor");
+          " the corresponding forward output is not a differentiable Tensor."
+          "You should return None at that position instead.");
       continue;
     }
 
-    TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
-    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
 
@@ -241,7 +228,9 @@ void _process_forward_mode_AD(
   }
 }
 
-at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
+static at::Tensor _view_as_self_with_no_grad(
+    const at::Tensor& self,
+    const _view_as_self_fn_t& view_as_self_fn) {
   // This is called below in _process_backward_mode_ad in two places:
   //
   // (1) An input has been returned, but it wasn't modified. Return it as a view
@@ -259,27 +248,41 @@ at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
   // ignored.
   at::AutoFwGradMode fw_grad_mode(false);
   AutoGradMode grad_mode(false);
-  return self.view_as(self);
+  // We thread through this view_as_self_fn lambda so that in the case we are a
+  // Python custom function (rather than a cpp one), we can properly call the
+  // view_as from python so that torch function logic can still trigger.
+  return view_as_self_fn(self);
 }
 
-optional_variable_list _process_backward_mode_ad(
+static optional_variable_list _process_backward_mode_ad(
     const std::unordered_map<at::TensorImpl*, size_t>& inputs_mapping,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata) {
-  int num_outputs = raw_outputs.size();
+    const std::shared_ptr<Node>& cdata,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn) {
+  auto num_outputs = raw_outputs.size();
+
+  const char* error_msg_input_returned_as_is =
+      "A input that has been returned as-is as output is being saved for backward. "
+      "This is not supported if you override setup_context. You should return and "
+      "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
+      "the forward function itself.";
 
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var,
                          uint32_t output_nr,
                          bool is_input,
                          bool is_modified,
-                         bool is_differentiable) {
+                         bool is_differentiable,
+                         bool is_saved_and_setup_context) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
-        if (is_input) {
-          var = _view_as_self_with_no_grad(var);
+        if (is_input && !is_modified) {
+          TORCH_CHECK(
+              !is_saved_and_setup_context, error_msg_input_returned_as_is)
+          var = _view_as_self_with_no_grad(var, view_as_self_fn);
         }
         return;
       }
@@ -326,14 +329,15 @@ optional_variable_list _process_backward_mode_ad(
       var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
-        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-        grad_acc->variable.reset();
+        auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
+        grad_acc.variable.reset();
       }
       if (cdata) {
         impl::rebase_history(var, {cdata, output_nr});
       }
     } else if (is_input) {
-      var = _view_as_self_with_no_grad(var);
+      TORCH_CHECK(!is_saved_and_setup_context, error_msg_input_returned_as_is)
+      var = _view_as_self_with_no_grad(var, view_as_self_fn);
       impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
       impl::set_gradient_edge(var, {cdata, output_nr});
@@ -346,16 +350,18 @@ optional_variable_list _process_backward_mode_ad(
   int num_diff_outputs = 0;
 
   for (const auto i : c10::irange(num_outputs)) {
-    // For outputs that are not tensors, put a placeholder undefined input.
+    // We put a undefined_input placeholder for outputs that are not tensor and
+    // for when the output tensor is not differentiable (see below)
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
         auto output_nr = cdata->add_input_metadata(Node::undefined_input());
-        AT_ASSERT(i == (int)output_nr);
+        AT_ASSERT(i == output_nr);
       }
       outputs.emplace_back();
       continue;
     }
 
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Variable var = raw_outputs[i].value();
 
     auto out_tensor_impl = var.unsafeGetTensorImpl();
@@ -364,12 +370,25 @@ optional_variable_list _process_backward_mode_ad(
     bool is_differentiable = cdata &&
         non_differentiable.count(out_tensor_impl) == 0 &&
         isDifferentiableType(var.scalar_type());
+    bool is_saved_and_setup_context =
+        to_save_if_setup_context.count(out_tensor_impl) > 0;
 
     if (cdata) {
-      auto output_nr = cdata->add_input_metadata(var);
-      AT_ASSERT(i == (int)output_nr);
+      uint32_t output_nr = 0;
+      if (!is_differentiable) {
+        output_nr = cdata->add_input_metadata(Node::undefined_input());
+      } else {
+        output_nr = cdata->add_input_metadata(var);
+      }
+      AT_ASSERT(i == output_nr);
     }
-    set_history(var, i, is_input, is_modified, is_differentiable);
+    set_history(
+        var,
+        i,
+        is_input,
+        is_modified,
+        is_differentiable,
+        is_saved_and_setup_context);
 
     // For deprecation cycle. Can be removed after 1.6. In the case where we
     // detected a view in no grad mode during the forward, only warn the user
@@ -421,7 +440,9 @@ optional_variable_list _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function) {
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn) {
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
@@ -429,13 +450,19 @@ optional_variable_list _wrap_outputs(
   }
 
   auto outputs = _process_backward_mode_ad(
-      inputs_mapping, non_differentiable, dirty_inputs, raw_outputs, cdata);
+      inputs_mapping,
+      non_differentiable,
+      dirty_inputs,
+      raw_outputs,
+      cdata,
+      to_save_if_setup_context,
+      view_as_self_fn);
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
   _process_forward_mode_AD(
       input_vars,
-      inputs_mapping,
+      std::move(inputs_mapping),
       raw_outputs,
       outputs,
       non_differentiable,
@@ -448,7 +475,7 @@ optional_variable_list _wrap_outputs(
 void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
-    std::string hook_name) {
+    const std::string& hook_name) {
   if (!original.options().type_equal(result.options())) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the type of value (";
@@ -468,7 +495,7 @@ void check_variable_result(
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sizes().vec() != result.sizes().vec()) {
+  if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
     throw std::runtime_error(ss.str());
@@ -554,5 +581,4 @@ const std::unordered_set<at::TensorImpl*>& AutogradContext::
     get_non_differentiable() const {
   return non_differentiable_;
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -182,8 +182,7 @@ TEST(OptimTest, OptimizerAccessors) {
 
   // test for state() with non-const reference return
   auto& state_ = static_cast<AdagradParamState&>(
-      *(optimizer
-            .state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
+      *(optimizer.state()[params_1[0].unsafeGetTensorImpl()]));
   state_.step(state_.step() + 1);
 
   const auto& optimizer_ = Adagrad(params, options);
@@ -435,8 +434,7 @@ TEST(OptimTest, ZeroGrad) {
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(parameter.grad().defined());
-    ASSERT_EQ(parameter.grad().sum().item<float>(), 0);
+    ASSERT_FALSE(parameter.grad().defined());
   }
 }
 

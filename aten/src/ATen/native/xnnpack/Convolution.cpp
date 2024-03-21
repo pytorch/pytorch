@@ -2,16 +2,15 @@
 
 #include <vector>
 
-#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Convolution.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 namespace internal {
 namespace convolution2d {
 
@@ -236,6 +235,8 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
+      nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   } else {
     for (const auto i : c10::irange(4)) {
@@ -264,6 +265,8 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+      nullptr,                                                        // xnn_caches_t
+      nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   }
 
@@ -337,26 +340,41 @@ Tensor run(
    */
 
   if (context.transposed_) {
-    setup_status = xnn_setup_deconvolution2d_nhwc_f32(
-      context.op.get(),                                      // operator
+    setup_status = xnn_reshape_deconvolution2d_nhwc_f32(
+      context.op.get(),
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       context.output_padding_[0],                            // adjustment_height
       context.output_padding_[1],                            // adjustment_width
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>(),                              // output
+      nullptr,                                               // output_height_out
+      nullptr,                                               // output_width_out
       caffe2::pthreadpool_());                               // threadpool
 
-  } else {
-    setup_status = xnn_setup_convolution2d_nhwc_f32(
+    setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>());                             // output
+  } else {
+    size_t workspace_size = SIZE_MAX;
+    size_t workspace_alignment = SIZE_MAX;
+
+    setup_status = xnn_reshape_convolution2d_nhwc_f32(
+      context.op.get(),
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>(),                              // output
+      &workspace_size,                                       // workspace_size
+      &workspace_alignment,                                  // workspace_alignment
+      nullptr,                                               // output_height_out
+      nullptr,                                               // output_width_out
       caffe2::pthreadpool_());
+
+    setup_status = xnn_setup_convolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
+      nullptr,                                               // workspace
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>());                             // output
   }
 
   TORCH_CHECK(
@@ -493,9 +511,6 @@ Tensor convolution2d(
       ContextConv2D::kMax);
 }
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

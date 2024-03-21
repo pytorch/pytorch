@@ -1,8 +1,16 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
@@ -11,12 +19,37 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/argsort_native.h>
+#include <ATen/ops/broadcast_tensors.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/kthvalue.h>
+#include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/masked_fill.h>
+#include <ATen/ops/median.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/msort_native.h>
+#include <ATen/ops/nanmedian.h>
+#include <ATen/ops/nanmedian_native.h>
+#include <ATen/ops/nanquantile_native.h>
+#include <ATen/ops/quantile_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/sort.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/topk_native.h>
+#endif
+
 #include <utility>
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
-using namespace native;
+using namespace ::at::native;
 
 TORCH_META_FUNC(topk)
 (const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted) {
@@ -30,7 +63,7 @@ TORCH_META_FUNC(topk)
   // Build the output size, which is the dim being selected set to
   // size k
   DimVector topKSize(self.sizes().vec());
-  if (topKSize.size() > 0) {
+  if (!topKSize.empty()) {
     topKSize[dim] = k;
   }
   set_output_raw_strided(0, topKSize, {}, self.options());
@@ -39,9 +72,6 @@ TORCH_META_FUNC(topk)
 
 TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
-  TORCH_INTERNAL_ASSERT(
-      stable.has_value(),
-      "sort(): c10::optional<bool> for stable has to have value.");
   maybe_wrap_dim(dim, self.dim());
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
@@ -55,9 +85,9 @@ TORCH_META_FUNC2(sort, stable)
   set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(sort_stub);
 DEFINE_DISPATCH(topk_stub);
@@ -360,7 +390,7 @@ void quantile_out_impl(
   resize_output(out, out_shape);
 
   auto quantile = quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
   out.copy_(quantile);
 }
 
@@ -378,7 +408,7 @@ Tensor quantile_impl(
   auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
 
   return quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
@@ -423,7 +453,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     .add_output(indices)
     .build();
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "kthvalue_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "kthvalue_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       for (const auto i : c10::irange(n)) {
         TensorAccessor<scalar_t, 1> tmp_values(
@@ -516,10 +546,10 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     .declare_static_shape(sizes, /*squash_dims=*/dim)
     .add_output(vals)
     .add_output(inds)
-    .add_input(in)
+    .add_const_input(in)
     .build();
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, in.scalar_type(), "median_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in.scalar_type(), "median_out", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       for (const auto i : c10::irange(n)) {
         auto valp = reinterpret_cast<scalar_t*>(data[0] + i * strides[0]);
@@ -587,7 +617,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   Tensor in = self.clone();
   Tensor out = at::empty({}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, in.scalar_type(), "median_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in.scalar_type(), "median_cpu", [&] {
     scalar_t* op = out.data_ptr<scalar_t>();
     scalar_t* first = in.data_ptr<scalar_t>();
     scalar_t* last = first + size;
@@ -920,7 +950,7 @@ TORCH_IMPL_FUNC(sort_stable_out)
     indices.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
+    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value_or(false));
   }
 }
 
@@ -959,5 +989,4 @@ Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descen
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native

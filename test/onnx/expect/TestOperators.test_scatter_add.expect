@@ -1,45 +1,28 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::ScatterElements_3"
-    name: "Constant_0"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 3
-        dims: 3
-        data_type: 1
-        raw_data: "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::ScatterElements_3"
+    input: "onnx::ScatterElements_0"
     input: "onnx::ScatterElements_1"
     input: "onnx::ScatterElements_2"
-    output: "onnx::Add_4"
-    name: "ScatterElements_1"
+    output: "3"
+    name: "ScatterElements_0"
     op_type: "ScatterElements"
     attribute {
       name: "axis"
       i: 1
       type: INT
     }
+    attribute {
+      name: "reduction"
+      s: "add"
+      type: STRING
+    }
   }
-  node {
-    input: "onnx::Add_0"
-    input: "onnx::Add_4"
-    output: "5"
-    name: "Add_2"
-    op_type: "Add"
-  }
-  name: "torch_jit"
+  name: "main_graph"
   input {
-    name: "onnx::Add_0"
+    name: "onnx::ScatterElements_0"
     type {
       tensor_type {
         elem_type: 1
@@ -87,7 +70,7 @@ graph {
     }
   }
   output {
-    name: "5"
+    name: "3"
     type {
       tensor_type {
         elem_type: 1
@@ -104,5 +87,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

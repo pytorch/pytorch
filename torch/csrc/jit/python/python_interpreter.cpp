@@ -23,8 +23,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -84,5 +83,4 @@ RegisterOperators reg({Operator(
     aliasAnalysisIsSpecialCase())});
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

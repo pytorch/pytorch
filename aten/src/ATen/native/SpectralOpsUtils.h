@@ -3,9 +3,13 @@
 #include <string>
 #include <stdexcept>
 #include <sstream>
+#include <c10/core/ScalarType.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/core/TensorBase.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Normalization types used in _fft_with_size
 enum class fft_norm_mode {
@@ -77,4 +81,4 @@ DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_sy
 // See NOTE [ Fourier Transform Conjugate Symmetry ]
 TORCH_API void _fft_fill_with_conjugate_symmetry_(const Tensor& self, IntArrayRef dims);
 
-}} // at::native
+} // namespace at::native

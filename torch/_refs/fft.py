@@ -1,15 +1,13 @@
 import math
 
-from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
-
-from typing_extensions import Literal
+from typing import Iterable, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
 from torch._decomp import register_decomposition
-from torch._prims_common import check, DimsType, ShapeType, TensorLikeType
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common import DimsType, ShapeType, TensorLikeType
+from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
 
 __all__ = [
     # Transforms
@@ -36,15 +34,16 @@ __all__ = [
     "ifftshift",
 ]
 
-NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
+NormType = Union[None, Literal["forward", "backward", "ortho"]]
 _NORM_VALUES = {None, "forward", "backward", "ortho"}
+aten = torch._ops.ops.aten
 
 
 def _apply_norm(
     x: TensorLikeType, norm: NormType, signal_numel: int, forward: bool
 ) -> TensorLikeType:
     """Apply normalization to the un-normalized FFT result"""
-    check(norm in _NORM_VALUES, lambda: f"Invalid normalization mode: {norm}")
+    torch._check(norm in _NORM_VALUES, lambda: f"Invalid normalization mode: {norm}")
 
     if norm == "ortho":
         return x * (1 / math.sqrt(signal_numel))
@@ -55,7 +54,9 @@ def _apply_norm(
     return x * (1 / signal_numel) if normalize else x
 
 
-def _promote_type_fft(dtype: torch.dtype, require_complex: bool) -> torch.dtype:
+def _promote_type_fft(
+    dtype: torch.dtype, require_complex: bool, device: torch.device
+) -> torch.dtype:
     """Helper to promote a dtype to one supported by the FFT primitives"""
     if dtype.is_complex:
         return dtype
@@ -63,6 +64,13 @@ def _promote_type_fft(dtype: torch.dtype, require_complex: bool) -> torch.dtype:
     # Promote integral to default float type
     if not dtype.is_floating_point:
         dtype = torch.get_default_dtype()
+
+    allowed_types = [torch.float32, torch.float64]
+    maybe_support_half = device.type in ["cuda", "meta"]
+
+    if maybe_support_half:
+        allowed_types.append(torch.float16)
+    torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
 
     if require_complex:
         dtype = utils.corresponding_complex_dtype(dtype)
@@ -75,10 +83,8 @@ def _maybe_promote_tensor_fft(
 ) -> TensorLikeType:
     """Helper to promote a tensor to a dtype supported by the FFT primitives"""
     cur_type = t.dtype
-    new_type = _promote_type_fft(cur_type, require_complex)
-    if cur_type == new_type:
-        return t
-    return prims.convert_element_type(t, new_type)
+    new_type = _promote_type_fft(cur_type, require_complex, t.device)
+    return _maybe_convert_to_dtype(t, new_type)  # type: ignore[return-value]
 
 
 def _resize_fft_input(
@@ -117,9 +123,12 @@ def _fft_c2r(
 ) -> TensorLikeType:
     """Common code for performing any complex to real FFT (irfft or hfft)"""
     input = _maybe_promote_tensor_fft(input, require_complex=True)
-    dims = (utils.canonicalize_dim(input.ndim, dim),)
+    dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    check(last_dim_size >= 1, lambda: f"Invalid number of data points ({n}) specified")
+    torch._check(
+        last_dim_size >= 1,
+        lambda: f"Invalid number of data points ({last_dim_size}) specified",
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims=dims, sizes=(last_dim_size // 2 + 1,))
@@ -141,18 +150,22 @@ def _fft_r2c(
     onesided: bool,
 ) -> TensorLikeType:
     """Common code for performing any real to complex FFT (rfft or ihfft)"""
-    check(
+    torch._check(
         not input.dtype.is_complex,
         lambda: f"{func_name} expects a floating point input tensor, but got {input.dtype}",
     )
     input = _maybe_promote_tensor_fft(input)
-    dims = (utils.canonicalize_dim(input.ndim, dim),)
+    dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
+    dim_size = n if n is not None else input.shape[dim]
+    torch._check(
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
 
     ret = prims.fft_r2c(input, dim=dims, onesided=onesided)
-    ret = _apply_norm(ret, norm, input.shape[dim], forward)
+    ret = _apply_norm(ret, norm, dim_size, forward)
     return ret if forward else torch.conj(ret)
 
 
@@ -165,20 +178,24 @@ def _fft_c2c(
     forward: bool,
 ) -> TensorLikeType:
     """Common code for performing any complex to complex FFT (fft or ifft)"""
-    check(
+    torch._check(
         input.dtype.is_complex,
         lambda: f"{func_name} expects a complex input tensor, but got {input.dtype}",
     )
-    dims = (utils.canonicalize_dim(input.ndim, dim),)
+    dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
+    dim_size = n if n is not None else input.shape[dim]
+    torch._check(
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
 
     ret = prims.fft_c2c(input, dim=dims, forward=forward)
-    return _apply_norm(ret, norm, input.shape[dim], forward)
+    return _apply_norm(ret, norm, dim_size, forward)
 
 
-@register_decomposition(torch.ops.aten.fft_fft)
+@register_decomposition(aten.fft_fft)
 @out_wrapper()
 def fft(
     input: TensorLikeType,
@@ -192,7 +209,7 @@ def fft(
         return _fft_r2c("fft", input, n, dim, norm, forward=True, onesided=False)
 
 
-@register_decomposition(torch.ops.aten.fft_ifft)
+@register_decomposition(aten.fft_ifft)
 @out_wrapper()
 def ifft(
     input: TensorLikeType,
@@ -206,7 +223,7 @@ def ifft(
         return _fft_r2c("ifft", input, n, dim, norm, forward=False, onesided=False)
 
 
-@register_decomposition(torch.ops.aten.fft_rfft)
+@register_decomposition(aten.fft_rfft)
 @out_wrapper()
 def rfft(
     input: TensorLikeType,
@@ -217,7 +234,7 @@ def rfft(
     return _fft_r2c("rfft", input, n, dim, norm, forward=True, onesided=True)
 
 
-@register_decomposition(torch.ops.aten.fft_irfft)
+@register_decomposition(aten.fft_irfft)
 @out_wrapper()
 def irfft(
     input: TensorLikeType,
@@ -228,7 +245,7 @@ def irfft(
     return _fft_c2r("irfft", input, n, dim, norm, forward=False)
 
 
-@register_decomposition(torch.ops.aten.fft_hfft)
+@register_decomposition(aten.fft_hfft)
 @out_wrapper()
 def hfft(
     input: TensorLikeType,
@@ -239,7 +256,7 @@ def hfft(
     return _fft_c2r("hfft", input, n, dim, norm, forward=True)
 
 
-@register_decomposition(torch.ops.aten.fft_ihfft)
+@register_decomposition(aten.fft_ihfft)
 @out_wrapper()
 def ihfft(
     input: TensorLikeType,
@@ -265,23 +282,25 @@ def _canonicalize_fft_shape_and_dim_args(
     if dim is not None:
         if not isinstance(dim, Sequence):
             dim = (dim,)
-        ret_dims = utils.canonicalize_dims(input_dim, dim)
+        ret_dims = utils.canonicalize_dims(input_dim, dim, wrap_scalar=False)
 
         # Check dims are unique
-        check(len(set(dim)) == len(dim), lambda: "FFT dims must be unique")
+        torch._check(
+            len(set(ret_dims)) == len(ret_dims), lambda: "FFT dims must be unique"
+        )
 
     if shape is not None:
         if not isinstance(shape, Sequence):
             shape = (shape,)
 
         # Has shape, might have dim
-        check(
+        torch._check(
             dim is None or len(dim) == len(shape),
             lambda: "When given, dim and shape arguments must have the same length",
         )
         transform_ndim = len(shape)
 
-        check(
+        torch._check(
             transform_ndim <= input_dim,
             lambda: f"Got shape with {transform_ndim} values but input tensor "
             f"only has {input_dim} dimensions.",
@@ -293,7 +312,7 @@ def _canonicalize_fft_shape_and_dim_args(
 
         # Translate any -1 values in shape to the default length
         ret_shape = tuple(
-            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)
+            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
         )
     elif dim is None:
         # No shape, no dim
@@ -301,12 +320,12 @@ def _canonicalize_fft_shape_and_dim_args(
         ret_shape = tuple(input_sizes)
     else:
         # No shape, has dim
-        ret_shape = tuple(input_sizes[d] for d in ret_dims)
+        ret_shape = tuple(input_sizes[d] for d in ret_dims)  # type: ignore[possibly-undefined]
 
     for n in ret_shape:
-        check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
+        torch._check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
 
-    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
+    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)  # type: ignore[possibly-undefined]
 
 
 def _prod(xs: Iterable[int]) -> int:
@@ -326,7 +345,7 @@ def _fftn_c2c(
     forward: bool,
 ) -> TensorLikeType:
     """Common code for n-dimensional complex to complex FFTs (fftn or ifftn)"""
-    check(
+    torch._check(
         input.dtype.is_complex,
         lambda: f"{function_name} expects a complex input tensor, "
         f"but got {input.dtype}",
@@ -336,7 +355,7 @@ def _fftn_c2c(
     return _apply_norm(output, norm=norm, signal_numel=_prod(shape), forward=forward)
 
 
-@register_decomposition(torch.ops.aten.fft_fftn)
+@register_decomposition(aten.fft_fftn)
 @out_wrapper()
 def fftn(
     input: TensorLikeType,
@@ -349,7 +368,7 @@ def fftn(
     return _fftn_c2c("fftn", x, shape, dim, norm, forward=True)
 
 
-@register_decomposition(torch.ops.aten.fft_ifftn)
+@register_decomposition(aten.fft_ifftn)
 @out_wrapper()
 def ifftn(
     input: TensorLikeType,
@@ -362,7 +381,7 @@ def ifftn(
     return _fftn_c2c("ifftn", x, shape, dim, norm, forward=False)
 
 
-@register_decomposition(torch.ops.aten.fft_rfftn)
+@register_decomposition(aten.fft_rfftn)
 @out_wrapper()
 def rfftn(
     input: TensorLikeType,
@@ -370,7 +389,7 @@ def rfftn(
     dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    check(
+    torch._check(
         not input.dtype.is_complex,
         lambda: f"rfftn expects a real-valued input tensor, but got {input.dtype}",
     )
@@ -381,7 +400,7 @@ def rfftn(
     return _apply_norm(out, norm=norm, signal_numel=_prod(shape), forward=True)
 
 
-@register_decomposition(torch.ops.aten.fft_ihfftn)
+@register_decomposition(aten.fft_ihfftn)
 @out_wrapper()
 def ihfftn(
     input: TensorLikeType,
@@ -389,12 +408,12 @@ def ihfftn(
     dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    check(
+    torch._check(
         not input.dtype.is_complex,
         lambda: f"ihfftn expects a real-valued input tensor, but got {input.dtype}",
     )
     shape, dim = _canonicalize_fft_shape_and_dim_args(input, s, dim)
-    check(len(shape) > 0, lambda: "ihfftn must transform at least one axis")
+    torch._check(len(shape) > 0, lambda: "ihfftn must transform at least one axis")
     input = _maybe_promote_tensor_fft(input, require_complex=False)
     input = _resize_fft_input(input, dim, shape)
 
@@ -424,14 +443,14 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
     """Canonicalize shape and dim arguments for n-dimensional c2r transforms,
     as well as calculating the last_dim_size which is shape[dim[-1]] for the output"""
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
-    check(len(shape) > 0, lambda: f"{fname} must transform at least one axis")
+    torch._check(len(shape) > 0, lambda: f"{fname} must transform at least one axis")
 
     if s is None or s[-1] == -1:
         last_dim_size = 2 * (input.shape[dim[-1]] - 1)
     else:
         last_dim_size = shape[-1]
 
-    check(
+    torch._check(
         last_dim_size >= 1,
         lambda: f"Invalid number of data points ({last_dim_size}) specified",
     )
@@ -443,7 +462,7 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
     )
 
 
-@register_decomposition(torch.ops.aten.fft_irfftn)
+@register_decomposition(aten.fft_irfftn)
 @out_wrapper()
 def irfftn(
     input: TensorLikeType,
@@ -460,7 +479,7 @@ def irfftn(
     return _apply_norm(out, norm, _prod(out.shape[d] for d in dim), forward=False)
 
 
-@register_decomposition(torch.ops.aten.fft_hfftn)
+@register_decomposition(aten.fft_hfftn)
 @out_wrapper()
 def hfftn(
     input: TensorLikeType,
@@ -481,7 +500,7 @@ def hfftn(
     return _apply_norm(out, norm, last_dim_size, forward=True)
 
 
-@register_decomposition(torch.ops.aten.fft_fft2)
+@register_decomposition(aten.fft_fft2)
 @out_wrapper()
 def fft2(
     input: TensorLikeType,
@@ -492,7 +511,7 @@ def fft2(
     return torch.fft.fftn(input, s=s, dim=dim, norm=norm)
 
 
-@register_decomposition(torch.ops.aten.fft_ifft2)
+@register_decomposition(aten.fft_ifft2)
 @out_wrapper()
 def ifft2(
     input: TensorLikeType,
@@ -503,7 +522,7 @@ def ifft2(
     return torch.fft.ifftn(input, s=s, dim=dim, norm=norm)
 
 
-@register_decomposition(torch.ops.aten.fft_rfft2)
+@register_decomposition(aten.fft_rfft2)
 @out_wrapper()
 def rfft2(
     input: TensorLikeType,
@@ -514,7 +533,7 @@ def rfft2(
     return torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
 
 
-@register_decomposition(torch.ops.aten.fft_irfft2)
+@register_decomposition(aten.fft_irfft2)
 @out_wrapper()
 def irfft2(
     input: TensorLikeType,
@@ -525,7 +544,7 @@ def irfft2(
     return torch.fft.irfftn(input, s=s, dim=dim, norm=norm)
 
 
-@register_decomposition(torch.ops.aten.fft_hfft2)
+@register_decomposition(aten.fft_hfft2)
 @out_wrapper()
 def hfft2(
     input: TensorLikeType,
@@ -536,7 +555,7 @@ def hfft2(
     return torch.fft.hfftn(input, s=s, dim=dim, norm=norm)
 
 
-@register_decomposition(torch.ops.aten.fft_ihfft2)
+@register_decomposition(aten.fft_ihfft2)
 @out_wrapper()
 def ihfft2(
     input: TensorLikeType,
@@ -557,14 +576,14 @@ def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> List[int]:
         return list(dim)
 
 
-@register_decomposition(torch.ops.aten.fft_fftshift)
+@register_decomposition(aten.fft_fftshift)
 def fftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     dims = _default_alldims(dim, input)
     shift = [input.shape[d] // 2 for d in dims]
     return torch.roll(input, shift, dims)
 
 
-@register_decomposition(torch.ops.aten.fft_ifftshift)
+@register_decomposition(aten.fft_ifftshift)
 def ifftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     dims = _default_alldims(dim, input)
     shift = [(input.shape[d] + 1) // 2 for d in dims]

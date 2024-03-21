@@ -1,32 +1,38 @@
 #pragma once
 
+#include <torch/csrc/distributed/c10d/Store.hpp>
+
 #include <chrono>
 #include <cstdint>
 
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/ivalue.h>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10d {
 
 // Base class for supplementary data potentially needed by ReduceOps
 struct TORCH_API _SupplementBase : torch::CustomClassHolder {
-  virtual ~_SupplementBase() {}
+  ~_SupplementBase() override = default;
 };
 
 // Supplementary data specific to NCCL PREMUL_SUM
 // The point of use in ProcessGroupNCCL knows how to unpack it.
 struct NCCLPreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
-  std::vector<at::Tensor> tensor_factors;
+  at::Tensor tensor_factor;
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(std::vector<at::Tensor> f) : tensor_factors{std::move(f)} {}
+  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
+    TORCH_CHECK_EQ(tensor_factor.numel(), 1);
+  }
 };
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
 struct TORCH_API ReduceOp : torch::CustomClassHolder {
+  // note(crcrpar): RedOpType could be defined outside of `ReduceOp`
   enum RedOpType : uint8_t {
     SUM = 0,
     AVG = 1,
@@ -40,14 +46,17 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     UNUSED = 9
   };
 
-  ReduceOp() {}
+  ReduceOp() = default;
 
   ReduceOp(RedOpType op) : op_(op) {
     TORCH_INTERNAL_ASSERT(
-      op_ != PREMUL_SUM, "PREMUL_SUM requires a scale factor tensor or scalar argument");
+        op_ != PREMUL_SUM,
+        "Use `torch.distributed._make_nccl_premul_sum` to create an instance of ReduceOp with PREMUL_SUM");
   }
 
-  ReduceOp(RedOpType op, c10::intrusive_ptr<_SupplementBase> optional_supplement) {
+  ReduceOp(
+      RedOpType op,
+      c10::intrusive_ptr<_SupplementBase> optional_supplement) {
     if (optional_supplement.get()) {
       op_ = op;
     } else {
@@ -55,10 +64,10 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     }
   }
 
-  // The heap resource supplement_, if it exists, is managed by a shared_ptr,
-  // so constructors and operator= can be simple
-  ReduceOp(const ReduceOp& other) :
-    op_(other.op_), supplement_(other.supplement_) {}
+  // The heap resource supplement_, if it exists, is managed by a
+  // c10::intrusive_ptr, so constructors and operator= can be simple
+  ReduceOp(const ReduceOp& other)
+      : op_(other.op_), supplement_(other.supplement_) {}
 
   const ReduceOp& operator=(const ReduceOp& other) {
     op_ = other.op_;
@@ -66,7 +75,9 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     return *this;
   }
 
-  operator RedOpType() const { return op_; }
+  operator RedOpType() const {
+    return op_;
+  }
 
   bool operator==(const std::uint8_t other) {
     TORCH_INTERNAL_ASSERT(other < 9, "Invalid other op value");
@@ -77,6 +88,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     return *this == static_cast<std::uint8_t>(other);
   }
 
+  // todo(crcrpar): Handle `RedOpType::PREMUL_SUM` with its scaling factor.
   bool operator==(const ReduceOp& other) {
     return *this == other.op_;
   }
@@ -92,7 +104,8 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
   c10::intrusive_ptr<_SupplementBase> supplement_;
 };
 
-template<typename T> ReduceOp makeNCCLPreMulSum(const T& factor) {
+template <typename T>
+ReduceOp makeNCCLPreMulSum(const T& factor) {
   ReduceOp rop;
   rop.op_ = ReduceOp::PREMUL_SUM;
   rop.supplement_ = c10::make_intrusive<NCCLPreMulSumSupplement>(factor);
@@ -105,11 +118,13 @@ struct BroadcastOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  c10::optional<at::Tensor> sparseIndices = c10::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -123,6 +138,7 @@ struct ReduceOptions {
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct GatherOptions {
@@ -133,11 +149,13 @@ struct GatherOptions {
 struct ScatterOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct AllToAllOptions {
@@ -147,6 +165,16 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  c10::optional<at::Device> device;
+};
+
+struct DistributedBackendOptions {
+  c10::intrusive_ptr<::c10d::Store> store;
+  int group_rank;
+  int group_size;
+  std::chrono::duration<float> timeout;
+  std::string group_id;
+  std::vector<int64_t> global_ranks_in_group;
 };
 
 } // namespace c10d

@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
 
@@ -64,6 +64,8 @@ void codegenOutputQuery(
     max_dev_version = CudaVersion(7, 5);
   } else if (nvrtc_version == CudaVersion(11, 0)) { // 11.0 supports 3-8.0
     max_dev_version = CudaVersion(8, 0);
+  } else if (nvrtc_version.first == 11 && nvrtc_version.second < 8) {
+    max_dev_version = CudaVersion(8, 6);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
@@ -103,7 +105,7 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
-  executor_utils::initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
@@ -125,7 +127,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -146,7 +148,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       std::to_string(major) + std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());

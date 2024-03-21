@@ -1,33 +1,69 @@
 #version 450 core
-#define PRECISION $precision
+// clang-format off
+#define PRECISION ${PRECISION}
+// clang-format on
 
 layout(std430) buffer;
 
-/* Qualifiers: layout - storage - precision - memory */
+/*
+ * Input Sampler
+ */
+layout(set = 0, binding = 0) uniform PRECISION sampler3D uImage;
 
-layout(set = 0, binding = 0) uniform PRECISION                    sampler3D uImage;
-layout(set = 0, binding = 1) buffer  PRECISION restrict writeonly Buffer {
+/*
+ * Output Buffer
+ */
+layout(set = 0, binding = 1) buffer PRECISION restrict writeonly Buffer {
   float data[];
-} uBuffer;
-layout(set = 0, binding = 2) uniform PRECISION restrict           Block {
-  ivec4 size;
-  ivec4 offset;
-} uBlock;
+}
+uBuffer;
 
+/*
+ * Params Buffer
+ */
+layout(set = 0, binding = 2) uniform PRECISION restrict Block {
+  // xyz contain the extents of the input texture, w contains HxW to help
+  // calculate buffer offsets
+  ivec4 in_extents;
+  // x: number of texels spanned by one channel
+  // y: number of channels
+  ivec2 c_info;
+}
+uBlock;
+
+/*
+ * Local Work Group Size
+ */
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-  if (all(lessThan(pos, uBlock.size.xyz))) {
-    const vec4 texel = texelFetch(uImage, pos, 0);
+  if (any(greaterThanEqual(pos, uBlock.in_extents.xyz))) {
+    return;
+  }
 
-    const int base = pos.x + uBlock.size.x * pos.y + uBlock.size.w * pos.z;
-    const ivec4 index = base + uBlock.offset;
+  const vec4 intex = texelFetch(uImage, pos, 0);
 
-    uBuffer.data[index.x] = texel.r;
-    uBuffer.data[index.y] = texel.g;
-    uBuffer.data[index.z] = texel.b;
-    uBuffer.data[index.w] = texel.a;
+  const int n_index = int(pos.z / uBlock.c_info.x);
+  const int c_index = (pos.z % uBlock.c_info.x) * 4;
+  int d_offset = (n_index * uBlock.c_info.y) + c_index;
+
+  const int base_index =
+      pos.x + uBlock.in_extents.x * pos.y + uBlock.in_extents.w * d_offset;
+  const ivec4 buf_indices =
+      base_index + ivec4(0, 1, 2, 3) * uBlock.in_extents.w;
+
+  if (c_index < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.x] = intex.x;
+  }
+  if (c_index + 1 < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.y] = intex.y;
+  }
+  if (c_index + 2 < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.z] = intex.z;
+  }
+  if (c_index + 3 < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.w] = intex.w;
   }
 }

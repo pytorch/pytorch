@@ -275,8 +275,8 @@ Note, is slope is size 1, the value is shared across the channels, otherwise $X$
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/prelu_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/prelu_op.cc
 
 
 <details>

@@ -63,7 +63,7 @@ bool Module::compareMethodSchemas(
 
 void Module::unsafeRemoveMethod(const std::string& basename) {
   int64_t i = 0;
-  for (; i < cu_->methods().size(); ++i) {
+  for (; i < static_cast<int64_t>(cu_->methods().size()); ++i) {
     if ((cu_->methods()[i])->name() == basename) {
       break;
     }
@@ -97,6 +97,10 @@ c10::optional<Method> Module::find_method(const std::string& basename) const {
 }
 
 namespace {
+// For JIT, there is a private function to get all modules by iteration in
+// struct slot_iterator_impl (jit/api/module.h). The following function use
+// recursion to mimic the logic without allocating extra memory to get module
+// list and set training attribute directly.
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
@@ -109,7 +113,9 @@ void set_train_recurse(
         "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
-    if (slot.isObject()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
       set_train_recurse(slot.toObject(), on);
     }
   }
@@ -135,8 +141,7 @@ void slot_named_params_recurse(
   size_t nslots = slots.size();
   for (const auto i : c10::irange(nslots)) {
     auto slot = slots[i];
-    std::string name =
-        parent_name.size() == 0 ? parent_name : parent_name + ".";
+    std::string name = parent_name.empty() ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
     // TODO: Fix this filter. Requires_grad is not the appropriate
     // filter of a parameter, but is a temporary hack to help probable
@@ -311,7 +316,7 @@ c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
   return stack.front();
 }
 
-c10::optional<std::string> print_type(const c10::Type& t) {
+static c10::optional<std::string> print_type(const c10::Type& t) {
   auto namedType = t.cast<c10::NamedType>();
   if (namedType && namedType->name()) {
     return namedType->name().value().qualifiedName();
@@ -329,7 +334,7 @@ TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
   std::vector<std::string> type_name_list;
   for (const auto& func_ptr : module.compilation_unit().methods()) {
     const auto& function = *func_ptr;
-    for (int i = 0; i < function.get_code().op_names_.size(); i++) {
+    for (const auto i : c10::irange(function.get_code().op_names_.size())) {
       const auto& op = function.get_code().op_names_[i];
       minfo.opname_to_num_args[mobile::operator_str(op)] =
           function.get_code().operator_input_sizes_[i];

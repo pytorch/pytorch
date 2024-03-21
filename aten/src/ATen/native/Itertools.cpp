@@ -1,5 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/cartesian_prod_native.h>
+#include <ATen/ops/combinations_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/meshgrid.h>
+#include <ATen/ops/stack.h>
+#endif
 
 #include <vector>
 
@@ -27,8 +41,7 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
 
 }  // namespace
 
-namespace at {
-namespace native{
+namespace at::native {
 
 Tensor cartesian_prod(TensorList tensors) {
   for(const Tensor &t : tensors) {
@@ -59,5 +72,4 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   return at::stack(grids, 1);
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

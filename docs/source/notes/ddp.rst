@@ -28,6 +28,7 @@ updated, and all models on different processes should be exactly the same.
     import torch.multiprocessing as mp
     import torch.nn as nn
     import torch.optim as optim
+    import os
     from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -65,7 +66,15 @@ updated, and all models on different processes should be exactly the same.
         os.environ["MASTER_PORT"] = "29500"
         main()
 
+DDP works with TorchDynamo.  When used with TorchDynamo, apply the DDP model wrapper
+before compiling the model, such that torchdynamo can apply ``DDPOptimizer``
+(graph-break optimizations) based on DDP bucket sizes.  (See `TorchDynamo DDPOptimizer <./ddp.html#torchdynamo-ddpoptimizer>`_ for more information.)
 
+
+.. code::
+
+        ddp_model = DDP(model, device_ids=[rank])
+        ddp_model = torch.compile(ddp_model)
 
 Internal Design
 ^^^^^^^^^^^^^^^
@@ -193,3 +202,24 @@ DistributedDataParallel
 .. image:: https://user-images.githubusercontent.com/16999635/72313120-4e7c1c80-3658-11ea-9c6d-44336b2daeac.png
     :alt: ddp_code.png
     :width: 400 px
+
+
+TorchDynamo DDPOptimizer
+------------------------
+
+DDP's performance advantage comes from overlapping allreduce collectives with computations during backwards.
+AotAutograd prevents this overlap when used with TorchDynamo for compiling a whole forward and whole backward graph,
+because allreduce ops are launched by autograd hooks _after_ the whole optimized backwards computation finishes.
+
+TorchDynamo's DDPOptimizer helps by breaking the forward graph at the logical boundaries of DDP's allreduce buckets
+during backwards.  Note: the goal is to break the graph during backwards, and the simplest implementation is to
+break the forward graphs and then call AotAutograd and compilation on each section.  This allows DDP's allreduce hooks
+to fire in-between sections of backwards, and schedule communications to overlap with compute.
+
+See `this blog post <https://dev-discuss.pytorch.org/t/torchdynamo-update-9-making-ddp-work-with-torchdynamo/860/1>`_ for
+a more in-depth explanation and experimental results, or read the docs and code at
+`torch/_dynamo/optimizations/distributed.py <https://github.com/pytorch/pytorch/blob/bbc39b7bb48d28d67e3253a89cc82df3687ddd1b/torch/_dynamo/backends/distributed.py#L124>`_
+
+To Debug DDPOptimizer, set `TORCH_LOGS='ddp_graphs'` for full graph dumps. For logs without graphs, add any of 'dynamo', 'distributed', or 'dist_ddp' to  `TORCH_LOGS`
+(for basic info about bucket boundaries).  To disable DDPOptimizer, set `torch._dynamo.config.optimize_ddp=False`.
+DDP and TorchDynamo should still work correctly without DDPOptimizer, but with performance degradation.

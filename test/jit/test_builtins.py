@@ -28,17 +28,17 @@ class TestBuiltins(JitTestCase):
     def test_has_attr(self):
         class HasA(torch.nn.Module):
             def __init__(self):
-                super(HasA, self).__init__()
+                super().__init__()
                 self.a = 0
 
         class HasB(torch.nn.Module):
             def __init__(self):
-                super(HasB, self).__init__()
+                super().__init__()
                 self.b = 1
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mods = torch.nn.ModuleList([HasA(), HasB()])
 
             def forward(self):
@@ -59,7 +59,7 @@ class TestBuiltins(JitTestCase):
     def test_has_attr_invalid_args(self):
         class Mod(torch.nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mod = torch.nn.Linear(1, 1)
 
             def forward(self, name):
@@ -70,9 +70,6 @@ class TestBuiltins(JitTestCase):
             torch.jit.script(Mod())
 
         class Mod(torch.nn.Module):
-            def __init__(self):
-                super(Mod, self).__init__()
-
             def forward(self, name):
                 # not allowed, `torch.rand` is not a class type
                 return hasattr(torch.rand(2, 3), name)
@@ -93,7 +90,7 @@ class TestBuiltins(JitTestCase):
             def fn(x):
                 a = x ** 2
                 del a
-                return a
+                return a  # noqa: F821
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
@@ -107,7 +104,7 @@ class TestBuiltins(JitTestCase):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
-                del b
+                del b  # noqa: F821
                 return a
 
     def test_del_multiple_operands(self):
@@ -158,20 +155,20 @@ class TestTensorBuiltins(JitTestCase):
             return x.{}
         """
 
-        EQUALITY_MISMATCH = set([
+        EQUALITY_MISMATCH = {
             # TorchScript doesn't have real enums so they return an int instead
             # of the actual value
             'dtype',
             'layout',
-        ])
-        MISSING_PROPERTIES = set([
+        }
+        MISSING_PROPERTIES = {
             'grad_fn',
             # This is an undocumented property so it's not included
             "output_nr",
             # This has a longer implementation, maybe not worth copying to
             # TorchScript if named tensors don't work there anyways
             'names',
-        ])
+        }
 
         for p in properties:
             if p in MISSING_PROPERTIES:

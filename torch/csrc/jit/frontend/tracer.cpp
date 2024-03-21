@@ -26,9 +26,7 @@
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace tracer {
+namespace torch::jit::tracer {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Recording the traces
@@ -112,7 +110,7 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
-Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+static Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
   return getValueTrace(IValue(var));
 }
 Value* TracingState::getValue(const IValue& var) {
@@ -376,7 +374,7 @@ static IValue addInput(
 
     // Unpack the list values statically
     for (const auto& entry : dict) {
-      IValue key = entry.key();
+      const IValue& key = entry.key();
       auto static_key = state->graph->insertConstant(key);
       auto static_value =
           state->graph->insert(aten::__getitem__, {value, static_key});
@@ -554,6 +552,15 @@ void TracingState::setValue(const IValue& v, Value* value) {
     auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
+
+    // If the value comes from a CallFunction or CallMethod, it may not have
+    // shape information attached. For debuggability, we enhance the type
+    // information by assigning the concrete value's tupe to the jit::Value.
+    if (auto tensor_type = value->type()->cast<TensorType>()) {
+      if (!tensor_type->isComplete()) {
+        value->inferTypeFrom(var);
+      }
+    }
   } else if (v.isTensorList()) {
     auto outputs = v.toTensorList();
     Node* unpack_node =
@@ -607,7 +614,7 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymInt value) {
-  addInputs(n, name, value.expect_int());
+  addInputs(n, name, value.guard_int(__FILE__, __LINE__));
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
@@ -672,18 +679,20 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::Generator>& value) {
-  if (value.has_value() && value->defined()) {
-    detail::badArgType(*value);
-  }
   Graph* g = n->owningGraph();
-  Value* undef_gen = g->insertNode(g->createNone())->output();
-  n->addInput(undef_gen);
+
+  if (value.has_value() && value->defined()) {
+    detail::genericAddInput(n, *value);
+  } else {
+    Value* undef_gen = g->insertNode(g->createNone())->output();
+    n->addInput(undef_gen);
+  }
 }
 void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, c10::Stream stream) {
-  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+  detail::genericAddInput(n, c10::IValue(stream));
 }
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
@@ -724,11 +733,24 @@ void addInputs(
     const c10::optional<at::ScalarType>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-
 void addInputs(
     Node* n,
     const char* name,
-    at::TensorList value,
+    at::ArrayRef<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorListRef(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorListRef(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
@@ -752,7 +774,6 @@ TORCH_API void addInputs(
       OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
-
 void addInputs(
     Node* n,
     const char* name,
@@ -762,19 +783,6 @@ void addInputs(
   Node* list_node =
       g->insertNode(g->createList(class_type, fmap(value, getValueTrace)));
   n->addInput(list_node->output());
-}
-
-void addInputs(
-    Node* n,
-    const char* name,
-    c10::optional<caffe2::TypeMeta> opt_dtype) {
-  if (opt_dtype.has_value()) {
-    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
@@ -802,15 +810,16 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
-  addInputs(n, name, asIntArrayRefSlow(value));
+  addInputs(n, name, C10_AS_INTARRAYREF_SLOW(value));
 }
 
 void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
   addInputs(
       n,
       name,
-      value.has_value() ? c10::make_optional(value->expect_int())
-                        : c10::nullopt);
+      value.has_value()
+          ? c10::make_optional(value->guard_int(__FILE__, __LINE__))
+          : c10::nullopt);
 }
 
 void addInputs(
@@ -824,6 +833,19 @@ void addInputs(
     Node* n,
     const char* name,
     const at::OptionalIntArrayRef& opt_value) {
+  if (opt_value.has_value()) {
+    jit::tracer::addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalSymIntArrayRef& opt_value) {
   if (opt_value.has_value()) {
     jit::tracer::addInputs(n, name, *opt_value);
   } else {
@@ -1030,7 +1052,7 @@ void ArgumentStash::stashValue(
 // Stack trace recording
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
-void defaultRecordSourceLocation(Node* n) {}
+static void defaultRecordSourceLocation(Node* n) {}
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
     defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
@@ -1040,7 +1062,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
-std::vector<StackEntry> defaultPythonCallstack() {
+static std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
@@ -1052,7 +1074,7 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
   python_callstack_fn.store(v);
 }
 
-void defaultWarn(const std::string& str) {
+static void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
@@ -1089,6 +1111,4 @@ void _do_warn(const char* _reason, const char* _kind) {
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
 }
-} // namespace tracer
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tracer

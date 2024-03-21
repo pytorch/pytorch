@@ -1,4 +1,4 @@
-"""Serialization
+"""Serialization.
 
 This module contains functionality for serializing TorchScript modules, notably:
     * torch.jit.save
@@ -7,19 +7,20 @@ This module contains functionality for serializing TorchScript modules, notably:
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import os
-import pathlib
 
 import torch
-from torch._six import string_classes
+from torch._utils_internal import log_torchscript_usage
 from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
 
 def save(m, f, _extra_files=None):
     r"""
-    Save an offline version of this module for use in a separate process. The
-    saved module serializes all of the methods, submodules, parameters, and
+    Save an offline version of this module for use in a separate process.
+
+    The saved module serializes all of the methods, submodules, parameters, and
     attributes of this module. It can be loaded into the C++ API using
     ``torch::jit::load(filename)`` or into the Python API with
     :func:`torch.jit.load <torch.jit.load>`.
@@ -50,7 +51,6 @@ def save(m, f, _extra_files=None):
         replicate the 1.6 behavior.
 
     Example:
-
     .. testcode::
 
         import torch
@@ -75,19 +75,19 @@ def save(m, f, _extra_files=None):
         extra_files = {'foo.txt': b'bar'}
         torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
+    log_torchscript_usage("save")
     if _extra_files is None:
         _extra_files = {}
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, os.PathLike)):
         m.save(f, _extra_files=_extra_files)
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
         f.write(ret)
 
 
-def load(f, map_location=None, _extra_files=None):
+def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     r"""
-    Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
-    saved with :func:`torch.jit.save <torch.jit.save>`
+    Load a :class:`ScriptModule` or :class:`ScriptFunction` previously saved with :func:`torch.jit.save <torch.jit.save>`.
 
     All previously saved modules, no matter their device, are first loaded onto CPU,
     and then are moved to the devices they were saved from. If this fails (e.g.
@@ -103,12 +103,12 @@ def load(f, map_location=None, _extra_files=None):
         _extra_files (dictionary of filename to content): The extra
             filenames given in the map would be loaded and their content
             would be stored in the provided map.
+        _restore_shapes (bool): Whether or not to retrace the module on load using stored inputs
 
     Returns:
         A :class:`ScriptModule` object.
 
     Example:
-
     .. testcode::
 
         import torch
@@ -146,24 +146,24 @@ def load(f, map_location=None, _extra_files=None):
         import os
         os.remove("scriptmodule.pt")
     """
-
-    if isinstance(f, string_classes):
+    log_torchscript_usage("load")
+    if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):  # type: ignore[type-var]
-            raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
+            raise ValueError(f"The provided filename {f} does not exist")  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):
-            raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
+            raise ValueError(f"The provided filename {f} is a directory")  # type: ignore[str-bytes-safe]
 
     map_location = validate_map_location(map_location)
     if _extra_files is None:
         _extra_files = {}
 
     cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files)
+    if isinstance(f, (str, os.PathLike)):
+        cpp_module = torch._C.import_ir_module(cu, os.fspath(f), map_location, _extra_files, _restore_shapes)  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
-            cu, f.read(), map_location, _extra_files
-        )
+            cu, f.read(), map_location, _extra_files, _restore_shapes
+        )  # type: ignore[call-arg]
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return wrap_cpp_module(cpp_module)
@@ -184,35 +184,19 @@ def validate_map_location(map_location=None):
     return map_location
 
 
-def get_ff_module():
-    try:
-        import torch._C_flatbuffer as ff
-
-        return ff
-    except ImportError:
-        print("Please include //caffe2:_C_flatbuffer as dependency.")
-        raise
-
-
 def jit_module_from_flatbuffer(f):
-    ff = get_ff_module()
-    if isinstance(f, string_classes):
-        if not os.path.exists(f):  # type: ignore[type-var]
-            raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
-        if os.path.isdir(f):
-            raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
-
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        f = str(f)
-        return wrap_cpp_module(ff._load_jit_module_from_file(f))
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
+        return wrap_cpp_module(torch._C._load_jit_module_from_file(f))
     else:
-        return wrap_cpp_module(ff._load_jit_module_from_bytes(f.read()))
+        return wrap_cpp_module(torch._C._load_jit_module_from_bytes(f.read()))
 
 
 def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
     r"""
-    Save an offline version of this module for use in a separate process. The
-    saved module serializes all of the methods, submodules, parameters, and
+    Save an offline version of this module for use in a separate process.
+
+    The saved module serializes all of the methods, submodules, parameters, and
     attributes of this module. It can be loaded into the C++ API using
     ``torch::jit::load_jit_module_from_file(filename)`` or into the Python API with
     :func:`torch.jit.jit_module_from_flatbuffer<torch.jit.jit_module_from_flatbuffer>`.
@@ -232,7 +216,6 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
 
 
     Example:
-
     .. testcode::
 
         import torch
@@ -247,23 +230,20 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
         # Save to file
         torch.jit.save_jit_module_to_flatbuffer(m, 'scriptmodule.ff')
     """
-
     extra_files = _extra_files
     if extra_files is None:
         extra_files = {}
 
-    ff = get_ff_module()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        f = str(f)
-        ff._save_jit_module(m._c, f, extra_files)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
+        torch._C._save_jit_module(m._c, f, extra_files)
     else:
-        s = ff._save_jit_module_to_bytes(m._c, extra_files)
+        s = torch._C._save_jit_module_to_bytes(m._c, extra_files)
         f.write(s)
 
 
 def get_flatbuffer_module_info(path_or_file):
     r"""Get some information regarding a model file in flatbuffer format.
-
 
     Args:
         path_or_file: Either str, Path or file like object (BytesIO OK).
@@ -282,10 +262,9 @@ def get_flatbuffer_module_info(path_or_file):
             'opname_to_num_args': {'aten::linear': 3} # Dict[str, int]
         }
     """
-    ff = get_ff_module()
-    if isinstance(path_or_file, str) or isinstance(path_or_file, pathlib.Path):
+    if isinstance(path_or_file, (str, os.PathLike)):
         with open(path_or_file, "rb") as f:
             all_bytes = f.read()
     else:
         all_bytes = path_or_file.read()
-    return ff._get_module_info_from_flatbuffer(all_bytes)
+    return torch._C._get_module_info_from_flatbuffer(all_bytes)

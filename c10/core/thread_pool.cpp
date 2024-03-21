@@ -1,11 +1,32 @@
 #include <c10/core/thread_pool.h>
+#include <c10/util/Logging.h>
+#if !defined(__powerpc__) && !defined(__s390x__)
+#include <cpuinfo.h>
+#endif
 
 namespace c10 {
+
+size_t TaskThreadPoolBase::defaultNumThreads() {
+  size_t num_threads = 0;
+#if !defined(__powerpc__) && !defined(__s390x__)
+  if (cpuinfo_initialize()) {
+    num_threads = cpuinfo_get_processors_count();
+    if (num_threads > 0) {
+      return num_threads;
+    }
+  }
+#endif
+  num_threads = std::thread::hardware_concurrency();
+  if (num_threads == 0) {
+    num_threads = 1;
+  }
+  return num_threads;
+}
 
 ThreadPool::ThreadPool(
     int pool_size,
     int numa_node_id,
-    std::function<void()> init_thread)
+    const std::function<void()>& init_thread)
     : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
@@ -57,7 +78,7 @@ bool ThreadPool::inThreadPool() const {
 }
 
 void ThreadPool::run(std::function<void()> func) {
-  if (threads_.size() == 0) {
+  if (threads_.empty()) {
     throw std::runtime_error("No threads to run a task");
   }
   std::unique_lock<std::mutex> lock(mutex_);
@@ -71,9 +92,7 @@ void ThreadPool::run(std::function<void()> func) {
 
 void ThreadPool::waitWorkComplete() {
   std::unique_lock<std::mutex> lock(mutex_);
-  while (!complete_) {
-    completed_.wait(lock);
-  }
+  completed_.wait(lock, [&]() { return complete_; });
 }
 
 void ThreadPool::main_loop(std::size_t index) {
@@ -81,9 +100,7 @@ void ThreadPool::main_loop(std::size_t index) {
   while (running_) {
     // Wait on condition variable while the task is empty and
     // the pool is still running.
-    while (tasks_.empty() && running_) {
-      condition_.wait(lock);
-    }
+    condition_.wait(lock, [&]() { return !tasks_.empty() || !running_; });
     // If pool is no longer running, break out of loop.
     if (!running_) {
       break;

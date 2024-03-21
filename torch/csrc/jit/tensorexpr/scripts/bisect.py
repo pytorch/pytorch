@@ -1,4 +1,7 @@
+# mypy: ignore-errors
+
 import subprocess
+
 import click
 
 
@@ -9,6 +12,7 @@ def test(cmd, limit):
         shell=True,
         capture_output=True,
         encoding="utf-8",
+        check=False,
     )
     print(p.stdout)
     f = "INTERNAL ASSERT FAILED"

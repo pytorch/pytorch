@@ -12,21 +12,22 @@ import signal
 import unittest
 import uuid
 from typing import Any, Dict
-from unittest.mock import call, patch, MagicMock
+from unittest.mock import call, MagicMock, patch
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic.agent.server.api import (
+    _get_fq_hostname,
+    _RoleInstanceInfo,
     RunResult,
     SimpleElasticAgent,
     WorkerGroup,
     WorkerSpec,
     WorkerState,
-    _get_fq_hostname,
-    _RoleInstanceInfo,
 )
 from torch.distributed.elastic.multiprocessing import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
+from torch.distributed.elastic.rendezvous.api import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import run_tests
 
@@ -159,6 +160,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         monitor_interval=1.0,
         role="test_trainer",
         local_world_size=8,
+        local_addr=None,
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
@@ -180,6 +182,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
             rdzv_handler=rdzv_handler,
             max_restarts=max_restarts,
             monitor_interval=monitor_interval,
+            local_addr=local_addr,
         )
         return spec
 
@@ -187,8 +190,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
-        self.assertEquals(WorkerState.INIT, worker_group.state)
-        self.assertEquals(spec.max_restarts, agent._remaining_restarts)
+        self.assertEqual(WorkerState.INIT, worker_group.state)
+        self.assertEqual(spec.max_restarts, agent._remaining_restarts)
 
     @patch("torch.distributed.elastic.agent.server.api.put_metric")
     def test_record_flakiness_metric(self, put_metric_mock):
@@ -316,6 +319,30 @@ class SimpleElasticAgentTest(unittest.TestCase):
             )
             self.assertSetEqual(set(range(w.world_size)), rank_set)
 
+    def test_rendezvous_default_master_addr(self):
+        spec = self._get_worker_spec(max_restarts=1)
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._rendezvous(worker_group)
+
+        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
+
+        self.assertEqual(_get_fq_hostname(), master_addr)
+        self.assertGreater(master_port, 0)
+
+    def test_rendezvous_master_addr_with_local_addr(self):
+        spec_local_addr = "1.2.3.4"
+        spec = self._get_worker_spec(max_restarts=1, local_addr=spec_local_addr)
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._rendezvous(worker_group)
+
+        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
+
+        self.assertNotEqual(_get_fq_hostname(), master_addr)
+        self.assertEqual(spec_local_addr, master_addr)
+        self.assertGreater(master_port, 0)
+
     def test_initialize_workers(self):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
@@ -372,7 +399,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         agent.run()
 
         # no failure, no membership changes -> no retries
-        self.assertEquals(max_restarts, agent._remaining_restarts)
+        self.assertEqual(max_restarts, agent._remaining_restarts)
         record_events_mock.assert_called_once()
 
     @patch.object(TestAgent, "_initialize_workers", side_effect=RuntimeError())
@@ -424,7 +451,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         worker_group = agent._worker_group
 
         agent.run()
-        self.assertEquals(WorkerState.SUCCEEDED, worker_group.state)
+        self.assertEqual(WorkerState.SUCCEEDED, worker_group.state)
         record_events_mock.assert_called_once()
 
     @patch.object(
@@ -456,8 +483,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         )
         agent = TestAgent(spec)
         total_sum, ranks = agent._get_ranks(role_infos, 0, 0, len(role_infos))
-        self.assertEquals(15, total_sum)
-        self.assertEquals([0, 1, 2, 3], list(ranks))
+        self.assertEqual(15, total_sum)
+        self.assertEqual([0, 1, 2, 3], list(ranks))
 
     def test_assign_worker_ranks(self):
         role_infos = [
@@ -555,6 +582,15 @@ class SimpleElasticAgentTest(unittest.TestCase):
                 agent.run()
             args, _ = shutdown_mock.call_args
             self.assertEqual(signal.SIGTERM, args[0])
+
+    @patch("torch.distributed.elastic.agent.server.api.put_metric")
+    @patch.object(TestAgent, "_invoke_run")
+    def test_agent_process_handler_graceful_exception(self, invoke_run, _):
+        spec = self._get_worker_spec(max_restarts=0)
+        agent = TestAgent(spec)
+        invoke_run.side_effect = RendezvousGracefulExitError()
+        with patch.object(agent, "_shutdown"):
+            agent.run()
 
 
 if __name__ == "__main__":

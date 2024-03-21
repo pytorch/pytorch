@@ -47,6 +47,7 @@ void poisson_cuda_kernel(
     at::PhiloxCudaState philox_args) {
   auto functor = [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& lambda) {
+        CUDA_KERNEL_ASSERT(lambda >= 0 && "invalid Poisson rate, expected rate to be non-negative");
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
         curand_init(std::get<0>(seeds),
@@ -127,7 +128,7 @@ void gamma_cuda_kernel(
 
 } // namespace
 
-namespace at { namespace native {
+namespace at::native {
 
 void launch_dirichlet_kernel(at::TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -166,7 +167,7 @@ void launch_binomial_cuda_kernel(
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(42);
   }
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "binomial_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "binomial_cuda", [&] {
     binomial_cuda_kernel<scalar_t>(iter, rng_engine_inputs);
   });
 }
@@ -204,4 +205,4 @@ void launch_dirichlet_grad_kernel(TensorIteratorBase &iter) {
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

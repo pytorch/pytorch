@@ -8,7 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
-from ufmt.core import make_black_config, ufmt_string
+from ufmt.core import ufmt_string
+from ufmt.util import make_black_config
 from usort import Config as UsortConfig
 
 
@@ -114,7 +115,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(
-        format="<%(threadName)s:%(levelname)s> %(message)s",
+        format="<%(processName)s:%(levelname)s> %(message)s",
         level=logging.NOTSET
         if args.verbose
         else logging.DEBUG
@@ -123,9 +124,8 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    with concurrent.futures.ThreadPoolExecutor(
+    with concurrent.futures.ProcessPoolExecutor(
         max_workers=os.cpu_count(),
-        thread_name_prefix="Thread",
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         for future in concurrent.futures.as_completed(futures):

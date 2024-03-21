@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/frontend/name_mangler.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
   static const std::string manglePrefix = "___torch_mangle_";
@@ -14,7 +13,7 @@ c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
     if (pos != std::string::npos) {
       auto num = atom.substr(pos + manglePrefix.size());
       // current mangle index in the name
-      size_t num_i = c10::stoi(num);
+      size_t num_i = std::stoi(num);
       // bump the mangleIndex_ to num_i + 1
       mangleIndex_ = std::max(mangleIndex_, num_i + 1);
       std::string newAtomPrefix;
@@ -34,5 +33,4 @@ c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
   return c10::QualifiedName(atoms);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

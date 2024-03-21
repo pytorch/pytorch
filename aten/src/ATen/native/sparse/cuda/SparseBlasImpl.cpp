@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 
@@ -22,11 +23,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
-namespace cuda {
+namespace at::native::sparse::impl::cuda {
 
 namespace {
 
@@ -41,7 +38,7 @@ c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
 
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+#if defined(USE_ROCM)
   // CUDA < 11.0 doesn't support row-major layout, return column-major in this case
   return prepare_column_major_matrix_for_cusparse(tensor);
 #else
@@ -463,6 +460,7 @@ void block_sparse_mv(
 }
 
 void block_sparse_mm(
+    const Tensor& input,
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
@@ -479,6 +477,28 @@ void block_sparse_mm(
   TORCH_INTERNAL_ASSERT(
       mat1.values().is_contiguous() ||
       mat1.values().transpose(-2, -1).is_contiguous());
+
+  // NOTE: the code below allows arbitrary block sizes
+  // and might be potentially faster than cuSPARSE implementation
+  // especially for not very sparse inputs.
+  if (mat1.scalar_type() == ScalarType::Half
+      || mat1.scalar_type() == ScalarType::BFloat16
+      || mat1.scalar_type() == ScalarType::Float) {
+    at::native::sparse::impl::_compressed_row_strided_addmm_out(
+        input,
+        mat1,
+        mat2,
+        /*beta=*/beta,
+        /*alpha=*/alpha,
+        // @nikitaved: not sure whether `const Tensor& result` makes sense,
+        // but let's keep the interface intact, hence the const cast.
+        const_cast<Tensor&>(result));
+    return;
+  }
+
+  if (beta.toComplexDouble() != 0. && !result.is_same(input)) {
+    result.copy_(input);
+  }
 
   const cusparseDirection_t block_layout = mat1.values().is_contiguous()
       ? CUSPARSE_DIRECTION_ROW
@@ -562,13 +582,13 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_52_API())
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
   c10::MaybeOwned<Tensor> mat2_ = prepare_dense_matrix_for_cusparse(mat2);
 
-  // Here subscript "c" stands for column-major, substript "r" stands for
+  // Here subscript "c" stands for column-major, subscript "r" stands for
   // row-major order Both orders are supported by cuSPARSE. For mixed input we
   // need to cast 'mat2' to order of 'result'. We compute
   // result = mat1 @ op(mat2) + result.
@@ -595,7 +615,7 @@ void spmm(
 
   // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
   // silently returning incorrect results
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+#if defined(USE_ROCM)
   auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
       mat1.crow_indices().to(kInt),
       mat1.col_indices().to(kInt),
@@ -672,13 +692,7 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if (!defined(USE_ROCM)) && (defined(CUDA_VERSION) && CUDA_VERSION < 11000)
-  TORCH_CHECK(
-      false,
-      "Calling addmm with sparse GPU tensors requires compiling ",
-      "PyTorch with CUDA 11+. ",
-      "Please use PyTorch built with newer CUDA version.");
-#elif defined(USE_ROCM) && ROCM_VERSION < 50200
+#if defined(USE_ROCM) && ROCM_VERSION < 50200
   TORCH_CHECK(
       false,
       "Calling addmm with sparse GPU tensors requires compiling ",
@@ -795,8 +809,7 @@ void spgemm(
             buffer2.get()));
 
         // Get how many specified elements are there in C
-        int64_t C_num_rows, C_num_cols, C_nnz;
-        std::tie(C_num_rows, C_num_cols, C_nnz) = descC.get_size();
+        auto [C_num_rows, C_num_cols, C_nnz] = descC.get_size();
 
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_rows == m);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_cols == n);
@@ -827,26 +840,133 @@ void spgemm(
 } // anonymous namespace
 
 void addmm_out_sparse_csr(
+    const Tensor& input,
     const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return block_sparse_mm(mat1, mat2, beta, alpha, result);
+  TORCH_INTERNAL_ASSERT(
+      !((mat1.layout() == kStrided) && (mat2.layout() == kStrided) &&
+        (result.layout() == kStrided)),
+      "Expected at least one sparse input");
+
+  // Layout checks are nested mat1, mat2, result
+  // Conditions are ordered strided, csr, csc, bsr, bsc.
+  // Valid combinations terminate in a return
+  // Invalid combinations are omitted and will fall though to the TORCH check
+  // generating an informative error message
+
+  // mm functions that copy input to result when needed (e.g. mm
+  // triton kernels do not require result being initialized with
+  // input):
+  if (mat1.layout() == kSparseBsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided)
+        return block_sparse_mm(input, mat1, mat2, beta, alpha, result);
+    }
   }
-  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return spmm(mat1, mat2, beta, alpha, result);
+
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        auto result_t = result.transpose(-2, -1);
+        auto input_t = (result.is_same(input) ? result_t : input.transpose(-2, -1));
+        return block_sparse_mm(
+            input_t,
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result_t);
+      }
+    }
   }
-  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
-    // TODO: Add native CSC support via cuSPARSE if supported.
-    return spmm(mat2.transpose(0, 1).to_sparse_csr(), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+
+  // copy input to result:
+  if (beta.toComplexDouble() != 0. && !result.is_same(input)) {
+    result.copy_(input);
   }
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return spgemm(mat1, mat2, beta, alpha, result);
+
+  // mm functions that assume that result contains input:
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spmm(
+            mat2.transpose(0, 1).to_sparse_csr(),
+            mat1.transpose(0, 1),
+            beta,
+            alpha,
+            result.transpose(0, 1));
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        return spmm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
   }
-  TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
-              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
+  if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        return spmm(mat1, mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr) {
+        return spgemm(mat1, mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kSparseCsr) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        // CSR @ CSC kernel would be very fast due to format alignment
+        return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
+      }
+    }
+  }
+  if (mat1.layout() == kSparseCsc) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr)
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kSparseCsr) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spgemm(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+      }
+      if (result.layout() == kSparseCsc) {
+        return spgemm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
+  }
+  TORCH_CHECK(
+      false,
+      "addmm: computation on CUDA is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 /*
@@ -967,6 +1087,7 @@ void add_out_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.sizes().equals(B.sizes()) && A.sizes().equals(C.sizes()));
 
   // Only 32-bit indices are supported
+  const auto output_indices_dtype = promoteTypes(A.crow_indices().scalar_type(), B.crow_indices().scalar_type());
   auto A_32 = at::native::_sparse_csr_tensor_unsafe(
       A.crow_indices().to(kInt),
       A.col_indices().to(kInt),
@@ -985,7 +1106,9 @@ void add_out_sparse_csr(
       B.device());
 
   // Modify C tensor in-place to swap indices tensors with 32-bit variants
-  indices_to_32_bit_inplace(C);
+  auto C_crow_indices_backup = C.crow_indices();
+  auto C_col_indices_backup = C.col_indices();
+  indices_to_32_bit_inplace(C); // no-op with 32-bit indices
 
   int nnzA = at::native::cuda_int_cast(A_32._nnz(), "nnzA");
   int nnzB = at::native::cuda_int_cast(B_32._nnz(), "nnzB");
@@ -1115,6 +1238,14 @@ void add_out_sparse_csr(
             C_crow_indices_ptr,
             C_col_indices_ptr,
             work_data.get());
+
+        if (output_indices_dtype == at::kLong) {
+          static_cast<SparseCsrTensorImpl*>(C.unsafeGetTensorImpl())->set_member_tensors(
+              C_crow_indices_backup.copy_(C.crow_indices()),
+              C_col_indices_backup.resize_({nnzC}).copy_(C.col_indices()),
+              C.values(),
+              C.sizes());
+        }
       });
 }
 
@@ -1295,7 +1426,7 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !AT_USE_CUSPARSE_GENERIC_SDDMM()
+#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_API())
   TORCH_CHECK(
       false,
       "Calling sampled_addmm with sparse GPU tensors requires compiling ",
@@ -1323,8 +1454,8 @@ void sampled_addmm_out_sparse_csr(
         // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
         // So we need to resort to the for loop
         for (const auto i : c10::irange(batchCount(A))) {
-          auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_, /*batch_offset=*/i);
-          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_, /*batch_offset=*/i);
+          auto descA = at::cuda::sparse::CuSparseConstDnMatDescriptor(*A_, /*batch_offset=*/i);
+          auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(*B_, /*batch_offset=*/i);
           auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
 
           auto beta_ = beta.to<scalar_t>();
@@ -1337,8 +1468,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.descriptor(),
-              descB.descriptor(),
+              descA.unsafe_mutable_descriptor(),
+              descB.unsafe_mutable_descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1354,8 +1485,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.descriptor(),
-              descB.descriptor(),
+              descA.unsafe_mutable_descriptor(),
+              descB.unsafe_mutable_descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1367,8 +1498,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.descriptor(),
-              descB.descriptor(),
+              descA.unsafe_mutable_descriptor(),
+              descB.unsafe_mutable_descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1379,8 +1510,4 @@ void sampled_addmm_out_sparse_csr(
 #endif
 }
 
-} // namespace cuda
-} // namespace impl
-} // namespace sparse
-} // namespace native
-} // namespace at
+} // namespace at::native::sparse::impl::cuda

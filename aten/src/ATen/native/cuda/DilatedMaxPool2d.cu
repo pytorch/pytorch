@@ -21,8 +21,7 @@
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -349,9 +348,9 @@ const Tensor& indices) {
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *output_data = output.data_ptr<scalar_t>();
-      scalar_t *input_data = input.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
+      scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
+      const scalar_t *input_data = input.const_data_ptr<scalar_t>();
+      int64_t *indices_data = indices.mutable_data_ptr<int64_t>();
 
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
@@ -423,14 +422,14 @@ IntArrayRef stride,
 IntArrayRef padding,
 IntArrayRef dilation,
 bool ceil_mode,
-const Tensor& indices,
+const Tensor& indices_,
 const Tensor& gradInput) {
   NoNamesGuard guard;
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
-  TensorArg indices_arg{ indices, "indices", 4 };
+  TensorArg indices_arg{ indices_, "indices", 4 };
 
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
@@ -474,6 +473,8 @@ const Tensor& gradInput) {
   const int64_t out_stride_h = gradOutput.stride(-2);
   const int64_t out_stride_w = gradOutput.stride(-1);
 
+  const Tensor indices = indices_.contiguous(memory_format);
+
   gradInput.zero_();
 
   int64_t count = input.numel();
@@ -483,9 +484,9 @@ const Tensor& gradInput) {
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
+      const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
+      scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+      const int64_t *indices_data = indices.const_data_ptr<int64_t>();
 
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
@@ -564,4 +565,3 @@ const Tensor& gradInput) {
 }
 
 } // at::native
-} // at

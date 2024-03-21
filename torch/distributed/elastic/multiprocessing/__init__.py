@@ -7,8 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Library that launches and manages ``n`` copies of worker subprocesses
-either specified by a function or a binary.
+Library that launches and manages ``n`` copies of worker subprocesses either specified by a function or a binary.
 
 For functions, it uses ``torch.multiprocessing`` (and therefore python
 ``multiprocessing``) to spawn/fork worker processes. For binaries it uses python
@@ -64,22 +63,40 @@ implementations of the parent :class:`api.PContext` class.
 """
 
 import os
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union, Set
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
+    _validate_full_rank,
+    DefaultLogsSpecs,
+    LogsDest,
+    LogsSpecs,
     MultiprocessContext,
     PContext,
     ProcessFailure,
     RunProcsResult,
-    Std,
     SignalException,
+    Std,
     SubprocessContext,
-    _validate_full_rank,
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
-log = get_logger()
+__all__ = [
+    "start_processes",
+    "MultiprocessContext",
+    "PContext",
+    "ProcessFailure",
+    "RunProcsResult",
+    "SignalException",
+    "Std",
+    "LogsDest",
+    "LogsSpecs",
+    "DefaultLogsSpecs",
+    "SubprocessContext",
+    "to_map",
+]
+
+log = get_logger(__name__)
 
 
 def start_processes(
@@ -87,13 +104,13 @@ def start_processes(
     entrypoint: Union[Callable, str],
     args: Dict[int, Tuple],
     envs: Dict[int, Dict[str, str]],
-    log_dir: str,
+    logs_specs: LogsSpecs,
+    log_line_prefixes: Optional[Dict[int, str]] = None,
     start_method: str = "spawn",
-    redirects: Union[Std, Dict[int, Std]] = Std.NONE,
-    tee: Union[Std, Dict[int, Std]] = Std.NONE,
 ) -> PContext:
     """
-    Starts ``n`` copies of ``entrypoint`` processes with the provided options.
+    Start ``n`` copies of ``entrypoint`` processes with the provided options.
+
     ``entrypoint`` is either a ``Callable`` (function) or a ``str`` (binary).
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
@@ -111,7 +128,7 @@ def start_processes(
               this is done by default and there is no need to manually annotate
               with the ``@record`` annotation.
 
-    ``redirects`` and ``tees`` are bitmasks specifying which std stream(s) to redirect
+    ``redirects`` and ``tee`` are bitmasks specifying which std stream(s) to redirect
     to a log file in the ``log_dir``. Valid mask values are defined in ``Std``.
     To redirect/tee only certain local ranks, pass ``redirects`` as a map with the key as
     the local rank to specify the redirect behavior for.
@@ -129,7 +146,6 @@ def start_processes(
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
     Example:
-
     ::
 
      log_dir = "/tmp/test"
@@ -178,67 +194,17 @@ def start_processes(
         args: arguments to each replica
         envs: env vars to each replica
         log_dir: directory used to write log files
-        nprocs: number of copies to create (one on each process)
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
         redirects: which std streams to redirect to a log file
-        tees: which std streams to redirect + print to console
+        tee: which std streams to redirect + print to console
+        local_ranks_filter: which ranks' logs to print to console
 
     """
-
-    # listdir raises FileNotFound or NotADirectoryError so no need to check manually
-    if os.listdir(log_dir):
-        raise RuntimeError(
-            f"log_dir: {log_dir} is not empty, please provide an empty log_dir"
-        )
 
     nprocs = len(args)
     _validate_full_rank(args, nprocs, "args")
     _validate_full_rank(envs, nprocs, "envs")
-
-    # create subdirs for each local rank in the logs_dir
-    # logs_dir
-    #       |- 0
-    #          |- error.json
-    #          |- stdout.log
-    #          |- stderr.log
-    #       |- ...
-    #       |- (nprocs-1)
-    redirs = to_map(redirects, nprocs)
-    ts = to_map(tee, nprocs)
-
-    # to tee stdout/stderr we first redirect into a file
-    # then tail -f stdout.log/stderr.log so add tee settings to redirects
-    for local_rank, tee_std in ts.items():
-        redirect_std = redirs[local_rank]
-        redirs[local_rank] = redirect_std | tee_std
-
-    stdouts = {local_rank: "" for local_rank in range(nprocs)}
-    stderrs = {local_rank: "" for local_rank in range(nprocs)}
-    tee_stdouts: Dict[int, str] = {}
-    tee_stderrs: Dict[int, str] = {}
-    error_files = {}
-
-    for local_rank in range(nprocs):
-        clogdir = os.path.join(log_dir, str(local_rank))
-        os.mkdir(clogdir)
-
-        rd = redirs[local_rank]
-        if (rd & Std.OUT) == Std.OUT:
-            stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
-        if (rd & Std.ERR) == Std.ERR:
-            stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
-
-        t = ts[local_rank]
-        if t & Std.OUT == Std.OUT:
-            tee_stdouts[local_rank] = stdouts[local_rank]
-        if t & Std.ERR == Std.ERR:
-            tee_stderrs[local_rank] = stderrs[local_rank]
-
-        error_file = os.path.join(clogdir, "error.json")
-        error_files[local_rank] = error_file
-        log.info(f"Setting worker{local_rank} reply file to: {error_file}")
-        envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
     context: PContext
     if isinstance(entrypoint, str):
@@ -247,11 +213,8 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
-            stdouts=stdouts,
-            stderrs=stderrs,
-            tee_stdouts=tee_stdouts,
-            tee_stderrs=tee_stderrs,
-            error_files=error_files,
+            logs_specs=logs_specs,
+            log_line_prefixes=log_line_prefixes,
         )
     else:
         context = MultiprocessContext(
@@ -259,12 +222,9 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
-            stdouts=stdouts,
-            stderrs=stderrs,
-            tee_stdouts=tee_stdouts,
-            tee_stderrs=tee_stderrs,
-            error_files=error_files,
+            log_line_prefixes=log_line_prefixes,
             start_method=start_method,
+            logs_specs=logs_specs,
         )
 
     try:

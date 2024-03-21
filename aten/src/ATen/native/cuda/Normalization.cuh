@@ -927,7 +927,7 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   blocks_trans.y = std::min(blocks_trans.y, MAX_GRID_SIZE);
   dim3 threads_trans(tf, tb);
   batch_norm_backward_elemt_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
-    (input, grad_output, mean, invstd, weight, sum_dy, sum_dy_xmu, grad_input, count.data_ptr<int>(), count.numel());
+    (input, grad_output, mean, invstd, weight, sum_dy, sum_dy_xmu, grad_input, count.const_data_ptr<int>(), count.numel());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return grad_input_reshaped.view(input_.sizes());
@@ -1448,13 +1448,13 @@ void batch_norm_stats_channels_last_cuda_template(
     semaphores = at::zeros({grid.x}, input.options().dtype(at::kInt));
   }
 
-  accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
-  int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
+  accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.mutable_data_ptr<accscalar_t>() : nullptr;
+  int* semaphores_ptr = grid.y > 1 ? semaphores.mutable_data_ptr<int>() : nullptr;
   batch_norm_collect_statistics_channels_last_kernel<VarTransform, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      input.data_ptr<scalar_t>(),
-      out_mean.data_ptr<accscalar_t>(),
-      out_invstd.data_ptr<accscalar_t>(),
+      input.const_data_ptr<scalar_t>(),
+      out_mean.mutable_data_ptr<accscalar_t>(),
+      out_invstd.mutable_data_ptr<accscalar_t>(),
       staging_data_ptr,
       semaphores_ptr,
       reduction_size,
@@ -1488,13 +1488,13 @@ void batch_norm_elemt_channels_last_cuda_template(
       using accscalar_t = at::acc_type<scalar_t, true>;
       batch_norm_transform_input_channels_last_kernel<scalar_t, accscalar_t, accscalar_t, ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          input.data_ptr<scalar_t>(),
-          z.has_value() ? z.value().data_ptr<scalar_t>() : nullptr,
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          weight.defined() ? weight.data_ptr<accscalar_t>() : nullptr,
-          shift.defined() ? shift.data_ptr<accscalar_t>() : nullptr,
-          output.data_ptr<scalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          z.has_value() ? z.value().const_data_ptr<scalar_t>() : nullptr,
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          weight.defined() ? weight.const_data_ptr<accscalar_t>() : nullptr,
+          shift.defined() ? shift.const_data_ptr<accscalar_t>() : nullptr,
+          output.mutable_data_ptr<scalar_t>(),
           reduction_size,
           stride,
           fuse_relu);
@@ -1509,13 +1509,13 @@ void batch_norm_elemt_channels_last_cuda_template(
       using accscalar_t = at::acc_type<scalar_t, true>;
       batch_norm_transform_input_channels_last_kernel<scalar_t, accscalar_t, scalar_t, ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          input.data_ptr<scalar_t>(),
-          z.has_value() ? z.value().data_ptr<scalar_t>() : nullptr,
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          weight.defined() ? weight.data_ptr<scalar_t>() : nullptr,
-          shift.defined() ? shift.data_ptr<scalar_t>(): nullptr,
-          output.data_ptr<scalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          z.has_value() ? z.value().const_data_ptr<scalar_t>() : nullptr,
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          weight.defined() ? weight.const_data_ptr<scalar_t>() : nullptr,
+          shift.defined() ? shift.const_data_ptr<scalar_t>(): nullptr,
+          output.mutable_data_ptr<scalar_t>(),
           reduction_size,
           stride,
           fuse_relu);
@@ -1563,18 +1563,18 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
   if (weight.defined() && input.scalar_type() != weight.scalar_type()) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "batchnorm_backward_reduce", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
-      int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
+      accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.mutable_data_ptr<accscalar_t>() : nullptr;
+      int* semaphores_ptr = grid.y > 1 ? semaphores.mutable_data_ptr<int>() : nullptr;
       batch_norm_backward_reduce_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          input.data_ptr<scalar_t>(),
-          grad_output.data_ptr<scalar_t>(),
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          sumn_dy.data_ptr<accscalar_t>(),
-          sum_dy_xmu.data_ptr<accscalar_t>(),
-          grad_weight.data_ptr<accscalar_t>(),
-          grad_bias.data_ptr<accscalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          sumn_dy.mutable_data_ptr<accscalar_t>(),
+          sum_dy_xmu.mutable_data_ptr<accscalar_t>(),
+          grad_weight.mutable_data_ptr<accscalar_t>(),
+          grad_bias.mutable_data_ptr<accscalar_t>(),
           staging_data_ptr,
           semaphores_ptr,
           reduction_size,
@@ -1588,18 +1588,18 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
     }
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "batchnorm_backward_reduce", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
-      int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
+      accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.mutable_data_ptr<accscalar_t>() : nullptr;
+      int* semaphores_ptr = grid.y > 1 ? semaphores.mutable_data_ptr<int>() : nullptr;
       batch_norm_backward_reduce_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          input.data_ptr<scalar_t>(),
-          grad_output.data_ptr<scalar_t>(),
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          sumn_dy.data_ptr<accscalar_t>(),
-          sum_dy_xmu.data_ptr<accscalar_t>(),
-          weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr,
-          weight.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr,
+          input.const_data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          sumn_dy.mutable_data_ptr<accscalar_t>(),
+          sum_dy_xmu.mutable_data_ptr<accscalar_t>(),
+          weight.defined() ? grad_weight.mutable_data_ptr<scalar_t>() : nullptr,
+          weight.defined() ? grad_bias.mutable_data_ptr<scalar_t>() : nullptr,
           staging_data_ptr,
           semaphores_ptr,
           reduction_size,
@@ -1637,15 +1637,15 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
       using accscalar_t = at::acc_type<scalar_t, true>;
       batch_norm_backward_elemt_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          grad_output.data_ptr<scalar_t>(),
-          input.data_ptr<scalar_t>(),
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          weight.data_ptr<accscalar_t>(),
-          sum_dy.data_ptr<accscalar_t>(),
-          sum_dy_xmu.data_ptr<accscalar_t>(),
-          count.data_ptr<int>(),
-          grad_input.data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          weight.const_data_ptr<accscalar_t>(),
+          sum_dy.const_data_ptr<accscalar_t>(),
+          sum_dy_xmu.const_data_ptr<accscalar_t>(),
+          count.const_data_ptr<int>(),
+          grad_input.mutable_data_ptr<scalar_t>(),
           count.numel(),
           reduction_size,
           stride);
@@ -1660,15 +1660,15 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
       using accscalar_t = at::acc_type<scalar_t, true>;
       batch_norm_backward_elemt_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          grad_output.data_ptr<scalar_t>(),
-          input.data_ptr<scalar_t>(),
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          weight.defined() ? weight.data_ptr<scalar_t>() : nullptr,
-          sum_dy.data_ptr<accscalar_t>(),
-          sum_dy_xmu.data_ptr<accscalar_t>(),
-          count.data_ptr<int>(),
-          grad_input.data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          weight.defined() ? weight.const_data_ptr<scalar_t>() : nullptr,
+          sum_dy.const_data_ptr<accscalar_t>(),
+          sum_dy_xmu.const_data_ptr<accscalar_t>(),
+          count.const_data_ptr<int>(),
+          grad_input.mutable_data_ptr<scalar_t>(),
           count.numel(),
           reduction_size,
           stride);
@@ -1706,14 +1706,14 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
     if (weight.defined() && weight.scalar_type() != input.scalar_type()) {
       batch_norm_backward_elemt_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          grad_output.data_ptr<scalar_t>(),
-          input.data_ptr<scalar_t>(),
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          weight.data_ptr<accscalar_t>(),
-          sum_dy.data_ptr<accscalar_t>(),
-          sum_dy_xmu.data_ptr<accscalar_t>(),
-          grad_input.data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          weight.const_data_ptr<accscalar_t>(),
+          sum_dy.const_data_ptr<accscalar_t>(),
+          sum_dy_xmu.const_data_ptr<accscalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(),
           static_cast<accscalar_t>(norm_fct),
           reduction_size,
           stride);
@@ -1721,14 +1721,14 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
     } else {
       batch_norm_backward_elemt_channels_last_kernel<ELEMENTS_PER_ITER>
           <<<grid, block, 0, stream>>>(
-          grad_output.data_ptr<scalar_t>(),
-          input.data_ptr<scalar_t>(),
-          mean.data_ptr<accscalar_t>(),
-          inv_std.data_ptr<accscalar_t>(),
-          weight.defined() ? weight.data_ptr<scalar_t>() : nullptr,
-          sum_dy.data_ptr<accscalar_t>(),
-          sum_dy_xmu.data_ptr<accscalar_t>(),
-          grad_input.data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          input.const_data_ptr<scalar_t>(),
+          mean.const_data_ptr<accscalar_t>(),
+          inv_std.const_data_ptr<accscalar_t>(),
+          weight.defined() ? weight.const_data_ptr<scalar_t>() : nullptr,
+          sum_dy.const_data_ptr<accscalar_t>(),
+          sum_dy_xmu.const_data_ptr<accscalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(),
           static_cast<accscalar_t>(norm_fct),
           reduction_size,
           stride);

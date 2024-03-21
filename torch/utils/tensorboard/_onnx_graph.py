@@ -8,18 +8,16 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 def load_onnx_graph(fname):
     import onnx
 
-    m = onnx.load(fname)
+    m = onnx.load(fname)  # type: ignore[attr-defined]
     g = m.graph
     return parse(g)
 
 
 def parse(graph):
-    nodes_proto = []
     nodes = []
     import itertools
 
-    for node in itertools.chain(graph.input, graph.output):
-        nodes_proto.append(node)
+    nodes_proto = list(itertools.chain(graph.input, graph.output))
 
     for node in nodes_proto:
         print(node.name)

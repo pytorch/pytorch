@@ -11,7 +11,7 @@ import unittest
 
 import torch
 import torch.utils.benchmark as benchmark_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest, TEST_WITH_ASAN
 import expecttest
 import numpy as np
 
@@ -55,7 +55,7 @@ def generate_callgrind_artifacts() -> None:
         "ones_with_data_exclusive": to_entry(stats_with_data.stmt_exclusive_stats),
     }
 
-    with open(CALLGRIND_ARTIFACTS, "wt") as f:
+    with open(CALLGRIND_ARTIFACTS, "w") as f:
         json.dump(artifacts, f, indent=4)
 
 
@@ -70,7 +70,7 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
     testing are stored in raw string form for easier inspection and to avoid
     baking any implementation details into the artifact itself.
     """
-    with open(CALLGRIND_ARTIFACTS, "rt") as f:
+    with open(CALLGRIND_ARTIFACTS) as f:
         artifacts = json.load(f)
 
     pattern = re.compile(r"^\s*([0-9]+)\s(.+)$")
@@ -216,7 +216,7 @@ class TestBenchmarkUtils(TestCase):
 
         def __init__(self, stmt, setup, timer, globals):
             self._random_state = np.random.RandomState(seed=self._seed)
-            self._mean_cost = {k: v for k, v in self._function_costs}[stmt]
+            self._mean_cost = dict(self._function_costs)[stmt]
 
         def sample(self, mean, noise_level):
             return max(self._random_state.normal(mean, mean * noise_level), 5e-9)
@@ -477,6 +477,7 @@ class TestBenchmarkUtils(TestCase):
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @unittest.skipIf(TEST_WITH_ASAN, "fails on asan")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
             ValueError,

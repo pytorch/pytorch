@@ -2,18 +2,16 @@
 
 #include <exception>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -62,45 +60,37 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   }
 
 // Only catch torch-specific exceptions
-#define CATCH_CORE_ERRORS(retstmnt)                                     \
-  catch (python_error & e) {                                            \
-    e.restore();                                                        \
-    retstmnt;                                                           \
-  }                                                                     \
-  _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)          \
-  _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)          \
-  _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)            \
-  _CATCH_GENERIC_ERROR(                                                 \
-      NotImplementedError, PyExc_NotImplementedError, retstmnt)         \
-  _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt) \
-  _CATCH_GENERIC_ERROR(                                                 \
-      OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
-  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
-  catch (torch::PyTorchError & e) {                                     \
-    auto msg = torch::processErrorMsg(e.what());                        \
-    PyErr_SetString(e.python_type(), msg);                              \
-    retstmnt;                                                           \
+#define CATCH_CORE_ERRORS(retstmnt)                                           \
+  catch (python_error & e) {                                                  \
+    e.restore();                                                              \
+    retstmnt;                                                                 \
+  }                                                                           \
+  catch (py::error_already_set & e) {                                         \
+    e.restore();                                                              \
+    retstmnt;                                                                 \
+  }                                                                           \
+  _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)                \
+  _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)                \
+  _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)                  \
+  _CATCH_GENERIC_ERROR(                                                       \
+      NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
+  _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
+  _CATCH_GENERIC_ERROR(                                                       \
+      OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistBackendError, THPException_DistBackendError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistNetworkError, THPException_DistNetworkError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
+  _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
+  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
+  catch (torch::PyTorchError & e) {                                           \
+    auto msg = torch::processErrorMsg(e.what());                              \
+    PyErr_SetString(e.python_type(), msg);                                    \
+    retstmnt;                                                                 \
   }
 
-#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
-#define CATCH_C10D_ERRORS(retstmnt)              \
-  catch (const c10d::TimeoutError& e) {          \
-    auto msg = torch::processErrorMsg(e.what()); \
-    PyErr_SetString(PyExc_TimeoutError, msg);    \
-    retstmnt;                                    \
-  }                                              \
-  catch (const c10d::C10dError& e) {             \
-    auto msg = torch::processErrorMsg(e.what()); \
-    PyErr_SetString(PyExc_RuntimeError, msg);    \
-    retstmnt;                                    \
-  }
-#else
-#define CATCH_C10D_ERRORS(retstmnt)
-#endif
-
-#define CATCH_TH_ERRORS(retstmnt) \
-  CATCH_CORE_ERRORS(retstmnt)     \
-  CATCH_C10D_ERRORS(retstmnt)
+#define CATCH_TH_ERRORS(retstmnt) CATCH_CORE_ERRORS(retstmnt)
 
 #define CATCH_ALL_ERRORS(retstmnt)               \
   CATCH_TH_ERRORS(retstmnt)                      \
@@ -146,12 +136,14 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError;
+    *THPException_OutOfMemoryError, *THPException_DistError,
+    *THPException_DistBackendError, *THPException_DistNetworkError,
+    *THPException_DistStoreError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
 struct python_error : public std::exception {
-  python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
+  python_error() = default;
 
   python_error(const python_error& other)
       : type(other.type),
@@ -164,16 +156,17 @@ struct python_error : public std::exception {
     Py_XINCREF(traceback);
   }
 
-  python_error(python_error&& other) {
-    type = other.type;
-    value = other.value;
-    traceback = other.traceback;
-    message = std::move(other.message);
+  python_error(python_error&& other) noexcept
+      : type(other.type),
+        value(other.value),
+        traceback(other.traceback),
+        message(std::move(other.message)) {
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;
   }
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~python_error() override {
     if (type || value || traceback) {
       pybind11::gil_scoped_acquire gil;
@@ -249,9 +242,9 @@ struct python_error : public std::exception {
     PyErr_Restore(type, value, traceback);
   }
 
-  PyObject* type;
-  PyObject* value;
-  PyObject* traceback;
+  PyObject* type{nullptr};
+  PyObject* value{nullptr};
+  PyObject* traceback{nullptr};
 
   // Message to return to the user when 'what()' is invoked.
   std::string message;
@@ -268,8 +261,8 @@ TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  PyTorchError(const std::string& msg_ = std::string()) : msg(msg_) {}
+  PyTorchError() = default;
+  PyTorchError(std::string msg_) : msg(std::move(msg_)) {}
   virtual PyObject* python_type() = 0;
   const char* what() const noexcept override {
     return msg.c_str();
@@ -286,38 +279,12 @@ struct PyTorchError : public std::exception {
 #define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX)
 #endif
 
-// Translates to Python IndexError
-struct IndexError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  IndexError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_IndexError;
-  }
-};
-
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
   using PyTorchError::PyTorchError;
-  TORCH_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  TORCH_PYTHON_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_TypeError;
-  }
-};
-
-// Translates to Python ValueError
-struct ValueError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_ValueError;
-  }
-};
-
-// Translates to Python NotImplementedError
-struct NotImplementedError : public PyTorchError {
-  NotImplementedError() = default;
-  PyObject* python_type() override {
-    return PyExc_NotImplementedError;
   }
 };
 
@@ -329,27 +296,6 @@ struct AttributeError : public PyTorchError {
   }
 };
 
-// Translates to Python LinAlgError
-struct LinAlgError : public PyTorchError {
-  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return THPException_LinAlgError;
-  }
-};
-
-struct WarningMeta {
-  WarningMeta(
-      const c10::SourceLocation& _source_location,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::string& _msg,
-      const bool _verbatim)
-      : source_location_{_source_location}, msg_{_msg}, verbatim_{_verbatim} {}
-
-  c10::SourceLocation source_location_;
-  std::string msg_;
-  bool verbatim_;
-};
-
 // ATen warning handler for Python
 struct PyWarningHandler {
   // Move actual handler into a separate class with a noexcept
@@ -357,19 +303,16 @@ struct PyWarningHandler {
   // subclasses to have a noexcept(false) destructor.
   struct InternalHandler : at::WarningHandler {
     ~InternalHandler() override = default;
-    void process(
-        const at::SourceLocation& source_location,
-        const std::string& msg,
-        const bool verbatim) override;
+    void process(const c10::Warning& warning) override;
 
-    std::vector<WarningMeta> warning_buffer_;
+    std::vector<c10::Warning> warning_buffer_;
   };
 
  public:
   /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
-  TORCH_API PyWarningHandler() noexcept(true);
+  TORCH_PYTHON_API PyWarningHandler() noexcept(true);
   // NOLINTNEXTLINE(bugprone-exception-escape)
-  TORCH_API ~PyWarningHandler() noexcept(false);
+  TORCH_PYTHON_API ~PyWarningHandler() noexcept(false);
 
   /** Call if an exception has been thrown
 
@@ -388,18 +331,35 @@ struct PyWarningHandler {
 };
 
 namespace detail {
-template <typename Func, size_t i>
-using Arg = typename function_traits<Func>::template arg<i>::type;
 
-template <typename Func, size_t... Is>
-auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
-  using traits = function_traits<Func>;
+struct noop_gil_scoped_release {
+  // user-defined constructor (i.e. not defaulted) to avoid
+  // unused-variable warnings at usage sites of this class
+  noop_gil_scoped_release() {}
+};
+
+template <bool release_gil>
+using conditional_gil_scoped_release = std::conditional_t<
+    release_gil,
+    pybind11::gil_scoped_release,
+    noop_gil_scoped_release>;
+
+template <typename Func, size_t i>
+using Arg = typename invoke_traits<Func>::template arg<i>::type;
+
+template <typename Func, size_t... Is, bool release_gil>
+auto wrap_pybind_function_impl_(
+    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+    Func&& f,
+    std::index_sequence<Is...>,
+    std::bool_constant<release_gil>) {
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = f](Arg<Func, Is>... args) -> typename traits::result_type {
+  return [f = std::forward<Func>(f)](Arg<Func, Is>... args) {
     HANDLE_TH_ERRORS
-    return f(std::forward<Arg<Func, Is>>(args)...);
+    conditional_gil_scoped_release<release_gil> no_gil;
+    return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
@@ -409,9 +369,22 @@ auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
 // Returns a function object suitable for registering with pybind11.
 template <typename Func>
 auto wrap_pybind_function(Func&& f) {
-  using traits = function_traits<Func>;
+  using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-      std::forward<Func>(f), std::make_index_sequence<traits::arity>{});
+      std::forward<Func>(f),
+      std::make_index_sequence<traits::arity>{},
+      std::false_type{});
+}
+
+// Wrap a function with TH error, warning handling and releases the GIL.
+// Returns a function object suitable for registering with pybind11.
+template <typename Func>
+auto wrap_pybind_function_no_gil(Func&& f) {
+  using traits = invoke_traits<Func>;
+  return torch::detail::wrap_pybind_function_impl_(
+      std::forward<Func>(f),
+      std::make_index_sequence<traits::arity>{},
+      std::true_type{});
 }
 
 } // namespace torch

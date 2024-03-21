@@ -2,9 +2,9 @@
 #include <c10/util/irange.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
 #include <gtest/gtest.h>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 

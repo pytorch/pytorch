@@ -1,8 +1,6 @@
-#include <ATen/native/vulkan/api/Shader.h>
+#include <utility>
 
-#ifdef USE_VULKAN_SHADERC_RUNTIME
-#include <shaderc/shaderc.hpp>
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
@@ -10,48 +8,53 @@ namespace vulkan {
 namespace api {
 
 //
-// ShaderSource
+// ShaderInfo
 //
 
-ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
-    : type(ShaderSource::Type::GLSL),
-      src_code{
-          .glsl =
-              {
-                  glsl_src,
-                  0u,
-              },
-      },
-      kernel_name{std::move(name)} {}
+ShaderInfo::ShaderInfo()
+    : src_code{
+          nullptr,
+          0u,
+      } {}
 
-ShaderSource::ShaderSource(
+ShaderInfo::ShaderInfo(
     std::string name,
     const uint32_t* const spirv_bin,
     const uint32_t size,
-    const std::vector<VkDescriptorType>& layout)
-    : type(Type::SPIRV),
-      src_code{
-          .spirv =
-              {
-                  spirv_bin,
-                  size,
-              },
+    std::vector<VkDescriptorType>  layout)
+    : src_code{
+          spirv_bin,
+          size,
       },
       kernel_name{std::move(name)},
-      kernel_layout{layout} {}
+      kernel_layout{std::move(layout)} {}
 
-bool operator==(const ShaderSource& _1, const ShaderSource& _2) {
-  if (_1.type != _2.type) {
-    return false;
+ShaderInfo::ShaderInfo(
+    std::string name,
+    const uint32_t* const spirv_bin,
+    const uint32_t size,
+    std::vector<VkDescriptorType>  layout,
+    const std::vector<uint32_t>& tile_size,
+    const StorageType bias_storage_type,
+    const StorageType weight_storage_type)
+    : src_code{
+          spirv_bin,
+          size,
+      },
+      kernel_name{std::move(name)},
+      kernel_layout{std::move(layout)},
+      tile_size(tile_size),
+      bias_storage_type(bias_storage_type),
+      weight_storage_type(weight_storage_type) {
+  for (uint64_t i = 0; i < tile_size.size(); ++i) {
+    out_tile_size.data[i] = tile_size[i];
   }
+}
 
-  if (_1.type == ShaderSource::Type::SPIRV) {
-    return (
-        _1.src_code.spirv.bin == _2.src_code.spirv.bin &&
-        _1.src_code.spirv.size == _2.src_code.spirv.size);
-  } else {
-    return (_1.src_code.glsl.src == _2.src_code.glsl.src);
-  }
+bool operator==(const ShaderInfo& _1, const ShaderInfo& _2) {
+  return (
+      _1.src_code.bin == _2.src_code.bin &&
+      _1.src_code.size == _2.src_code.size);
 }
 
 //
@@ -59,10 +62,10 @@ bool operator==(const ShaderSource& _1, const ShaderSource& _2) {
 //
 
 ShaderLayout::ShaderLayout(
-    const VkDevice device,
+    VkDevice device,
     const ShaderLayout::Signature& signature)
     : device_(device), handle_{VK_NULL_HANDLE} {
-  c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
+  std::vector<VkDescriptorSetLayoutBinding> bindings;
 
   uint32_t binding_num = 0u;
   for (const VkDescriptorType type : signature) {
@@ -93,7 +96,7 @@ ShaderLayout::ShaderLayout(ShaderLayout&& other) noexcept
 }
 
 ShaderLayout::~ShaderLayout() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyDescriptorSetLayout(device_, handle_, nullptr);
@@ -115,10 +118,10 @@ void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept {
 // ShaderModule
 //
 
-ShaderModule::ShaderModule(const VkDevice device, const ShaderSource& source)
+ShaderModule::ShaderModule(VkDevice device, const ShaderInfo& source)
     : device_(device), handle_{VK_NULL_HANDLE} {
-  const uint32_t* code = source.src_code.spirv.bin;
-  uint32_t size = source.src_code.spirv.size;
+  const uint32_t* code = source.src_code.bin;
+  uint32_t size = source.src_code.size;
 
   const VkShaderModuleCreateInfo shader_module_create_info{
       VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, // sType
@@ -138,7 +141,7 @@ ShaderModule::ShaderModule(ShaderModule&& other) noexcept
 }
 
 ShaderModule::~ShaderModule() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyShaderModule(device_, handle_, nullptr);
@@ -160,13 +163,12 @@ void swap(ShaderModule& lhs, ShaderModule& rhs) noexcept {
 // ShaderLayoutCache
 //
 
-ShaderLayoutCache::ShaderLayoutCache(const VkDevice device)
+ShaderLayoutCache::ShaderLayoutCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 ShaderLayoutCache::ShaderLayoutCache(ShaderLayoutCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 ShaderLayoutCache::~ShaderLayoutCache() {
@@ -178,7 +180,7 @@ VkDescriptorSetLayout ShaderLayoutCache::retrieve(
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_.insert({key, ShaderLayoutCache::Value(device_, key)}).first;
   }
 
@@ -194,13 +196,12 @@ void ShaderLayoutCache::purge() {
 // ShaderCache
 //
 
-ShaderCache::ShaderCache(const VkDevice device)
+ShaderCache::ShaderCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 ShaderCache::ShaderCache(ShaderCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 ShaderCache::~ShaderCache() {
@@ -211,7 +212,7 @@ VkShaderModule ShaderCache::retrieve(const ShaderCache::Key& key) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_.insert({key, ShaderCache::Value(device_, key)}).first;
   }
 

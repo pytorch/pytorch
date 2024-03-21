@@ -1,6 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -9,7 +10,14 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
-#include <torch/custom_class.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -236,7 +244,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
     at::Tensor input,
     bool reduce_range) {
   if (reduce_range) {
-    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+    TORCH_WARN_ONCE("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
   }
 
   using at::Tensor;
@@ -415,6 +423,8 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
+  auto output_data = output.data_ptr<float>();
+
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     for (const auto task_id : c10::irange(begin, end)) {
@@ -425,7 +435,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
           /*A=*/input_ptr,
           /*Bp=*/packed_weight_fp16,
           /*beta=*/0.0f,
-          /*C=*/output.data_ptr<float>(),
+          /*C=*/output_data,
           /*thread_id=*/static_cast<int>(task_id),
           /*num_threads=*/num_tasks);
     }
@@ -512,8 +522,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       /*len=*/input.numel());
 #else
   if (input_contig.numel() > 0) {
-    Tensor t_min, t_max;
-    std::tie(t_min, t_max) = at::aminmax(input_contig);
+    auto [t_min, t_max] = at::aminmax(input_contig);
     x_max = t_max.item<float>();
     x_min = t_min.item<float>();
   }
@@ -555,26 +564,24 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   // and won't be updated afterwards.
   int num_threads = at::get_num_threads();
   PrimitiveCacheKey cache_key = std::make_tuple(
-      q_params.scale, q_params.zero_point, input_dims, 1.0, 0, num_threads);
+      q_params.scale, q_params.zero_point, input_dims, 1.0, 0, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/true>(
-          params, x, w, b, y, 1.0f, 1.0f,
+          params, x, w, b, y,
           src_scales, weights_scales, ideep::scale_t(),
-          src_zero_point, ideep::zero_point_t(), op_attr);
+          src_zero_point, ideep::zero_point_t(), 1.0f, 1.0f, op_attr);
       get_cache() = LinearPrimitiveCache(cache_key, params);
-      onednn_utils::try_reorder(
-          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+      w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
   if (get_cache().hit_dynamic(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::matmul_forward::compute_dynamic(
-        params, x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
-        ideep::scale_t(), src_zero_point, ideep::zero_point_t());
+    ideep::matmul_forward::compute(params, x, w, b, y, src_scales, src_zero_point);
   } else {
-    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f,
-                                      src_scales, weights_scales, ideep::scale_t(),
-                                      src_zero_point, ideep::zero_point_t(), op_attr);
+    ideep::matmul_forward::compute(x, w, b, y,
+                                   src_scales, weights_scales, ideep::scale_t(),
+                                   src_zero_point, ideep::zero_point_t(),
+                                   1.0f, 1.0f, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = w.get_dim(1);
@@ -654,6 +661,7 @@ class QLinearDynamicFp16 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::linear_dynamic"),
       TORCH_FN(QLinearDynamicInt8<false>::run));
@@ -669,6 +677,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
+  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"),
       TORCH_FN(QLinearDynamicInt8<false>::run));

@@ -24,12 +24,6 @@ class TestWorkspace(unittest.TestCase):
         )
         workspace.ResetWorkspace()
 
-    def testRootFolder(self):
-        self.assertEqual(workspace.ResetWorkspace(), True)
-        self.assertEqual(workspace.RootFolder(), ".")
-        self.assertEqual(workspace.ResetWorkspace("/tmp/caffe-workspace-test"), True)
-        self.assertEqual(workspace.RootFolder(), "/tmp/caffe-workspace-test")
-
     def testWorkspaceHasBlobWithNonexistingName(self):
         self.assertEqual(workspace.HasBlob("non-existing"), False)
 
@@ -138,15 +132,15 @@ class TestWorkspace(unittest.TestCase):
             tensor.init([3, 4], core.DataType.STRING)
 
         """ feed (copy) data into tensor """
-        val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=np.object)
+        val = np.array([[b"abc", b"def"], [b"ghi", b"jkl"]], dtype=object)
         tensor.feed(val)
-        self.assertEquals(tensor.data[0, 0], b"abc")
+        self.assertEqual(tensor.data[0, 0], b"abc")
         np.testing.assert_array_equal(ws.blobs["tensor"].fetch(), val)
 
         val = np.array([1.1, 10.2])
         tensor.feed(val)
         val[0] = 5.2
-        self.assertEquals(tensor.data[0], 1.1)
+        self.assertEqual(tensor.data[0], 1.1)
 
         """ fetch (copy) data from tensor """
         val = np.array([1.1, 1.2])
@@ -155,7 +149,7 @@ class TestWorkspace(unittest.TestCase):
         tensor.data[0] = 5.2
         val3 = tensor.fetch()
         np.testing.assert_array_equal(val, val2)
-        self.assertEquals(val3[0], 5.2)
+        self.assertEqual(val3[0], 5.2)
 
     def testFetchFeedBlob(self):
         self.assertEqual(
@@ -190,7 +184,7 @@ class TestWorkspace(unittest.TestCase):
             np.float16,
             np.float32,
             np.float64,
-            np.bool,
+            bool,
             np.int8,
             np.int16,
             np.int32,
@@ -211,12 +205,12 @@ class TestWorkspace(unittest.TestCase):
 
     def testFetchFeedBlobBool(self):
         """Special case for bool to ensure coverage of both true and false."""
-        data = np.zeros((2, 3, 4)).astype(np.bool)
+        data = np.zeros((2, 3, 4)).astype(bool)
         data.flat[::2] = True
         self.assertEqual(workspace.FeedBlob("testblob_types", data), True)
         fetched_back = workspace.FetchBlob("testblob_types")
         self.assertEqual(fetched_back.shape, (2, 3, 4))
-        self.assertEqual(fetched_back.dtype, np.bool)
+        self.assertEqual(fetched_back.dtype, bool)
         np.testing.assert_array_equal(fetched_back, data)
 
     def testGetBlobSizeBytes(self):
@@ -224,7 +218,7 @@ class TestWorkspace(unittest.TestCase):
             np.float16,
             np.float32,
             np.float64,
-            np.bool,
+            bool,
             np.int8,
             np.int16,
             np.int32,
@@ -300,8 +294,8 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob("s1", s1)
         workspace.FeedBlob("s2", s2)
         fetch1, fetch2 = workspace.FetchBlobs(["s1", "s2"])
-        self.assertEquals(s1, fetch1)
-        self.assertEquals(s2, fetch2)
+        self.assertEqual(s1, fetch1)
+        self.assertEqual(s2, fetch2)
 
     def testFetchFeedViaBlobDict(self):
         self.assertEqual(
@@ -774,7 +768,7 @@ class TestTransform(htu.HypothesisTestCase):
 
 class MyModule(torch.jit.ScriptModule):
     def __init__(self):
-        super(MyModule, self).__init__()
+        super().__init__()
         self.mult = torch.nn.Parameter(torch.tensor([[1, 2, 3, 4, 5.0]]))
 
     @torch.jit.script_method

@@ -1,7 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_call.h>
 
-#include <c10/util/C++17.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -27,7 +25,7 @@ c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
   TORCH_INTERNAL_ASSERT(
-      message.payload().size() >= 1,
+      !message.payload().empty(),
       "Failed to convert an RPC message to PythonCall, the payload should at "
       "least contain one byte indicating whether this is an async function, "
       "but got payload of size ",

@@ -6,6 +6,7 @@ from numbers import Number
 import pytest
 
 import torch
+from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
@@ -14,8 +15,10 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform, Compo
                                             LowerCholeskyTransform, PowerTransform,
                                             ReshapeTransform, SigmoidTransform, TanhTransform,
                                             SoftmaxTransform, SoftplusTransform, StickBreakingTransform,
-                                            identity_transform, Transform, _InverseTransform)
+                                            identity_transform, Transform, _InverseTransform,
+                                            PositiveDefiniteTransform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
+from torch.testing._internal.common_utils import run_tests
 
 
 def get_transforms(cache_size):
@@ -23,6 +26,8 @@ def get_transforms(cache_size):
         AbsTransform(cache_size=cache_size),
         ExpTransform(cache_size=cache_size),
         PowerTransform(exponent=2,
+                       cache_size=cache_size),
+        PowerTransform(exponent=-2,
                        cache_size=cache_size),
         PowerTransform(exponent=torch.tensor(5.).normal_(),
                        cache_size=cache_size),
@@ -43,6 +48,7 @@ def get_transforms(cache_size):
         StickBreakingTransform(cache_size=cache_size),
         LowerCholeskyTransform(cache_size=cache_size),
         CorrCholeskyTransform(cache_size=cache_size),
+        PositiveDefiniteTransform(cache_size=cache_size),
         ComposeTransform([
             AffineTransform(torch.randn(4, 5),
                             torch.randn(4, 5),
@@ -118,10 +124,15 @@ def generate_data(transform):
         domain = domain.base_constraint
     codomain = transform.codomain
     x = torch.empty(4, 5)
-    if domain is constraints.lower_cholesky or codomain is constraints.lower_cholesky:
-        x = torch.empty(6, 6)
-        x = x.normal_()
+    positive_definite_constraints = [constraints.lower_cholesky, constraints.positive_definite]
+    if domain in positive_definite_constraints:
+        x = torch.randn(6, 6)
+        x = x.tril(-1) + x.diag().exp().diag_embed()
+        if domain is constraints.positive_definite:
+            return x @ x.T
         return x
+    elif codomain in positive_definite_constraints:
+        return torch.randn(6, 6)
     elif domain is constraints.real:
         return x.normal_()
     elif domain is constraints.real_vector:
@@ -148,7 +159,7 @@ def generate_data(transform):
         x /= x.norm(dim=-1, keepdim=True)
         x.diagonal(dim1=-1).copy_(x.diagonal(dim1=-1).abs())
         return x
-    raise ValueError('Unsupported domain: {}'.format(domain))
+    raise ValueError(f'Unsupported domain: {domain}')
 
 
 TRANSFORMS_CACHE_ACTIVE = get_transforms(cache_size=1)
@@ -189,6 +200,7 @@ def test_with_cache(transform):
 @pytest.mark.parametrize('test_cached', [True, False])
 def test_forward_inverse(transform, test_cached):
     x = generate_data(transform).requires_grad_()
+    assert transform.domain.check(x).all()  # verify that the input data are valid
     try:
         y = transform(x)
     except NotImplementedError:
@@ -206,19 +218,19 @@ def test_forward_inverse(transform, test_cached):
     if transform.bijective:
         # verify function inverse
         assert torch.allclose(x2, x, atol=1e-4, equal_nan=True), '\n'.join([
-            '{} t.inv(t(-)) error'.format(transform),
-            'x = {}'.format(x),
-            'y = t(x) = {}'.format(y),
-            'x2 = t.inv(y) = {}'.format(x2),
+            f'{transform} t.inv(t(-)) error',
+            f'x = {x}',
+            f'y = t(x) = {y}',
+            f'x2 = t.inv(y) = {x2}',
         ])
     else:
         # verify weaker function pseudo-inverse
         assert torch.allclose(y2, y, atol=1e-4, equal_nan=True), '\n'.join([
-            '{} t(t.inv(t(-))) error'.format(transform),
-            'x = {}'.format(x),
-            'y = t(x) = {}'.format(y),
-            'x2 = t.inv(y) = {}'.format(x2),
-            'y2 = t(x2) = {}'.format(y2),
+            f'{transform} t(t.inv(t(-))) error',
+            f'x = {x}',
+            f'y = t(x) = {y}',
+            f'x2 = t.inv(y) = {x2}',
+            f'y2 = t(x2) = {y2}',
         ])
 
 
@@ -243,7 +255,7 @@ base_dist1 = Dirichlet(torch.ones(4, 4))
 base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
 
 
-@pytest.mark.parametrize('batch_shape, event_shape, dist', [
+@pytest.mark.parametrize(('batch_shape', 'event_shape', 'dist'), [
     ((4, 4), (), base_dist0),
     ((4,), (4,), base_dist1),
     ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
@@ -409,7 +421,7 @@ def test_compose_affine(event_dims):
     if transform.domain.event_dim > 1:
         base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
     dist = TransformedDistribution(base_dist, transforms)
-    assert dist.support.event_dim == max(1, max(event_dims))
+    assert dist.support.event_dim == max(1, *event_dims)
 
 
 @pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)
@@ -486,5 +498,18 @@ def test_save_load_transform():
     assert torch.allclose(log_prob, other.log_prob(x))
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
+def test_transform_sign(transform: Transform):
+    try:
+        sign = transform.sign
+    except NotImplementedError:
+        pytest.skip('Not implemented.')
+
+    x = generate_data(transform).requires_grad_()
+    y = transform(x).sum()
+    derivatives, = grad(y, [x])
+    assert torch.less(torch.as_tensor(0.), derivatives * sign).all()
+
+
+if __name__ == "__main__":
+    run_tests()

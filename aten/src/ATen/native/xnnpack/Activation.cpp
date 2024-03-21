@@ -1,11 +1,10 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/utils/Factory.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 
 bool use_hardswish(
@@ -18,14 +17,11 @@ bool use_hardswish(
            true;
 }
 
-Tensor& hardswish_impl(Tensor& input, Tensor& output) {
+static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   using namespace internal;
 
   xnn_operator_t hardswish_op{};
   const xnn_status create_status = xnn_create_hardswish_nc_f32(
-    1, // channels
-    1, // input stride
-    1, // output stride
     0, // flags
     &hardswish_op);
 
@@ -35,12 +31,22 @@ Tensor& hardswish_impl(Tensor& input, Tensor& output) {
 
   Operator hardswish_scoped_op(hardswish_op);
 
-  const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
+  const xnn_status reshape_status = xnn_reshape_hardswish_nc_f32(
     hardswish_op,
     input.numel(),  // Batch
-    input.data_ptr<float>(),
-    output.data_ptr<float>(),
+    1, // channels
+    1, // input stride
+    1, // output stride
     caffe2::pthreadpool_());  // threadpool
+
+  TORCH_CHECK(
+    xnn_status_success == reshape_status,
+    "xnn_reshape_hardswish_nc_f32 failed!");
+
+  const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
+    hardswish_op,
+    input.data_ptr<float>(),
+    output.data_ptr<float>());
 
   TORCH_CHECK(
     xnn_status_success == setup_status,
@@ -90,8 +96,6 @@ Tensor& hardswish_(Tensor& input) {
   }
 }
 
-}
-}
-}
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

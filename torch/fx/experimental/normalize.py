@@ -59,6 +59,7 @@ class NormalizeArgs(Transformer):
         if n.op != "output":
             self.node_map[out] = n
             out.node.meta = n.meta
+            out.node.type = n.type
         return out
 
     def call_function(

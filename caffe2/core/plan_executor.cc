@@ -624,7 +624,6 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         }
         if (compiledStep->gotFailure) {
           LOG(ERROR) << "One of the workers failed.";
-          // NOLINTNEXTLINE(bugprone-use-after-move)
           if (first_exception) {
             first_exception.rethrowException();
           }

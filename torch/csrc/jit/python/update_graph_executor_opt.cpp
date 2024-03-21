@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/python/update_graph_executor_opt.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 thread_local bool kOptimize = true;
 void setGraphExecutorOptimize(bool o) {
@@ -10,5 +9,5 @@ void setGraphExecutorOptimize(bool o) {
 bool getGraphExecutorOptimize() {
   return kOptimize;
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

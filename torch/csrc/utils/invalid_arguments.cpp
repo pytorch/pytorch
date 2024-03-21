@@ -1,6 +1,5 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 
-#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/irange.h>
@@ -18,6 +17,11 @@ std::string py_typename(PyObject* object) {
 }
 
 struct Type {
+  Type() = default;
+  Type(const Type&) = default;
+  Type& operator=(const Type&) = default;
+  Type(Type&&) noexcept = default;
+  Type& operator=(Type&&) noexcept = default;
   virtual bool is_matching(PyObject* object) = 0;
   virtual ~Type() = default;
 };
@@ -82,7 +86,9 @@ struct SequenceType : public Type {
       return false;
     auto num_elements = PySequence_Length(object);
     for (const auto i : c10::irange(num_elements)) {
-      if (!type->is_matching(PySequence_GetItem(object, i)))
+      if (!type->is_matching(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(object, i))
+                  .ptr()))
         return false;
     }
     return true;
@@ -107,7 +113,7 @@ struct Option {
   Option(bool is_variadic, bool has_out)
       : arguments(), is_variadic(is_variadic), has_out(has_out){};
   Option(const Option&) = delete;
-  Option(Option&& other)
+  Option(Option&& other) noexcept
       : arguments(std::move(other.arguments)),
         is_variadic(other.is_variadic),
         has_out(other.has_out){};
@@ -122,8 +128,7 @@ std::vector<std::string> _splitString(
     const std::string& delim) {
   std::vector<std::string> tokens;
   size_t start = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t end;
+  size_t end = 0;
   while ((end = s.find(delim, start)) != std::string::npos) {
     tokens.push_back(s.substr(start, end - start));
     start = end + delim.length();
@@ -135,25 +140,25 @@ std::vector<std::string> _splitString(
 std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   std::unique_ptr<Type> result;
   if (type_name == "float") {
-    result = torch::make_unique<MultiType>(MultiType{"float", "int", "long"});
+    result = std::make_unique<MultiType>(MultiType{"float", "int", "long"});
   } else if (type_name == "int") {
-    result = torch::make_unique<MultiType>(MultiType{"int", "long"});
+    result = std::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
     for (auto& type : _splitString(type_list, ","))
       types.emplace_back(_buildType(type, false));
-    result = torch::make_unique<TupleType>(std::move(types));
+    result = std::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
     auto subtype = type_name.substr(9);
     subtype.pop_back();
-    result = torch::make_unique<SequenceType>(_buildType(subtype, false));
+    result = std::make_unique<SequenceType>(_buildType(subtype, false));
   } else {
-    result = torch::make_unique<SimpleType>(type_name);
+    result = std::make_unique<SimpleType>(type_name);
   }
   if (is_nullable)
-    result = torch::make_unique<NullableType>(std::move(result));
+    result = std::make_unique<NullableType>(std::move(result));
   return result;
 }
 
@@ -272,14 +277,41 @@ std::string _formattedArgDesc(
       result += red;
     if (is_kwarg)
       result += option.arguments[i].name + "=";
-    result += py_typename(arg);
+    bool is_tuple = PyTuple_Check(arg);
+    if (is_tuple || PyList_Check(arg)) {
+      result += py_typename(arg) + " of ";
+      auto num_elements = PySequence_Length(arg);
+      if (is_tuple) {
+        result += "(";
+      } else {
+        result += "[";
+      }
+      for (const auto i : c10::irange(num_elements)) {
+        if (i != 0) {
+          result += ", ";
+        }
+        result += py_typename(
+            py::reinterpret_steal<py::object>(PySequence_GetItem(arg, i))
+                .ptr());
+      }
+      if (is_tuple) {
+        if (num_elements == 1) {
+          result += ",";
+        }
+        result += ")";
+      } else {
+        result += "]";
+      }
+    } else {
+      result += py_typename(arg);
+    }
     if (is_matching)
       result += reset_green;
     else
       result += reset_red;
     result += ", ";
   }
-  if (arguments.size() > 0)
+  if (!arguments.empty())
     result.erase(result.length() - 2);
   result += ")";
   return result;
@@ -293,7 +325,7 @@ std::string _argDesc(
     result += std::string(py_typename(arg)) + ", ";
   for (auto& kwarg : kwargs)
     result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
-  if (arguments.size() > 0)
+  if (!arguments.empty())
     result.erase(result.length() - 2);
   result += ")";
   return result;
@@ -345,8 +377,7 @@ std::string format_invalid_args(
 
   bool has_kwargs = given_kwargs && PyDict_Size(given_kwargs) > 0;
   if (has_kwargs) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject *key, *value;
+    PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
 
     while (PyDict_Next(given_kwargs, &pos, &key, &value)) {
@@ -361,7 +392,7 @@ std::string format_invalid_args(
     std::vector<std::string> unmatched_kwargs;
     if (has_kwargs)
       unmatched_kwargs = _tryMatchKwargs(option, kwargs);
-    if (unmatched_kwargs.size()) {
+    if (!unmatched_kwargs.empty()) {
       error_msg += "got unrecognized keyword arguments: ";
       for (auto& kwarg : unmatched_kwargs)
         error_msg += kwarg + ", ";
@@ -391,7 +422,7 @@ std::string format_invalid_args(
         std::vector<std::string> unmatched_kwargs;
         if (has_kwargs)
           unmatched_kwargs = _tryMatchKwargs(option, kwargs);
-        if (unmatched_kwargs.size() > 0) {
+        if (!unmatched_kwargs.empty()) {
           error_msg +=
               "      didn't match because some of the keywords were incorrect: ";
           for (auto& kwarg : unmatched_kwargs)

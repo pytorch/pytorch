@@ -3,6 +3,8 @@
 #include <c10/util/irange.h>
 #include <torch/types.h>
 
+#include <utility>
+
 namespace torch {
 namespace nn {
 namespace utils {
@@ -74,10 +76,10 @@ class PackedSequence {
         "They should be instantiated by functions like pack_sequence "
         "and pack_padded_sequences in nn::utils::rnn. "
         "https://pytorch.org/docs/stable/nn.html#torch.nn.utils.rnn.pack_sequence");
-    data_ = data;
-    batch_sizes_ = batch_sizes;
-    sorted_indices_ = sorted_indices;
-    unsorted_indices_ = unsorted_indices;
+    data_ = std::move(data);
+    batch_sizes_ = std::move(batch_sizes);
+    sorted_indices_ = std::move(sorted_indices);
+    unsorted_indices_ = std::move(unsorted_indices);
   }
 
   const Tensor& data() const {
@@ -130,7 +132,10 @@ class PackedSequence {
                 options.device(data.device()).dtype(unsorted_indices_.dtype()))
           : Tensor();
       return PackedSequence(
-          data, batch_sizes_, sorted_indices, unsorted_indices);
+          std::move(data),
+          batch_sizes_,
+          std::move(sorted_indices),
+          std::move(unsorted_indices));
     }
   }
 
@@ -207,10 +212,10 @@ inline PackedSequence pack_padded_sequence(
     input = input.index_select(batch_dim, sorted_indices);
   }
 
-  Tensor data, batch_sizes;
-  std::tie(data, batch_sizes) =
+  auto [data, batch_sizes] =
       torch::_pack_padded_sequence(input, lengths, batch_first);
-  return PackedSequence(data, batch_sizes, sorted_indices, {});
+  return PackedSequence(
+      std::move(data), std::move(batch_sizes), std::move(sorted_indices), {});
 }
 
 /// Pads a packed batch of variable length sequences.
@@ -256,8 +261,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
         max_seq_length);
     max_seq_length = total_length_val;
   }
-  Tensor padded_output, lengths;
-  std::tie(padded_output, lengths) = torch::_pad_packed_sequence(
+  auto [padded_output, lengths] = torch::_pad_packed_sequence(
       sequence.data(),
       sequence.batch_sizes(),
       batch_first,
@@ -268,7 +272,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
     int64_t batch_dim = batch_first ? 0 : 1;
     return std::make_tuple(
         padded_output.index_select(batch_dim, unsorted_indices),
-        lengths.index({unsorted_indices}));
+        lengths.index({unsorted_indices.cpu()}));
   }
   return std::make_tuple(padded_output, lengths);
 }
@@ -336,7 +340,7 @@ inline PackedSequence pack_sequence(
   }
   return pack_padded_sequence(
       at::pad_sequence(sequences),
-      lengths,
+      std::move(lengths),
       /*batch_first=*/false,
       /*enforce_sorted=*/enforce_sorted);
 }

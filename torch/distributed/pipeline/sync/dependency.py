@@ -12,7 +12,7 @@ from torch import Tensor
 
 from .phony import get_phony
 
-__all__: List[str] = []
+__all__: List[str] = ["fork", "Fork", "join", "Join"]
 
 
 def fork(input: Tensor) -> Tuple[Tensor, Tensor]:
@@ -37,7 +37,7 @@ class Fork(torch.autograd.Function):
 
 
 def join(input: Tensor, phony: Tensor) -> Tensor:
-    """Merges two autograd lanes."""
+    """Merge two autograd lanes."""
     if torch.is_grad_enabled() and (input.requires_grad or phony.requires_grad):
         input = Join.apply(input, phony)
 

@@ -76,7 +76,7 @@ TORCH_API bool isClamp(Node* n);
 // the input tensor is quantized or not, example: aten::size
 TORCH_API bool isTensorInfoNode(Node* n);
 
-// Check if this the the propaagate op that has single input, e.g. aten::cat
+// Check if this the propagate op that has single input, e.g. aten::cat
 TORCH_API bool isPropagateQuantSingleInputOp(Node* n);
 
 // Check if this is the propagate op that has two inputs, e.g. aten::add

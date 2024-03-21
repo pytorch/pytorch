@@ -22,7 +22,7 @@ namespace nn {
 
 /// TransformerEncoderLayer module.
 /// See
-/// https://pytorch.org/docs/master/generated/torch.nn.TransformerEncoderLayer.html
+/// https://pytorch.org/docs/main/generated/torch.nn.TransformerEncoderLayer.html
 /// to learn abouut the exact behavior of this encoder layer model
 ///
 /// See the documentation for `torch::nn::TransformerEncoderLayer` class to
@@ -33,15 +33,13 @@ namespace nn {
 /// TransformerEncoderLayer encoderLayer(TransformerEncoderLayerOptions(512,
 /// 8).dropout(0.1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerEncoderLayerImpl
     : public Cloneable<TransformerEncoderLayerImpl> {
  public:
   TransformerEncoderLayerImpl(int64_t d_model, int64_t nhead)
       : TransformerEncoderLayerImpl(
             TransformerEncoderLayerOptions(d_model, nhead)) {}
-  explicit TransformerEncoderLayerImpl(
-      const TransformerEncoderLayerOptions& options_);
+  explicit TransformerEncoderLayerImpl(TransformerEncoderLayerOptions options_);
 
   Tensor forward(
       const Tensor& src,
@@ -99,7 +97,7 @@ TORCH_MODULE(TransformerEncoderLayer);
 /// Polosukhin. 2017. Attention is all you need. In Advances in Neural
 /// Information Processing Systems, pages 6000-6010. Users may modify or
 /// implement in a different way during application. See
-/// https://pytorch.org/docs/master/nn.html#transformer-layers to learn about
+/// https://pytorch.org/docs/main/nn.html#transformer-layers to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::TransformerDecoderLayerOptions` class
@@ -110,15 +108,13 @@ TORCH_MODULE(TransformerEncoderLayer);
 /// TransformerDecoderLayer model(TransformerDecoderLayerOptions(512,
 /// 8).dropout(0.2));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerDecoderLayerImpl
     : public Cloneable<TransformerDecoderLayerImpl> {
  public:
   TransformerDecoderLayerImpl(int64_t d_model, int64_t nhead)
       : TransformerDecoderLayerImpl(
             TransformerDecoderLayerOptions(d_model, nhead)) {}
-  explicit TransformerDecoderLayerImpl(
-      const TransformerDecoderLayerOptions& options_);
+  explicit TransformerDecoderLayerImpl(TransformerDecoderLayerOptions options_);
 
   void reset() override;
 

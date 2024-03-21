@@ -25,7 +25,7 @@ public:
         HIPStream(
           Stream(
             Stream::UNSAFE,
-            Device(DeviceType::HIP, stream.device_index()),
+            Device(c10::DeviceType::HIP, stream.device_index()),
             stream.id())
         )
       ) {}
@@ -50,9 +50,12 @@ public:
 
   DeviceIndex device_index() const { return stream_.device_index(); }
 
+  // Unsafely coerce HIP device into CUDA device
+  c10::DeviceType device_type() const { return c10::DeviceType::CUDA; }
+
   Device device() const {
     // Unsafely coerce HIP device into CUDA device
-    return Device(DeviceType::CUDA, stream_.device_index());
+    return Device(c10::DeviceType::CUDA, stream_.device_index());
   }
 
   StreamId id() const        { return stream_.id(); }
@@ -66,14 +69,17 @@ public:
     return Stream(Stream::UNSAFE, device(), id());
   }
 
-  uint64_t pack() const noexcept {
+  c10::StreamData3 pack3() const noexcept {
     // Unsafely coerce HIP stream into "CUDA" stream before packing
-    return unwrap().pack();
+    return unwrap().pack3();
   }
 
-  static HIPStreamMasqueradingAsCUDA unpack(uint64_t bits) {
+  static HIPStreamMasqueradingAsCUDA unpack3(StreamId stream_id,
+                                             DeviceIndex device_index,
+                                             c10::DeviceType device_type) {
     // NB: constructor manages CUDA->HIP translation for us
-    return HIPStreamMasqueradingAsCUDA(Stream::unpack(bits));
+    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(
+        stream_id, device_index, device_type));
   }
 
   static std::tuple<int, int> priority_range() { return HIPStream::priority_range(); }

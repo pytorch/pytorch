@@ -27,7 +27,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
     createSharedBuffer<CPUContext>(ws_);
   }
 
-  ~Int8ConvOp() {
+  ~Int8ConvOp() override {
     if (this->qnnpackObject_ != nullptr) {
       qnnp_delete_operator(this->qnnpackObject_);
       this->qnnpackObject_ = nullptr;

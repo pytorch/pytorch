@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 __all__ = ['parse_rendezvous_endpoint']
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
-    """Extracts key-value pairs from a rendezvous configuration string.
+    """Extract key-value pairs from a rendezvous configuration string.
 
     Args:
         config_str:
@@ -55,14 +55,14 @@ def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
 
 
 def _try_parse_port(port_str: str) -> Optional[int]:
-    """Tries to extract the port number from ``port_str``."""
+    """Try to extract the port number from ``port_str``."""
     if port_str and re.match(r"^[0-9]{1,5}$", port_str):
         return int(port_str)
     return None
 
 
 def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
-    """Extracts the hostname and the port number from a rendezvous endpoint.
+    """Extract the hostname and the port number from a rendezvous endpoint.
 
     Args:
         endpoint:
@@ -109,7 +109,7 @@ def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tup
 
 
 def _matches_machine_hostname(host: str) -> bool:
-    """Indicates whether ``host`` matches the hostname of this machine.
+    """Indicate whether ``host`` matches the hostname of this machine.
 
     This function compares ``host`` to the hostname as well as to the IP
     addresses of this machine. Note that it may return a false negative if this
@@ -127,6 +127,18 @@ def _matches_machine_hostname(host: str) -> bool:
     if addr and addr.is_loopback:
         return True
 
+    try:
+        host_addr_list = socket.getaddrinfo(
+            host, None, proto=socket.IPPROTO_TCP, flags=socket.AI_CANONNAME
+        )
+    except (ValueError, socket.gaierror) as _:
+        host_addr_list = []
+
+    host_ip_list = [
+        host_addr_info[4][0]
+        for host_addr_info in host_addr_list
+    ]
+
     this_host = socket.gethostname()
     if host == this_host:
         return True
@@ -138,16 +150,21 @@ def _matches_machine_hostname(host: str) -> bool:
         # If we have an FQDN in the addr_info, compare it to `host`.
         if addr_info[3] and addr_info[3] == host:
             return True
+
         # Otherwise if `host` represents an IP address, compare it to our IP
         # address.
         if addr and addr_info[4][0] == str(addr):
+            return True
+
+        # If the IP address matches one of the provided host's IP addresses
+        if addr_info[4][0] in host_ip_list:
             return True
 
     return False
 
 
 def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
-    """Suspends the current thread for ``seconds``.
+    """Suspend the current thread for ``seconds``.
 
     Args:
         seconds:
@@ -162,7 +179,7 @@ def _delay(seconds: Union[float, Tuple[float, float]]) -> None:
 
 
 class _PeriodicTimer:
-    """Represents a timer that periodically runs a specified function.
+    """Represent a timer that periodically runs a specified function.
 
     Args:
         interval:
@@ -208,11 +225,11 @@ class _PeriodicTimer:
 
     @property
     def name(self) -> Optional[str]:
-        """Gets the name of the timer."""
+        """Get the name of the timer."""
         return self._name
 
     def set_name(self, name: str) -> None:
-        """Sets the name of the timer.
+        """Set the name of the timer.
 
         The specified name will be assigned to the background thread and serves
         for debugging and troubleshooting purposes.

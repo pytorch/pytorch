@@ -6,7 +6,12 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
 
+#include <utility>
+
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
+
+#define TORCH_CHECK_TENSOR_ALL(cond, ...) \
+  TORCH_CHECK((cond)._is_all_true().item<bool>(), __VA_ARGS__);
 
 namespace at {
 
@@ -15,12 +20,14 @@ namespace at {
 // which do NO argument checking by default.
 
 struct TORCH_API TensorArg {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor& tensor;
   const char* name;
   int pos; // 1-indexed
   TensorArg(const Tensor& tensor, const char* name, int pos)
       : tensor(tensor), name(name), pos(pos) {}
   // Try to mitigate any possibility of dangling reference to temporaries.
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
   const Tensor* operator->() const {
     return &tensor;
@@ -37,7 +44,7 @@ struct TORCH_API TensorGeometryArg {
   /* implicit */ TensorGeometryArg(TensorArg arg)
       : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
   TensorGeometryArg(TensorGeometry tensor, const char* name, int pos)
-      : tensor(tensor), name(name), pos(pos) {}
+      : tensor(std::move(tensor)), name(name), pos(pos) {}
   const TensorGeometry* operator->() const {
     return &tensor;
   }
@@ -61,7 +68,9 @@ using CheckedFrom = const char*;
 // not TensorGeometryArg, because the Tensor to TensorGeometry
 // conversion will blow up if you have undefined tensors.
 
-TORCH_API std::ostream& operator<<(std::ostream& out, TensorGeometryArg t);
+TORCH_API std::ostream& operator<<(
+    std::ostream& out,
+    const TensorGeometryArg& t);
 TORCH_API void checkDim(
     CheckedFrom c,
     const Tensor& tensor,
@@ -85,19 +94,28 @@ TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     IntArrayRef sizes);
+TORCH_API void checkSize_symint(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    c10::SymIntArrayRef sizes);
 TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim,
     int64_t size);
+TORCH_API void checkSize_symint(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim,
+    const c10::SymInt& size);
 TORCH_API void checkNumel(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t numel);
 TORCH_API void checkSameNumel(
     CheckedFrom c,
-    const TensorGeometryArg& t1,
-    const TensorGeometryArg& t2);
+    const TensorArg& t1,
+    const TensorArg& t2);
 TORCH_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
 TORCH_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
 TORCH_API void checkScalarTypes(
@@ -118,6 +136,7 @@ TORCH_API void checkSameSize(
     CheckedFrom c,
     const TensorArg& t1,
     const TensorArg& t2);
+TORCH_API void checkAllSameSize(CheckedFrom c, ArrayRef<TensorArg> tensors);
 TORCH_API void checkDefined(CheckedFrom c, const TensorArg& t);
 TORCH_API void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 

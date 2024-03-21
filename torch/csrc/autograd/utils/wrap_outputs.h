@@ -30,6 +30,10 @@ inline PyObject* wrap(bool value) {
   }
 }
 
+inline PyObject* wrap(c10::DeviceIndex value) {
+  return THPUtils_packDeviceIndex(value);
+}
+
 inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
 }
@@ -98,6 +102,10 @@ inline PyObject* wrap(at::IntArrayRef list) {
     PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
   }
   return r.release();
+}
+
+inline PyObject* wrap(at::Stream stream) {
+  return THPStream_Wrap(stream);
 }
 
 namespace detail {

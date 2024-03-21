@@ -1,5 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/native/Unfold3d.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
@@ -7,8 +10,7 @@
 #include <mkl.h>
 #endif // AT_MKL_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -450,8 +452,9 @@ void Unfold3dCopyCPU(
     int64_t pad_h,
     int64_t pad_w,
     void* dst) {
-  AT_DISPATCH_ALL_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::BFloat16,
+      at::ScalarType::Half,
       dtype,
       "Unfold3dCopyCPU",
       [=, &src]() {
@@ -497,8 +500,9 @@ void Unfold3dAccCPU(
     int64_t pad_h,
     int64_t pad_w,
     void* dst) {
-  AT_DISPATCH_ALL_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::BFloat16,
+      at::ScalarType::Half,
       dtype,
       "Unfold3dAccCPU",
       [=, &src]() {
@@ -524,5 +528,4 @@ void Unfold3dAccCPU(
       });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,13 +1,12 @@
 #include <c10/util/Type.h>
 
+#if HAS_DEMANGLE
+
 #include <cstdlib>
 #include <functional>
 #include <memory>
 
-#if HAS_DEMANGLE
-
 #include <cxxabi.h>
-#include <execinfo.h>
 
 namespace c10 {
 
@@ -24,8 +23,7 @@ std::string demangle(const char* name) {
       abi::__cxa_demangle(
           name,
           /*__output_buffer=*/nullptr,
-          // NOLINTNEXTLINE(modernize-use-nullptr)
-          /*__length=*/0,
+          /*__length=*/nullptr,
           &status),
       /*deleter=*/free);
 

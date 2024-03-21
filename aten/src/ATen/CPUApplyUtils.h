@@ -6,7 +6,6 @@
 #include <c10/util/irange.h>
 #include <cstring>
 #include <limits>
-#include <utility>
 
 namespace at {
 
@@ -67,9 +66,10 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
   void operator=(strided_tensor_iter_fixed const& x) = delete;
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
-  strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
+  strided_tensor_iter_fixed(
+      Tensor& tensor,
+      C10_UNUSED bool sort_strides = false)
       : data_(tensor.data_ptr<T>()) {
-    (void)sort_strides; // Suppress unused variable warning
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
       std::memcpy(
@@ -106,7 +106,7 @@ struct strided_tensor_iter {
 };
 
 inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
-  if (tensors.size() == 0)
+  if (tensors.empty())
     return true;
   int64_t all_numel = tensors[0].numel();
   for (const auto i : c10::irange(1, tensors.size())) {

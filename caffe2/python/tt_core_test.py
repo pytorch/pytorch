@@ -52,7 +52,7 @@ class TestTTSVD(hu.HypothesisTestCase):
         Y_full_tt = workspace.FetchBlob("Y").flatten()
 
         assert(len(Y_fc) == len(Y_full_tt))
-        self.assertAlmostEquals(np.linalg.norm(Y_fc - Y_full_tt), 0, delta=1e-3)
+        self.assertAlmostEqual(np.linalg.norm(Y_fc - Y_full_tt), 0, delta=1e-3)
 
         # Testing TT-decomposition with minimal ranks
         sparse_tt_ranks = [1, 1, 1, 1, 1]
@@ -74,7 +74,7 @@ class TestTTSVD(hu.HypothesisTestCase):
         Y_sparse_tt = workspace.FetchBlob("Y").flatten()
 
         assert(len(Y_fc) == len(Y_sparse_tt))
-        self.assertAlmostEquals(np.linalg.norm(Y_fc - Y_sparse_tt),
+        self.assertAlmostEqual(np.linalg.norm(Y_fc - Y_sparse_tt),
                                 39.974, delta=1e-3)
 
 

@@ -18,6 +18,7 @@ from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.layout import SkipLayout
 from torch.distributed.pipeline.sync.skip.tracker import SkipTracker, SkipTrackerThroughPotals, current_skip_tracker
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_default_skip_tracker():
@@ -127,3 +128,7 @@ def test_tensor_life_with_checkpointing():
     with enable_recomputing():
         skip_tracker.save(batch, None, "test", tensor)
     assert skip_tracker.portals[(None, "test")].tensor_life == 0
+
+
+if __name__ == "__main__":
+    run_tests()

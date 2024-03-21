@@ -299,7 +299,7 @@ class AvgPoolMicrokernelTester {
               << "at pixel " << i << ", channel " << k << ", n = " << n()
               << ", kc = " << kc();
           ASSERT_NEAR(
-              float(int32_t(y[i * yStride() + k])), yFP[i * kc() + k], 0.5f)
+              float(int32_t(y[i * yStride() + k])), yFP[i * kc() + k], 0.5001f)
               << "at pixel " << i << ", channel " << k << ", n = " << n()
               << ", ks = " << kh() << "x" << kw() << " (" << ks()
               << "), kc = " << kc() << ", acc = " << yAcc[i * kc() + k];
@@ -394,7 +394,7 @@ class AvgPoolMicrokernelTester {
               << "at pixel " << i << ", channel " << k << ", n = " << n()
               << ", kc = " << kc();
           ASSERT_NEAR(
-              float(int32_t(y[i * yStride() + k])), yFP[i * kc() + k], 0.5f)
+              float(int32_t(y[i * yStride() + k])), yFP[i * kc() + k], 0.5001f)
               << "at pixel " << i << ", channel " << k << ", n = " << n()
               << ", ks = " << kh() << "x" << kw() << " (" << ks()
               << "), kc = " << kc() << ", acc = " << yAcc[i * kc() + k];

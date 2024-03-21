@@ -32,7 +32,6 @@ struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
   TORCH_API friend bool operator==(
       const AdamOptions& lhs,
       const AdamOptions& rhs);
-  ~AdamOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -50,7 +49,6 @@ struct TORCH_API AdamParamState
   TORCH_API friend bool operator==(
       const AdamParamState& lhs,
       const AdamParamState& rhs);
-  ~AdamParamState() override = default;
 };
 
 class TORCH_API Adam : public Optimizer {
@@ -77,11 +75,8 @@ class TORCH_API Adam : public Optimizer {
         "Invalid weight_decay value: ",
         defaults.weight_decay());
   }
-  explicit Adam(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      AdamOptions defaults = {})
-      : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit Adam(std::vector<Tensor> params, AdamOptions defaults = {})
+      : Adam({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

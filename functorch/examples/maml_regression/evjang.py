@@ -2,13 +2,15 @@
 # (https://github.com/ericjang/maml-jax).
 # We translated his implementation from JAX to PyTorch.
 
-import matplotlib.pyplot as plt
 import math
-import torch
-import numpy as np
-from torch.nn import functional as F
+
 import matplotlib as mpl
-mpl.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch.nn import functional as F
+
+mpl.use("Agg")
 
 
 def net(x, params):
@@ -23,13 +25,15 @@ def net(x, params):
 
 
 params = [
-    torch.Tensor(40, 1).uniform_(-1., 1.).requires_grad_(),
+    torch.Tensor(40, 1).uniform_(-1.0, 1.0).requires_grad_(),
     torch.Tensor(40).zero_().requires_grad_(),
-
-    torch.Tensor(40, 40).uniform_(-1. / math.sqrt(40), 1. / math.sqrt(40)).requires_grad_(),
+    torch.Tensor(40, 40)
+    .uniform_(-1.0 / math.sqrt(40), 1.0 / math.sqrt(40))
+    .requires_grad_(),
     torch.Tensor(40).zero_().requires_grad_(),
-
-    torch.Tensor(1, 40).uniform_(-1. / math.sqrt(40), 1. / math.sqrt(40)).requires_grad_(),
+    torch.Tensor(1, 40)
+    .uniform_(-1.0 / math.sqrt(40), 1.0 / math.sqrt(40))
+    .requires_grad_(),
     torch.Tensor(1).zero_().requires_grad_(),
 ]
 
@@ -46,17 +50,18 @@ def sample_tasks(outer_batch_size, inner_batch_size):
     As = []
     phases = []
     for _ in range(outer_batch_size):
-        As.append(np.random.uniform(low=0.1, high=.5))
-        phases.append(np.random.uniform(low=0., high=np.pi))
+        As.append(np.random.uniform(low=0.1, high=0.5))
+        phases.append(np.random.uniform(low=0.0, high=np.pi))
 
     def get_batch():
         xs, ys = [], []
         for A, phase in zip(As, phases):
-            x = np.random.uniform(low=-5., high=5., size=(inner_batch_size, 1))
+            x = np.random.uniform(low=-5.0, high=5.0, size=(inner_batch_size, 1))
             y = A * np.sin(x + phase)
             xs.append(x)
             ys.append(y)
         return torch.tensor(xs, dtype=torch.float), torch.tensor(ys, dtype=torch.float)
+
     x1, y1 = get_batch()
     x2, y2 = get_batch()
     return x1, y1, x2, y2
@@ -80,14 +85,17 @@ for it in range(20000):
         return F.mse_loss(v_f, y2)
 
     task = sample_tasks(num_tasks, K)
-    inner_losses = [get_loss_for_task(task[0][i], task[1][i], task[2][i], task[3][i]) for i in range(num_tasks)]
+    inner_losses = [
+        get_loss_for_task(task[0][i], task[1][i], task[2][i], task[3][i])
+        for i in range(num_tasks)
+    ]
     loss2 = sum(inner_losses) / len(inner_losses)
     loss2.backward()
 
     opt.step()
 
     if it % 100 == 0:
-        print('Iteration %d -- Outer Loss: %.4f' % (it, loss2))
+        print("Iteration %d -- Outer Loss: %.4f" % (it, loss2))
     losses.append(loss2.detach())
 
 t_A = torch.tensor(0.0).uniform_(0.1, 0.5)
@@ -112,11 +120,11 @@ test_y = t_A * torch.sin(test_x + t_b)
 
 test_f = net(test_x, t_params)
 
-plt.plot(test_x.data.numpy(), test_y.data.numpy(), label='sin(x)')
-plt.plot(test_x.data.numpy(), test_f.data.numpy(), label='net(x)')
-plt.plot(t_x.data.numpy(), t_y.data.numpy(), 'o', label='Examples')
+plt.plot(test_x.data.numpy(), test_y.data.numpy(), label="sin(x)")
+plt.plot(test_x.data.numpy(), test_f.data.numpy(), label="net(x)")
+plt.plot(t_x.data.numpy(), t_y.data.numpy(), "o", label="Examples")
 plt.legend()
-plt.savefig('maml-sine.png')
+plt.savefig("maml-sine.png")
 plt.figure()
-plt.plot(np.convolve(losses, [.05] * 20))
-plt.savefig('losses.png')
+plt.plot(np.convolve(losses, [0.05] * 20))
+plt.savefig("losses.png")

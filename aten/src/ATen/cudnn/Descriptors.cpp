@@ -31,6 +31,9 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 
 } // anonymous namespace
 
+void RNNDataDescriptor::set(const at::Tensor &t, const cudnnRNNDataLayout_t layout, const int maxSeqLength, const int batchSize, const int vectorSize, const int* seqLengthArray) {
+  set(getDataType(t), layout, maxSeqLength, batchSize, vectorSize, seqLengthArray);
+}
 
 void TensorDescriptor::set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad) {
   set(getDataType(t), t.sizes(), t.strides(), pad,
@@ -164,7 +167,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
       filter_format = CUDNN_TENSOR_NHWC;
       break;
     default:
-      TORCH_INTERNAL_ASSERT(false, "unsurpported memory_format for cuDNN filters");
+      TORCH_INTERNAL_ASSERT(false, "unsupported memory_format for cuDNN filters");
   }
   set(getDataType(t), (int) dim, size, filter_format);
 }

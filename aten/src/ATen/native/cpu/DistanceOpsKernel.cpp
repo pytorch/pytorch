@@ -7,10 +7,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/cpu/vml.h>
+#include <ATen/cpu/vec/functional.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native { namespace {
+namespace at::native {
+namespace {
 
 template<typename scalar_t>
 struct Dist {
@@ -202,8 +203,8 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_cdist(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
-    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
-    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.const_data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.const_data_ptr<scalar_t>();
     int64_t d = t1.size(0);
     int64_t r1 = t1.size(-2);
     int64_t r2 = t2.size(-2);
@@ -302,7 +303,7 @@ struct Dist {
 
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
-    // first section of each vector independentaly of the second section, etc.
+    // first section of each vector independently of the second section, etc.
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
@@ -447,4 +448,4 @@ REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
-}}  // namespace at::native
+}  // namespace at::native

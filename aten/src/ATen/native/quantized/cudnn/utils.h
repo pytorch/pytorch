@@ -8,16 +8,21 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/cudnn/Types.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/ArrayRef.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
+C10_DIAGNOSTIC_POP()
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
@@ -39,12 +44,12 @@ struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
 
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false) override {
     throw std::runtime_error(
-    "apply_relu_out is not implemented for this packed "
+    "apply_dynamic is not implemented for this packed "
     "parameter type");
   }
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false) override {
     throw std::runtime_error(
-    "apply_relu_out is not implemented for this packed "
+    "apply_dynamic_relu is not implemented for this packed "
     "parameter type");
   }
 
@@ -112,7 +117,7 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
 
   at::Tensor apply_dynamic(
     const at::Tensor& input,
-    bool reduce_range) {
+    bool reduce_range) override {
     TORCH_CHECK(false, "apply_dynamic is currently not reported");
   }
 
@@ -207,7 +212,11 @@ uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  while (address % alignment == 0 && alignment < 16) alignment *= 2;
+  for (; alignment < 16; alignment *= 2) {
+    if (address % (alignment * 2)) {
+      return alignment;
+    }
+  }
   return alignment;
 }
 
@@ -341,6 +350,5 @@ cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_
 } // anonymous
 } // cudnn_utils
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

@@ -5,20 +5,40 @@
 // 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Fill.h>
 #include <c10/util/irange.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
-#include <numeric>
-#include <type_traits>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_ctc_loss.h>
+#include <ATen/ops/_ctc_loss_backward.h>
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/_ctc_loss_native.h>
+#include <ATen/ops/_cudnn_ctc_loss.h>
+#include <ATen/ops/_use_cudnn_ctc_loss.h>
+#include <ATen/ops/ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
+#endif
 
-namespace at {
-namespace native {
+#include <type_traits>
+#include <utility>
+
+namespace at::native {
 
 namespace {
 
@@ -32,18 +52,12 @@ static inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t
   }
 }
 
-// This kernel is a relatively straightforward implementation of the alpha calculation in the forward backward algorithm (section 4.1).
-// A (minor) twist is that we are using log-calculations to enhance numerical stability (log_probs and log_alpha).
-// The function returns the loss and the alphas, the alphas are kept for the backward step. The wrapper (ctc_loss below) hides
-// the alphas from the user by only returning the loss.
 template<typename scalar_t, ScalarType target_scalar_type>
-std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
+std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outputs(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
-  constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
 
-  CheckedFrom c = "ctc_loss_cpu";
+  CheckedFrom c = "ctc_loss_allocate_outputs";
   auto log_probs_arg = TensorArg(log_probs, "log_probs", 1);
   auto targets_arg = TensorArg(targets, "targets", 2);
   checkScalarType(c, targets_arg, target_scalar_type);
@@ -95,6 +109,35 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
+  return std::make_tuple(neg_log_likelihood, log_alpha, tg_target_stride, tg_batch_offsets);
+}
+
+// This kernel is a relatively straightforward implementation of the alpha calculation in the forward backward algorithm (section 4.1).
+// A (minor) twist is that we are using log-calculations to enhance numerical stability (log_probs and log_alpha).
+// The function returns the loss and the alphas, the alphas are kept for the backward step. The wrapper (ctc_loss below) hides
+// the alphas from the user by only returning the loss.
+template<typename scalar_t, ScalarType target_scalar_type>
+std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
+  // log_probs: input_len x batch_size x num_labels
+  // targets [int64]: batch_size x target_length OR sum(target_lengths)
+  constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
+  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+
+  Tensor neg_log_likelihood, log_alpha;
+  size_t tg_target_stride;
+  std::vector<int64_t> tg_batch_offsets;
+
+  if (targets.scalar_type() == kLong) {
+    std::tie(neg_log_likelihood, log_alpha,tg_target_stride, tg_batch_offsets) =
+        ctc_loss_allocate_outputs<scalar_t, kLong>(
+            log_probs, targets, input_lengths, target_lengths, BLANK);
+  } else {
+    std::tie(neg_log_likelihood, log_alpha, tg_target_stride, tg_batch_offsets) =
+        ctc_loss_allocate_outputs<scalar_t, kInt>(
+            log_probs, targets, input_lengths, target_lengths, BLANK);
+  }
+
+  int64_t batch_size = log_probs.size(1);
   auto lpp  = log_probs.permute({1,0,2});
   auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
@@ -150,7 +193,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
           log_alpha_a[t][s] = std::log(std::exp(la1-lamax)+std::exp(la2-lamax)+std::exp(la3-lamax))+lamax + log_probs_a[t][current_target_prime];
         }
       }
-      // the likelihood is the the sum of the last two alphas, eq (8), the loss is the negative log likelihood
+      // the likelihood is the sum of the last two alphas, eq (8), the loss is the negative log likelihood
       if (target_length == 0) {
         // if the target is empty then there is no preceding BLANK state and hence there is no path to merge
         neg_log_likelihood_a[b] = -log_alpha_a[input_length-1][0];
@@ -217,6 +260,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   auto gp = grad.permute({1,0,2});
   auto grad_a_global = gp.accessor<scalar_t, 3>();
   auto targets_data = targets.data_ptr<target_t>();
+  auto grad_out_a = grad_out.accessor<scalar_t, 1>();
 
   auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
     return TensorIteratorConfig()
@@ -323,7 +367,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // now we wrap up the calculation by adding in the remaining items of eq (16)
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-      scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
+      scalar_t gr = grad_out_a[b];
       for (const auto t : c10::irange(input_length)) { // or go for the full thing?
         for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
@@ -345,6 +389,22 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
 
 } // namespace
 
+std::tuple<Tensor, Tensor> ctc_loss_meta(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool zero_infinity) {
+  (void)zero_infinity; // only used for backwards
+  return AT_DISPATCH_FLOATING_TYPES(
+      log_probs.scalar_type(), "ctc_loss_meta", [&] {
+        Tensor neg_log_likelihood, log_alpha;
+        if (targets.scalar_type() == kLong) {
+          std::tie(neg_log_likelihood, log_alpha, std::ignore, std::ignore) =  ctc_loss_allocate_outputs<scalar_t, kLong>(
+              log_probs, targets, input_lengths, target_lengths, BLANK);
+        } else {
+          std::tie(neg_log_likelihood, log_alpha, std::ignore, std::ignore) = ctc_loss_allocate_outputs<scalar_t, kInt>(
+              log_probs, targets, input_lengths, target_lengths, BLANK);
+        }
+        return std::make_tuple(neg_log_likelihood, log_alpha);
+      });
+}
+
 std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool zero_infinity) {
   (void)zero_infinity; // only used for backwards
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_cpu", [&] {
@@ -355,6 +415,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& t
       }
   });
 }
+
 
 std::tuple<Tensor, Tensor> ctc_loss_tensor(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, bool zero_infinity) {
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");
@@ -410,7 +471,7 @@ Tensor get_clamped_target_length(
 }
 
 Tensor get_clamped_target_length(
-    Tensor target_lengths,
+    const Tensor & target_lengths,
     const TensorOptions& options) {
   return target_lengths.clamp_min(1);
 }
@@ -452,7 +513,7 @@ Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsTyp
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
-  return is_batched ? res : res.squeeze(0);
+  return is_batched ? std::move(res) : res.squeeze(0);
 }
 
 } // namespace
@@ -481,4 +542,4 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 
-} } // at::native
+} // at::native

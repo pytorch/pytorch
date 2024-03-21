@@ -342,8 +342,8 @@ $$b_{c} = a_{c}(bias + \frac{\alpha}{n}\sum_{c'=max(0,c-n/2)}^{min(N-1,c+n/2)} a
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/local_response_normalization_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/local_response_normalization_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/local_response_normalization_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/local_response_normalization_op.cc
 
 
 <details>

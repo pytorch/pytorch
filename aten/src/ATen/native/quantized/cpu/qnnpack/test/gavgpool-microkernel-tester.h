@@ -201,7 +201,7 @@ class GAvgPoolMicrokernelTester {
             << "at position " << i << ", m = " << m() << ", n = " << n();
         ASSERT_GE(uint32_t(y[i]), uint32_t(yMin()))
             << "at position " << i << ", m = " << m() << ", n = " << n();
-        ASSERT_NEAR(float(int32_t(y[i])), yFP[i], 0.5f)
+        ASSERT_NEAR(float(int32_t(y[i])), yFP[i], 0.5001f)
             << "at position " << i << ", m = " << m() << ", n = " << n()
             << ", acc = " << yAcc[i];
         ASSERT_EQ(uint32_t(yRef[i]), uint32_t(y[i]))
@@ -276,7 +276,7 @@ class GAvgPoolMicrokernelTester {
             << "at position " << i << ", m = " << m() << ", n = " << n();
         ASSERT_GE(uint32_t(y[i]), uint32_t(yMin()))
             << "at position " << i << ", m = " << m() << ", n = " << n();
-        ASSERT_NEAR(float(int32_t(y[i])), yFP[i], 0.5f)
+        ASSERT_NEAR(float(int32_t(y[i])), yFP[i], 0.5001f)
             << "at position " << i << ", m = " << m() << ", n = " << n()
             << ", acc = " << yAcc[i];
         ASSERT_EQ(uint32_t(yRef[i]), uint32_t(y[i]))

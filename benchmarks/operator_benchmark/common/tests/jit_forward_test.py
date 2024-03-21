@@ -9,6 +9,7 @@ intraop_bench_configs = op_bench.config_list(
     tags=["short"],
 )
 
+
 @torch.jit.script
 def torch_sumall(a, iterations):
     # type: (Tensor, int)
@@ -29,6 +30,7 @@ class TorchSumBenchmark(op_bench.TorchBenchmarkBase):
     # TODO(mingzhe): use one forward method for both JIT and Eager
     def jit_forward(self, iters):
         return torch_sumall(self.input_one, iters)
+
 
 op_bench.generate_pt_test(intraop_bench_configs, TorchSumBenchmark)
 

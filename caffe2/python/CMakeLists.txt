@@ -1,6 +1,7 @@
 # ---[ CPU files.
 set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state.cc"
+    "/pybind_workspace.cc"
     "/pybind_state_dlpack.cc"
     "/pybind_state_nomni.cc"
     "/pybind_state_registry.cc"

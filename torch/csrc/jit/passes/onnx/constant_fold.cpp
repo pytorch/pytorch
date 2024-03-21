@@ -483,9 +483,14 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     at::Tensor indices = inputTensorValues[1];
     auto q = indices.dim();
     // at::index_select only supports indices with rank <= 1.
-    // See https://pytorch.org/docs/master/generated/torch.index_select.html
+    // See https://pytorch.org/docs/main/generated/torch.index_select.html
     if (q > 1) {
       return c10::nullopt;
+    }
+    // If the device of indices tensor is not the same with it of the input
+    // tensor, move it to the device of the input tensor
+    if (inputTensorValues[0].device() != indices.device()) {
+      indices = indices.to(inputTensorValues[0].device());
     }
     // If indices input for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim value) for aten op
@@ -529,6 +534,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       total_size *= size;
     }
     return c10::optional<at::Tensor>(IntToTensor(total_size));
+  } else if (node->kind() == onnx::Softmax) {
+    int64_t axis = node->hasAttributeS("axis") ? node->i(attr::axis) : -1;
+    updated_val = at::softmax(inputTensorValues[0], axis);
+    return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
   }

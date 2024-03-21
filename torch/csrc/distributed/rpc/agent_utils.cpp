@@ -41,7 +41,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
-std::vector<std::string> splitString(
+static std::vector<std::string> splitString(
     const std::string& s,
     const std::string& delim) {
   std::vector<std::string> tokens;
@@ -154,15 +154,19 @@ const string storeKeyActiveCallCount = "ACTIVE_CALLS";
 const string storeKeyReady = "READY";
 static std::atomic<int> barrierId(0);
 
-std::tuple<std::string, std::string, std::string> getNextKeyIds() {
+static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
-  std::string processCountKey =
-      fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
+  auto newBarrierId = barrierId.load();
+  std::string processCountKey = fmt::format(
+      "{}{}{}", storeKeyProcessCount, storeKeyBarrierId, newBarrierId);
   std::string activeCallCountKey = fmt::format(
-      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
+      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, newBarrierId);
   std::string barrierKey =
-      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
-  return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
+      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, newBarrierId);
+  return std::make_tuple(
+      std::move(processCountKey),
+      std::move(activeCallCountKey),
+      std::move(barrierKey));
 }
 
 // Synchronize process with all other agent processes strictly using store
@@ -172,11 +176,10 @@ int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls) {
-  std::string processCountKey, activeCallCountKey, readyKey;
-  std::tie(processCountKey, activeCallCountKey, readyKey) = getNextKeyIds();
+  auto [processCountKey, activeCallCountKey, readyKey] = getNextKeyIds();
 
   // Add to keys which will record the number of processes and active calls
-  int totalCallCount = store.add(activeCallCountKey, activeCalls);
+  store.add(activeCallCountKey, activeCalls);
   int totalProcessCount = store.add(processCountKey, 1);
 
   // The last worker will need to set the ready key
@@ -189,7 +192,7 @@ int syncCallCount(
 
   // Read count of active calls which may have changed
   auto activeCallCountData = store.get(activeCallCountKey);
-  totalCallCount = std::stoi(
+  int totalCallCount = std::stoi(
       std::string(activeCallCountData.begin(), activeCallCountData.end()));
   return totalCallCount;
 }

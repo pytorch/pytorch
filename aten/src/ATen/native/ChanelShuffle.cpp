@@ -1,8 +1,5 @@
-#include <ATen/Functions.h>
-#include <ATen/native/TensorTransformations.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
@@ -10,15 +7,29 @@
 
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/channel_shuffle_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/native_channel_shuffle.h>
+#include <ATen/ops/native_channel_shuffle_native.h>
+#endif
+
+namespace at::native {
 
 Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
-  auto memory_format = self.suggest_memory_format();
-  auto output = at::empty({0}, self.options());
-  output.resize_(self.sizes(), memory_format);
-  auto input = self.contiguous(memory_format);
-  channel_shuffle_kernel(kCPU, output, input, groups);
+  Tensor output;
+  if (self.numel() == 0) {
+    output = self.alias();
+  } else {
+    auto memory_format = self.suggest_memory_format();
+    output = at::empty({0}, self.options());
+    output.resize_(self.sizes(), memory_format);
+    auto input = self.contiguous(memory_format);
+    channel_shuffle_kernel(kCPU, output, input, groups);
+  }
   return namedinference::propagate_names_if_nonempty(
       output,
       self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
@@ -39,12 +50,12 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (self.is_contiguous(MemoryFormat::ChannelsLast) &&
       xnnpack::use_channel_shuffle(self, groups)) {
-    auto output = self.numel() == 0 ? self : xnnpack::channel_shuffle(self, groups);
+    auto output = self.numel() == 0 ? self.alias() : xnnpack::channel_shuffle(self, groups);
     return output;
   }
 #endif
 
-  auto output = self.numel() == 0 ? self : at::native_channel_shuffle(self, groups);
+  auto output = self.numel() == 0 ? self.alias() : at::native_channel_shuffle(self, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
       self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
@@ -63,7 +74,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   // It is not clear, however from initial looking around it feels that
   // this may not be correct.
   // In this case channels last will likely require custom implementation
-  // if we want to preseve the memory order.
+  // if we want to preserve the memory order.
   // XNNPACK has channel shuffle op for NHWC. For mobile usecase this is good.
   // For server we will have to do a custom implementation.
   // For ChannelsFirst, a.k.a Contiguous, memory format we will also need
@@ -79,4 +90,4 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
 
 DEFINE_DISPATCH(channel_shuffle_kernel);
 
-}} // namespace at::native
+} // namespace at::native

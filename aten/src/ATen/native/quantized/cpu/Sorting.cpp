@@ -1,13 +1,17 @@
-#include <ATen/ATen.h>
-#include <torch/library.h>
-#include <ATen/cpu/vec/vec.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 
-#include <algorithm>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/topk_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -19,7 +23,7 @@ namespace native {
 //
 // If we want to support this publicly, we need to add
 // a requantization step to the kernel.
-std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
+static std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,

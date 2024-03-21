@@ -38,7 +38,7 @@ class TORCH_API DeprecatedTypeProperties {
     return layout_from_backend(backend()) == kSparseCsr;
   }
 
-  DeviceType device_type() const {
+  c10::DeviceType device_type() const {
     return backendToDeviceType(backend_);
   }
 
@@ -92,6 +92,10 @@ class TORCH_API DeprecatedTypeProperties {
 
   DeprecatedTypeProperties & hip() const {
     return toBackend(Backend::HIP);
+  }
+
+  DeprecatedTypeProperties & privateUser1() const {
+    return toBackend(Backend::PrivateUse1);
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.

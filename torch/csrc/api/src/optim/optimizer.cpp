@@ -1,7 +1,6 @@
 #include <torch/optim/optimizer.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/ordered_dict.h>
 #include <torch/types.h>
 
 #include <string>
@@ -64,13 +63,13 @@ void OptimizerParamState::serialize(
 double OptimizerOptions::get_lr() const {
   TORCH_CHECK(
       false,
-      "double get_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+      "double get_lr() has not been overridden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
 }
 
 void OptimizerOptions::set_lr(const double lr) {
   TORCH_CHECK(
       false,
-      "double set_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+      "double set_lr() has not been overridden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
 }
 
 std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {
@@ -109,7 +108,7 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   }
   for (const auto& p : param_group_.params()) {
     TORCH_CHECK(
-        state_.count(c10::guts::to_string(p.unsafeGetTensorImpl())) == 0,
+        state_.count(p.unsafeGetTensorImpl()) == 0,
         "some parameters appear in more than one parameter group");
   }
   param_groups_.emplace_back(std::move(param_group_));
@@ -121,12 +120,15 @@ void Optimizer::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
 
-void Optimizer::zero_grad() {
+void Optimizer::zero_grad(bool set_to_none) {
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
-      if (p.grad().defined()) {
-        p.grad().detach_();
-        p.grad().zero_();
+      if (p.mutable_grad().defined()) {
+        p.mutable_grad().detach_();
+        if (set_to_none)
+          p.mutable_grad().reset();
+        else
+          p.mutable_grad().zero_();
       }
     }
   }
@@ -168,12 +170,12 @@ const std::vector<OptimizerParamGroup>& Optimizer::param_groups()
   return param_groups_;
 }
 
-ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
-Optimizer::state() noexcept {
+ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& Optimizer::
+    state() noexcept {
   return state_;
 }
 
-const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
 Optimizer::state() const noexcept {
   return state_;
 }

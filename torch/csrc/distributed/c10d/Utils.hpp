@@ -1,9 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -32,10 +33,11 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
-TORCH_API std::string parse_env(const char* env_var_name);
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
-TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(
+    const std::vector<at::Tensor>& tensors);
 
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
@@ -73,31 +75,118 @@ inline void assertSameType(
   }
 }
 
-inline int parseEnvVarInt(const char* envVarName) {
-  char* stringValue = std::getenv(envVarName);
-  if (stringValue != nullptr) {
-    int val;
-    try {
-      val = std::stoi(stringValue);
-    } catch (std::exception& e) {
-      TORCH_CHECK(false,
-          "Invalid value for environment variable: " + std::string(envVarName));
-    }
-    return val;
+inline std::vector<std::string> split(
+    char separator,
+    const std::string& string) {
+  std::vector<std::string> pieces;
+  std::stringstream ss(string);
+  std::string item;
+  while (std::getline(ss, item, separator)) {
+    pieces.push_back(std::move(item));
   }
-  return C10D_ENV_NOT_SET;
+  return pieces;
 }
 
-inline bool parseEnvVarFlag(const char* envVarName) {
-    int val = parseEnvVarInt(envVarName);
-    if (val == 1) {
-      return true;
-    } else if (val == 0 || val == C10D_ENV_NOT_SET) {
-      return false;
+inline std::string getCvarString(
+    const std::vector<std::string>& env,
+    const char* def) {
+  const char* ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (int i = env.size() - 1; i >= 0; i--) {
+    const char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      TORCH_WARN(
+          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
+          " instead");
     }
-    TORCH_CHECK(false,
-        "Invalid value for environment variable: " + std::string(envVarName));
-    return false;
+
+    ret = val;
+  }
+
+  return ret;
+}
+
+inline int getCvarInt(const std::vector<std::string>& env, int def) {
+  int ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (int i = env.size() - 1; i >= 0; i--) {
+    char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      TORCH_WARN(
+          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
+          " instead");
+    }
+
+    try {
+      ret = std::stoi(val);
+    } catch (std::exception& e) {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+    }
+  }
+
+  return ret;
+}
+
+inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
+  bool ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (int i = env.size() - 1; i >= 0; i--) {
+    char* val_ = std::getenv(env[i].c_str());
+    if (val_ == nullptr) {
+      continue;
+    } else if (i) {
+      TORCH_WARN(
+          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
+          " instead");
+    }
+
+    std::string val = std::string(val_);
+    for (auto& x : val) {
+      x = std::tolower(x);
+    }
+
+    if (val == "y" || val == "yes" || val == "1" || val == "t" ||
+        val == "true") {
+      ret = true;
+    } else if (
+        val == "n" || val == "no" || val == "0" || val == "f" ||
+        val == "false") {
+      ret = false;
+    } else {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+      return ret;
+    }
+  }
+
+  return ret;
 }
 
 inline void assertSameSizes(
@@ -115,7 +204,7 @@ inline void assertSameSizes(
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     throw std::invalid_argument("argument is empty");
   }
 
@@ -197,7 +286,7 @@ inline void assertLayoutMatch(
 inline void assertNonEmpty(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     fn("requires non-empty tensor list");
   }
 }
@@ -332,7 +421,7 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
 inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
-  if (tensors.size() == 0 || tensors[0].size() == 0) {
+  if (tensors.empty() || tensors[0].empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
@@ -355,7 +444,7 @@ inline at::Tensor newLikeFlat(
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   auto& t = tensors[0];
@@ -409,7 +498,7 @@ inline void checkSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
     int group_size) {
-  if (split_sizes.size() == 0) {
+  if (split_sizes.empty()) {
     TORCH_CHECK(
         tensor.size(0) % group_size == 0,
         "Tensor's dim 0 does not divide equally across group size");
@@ -437,18 +526,15 @@ size_t computeLengthsAndOffsets(
   size_t split_size = 0;
   size_t offset = 0;
 
-  if (split_sizes.size() == 0) {
+  if (split_sizes.empty()) {
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
+    // TODO: see if we should add overflow protection for offset
     offset += length;
   }
   return offset;
@@ -461,12 +547,8 @@ size_t computeLengthsAndOffsets(
     std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
     offset += length;
@@ -496,30 +578,30 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        TORCH_CHECK(false, "Socket Timeout");                       \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
       } else {                                                            \
-        throw std::system_error(errno_local, std::system_category());     \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
       }                                                                   \
     } else {                                                              \
       break;                                                              \
     }                                                                     \
   }
 #else
-#define SYSCHECK(expr, success_cond)                            \
-  while (true) {                                                \
-    auto __output = (expr);                                     \
-    (void)__output;                                             \
-    if (!(success_cond)) {                                      \
-      if (errno == EINTR) {                                     \
-        continue;                                               \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-        TORCH_CHECK(false, "Socket Timeout");             \
-      } else {                                                  \
-        throw std::system_error(errno, std::system_category()); \
-      }                                                         \
-    } else {                                                    \
-      break;                                                    \
-    }                                                           \
+#define SYSCHECK(expr, success_cond)                             \
+  while (true) {                                                 \
+    auto __output = (expr);                                      \
+    (void)__output;                                              \
+    if (!(success_cond)) {                                       \
+      if (errno == EINTR) {                                      \
+        continue;                                                \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
+      } else {                                                   \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
+      }                                                          \
+    } else {                                                     \
+      break;                                                     \
+    }                                                            \
   }
 #endif
 
@@ -564,7 +646,7 @@ void sendBytes(
         bytesSent =
             ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      throw std::system_error(ECONNRESET, std::system_category());
+      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
 
     bytesToSend -= bytesSent;
@@ -587,7 +669,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      throw std::system_error(ECONNRESET, std::system_category());
+      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
 
     bytesToReceive -= bytesReceived;

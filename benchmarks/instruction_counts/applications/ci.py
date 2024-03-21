@@ -30,7 +30,7 @@ def main(argv: List[str]) -> None:
     benchmarks = materialize(BENCHMARKS)
 
     # Useful for local development, since e2e time for the full suite is O(1 hour)
-    in_debug_mode = (args.subset or args.destination is None)
+    in_debug_mode = args.subset or args.destination is None
     if args.subset:
         version = -1
         benchmarks = benchmarks[:10]
@@ -54,7 +54,8 @@ def main(argv: List[str]) -> None:
 
     # TODO: Annotate with TypedDict when 3.8 is the minimum supported verson.
     grouped_results: Dict[str, Dict[str, List[Union[float, int]]]] = {
-        key: {"times": [], "counts": []} for key in keys}
+        key: {"times": [], "counts": []} for key in keys
+    }
 
     for work_order, r in results.items():
         key = str(work_order)
@@ -70,11 +71,12 @@ def main(argv: List[str]) -> None:
     }
 
     if args.destination:
-        with open(args.destination, "wt") as f:
+        with open(args.destination, "w") as f:
             json.dump(final_results, f)
 
     if in_debug_mode:
         result_str = json.dumps(final_results)
         print(f"{result_str[:30]} ... {result_str[-30:]}\n")
         import pdb
+
         pdb.set_trace()

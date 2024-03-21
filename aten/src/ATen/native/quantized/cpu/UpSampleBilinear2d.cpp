@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
@@ -6,16 +8,21 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#include <algorithm>
-#include <cmath>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/upsample_bilinear2d_native.h>
+#endif
+
 #include <cstring>
-#include <limits>
 
 namespace at {
 namespace native {
 namespace {
 
-// pre calcuate interpolation params on width
+// pre calculate interpolation params on width
 struct UpsampleBilinearParamW {
   int64_t w1, w1p;
   float w0lambda, w1lambda;
@@ -41,14 +48,14 @@ static void upsample_bilinear2d_out_frame(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  auto* idata = static_cast<scalar_t*>(input.data_ptr());
+  auto* idata = static_cast<const scalar_t*>(input.const_data_ptr());
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
   if (channels == 0 || output_height == 0 || output_width == 0) {
     return;
   }
-  auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
+  auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy
@@ -212,7 +219,7 @@ Tensor upsample_bilinear2d_quantized_cpu(
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-Tensor upsample_bilinear2d_quantized_cpu(
+static Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
       bool align_corners,

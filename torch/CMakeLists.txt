@@ -2,7 +2,7 @@
 # Now it only builds the Torch python bindings.
 
 if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -11,10 +11,6 @@ endif()
 
 if(NOT BUILD_PYTHON)
   return()
-endif()
-
-if(USE_TBB)
-  include_directories(${TBB_INCLUDE_DIR})
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -43,9 +39,6 @@ set(TORCH_PYTHON_SRCS
     ${GENERATED_CXX_PYTHON}
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
-
-list(APPEND TORCH_PYTHON_SRCS
-    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp)
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
@@ -90,9 +83,17 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
 
-set(TORCH_PYTHON_COMPILE_DEFINITIONS)
+if(USE_ASAN AND TARGET Sanitizer::address)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
+endif()
+if(USE_ASAN AND TARGET Sanitizer::undefined)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
+endif()
+if(USE_TSAN AND TARGET Sanitizer::thread)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::thread)
+endif()
 
-set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
+set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
@@ -109,13 +110,7 @@ elseif(APPLE)
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
-      -Wno-write-strings
       -Wno-strict-aliasing)
-endif()
-
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
 endif()
 
 if(USE_ITT)
@@ -132,6 +127,7 @@ if(USE_CUDA)
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
 
@@ -144,14 +140,16 @@ if(USE_ROCM)
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
-      __HIP_PLATFORM_HCC__
+      __HIP_PLATFORM_AMD__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
+if(USE_XPU)
+    include(${TORCH_ROOT}/cmake/public/xpu.cmake)
+    append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
+
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
 endif()
 
 if(USE_CUDNN OR USE_ROCM)
@@ -253,7 +251,7 @@ if(USE_DISTRIBUTED)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
     endif()
     # Disable certain warnings for GCC-9.X
-    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+    if(CMAKE_COMPILER_IS_GNUCXX)
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
@@ -267,7 +265,7 @@ if(USE_DISTRIBUTED)
     endif()
     # Same for MPI.
     if(USE_MPI)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES MPI::MPI_CXX)
     endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 
@@ -279,96 +277,14 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
-
-# WARNING- any TORCH_PYTHON_COMPILE_DEFINITIONS above this line
-#          affect both torch_python and DEPLOY interpreter.
-if(USE_DEPLOY)
-  add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
-  if(NOT MSVC)
-    target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
-  endif()
-  if(USE_DISTRIBUTED)
-    # Set c10d-related compile definitions. For a "normal" build of
-    # libtorch_python, these are set on libtorch as PUBLIC so they are
-    # automatically propagated when libtorch_python links against libtorch. But
-    # since in the deploy build we are intentionally *not* linking against
-    # libtorch, we need to set them manually here.
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(USE_GLOO AND USE_C10D_GLOO)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
-    endif()
-    if(USE_UCC AND USE_C10D_UCC)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_UCC)
-    endif()
-    if(USE_NCCL AND USE_C10D_NCCL)
-        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
-        # Put nccl headers on the include path. We are specifically only setting
-        # include dirs here instead of linking against __caffe2_nccl wholesale
-        # to ensure we aren't accidentally replicating the nccl lib.
-        target_include_directories(torch_python_obj PRIVATE $<TARGET_PROPERTY:__caffe2_nccl,INTERFACE_INCLUDE_DIRECTORIES>)
-    endif()
-    if(USE_MPI AND USE_C10D_MPI)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_MPI)
-    endif()
-
-    # Pass USE_RPC in order to reduce use of
-    # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
-    # need to be removed when RPC is supported
-    if(NOT WIN32)
-      target_compile_definitions(torch_cpu PUBLIC USE_RPC)
-    endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TENSORPIPE)
-    endif()
-
-    # Set c10d-related include directories as well.
-    target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-  endif()
-  target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
-
-  target_compile_definitions(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
-
-  target_compile_definitions(torch_python_obj PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
-
-  target_compile_options(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
-
-  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    target_compile_options(torch_python_obj PRIVATE -fno-gnu-unique)
-  endif()
-
-  target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
-  target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
-
-  # need to specify the dependency so the generated headers exist,
-  # missing dependency since torch_python_obj doesn't link onnx, the interpreter lib does.
-  add_dependencies(torch_python_obj onnx)
-
-  target_include_directories(torch_python_obj SYSTEM PRIVATE
-      ${PYTHON_INCLUDE_DIRS}
-      ${pybind11_INCLUDE_DIRS})
-
-  if(HAVE_SOVERSION)
-    set_target_properties(torch_python_obj PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
-  add_dependencies(torch_python_obj torch_python_stubs)
-
-  # Required workaround for generated sources
-  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
-  add_dependencies(torch_python_obj generate-torch-sources)
-  set_source_files_properties(
-      ${GENERATED_THNN_SOURCES}
-      ${GENERATED_CXX_PYTHON}
-      PROPERTIES GENERATED TRUE
-      )
-
-  add_dependencies(torch_python_obj gen_torch_version)
-
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
+endif()
+
+if(NOT MSVC)
+  # cudaProfilerInitialize must go away
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
 endif()
 
 # coreml
@@ -398,10 +314,6 @@ if(USE_PRECOMPILED_HEADERS)
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
 endif()
 
-if(NOT MSVC)
-  target_compile_options(torch_python PRIVATE -Wno-unused-variable)
-endif()
-
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
@@ -412,11 +324,8 @@ set_source_files_properties(
     )
 
 # Disable certain warnings for GCC-9.X
-if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+if(CMAKE_COMPILER_IS_GNUCXX)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(
-    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp
-    PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
@@ -437,8 +346,6 @@ target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
-
-target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
 
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
@@ -469,13 +376,12 @@ endif()
 
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
   COMMAND
-    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
-  COMMAND
-    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
-      --is_debug=${TORCH_VERSION_DEBUG}
-      --cuda_version=${CUDA_VERSION}
-      --hip_version=${HIP_VERSION}
+    "${PYTHON_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+      --is-debug=${TORCH_VERSION_DEBUG}
+      --cuda-version=${CUDA_VERSION}
+      --hip-version=${HIP_VERSION}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )

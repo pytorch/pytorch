@@ -16,8 +16,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 void hardsigmoid_kernel(TensorIteratorBase& iter) {
@@ -72,5 +71,4 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

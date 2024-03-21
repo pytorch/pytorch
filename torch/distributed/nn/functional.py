@@ -125,11 +125,6 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
         input_tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
 
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
@@ -158,11 +153,10 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
 
 def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     """
-    Each process scatters list of input tensors to all processes in a group and
-    return gathered list of tensors in output list.
+    Each process scatters list of input tensors to all processes in a group and return gathered list of tensors in output list.
 
     Arguments:
-        out_tensor_list (list[Tensor]): list of tensors to gather one per rank.
+        output_tensor_list (list[Tensor]): list of tensors to gather one per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.
 
@@ -181,12 +175,12 @@ def all_to_all_single(
     group=group.WORLD,
 ):
     """
-    Each process splits input tensor and then scatters the split list
-    to all processes in a group. Then concatenate the received tensors from all
-    the processes in the group and return single output tensor.
+    Each process splits input tensor and then scatters the split list to all processes in a group.
+
+    Then concatenate the received tensors from all the processes in the group and return single output tensor.
 
     Arguments:
-        output (Tensor): Gathered cancatenated output tensor.
+        output (Tensor): Gathered concatenated output tensor.
         input (Tensor): Input tensor to scatter.
         output_split_sizes: (list[Int], optional): Output split sizes for dim 0
             if specified None or empty, dim 0 of ``output`` tensor must divide
@@ -206,8 +200,7 @@ def all_to_all_single(
 
 def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
     """
-    Reduces the tensor data across all machines in such a way that all get
-    the final result.
+    Reduces the tensor data across all machines in such a way that all get the final result.
 
     After the call the returned tensor is going to be bitwise
     identical in all processes.
@@ -231,7 +224,7 @@ class _Broadcast(Function):
     def forward(ctx, src, group, tensor):
         ctx.src = src
         ctx.group = group
-        ctx.rank = dist.get_rank()
+        ctx.rank = dist.get_rank(group=group)
         # torch.distributed makes all the calls in place
         # we allocate new tensors to avoid this
         tensor = tensor.clone()
@@ -307,6 +300,8 @@ class _Reduce_Scatter(Function):
     @staticmethod
     def forward(ctx, op, group, tensor, *input_tensor_list):
         ctx.group = group
+        # Need contiguous tensors for collectives.
+        tensor = tensor.contiguous()
         input_tensor_list = tuple(t.contiguous() for t in input_tensor_list)
         dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
         return tensor
@@ -333,9 +328,9 @@ class _AllGather(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank()
+            rank = dist.get_rank(group=ctx.group)
             gx = torch.empty_like(grad_outputs[rank])
-            _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
+            gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
             # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior

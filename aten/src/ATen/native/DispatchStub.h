@@ -1,11 +1,10 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
+#include <c10/core/DeviceType.h>
+#include <c10/macros/Macros.h>
 
-#include <type_traits>
 #include <atomic>
+#include <utility>
 
 // Implements instruction set specific function dispatch.
 //
@@ -38,12 +37,10 @@
 // the main dispatch mechanism is.
 
 // ignore warnings about DispatchStub::DEFAULT, AVX, AVX2 defined elsewhere
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wundefined-var-template"
-#endif
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wundefined-var-template")
 
-namespace at { namespace native {
+namespace at::native {
 
 enum class CPUCapability {
   DEFAULT = 0,
@@ -71,7 +68,7 @@ struct DispatchStub;
  */
 struct TORCH_API DispatchStubImpl {
   void* get_call_ptr(
-    DeviceType device_type
+    c10::DeviceType device_type
     , void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
       , void *AVX512
@@ -115,11 +112,13 @@ struct TORCH_API DispatchStubImpl {
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
     void* mps_dispatch_ptr;
+    void* privateuse1_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
     void* cuda_dispatch_ptr = nullptr;
     void* hip_dispatch_ptr = nullptr;
     void* mps_dispatch_ptr = nullptr;
+    void* privateuse1_dispatch_ptr = nullptr;
   #endif
 };
 
@@ -132,7 +131,7 @@ struct DispatchStub<rT (*)(Args...), T> {
   DispatchStub& operator=(const DispatchStub&) = delete;
 
 private:
-  FnPtr get_call_ptr(DeviceType device_type) {
+  FnPtr get_call_ptr(c10::DeviceType device_type) {
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
@@ -154,7 +153,7 @@ private:
 
 public:
   template <typename... ArgTypes>
-  rT operator()(DeviceType device_type, ArgTypes&&... args) {
+  rT operator()(c10::DeviceType device_type, ArgTypes&&... args) {
     FnPtr call_ptr = get_call_ptr(device_type);
     return (*call_ptr)(std::forward<ArgTypes>(args)...);
   }
@@ -169,6 +168,10 @@ public:
 
   void set_mps_dispatch_ptr(FnPtr fn_ptr) {
     impl.mps_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
+  void set_privateuse1_dispatch_ptr(FnPtr fn_ptr) {
+    impl.privateuse1_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
   static TORCH_API FnPtr DEFAULT;
@@ -211,24 +214,31 @@ struct RegisterHIPDispatch {
   }
 };
 
+template <typename DispatchStub>
+struct RegisterPRIVATEUSE1Dispatch {
+  RegisterPRIVATEUSE1Dispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
+    stub.set_privateuse1_dispatch_ptr(value);
+  }
+};
+
 } // anonymous namespace
 // Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
 // the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
 // adding parentheses and using helper struct to get rid of the parentheses, do
 // not work with MSVC. So do a `using`-declaration if you need to pass in such
 // `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
-#define DECLARE_DISPATCH(fn, name)         \
-  struct name : DispatchStub<fn, name> {   \
-    name() = default;                      \
-    name(const name&) = delete;            \
-    name& operator=(const name&) = delete; \
-  };                                       \
-  extern TORCH_API struct name name
+#define DECLARE_DISPATCH(fn, name)                                                         \
+  struct name##_DECLARE_DISPATCH_type : DispatchStub<fn, name##_DECLARE_DISPATCH_type> {   \
+    name##_DECLARE_DISPATCH_type() = default;                                              \
+    name##_DECLARE_DISPATCH_type(const name##_DECLARE_DISPATCH_type&) = delete;            \
+    name##_DECLARE_DISPATCH_type& operator=(const name##_DECLARE_DISPATCH_type&) = delete; \
+  };                                                                                       \
+  extern TORCH_API struct name##_DECLARE_DISPATCH_type name;
 
-#define DEFINE_DISPATCH(name) struct name name
+#define DEFINE_DISPATCH(name) struct name##_DECLARE_DISPATCH_type name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> name::FnPtr TORCH_API DispatchStub<name::FnPtr, struct name>::arch = fn;
+  template <> name##_DECLARE_DISPATCH_type::FnPtr TORCH_API DispatchStub<name##_DECLARE_DISPATCH_type::FnPtr, struct name##_DECLARE_DISPATCH_type>::arch = fn;
 
 #ifdef HAVE_AVX512_CPU_DEFINITION
 #define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)
@@ -267,13 +277,16 @@ struct RegisterHIPDispatch {
   REGISTER_ALL_CPU_DISPATCH(name, nullptr)
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
-  static RegisterCUDADispatch<struct name> name ## __register(name, fn);
+  static RegisterCUDADispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_HIP_DISPATCH(name, fn) \
-  static RegisterHIPDispatch<struct name> name ## __register(name, fn);
+  static RegisterHIPDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_MPS_DISPATCH(name, fn) \
-  static RegisterMPSDispatch<struct name> name ## __register(name, fn);
+  static RegisterMPSDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
+
+#define REGISTER_PRIVATEUSE1_DISPATCH(name, fn) \
+  static RegisterPRIVATEUSE1Dispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
@@ -288,15 +301,15 @@ struct RegisterHIPDispatch {
 // NB: this macro must be used from a 'mm' file in order to dispatch a MPS kernel
 #define REGISTER_DISPATCH(name, fn) REGISTER_MPS_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
+// REGISTER_DISPATCH now dispatches an AVX512 kernel to nullptr but registers other dispatches.
+// ALSO_REGISTER_AVX512_DISPATCH should be used for ensuring AVX512 dispatch, among others.
+#ifdef CPU_CAPABILITY_AVX512
+#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, nullptr)
+#else
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
-#define REGISTER_NO_AVX512_DISPATCH(name)       \
-  REGISTER_AVX512_DISPATCH(name, nullptr)
 #endif
-
-
-}} // namespace at::native
-
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
+#define ALSO_REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
+} // namespace at::native
+
+C10_CLANG_DIAGNOSTIC_POP()

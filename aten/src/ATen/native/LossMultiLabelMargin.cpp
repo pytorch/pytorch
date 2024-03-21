@@ -1,12 +1,24 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/LossMulti.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/multilabel_margin_loss_backward_native.h>
+#include <ATen/ops/multilabel_margin_loss_forward.h>
+#include <ATen/ops/multilabel_margin_loss_forward_native.h>
+#include <ATen/ops/multilabel_margin_loss_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
+namespace at::native {
 
 namespace {
 
@@ -64,8 +76,7 @@ static void multilabel_margin_loss_forward_out_frame(
 
     accscalar_t sum = 0;
 
-    for (const auto t : c10::irange(nframe)) {
-      (void)t; //Suppress unused variable warning
+    for (C10_UNUSED const auto t : c10::irange(nframe)) {
       sum += multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -107,15 +118,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const int64_t ndims = input.dim();
-  if (ndims <= 1) {
-    nframe = 1;
-    dim = ndims == 0 ? 1 : input.size(0);
-  }
-  else {
-    nframe = input.size(0);
-    dim = input.size(1);
-  }
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
 
   // special case target.dim() <= 1: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
@@ -172,9 +175,8 @@ static void multilabel_margin_loss_backward_out_frame(
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
-  scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
-  for (const auto t : c10::irange(nframe)) {
-    (void)t; //Suppress unused variable warning
+  scalar_t* grad_input_row_data = grad_input.mutable_data_ptr<scalar_t>();
+  for (C10_UNUSED const auto t : c10::irange(nframe)) {
     for (const auto dt : c10::irange(dim)) {
       int64_t target_idx = target_data[dt];
       if (target_idx < 0) {
@@ -198,7 +200,7 @@ static void multilabel_margin_loss_backward_out_frame(
     grad_input_row_data += dim;
   }
 
-  scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
+  scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   if (reduction != Reduction::None || grad_output.dim() == 0) {
     assert(
         reduction != Reduction::None || grad_output.dim() > 0 || nframe == 1);
@@ -231,7 +233,7 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
   const int64_t ndims = input.dim();
 
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
   checkSameSize(c, target_arg, is_target_arg);
 
   grad_input.resize_as_(input);
@@ -320,5 +322,4 @@ Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_
   return std::get<0>(at::multilabel_margin_loss_forward(self, target, reduction));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

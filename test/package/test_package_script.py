@@ -240,9 +240,6 @@ class TestPackageScript(PackageTestCase):
         """
 
         class Submod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input: str):
                 input = input + "_submod"
                 return input
@@ -260,9 +257,6 @@ class TestPackageScript(PackageTestCase):
         # redefinition is intentional, change single inner string
         # string attribute, should trigger new module type
         class Submod(torch.nn.Module):  # noqa: F811
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input: str):
                 input = input + "_submod(changed)"
                 return input

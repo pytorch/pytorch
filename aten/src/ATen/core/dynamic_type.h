@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 
@@ -56,6 +57,7 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(AnyEnum, DYNAMIC_TYPE_BIT(20), 1)                                        \
   _(RRef, DYNAMIC_TYPE_BIT(21), 0)                                           \
   _(Future, DYNAMIC_TYPE_BIT(22), 0)                                         \
+  _(Await, DYNAMIC_TYPE_BIT(23), 0)                                          \
   _(Any, 0xffffffff, 1)
 
 #define FORALL_DYNAMIC_TYPES_FAKE(_) \
@@ -185,7 +187,7 @@ class DynamicType : public SharedType {
   bool equals(const DynamicType& other) const;
 
   template <typename F>
-  bool compareArguments(const DynamicType& other, F&& f) const {
+  bool compareArguments(const DynamicType& other, const F& f) const {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }

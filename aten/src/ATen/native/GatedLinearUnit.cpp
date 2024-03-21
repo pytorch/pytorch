@@ -1,10 +1,24 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Activation.h>
 
-namespace at {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/glu_backward_native.h>
+#include <ATen/ops/glu_backward_jvp_native.h>
+#include <ATen/ops/glu_jvp_native.h>
+#include <ATen/ops/glu_native.h>
+#include <ATen/ops/sigmoid.h>
+#endif
 
-namespace meta {
+namespace at::meta {
+
 TORCH_META_FUNC(glu) (
     const Tensor& self, int64_t dim
 ) {
@@ -22,9 +36,9 @@ TORCH_META_FUNC(glu) (
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
   build_borrowing_binary_op(maybe_get_output(), firstHalf, secondHalf);
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_stub);
@@ -138,5 +152,4 @@ Tensor glu_backward_jvp(
 }
 
 
-} // at::native
-} // at
+} // namespace at::native

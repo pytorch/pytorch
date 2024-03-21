@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <thread>
 #include <utility>
 
 #include <c10/macros/Macros.h>
@@ -48,7 +47,7 @@ class once_flag {
     if (init_.load(std::memory_order_relaxed)) {
       return;
     }
-    c10::guts::invoke(f, std::forward<Args>(args)...);
+    c10::guts::invoke(std::forward<F>(f), std::forward<Args>(args)...);
     init_.store(true, std::memory_order_release);
   }
 

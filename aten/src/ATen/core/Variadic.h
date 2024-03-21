@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <tuple>
-#include <type_traits>
 #include <utility>
 
 #include <c10/util/ArrayRef.h>
@@ -47,6 +44,15 @@ struct IterArgs {
   // to your struct.  These are not enabled by default because
   // you may be able to process these structures more efficiently
   // than handling them one-by-one.
+
+  template <typename T>
+  void operator()(c10::IListRef<T> args) {
+    for (const auto& arg : args) {
+      self()(arg);
+      if (self().short_circuit())
+        return;
+    }
+  }
 
   template <typename T>
   void operator()(at::ArrayRef<T> args) {

@@ -119,7 +119,7 @@ std::vector<c10::IValue> create_inputs() {
     auto input_dims_str = split(',', input_dims_list[i]);
     std::vector<int64_t> input_dims;
     for (const auto& s : input_dims_str) {
-      input_dims.push_back(c10::stoi(s));
+      input_dims.push_back(std::stoi(s));
     }
 
     at::ScalarType input_type;
@@ -180,6 +180,10 @@ class vkRunner final : public Runner<T> {
   virtual c10::IValue run(
       T& module,
       const std::vector<c10::IValue>& inputs) override {
+    if (!module.attr("requires_backend_transfers", at::IValue(true)).toBool()) {
+      // No need to transfer input/output backends
+      return module.forward(inputs);
+    }
 
     if (inputs_.size() == 0) {
       // Upload the input tensor(s) to GPU memory.

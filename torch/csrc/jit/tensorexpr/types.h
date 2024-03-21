@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <iostream>
+#include <iosfwd>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Logging.h>
@@ -76,7 +76,9 @@ class TORCH_API Dtype {
   }
 
  private:
-  friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
+  friend TORCH_API std::ostream& operator<<(
+      std::ostream& stream,
+      const Dtype& dtype);
   ScalarType scalar_type_;
   int lanes_; // the width of the element for a vector time
 };

@@ -16,7 +16,6 @@ namespace nn {
 namespace detail {
 
 template <typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class _DropoutNd : public torch::nn::Cloneable<Derived> {
  public:
   _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)){};
@@ -42,7 +41,7 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies dropout over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Dropout to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Dropout to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::DropoutOptions` class to learn what
@@ -52,7 +51,6 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
 /// ```
 /// Dropout model(DropoutOptions().p(0.42).inplace(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API DropoutImpl : public detail::_DropoutNd<DropoutImpl> {
  public:
   using detail::_DropoutNd<DropoutImpl>::_DropoutNd;
@@ -73,7 +71,7 @@ TORCH_MODULE(Dropout);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies dropout over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Dropout2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Dropout2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Dropout2dOptions` class to learn what
@@ -83,7 +81,6 @@ TORCH_MODULE(Dropout);
 /// ```
 /// Dropout2d model(Dropout2dOptions().p(0.42).inplace(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Dropout2dImpl : public detail::_DropoutNd<Dropout2dImpl> {
  public:
   using detail::_DropoutNd<Dropout2dImpl>::_DropoutNd;
@@ -104,7 +101,7 @@ TORCH_MODULE(Dropout2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies dropout over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Dropout3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Dropout3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Dropout3dOptions` class to learn what
@@ -114,7 +111,6 @@ TORCH_MODULE(Dropout2d);
 /// ```
 /// Dropout3d model(Dropout3dOptions().p(0.42).inplace(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Dropout3dImpl : public detail::_DropoutNd<Dropout3dImpl> {
  public:
   using detail::_DropoutNd<Dropout3dImpl>::_DropoutNd;
@@ -135,7 +131,7 @@ TORCH_MODULE(Dropout3d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AlphaDropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies Alpha Dropout over the input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AlphaDropout to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AlphaDropout to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AlphaDropoutOptions` class to learn
@@ -145,7 +141,6 @@ TORCH_MODULE(Dropout3d);
 /// ```
 /// AlphaDropout model(AlphaDropoutOptions(0.2).inplace(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API AlphaDropoutImpl : public detail::_DropoutNd<AlphaDropoutImpl> {
  public:
   using detail::_DropoutNd<AlphaDropoutImpl>::_DropoutNd;
@@ -173,7 +168,6 @@ TORCH_MODULE(AlphaDropout);
 /// ```
 /// FeatureAlphaDropout model(FeatureAlphaDropoutOptions(0.2).inplace(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FeatureAlphaDropoutImpl
     : public detail::_DropoutNd<FeatureAlphaDropoutImpl> {
  public:

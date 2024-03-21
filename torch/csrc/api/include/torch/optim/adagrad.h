@@ -34,7 +34,6 @@ struct TORCH_API AdagradOptions
   TORCH_API friend bool operator==(
       const AdagradOptions& lhs,
       const AdagradOptions& rhs);
-  ~AdagradOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -45,12 +44,16 @@ struct TORCH_API AdagradParamState
   TORCH_ARG(int64_t, step) = 0;
 
  public:
+  AdagradParamState() = default;
+  AdagradParamState(const AdagradParamState&) = default;
+  AdagradParamState& operator=(const AdagradParamState&) = default;
+  AdagradParamState(AdagradParamState&&) noexcept = default;
+  AdagradParamState& operator=(AdagradParamState&&) noexcept = default;
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(
       const AdagradParamState& lhs,
       const AdagradParamState& rhs);
-  ~AdagradParamState() override = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {
@@ -84,17 +87,13 @@ class TORCH_API Adagrad : public Optimizer {
             p.data(),
             defaults.initial_accumulator_value(),
             at::MemoryFormat::Preserve));
-        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
-            std::move(state);
+        state_[p.unsafeGetTensorImpl()] = std::move(state);
       }
     }
   }
 
-  explicit Adagrad(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      AdagradOptions defaults = {})
-      : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit Adagrad(std::vector<Tensor> params, AdagradOptions defaults = {})
+      : Adagrad({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

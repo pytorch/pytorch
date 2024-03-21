@@ -1,6 +1,10 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 
@@ -124,7 +128,7 @@ class DeviceGuard {
 class OptionalDeviceGuard {
  public:
   /// Create an uninitialized guard.  Set the guard later using reset_device.
-  explicit OptionalDeviceGuard() : guard_() {}
+  explicit OptionalDeviceGuard() = default;
 
   /// Initialize the guard, setting the current device to the passed Device.
   explicit OptionalDeviceGuard(Device device) : guard_(device) {}
@@ -175,7 +179,7 @@ class OptionalDeviceGuard {
   }
 
  private:
-  impl::InlineOptionalDeviceGuard<impl::VirtualGuardImpl> guard_;
+  impl::InlineOptionalDeviceGuard<impl::VirtualGuardImpl> guard_{};
 };
 
 // Note [Whither the DeviceGuard boilerplate]

@@ -17,8 +17,9 @@ __all__ = ["RoutedDecoderIterDataPipe", ]
 @functional_datapipe('routed_decode')
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     r"""
-    Decodes binary streams from input DataPipe, yields pathname and decoded data
-    in a tuple (functional name: ``routed_decode``).
+    Decodes binary streams from input DataPipe, yields pathname and decoded data in a tuple.
+
+    (functional name: ``routed_decode``)
 
     Args:
         datapipe: Iterable datapipe that provides pathname and binary stream in tuples
@@ -62,4 +63,4 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

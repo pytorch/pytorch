@@ -1,12 +1,9 @@
 #include <c10/core/WrapDimMinimal.h>
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
-int64_t maybe_wrap_dim_slow(
-    int64_t dim,
-    int64_t dim_post_expr,
-    bool wrap_scalar) {
+template <typename T>
+T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar) {
   TORCH_CHECK_INDEX(
       dim_post_expr >= 0, "Rank cannot be negative but got ", dim_post_expr);
 
@@ -16,11 +13,12 @@ int64_t maybe_wrap_dim_slow(
         "Dimension specified as ",
         dim,
         " but tensor has no dimensions");
-    return c10::maybe_wrap_dim(dim, /*dim_post_expr=*/1, /*wrap_scalar=*/false);
+    return c10::maybe_wrap_dim(
+        std::move(dim), /*dim_post_expr=*/1, /*wrap_scalar=*/false);
   }
 
-  int64_t min = -dim_post_expr;
-  int64_t max = dim_post_expr - 1;
+  T min = dim_post_expr * -1;
+  T max = dim_post_expr - 1;
   TORCH_CHECK_INDEX(
       min <= dim && dim <= max,
       "Dimension out of range (expected to be in range of [",
@@ -35,5 +33,10 @@ int64_t maybe_wrap_dim_slow(
       false, "should never reach here as dim should be out-of-bounds");
 }
 
-} // namespace detail
-} // namespace c10
+// Explicitly instantiate the template at the two types it will be used
+template C10_API int64_t
+maybe_wrap_dim_slow(int64_t dim, int64_t dim_post_expr, bool wrap_scalar);
+template C10_API SymInt
+maybe_wrap_dim_slow(SymInt dim, SymInt dim_post_expr, bool wrap_scalar);
+
+} // namespace c10::detail

@@ -35,6 +35,7 @@ namespace c10 {
 
 template <size_t Alignment, size_t Size>
 struct AlignedCharArray {
+  // NOLINTNEXTLINE(*c-arrays)
   alignas(Alignment) char buffer[Size];
 };
 
@@ -126,6 +127,7 @@ class AlignerImpl {
   T9 t9;
   T10 t10;
 
+ public:
   AlignerImpl() = delete;
 };
 
@@ -141,6 +143,7 @@ template <
     typename T9 = char,
     typename T10 = char>
 union SizerImpl {
+  // NOLINTNEXTLINE(*c-arrays)
   char arr1[sizeof(T1)], arr2[sizeof(T2)], arr3[sizeof(T3)], arr4[sizeof(T4)],
       arr5[sizeof(T5)], arr6[sizeof(T6)], arr7[sizeof(T7)], arr8[sizeof(T8)],
       arr9[sizeof(T9)], arr10[sizeof(T10)];

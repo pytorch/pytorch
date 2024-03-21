@@ -130,8 +130,7 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
   for (int stream_id = 0; stream_id <= std::min(stream_seq, max_streams - 1);
        stream_id++) {
     VLOG(1) << "Wait for stream:" << stream_id;
-    CUDA_CHECK(
-        cudaStreamSynchronize(CUDAContext::cuda_stream(gpu_id, stream_id)));
+    CUDA_CHECK(cudaStreamSynchronize(CUDAContext::cuda_stream(gpu_id, stream_id)));
   }
 }
 

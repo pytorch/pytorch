@@ -86,7 +86,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with enable_profiling_mode_for_profiling_tests():
             class M(torch.nn.Module):
                 def __init__(self, has_bias):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.ll = torch.nn.Linear(10, 10, has_bias)
 
                 def forward(self, x, y):
@@ -154,9 +154,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             output_ref = func(input0, input1)
             for i in range(2):
                 output = jit_f(input0, input1)
-                assert(output_ref[0].requires_grad == output[0].requires_grad)
-                assert(output_ref[1][0].requires_grad == output[1][0].requires_grad)
-                assert(output_ref[1][1].requires_grad == output[1][1].requires_grad)
+                assert output_ref[0].requires_grad == output[0].requires_grad
+                assert output_ref[1][0].requires_grad == output[1][0].requires_grad
+                assert output_ref[1][1].requires_grad == output[1][1].requires_grad
 
     @unittest.skip("disable until we property handle tensor lists with undefined gradients")
     def test_differentiable_graph_ops_requires_grad(self):

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <queue>
 
@@ -102,7 +101,7 @@ void MemoryDAG::collectAllContainedMemoryLocationsImpl(
 bool MemoryDAG::mayContainAlias(
     const Element* a,
     const at::ArrayRef<Element*> b) const {
-  if (b.size() == 0) {
+  if (b.empty()) {
     return false;
   }
 
@@ -115,7 +114,7 @@ bool MemoryDAG::mayContainAlias(
 bool MemoryDAG::mayContainAlias(
     const at::ArrayRef<Element*> a,
     const at::ArrayRef<Element*> b) const {
-  if (a.size() == 0 || b.size() == 0) {
+  if (a.empty() || b.empty()) {
     return false;
   }
 

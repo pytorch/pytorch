@@ -16,13 +16,11 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/col2im_native.h>
-#include <ATen/ops/col2im_backward_native.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/im2col_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 void col2im_out_cuda_template(
@@ -102,7 +100,6 @@ void col2im_out_cuda_template(
   int64_t input_batch_stride = input.stride(0);
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
-  output.zero_();
   int64_t output_batch_stride = output.stride(0);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
@@ -118,7 +115,7 @@ void col2im_out_cuda_template(
 
     col2im_batched(
         at::cuda::getCurrentCUDAStream(),
-        input.data_ptr<scalar_t>(),
+        input.const_data_ptr<scalar_t>(),
         input_batch_stride,
         batch_size,
         n_output_plane,
@@ -134,25 +131,13 @@ void col2im_out_cuda_template(
         stride_width,
         dilation_height,
         dilation_width,
-        output.data_ptr<scalar_t>(),
+        output.mutable_data_ptr<scalar_t>(),
         output_batch_stride);
 
     if (!batched_input) {
       output.resize_({n_output_plane, output_height, output_width});
     }
   });
-}
-
-void col2im_backward_out_cuda_template(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  // im2col_out_cuda checks size of kernel_size, dilation, padding and stride
-  at::native::im2col_out_cuda(
-      grad_output, kernel_size, dilation, padding, stride, grad_input);
 }
 
 } // namespace
@@ -183,29 +168,4 @@ Tensor col2im_cuda(
   return output;
 }
 
-Tensor& col2im_backward_out_cuda(const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    Tensor& grad_input) {
-  col2im_backward_out_cuda_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
-}
-
-Tensor col2im_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  col2im_backward_out_cuda_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
-}
-
-} // namespace native
-} // namespace at
+} // namespace at::native

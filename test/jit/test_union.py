@@ -113,7 +113,7 @@ class TestUnion(JitTestCase):
     def test_union_in_class_constructor(self):
 
         @torch.jit.script  # noqa: B903
-        class A(object):    # noqa: B903
+        class A:    # noqa: B903
             def __init__(self, x: Union[int, str]) -> None:
                 self.x = x
 

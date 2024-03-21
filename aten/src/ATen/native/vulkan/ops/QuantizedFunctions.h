@@ -11,6 +11,12 @@ Tensor quantize_per_tensor(
     const int64_t zero_point,
     const c10::ScalarType dtype);
 
+Tensor quantize_per_tensor_tensor_qparams(
+    const at::Tensor& input_arg,
+    const at::Tensor& scale,
+    const at::Tensor& zero_point,
+    const c10::ScalarType dtype);
+
 Tensor dequantize_helper(
     const at::Tensor& input_arg,
     const double scale,
@@ -43,7 +49,7 @@ Tensor quantized_div(
     const double scale,
     const int64_t zero_point);
 
-Tensor conv2d(
+Tensor quantized_conv2d(
     const Tensor& input_,
     const Tensor& weight,
     const c10::optional<Tensor>& bias_opt,

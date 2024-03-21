@@ -1,22 +1,24 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
-#include <iostream>
+#include <ostream>
+#include <sstream>
+#include <utility>
 
 namespace c10 {
 
-OptionalTypePtr OptionalType::create(TypePtr contained) {
-  return OptionalTypePtr(new OptionalType(std::move(contained)));
+OptionalTypePtr OptionalType::create(const TypePtr& contained) {
+  return OptionalTypePtr(new OptionalType(contained));
 }
 
 TypePtr OptionalType::ofTensor() {
-  static auto value = TypeFactory::create<OptionalType>(TensorType::get());
+  static auto value = OptionalType::create(TensorType::get());
   return value;
 }
 
@@ -47,7 +49,7 @@ c10::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, Ar
                 return !should_subtract(t);
               });
 
-  if (types.size() == 0) {
+  if (types.empty()) {
     return c10::nullopt;
   } else if (types.size() == 1) {
     return types[0];
@@ -128,13 +130,13 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
     }
   }
   // Cut off the vector's tail so that `end` is the real last element
-  types->erase(types->begin() + end_idx + 1, types->end());
+  types->erase(types->begin() + static_cast<std::ptrdiff_t>(end_idx) + 1, types->end());
 
 }
 
 }
 
-void sortUnion(std::vector<TypePtr>* types) {
+static void sortUnion(std::vector<TypePtr>* types) {
   // We want the elements to be sorted so we can easily compare two
   // UnionType objects for equality in the future. Note that this order
   // is guaranteed to be stable since we've already coalesced any
@@ -161,10 +163,10 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
                         "passed a `nullptr`");
   std::vector<TypePtr> to_fill;
   standardizeVectorForUnion(*to_flatten, &to_fill);
-  *to_flatten = to_fill;
+  *to_flatten = std::move(to_fill);
 }
 
-OptionalType::OptionalType(TypePtr contained)
+OptionalType::OptionalType(const TypePtr& contained)
                            : UnionType({contained, NoneType::get()}, TypeKind::OptionalType) {
   bool is_numbertype = false;
   if (auto as_union = contained->cast<UnionType>()) {
@@ -178,11 +180,12 @@ OptionalType::OptionalType(TypePtr contained)
   } else if (contained == NumberType::get() || is_numbertype) {
     contained_ = NumberType::get();
     types_.clear();
-    types_.push_back(NumberType::get());
-    types_.push_back(NoneType::get());
+    types_.emplace_back(NumberType::get());
+    types_.emplace_back(NoneType::get());
   } else {
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = subtractTypeSetFrom(to_subtract, types_);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     contained_ = UnionType::create({*without_none});
   }
   has_free_variables_ = contained_->hasFreeVariables();
@@ -227,7 +230,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
 }
 
 UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
-  auto union_type = new UnionType(std::move(reference));
+  UnionTypePtr union_type(new UnionType(std::move(reference)));
 
   // Some very special-cased logic for `Optional`. This will be deleted
   // in a later PR
@@ -236,7 +239,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
   bool complex_found = false;
   bool nonetype_found = false;
 
-  auto update_is_opt_flags = [&](TypePtr t) {
+  auto update_is_opt_flags = [&](const TypePtr& t) {
     if (t == IntType::get()) {
       int_found = true;
     } else if (t == FloatType::get()) {
@@ -266,7 +269,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
     }
   }
 
-  return UnionTypePtr(union_type);
+  return union_type;
 }
 
 c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
@@ -303,7 +306,7 @@ bool UnionType::equals(const Type& rhs) const {
                        [&](TypePtr lhs_type) {
                          return std::any_of(union_rhs->containedTypes().begin(),
                                             union_rhs->containedTypes().end(),
-                                            [&](TypePtr rhs_type) {
+                                            [&](const TypePtr& rhs_type) {
                                               return *lhs_type == *rhs_type;
                                             });
                        });
@@ -356,7 +359,7 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   });
 }
 
-std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
+std::string UnionType::unionStr(const TypePrinter& printer, bool is_annotation_str)
     const {
   std::stringstream ss;
 
@@ -364,7 +367,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
 
   std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
 
-  auto is_numbertype = [&](TypePtr lhs) {
+  auto is_numbertype = [&](const TypePtr& lhs) {
     for (const auto& rhs : number_types) {
       if (*lhs == *rhs) {
         return true;
@@ -409,7 +412,7 @@ std::string UnionType::str() const {
   return this->unionStr(nullptr, /*is_annotation_str=*/false);
 }
 
-std::string UnionType::annotation_str_impl(TypePrinter printer) const {
+std::string UnionType::annotation_str_impl(const TypePrinter& printer) const {
   return this->unionStr(printer, /*is_annotation_str=*/true);
 }
 
@@ -457,7 +460,7 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
       return true;
     }
   } else {
-    // NOLINTNEXTLINE(bugprone-argument-comment)
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return Type::isSubtypeOfExt(rhs, why_not);
   }
 }

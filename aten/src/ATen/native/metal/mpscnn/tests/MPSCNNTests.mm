@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
+#include <iostream>
 #include <sstream>
 
 #define ITER_COUNT 5
@@ -75,8 +76,8 @@ bool almostEqualTensor(const at::Tensor& a, const at::Tensor& b, float t) {
     return false;
   }
   for (int i = 0; i < a.numel(); ++i) {
-    float x1 = a.data_ptr<float>()[i];
-    float x2 = b.data_ptr<float>()[i];
+    float x1 = a.const_data_ptr<float>()[i];
+    float x2 = b.const_data_ptr<float>()[i];
     if (std::abs(x1 - x2) > t) {
       return false;
     }
@@ -646,7 +647,7 @@ bool test_view2() {
 }
 
 bool test_view3() {
-  // nonarry -> array
+  // nonarray -> array
   __block std::vector<int64_t> size{5, 8};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));

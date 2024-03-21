@@ -11,10 +11,12 @@ from functools import reduce
 import numpy as np
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
-    onlyNativeDeviceTypes)
+    onlyNativeDeviceTypes, skipXLA)
+import operator
 
 
 class TestIndexing(TestCase):
@@ -137,7 +139,7 @@ class TestIndexing(TestCase):
         def consec(size, start=1):
             # Creates the sequence in float since CPU half doesn't support the
             # needed operations. Converts to dtype before returning.
-            numel = reduce(lambda x, y: x * y, size, 1)
+            numel = reduce(operator.mul, size, 1)
             sequence = torch.ones(numel, dtype=torch.float, device=device).cumsum(0)
             sequence.add_(start - 1)
             return sequence.view(*size).to(dtype=dtype)
@@ -533,7 +535,7 @@ class TestIndexing(TestCase):
             [[[2]], [[0, 3], [4, 1]], slice(None)],
             # non-contiguous indexing subspace
             [[0, 2, 3], slice(None), [1, 3, 4]],
-
+            # [...]
             # less dim, ellipsis
             [[0, 2], ],
             [[0, 2], slice(None)],
@@ -737,6 +739,7 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
+    @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -834,6 +837,7 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_index_put_accumulate_with_optional_tensors(self, device):
         # TODO: replace with a better solution.
         # Currently, here using torchscript to put None into indices.
@@ -881,6 +885,38 @@ class TestIndexing(TestCase):
 
             self.assertEqual(output, input_list)
 
+    @onlyNativeDeviceTypes
+    def test_index_ind_dtype(self, device):
+        x = torch.randn(4, 4, device=device)
+        ind_long = torch.randint(4, (4,), dtype=torch.long, device=device)
+        ind_int = ind_long.int()
+        src = torch.randn(4, device=device)
+        ref = x[ind_long, ind_long]
+        res = x[ind_int, ind_int]
+        self.assertEqual(ref, res)
+        ref = x[ind_long, :]
+        res = x[ind_int, :]
+        self.assertEqual(ref, res)
+        ref = x[:, ind_long]
+        res = x[:, ind_int]
+        self.assertEqual(ref, res)
+        # no repeating indices for index_put
+        ind_long = torch.arange(4, dtype=torch.long, device=device)
+        ind_int = ind_long.int()
+        for accum in (True, False):
+            inp_ref = x.clone()
+            inp_res = x.clone()
+            torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
+            torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
+            self.assertEqual(inp_ref, inp_res)
+
+    @skipXLA
+    def test_index_put_accumulate_empty(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/94667
+        input = torch.rand([], dtype=torch.float32, device=device)
+        with self.assertRaises(RuntimeError):
+            input.index_put([], torch.tensor([1.0], device=device), True)
+
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -898,6 +934,7 @@ class TestIndexing(TestCase):
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_jit_indexing(self, device):
         def fn1(x):
             x[x < 50] = 1.0
@@ -1165,6 +1202,32 @@ class TestIndexing(TestCase):
         self.assertEqual(x[idx, ...].tolist(), [[0, 1, 2],
                                                 [6, 7, 8]])
 
+    def test_unravel_index_errors(self, device):
+        with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+            torch.unravel_index(
+                torch.tensor(0.5, device=device),
+                (2, 2))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+            torch.unravel_index(
+                torch.tensor([], device=device),
+                (10, 3, 5))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'shape' to be int or sequence"):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=torch.int64),
+                torch.tensor([1, 2, 3]))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'shape' sequence to only contain ints"):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=torch.int64),
+                (1, 2, 2.0))
+
+        with self.assertRaisesRegex(ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"):
+            torch.unravel_index(
+                torch.tensor(0, device=device),
+                (2, -3))
+
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
@@ -1291,6 +1354,57 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t.cpu(), indices, dim=0)
+
+    @onlyCUDA
+    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+        with DeterministicGuard(True):
+            idx1 = torch.tensor([0])
+            idx2 = torch.tensor([2, 6])
+            idx3 = torch.tensor([1, 5, 7])
+
+            tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx1] = 1.0
+            tensor_a[idx1, :, idx2, idx2, :] = 2.0
+            tensor_a[:, idx1, idx3, :, idx3] = 3.0
+            tensor_b[idx1] = 1.0
+            tensor_b[idx1, :, idx2, idx2, :] = 2.0
+            tensor_b[:, idx1, idx3, :, idx3] = 3.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 11).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx3] = 1.0
+            tensor_a[idx2, :] = 2.0
+            tensor_a[:, idx2] = 3.0
+            tensor_a[:, idx1] = 4.0
+            tensor_b[idx3] = 1.0
+            tensor_b[idx2, :] = 2.0
+            tensor_b[:, idx2] = 3.0
+            tensor_b[:, idx1] = 4.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[[8]] = 1.0
+            tensor_b[[8]] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[6] = 1.0
+            tensor_b[6] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+    def test_index_limits(self, device):
+        #  Regression test for https://github.com/pytorch/pytorch/issues/115415
+        t = torch.tensor([], device=device)
+        idx_min = torch.iinfo(torch.int64).min
+        idx_max = torch.iinfo(torch.int64).max
+        self.assertRaises(IndexError, lambda: t[idx_min])
+        self.assertRaises(IndexError, lambda: t[idx_max])
+
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -1551,6 +1665,15 @@ class NumpyTests(TestCase):
         a[b] = v
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
+
+    def test_truncate_leading_1s(self, device):
+        col_max = torch.randn(1, 4)
+        kernel = col_max.T * col_max  # [4, 4] tensor
+        kernel2 = kernel.clone()
+        # Set the diagonal
+        kernel[range(len(kernel)), range(len(kernel))] = torch.square(col_max)
+        torch.diagonal(kernel2).copy_(torch.square(col_max.view(4)))
+        self.assertEqual(kernel, kernel2)
 
 instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
 instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')

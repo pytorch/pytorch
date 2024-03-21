@@ -235,7 +235,7 @@ static void Caffe2InitializeCuda() {
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.
         // It is ok if peer access is already enabled...
-        cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaDeviceEnablePeerAccess(j, 0));
         if ((err != cudaErrorPeerAccessAlreadyEnabled) &&
             (err != cudaSuccess)) {
           CAFFE_THROW(cudaGetErrorString(err));
@@ -306,7 +306,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
     baseAllocator_ = GetDefaultCPUAllocator();
   }
   ~PinnedCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     if (nbytes == 0) {
       // replicate c10::alloc_cpu behavior - return nullptr
       return {nullptr, nullptr, &Delete, at::Device(CPU)};
@@ -336,6 +336,10 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
     return &Delete;
   }
 
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for PinnedCPUAllocator");
+  }
+
  private:
   static void Delete(void* data) {
     if (!data) {
@@ -351,7 +355,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       CUDA_ENFORCE(cudaHostUnregister(data));
       GetDefaultCPUAllocator()->raw_deleter()(data);
     } else {
-      cudaError_t err = cudaFreeHost(data);
+      cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaFreeHost(data));
       profiledCPUMemoryReporter().Delete(data);
       if (err == cudaErrorInvalidValue) {
         free(data);
@@ -509,7 +513,7 @@ void TrackMemoryAlloc(size_t nbytes) {
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
   ~DefaultCUDAAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     // Lock the mutex
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     // A one-time caffe2 cuda initializer.
@@ -561,12 +565,12 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           // some models that are currently running with the thc
           // allocator fit in memory.  We will need to find some
           // way of resolving this problem.
-          cuda::CUDAStreamGuard g(
+          c10::cuda::CUDAStreamGuard g(
             Stream(
               Stream::DEFAULT,
               Device(kCUDA, CaffeCudaGetDevice())
             ));
-          ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
+          ptr = c10::cuda::CUDACachingAllocator::raw_alloc(nbytes);
         }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
@@ -579,6 +583,10 @@ struct DefaultCUDAAllocator final : public at::Allocator {
 
   at::DeleterFnPtr raw_deleter() const override {
     return &Delete;
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for DefaultCUDAAllocator");
   }
 
  private:
@@ -598,7 +606,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE: {
         // If memory pool is not set up, use simple cudaFree.
-        cudaError_t error = cudaFree(ptr);
+        cudaError_t error = C10_CUDA_ERROR_HANDLED(cudaFree(ptr));
         // For some reason, in Python runtime we sometimes delete a data pointer
         // after the cuda runtime exits - this is odd but is probably caused by
         // a static workspace that pycaffe2 uses, and the destruction got
@@ -625,7 +633,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         break;
       }
       case CudaMemoryPoolType::THC: {
-        cuda::CUDACachingAllocator::raw_delete(ptr);
+        c10::cuda::CUDACachingAllocator::raw_delete(ptr);
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
         }

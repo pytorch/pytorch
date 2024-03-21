@@ -6,9 +6,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/mkldnn/Common.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
   static FunctionSchemaMap<NNCLoweringFunction> lowering_registry_;
@@ -519,11 +517,11 @@ int nnc_lowerings_lazy_registration() {
          at::Device device) {
         bool noMin = false;
         bool noMax = false;
-        if (c10::get_if<ArgNone>(&inputs[1])) {
+        if (std::get_if<ArgNone>(&inputs[1])) {
           noMin = true;
         }
 
-        if (c10::get_if<ArgNone>(&inputs[2])) {
+        if (std::get_if<ArgNone>(&inputs[2])) {
           noMax = true;
         }
 
@@ -585,7 +583,7 @@ int nnc_lowerings_lazy_registration() {
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         // check if the activation is quantized
-        const BufHandle& x = c10::get<BufHandle>(inputs[0]);
+        const BufHandle& x = std::get<BufHandle>(inputs[0]);
         if (x.node()->qscale()) {
           return computeQuantizedSigmoidExternalCall(
               inputs, outputShape, outputStrides, outputType, device);
@@ -677,7 +675,7 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        auto A = c10::get<BufHandle>(inputs[0]);
+        auto A = std::get<BufHandle>(inputs[0]);
         if (A.node()->qscale()) {
           return computeQuantizedRelu(
               inputs, outputShape, outputStrides, outputType, device);
@@ -743,7 +741,7 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        const auto& kApproximate = c10::get<std::string>(inputs[1]);
+        const auto& kApproximate = std::get<std::string>(inputs[1]);
         std::vector<ArgValue> operands = {inputs.front()};
         if (at::native::get_gelutype_enum(kApproximate) ==
             at::native::GeluType::Tanh) {
@@ -989,7 +987,7 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        const BufHandle& rhs = c10::get<BufHandle>(inputs[1]);
+        const BufHandle& rhs = std::get<BufHandle>(inputs[1]);
         auto dtype = rhs.dtype();
         return computeOneOperand(
             "aten_type_as",
@@ -1710,7 +1708,7 @@ int nnc_lowerings_lazy_registration() {
   //           outputShape,
   //           [&](const std::vector<VarHandle>& axes) {
   //             int64_t dim =
-  //                 at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]),
+  //                 at::maybe_wrap_dim(std::get<int64_t>(inputs[1]),
   //                 axes.size());
   //             ExprHandle start = constant(inputs[2]);
   //             ExprHandle stride = constant(inputs[4]);
@@ -1732,9 +1730,9 @@ int nnc_lowerings_lazy_registration() {
             outputShape,
             outputStrides,
             [&](const std::vector<VarHandle>& axes) {
-              int64_t dim = c10::get<int64_t>(inputs[1]);
+              int64_t dim = std::get<int64_t>(inputs[1]);
               if (dim < 0) {
-                if (axes.size() == 0) {
+                if (axes.empty()) {
                   throw malformed_input("axes are zero handling unsqueeze");
                 }
                 dim += axes.size();
@@ -1747,11 +1745,11 @@ int nnc_lowerings_lazy_registration() {
               int64_t i = 0;
               for (const auto& a : axes) {
                 if (i++ != dim) {
-                  indices.emplace_back(ExprHandle(a.node()));
+                  indices.emplace_back(a.node());
                 }
               }
 
-              return broadcast(c10::get<BufHandle>(inputs[0]), indices);
+              return broadcast(std::get<BufHandle>(inputs[0]), indices);
             });
       });
   RegisterNNCLoweringsFunction aten_t(
@@ -1778,7 +1776,7 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        auto A = c10::get<BufHandle>(inputs[0]);
+        auto A = std::get<BufHandle>(inputs[0]);
         // Trivial case of 0-dim tensors: just a copy of the input
         if (A.ndim() == 0) {
           auto tensor = Compute(
@@ -1795,7 +1793,7 @@ int nnc_lowerings_lazy_registration() {
           }
           return tensor;
         }
-        auto permute_dims = c10::get<IntList>(inputs[1]);
+        auto permute_dims = std::get<IntList>(inputs[1]);
         auto tensor = Compute(
             "aten_permute",
             outputShape,
@@ -2000,6 +1998,4 @@ NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
   return nullptr;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

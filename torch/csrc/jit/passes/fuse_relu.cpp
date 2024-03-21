@@ -54,8 +54,8 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
 
   rewriter.runOnGraph(graph);
   // NB: Patterns that are left out are add_ + relu and add_out + relu
-  // This is because inplace mutation of the testor done by add_ will be lost if
-  // inplace mutatation of the same tensor actually does add+relu
+  // This is because inplace mutation of the tensor done by add_ will be lost if
+  // inplace mutation of the same tensor actually does add+relu
 }
 } // namespace
 

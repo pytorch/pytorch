@@ -7,14 +7,13 @@
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
 
 #include <cmath>
-#include <typeinfo>
+#include <utility>
 
 namespace at {
 
@@ -82,7 +81,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
+static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t element_per_byte;
   switch(t) {
@@ -96,7 +95,7 @@ int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::S
       element_per_byte = 1;
   }
   // zero dim tensor
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return c10::multiply_integers(sizes) * dtype_itemsize;
   }
   // Consider most inner dim as cols
@@ -120,6 +119,8 @@ inline Tensor new_qtensor(
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
     allocator = GetAllocator(kMeta);
+  } else if (device.is_privateuseone()) {
+    allocator = GetAllocator(kPrivateUse1);
   } else {
     TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
   }
@@ -145,12 +146,13 @@ inline Tensor new_qtensor(
   auto scalar_type = typeMetaToScalarType(dtype);
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
-  auto storage = c10::make_intrusive<StorageImpl>(
+  auto storage = make_storage_impl(
       StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
-      /*resizable=*/true);
+      /*resizable=*/true,
+      device);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::DispatchKeySet(tensorDispatchKey), dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
@@ -177,7 +179,7 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-void per_tensor_affine_dequantize_impl(
+static void per_tensor_affine_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const double scale,
@@ -227,7 +229,7 @@ Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-void per_channel_affine_dequantize_impl(
+static void per_channel_affine_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const Tensor& scale,
@@ -277,7 +279,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-void per_channel_affine_float_q_params_dequantize_impl(
+static void per_channel_affine_float_q_params_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const Tensor& scale,
@@ -377,7 +379,7 @@ Tensor from_blob_quantized_per_tensor_affine(
       data,
       sizes,
       strides,
-      deleter,
+      std::move(deleter),
       scale,
       zeroPoint,
       options);

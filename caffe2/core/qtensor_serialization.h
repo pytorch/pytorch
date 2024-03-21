@@ -12,7 +12,7 @@ template <class Context>
 class QTensorSerializer : public BlobSerializerBase {
  public:
   QTensorSerializer() : context_() {}
-  ~QTensorSerializer() {}
+  ~QTensorSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain QTensor<Context>.
    */

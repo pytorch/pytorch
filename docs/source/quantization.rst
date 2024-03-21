@@ -3,8 +3,8 @@
 Quantization
 ============
 
-.. automodule:: torch.quantization
-.. automodule:: torch.quantization.fx
+.. automodule:: torch.ao.quantization
+.. automodule:: torch.ao.quantization.fx
 
 .. warning ::
      Quantization is in beta and subject to change.
@@ -41,57 +41,63 @@ to lower precision with minimal accuracy loss.
 Quantization API Summary
 -----------------------------
 
-PyTorch provides two different modes of quantization: Eager Mode Quantization and FX Graph Mode Quantization.
+PyTorch provides three different modes of quantization: Eager Mode Quantization, FX Graph Mode Quantization (maintenance) and PyTorch 2 Export Quantization.
 
 Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
 
-FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
+FX Graph Mode Quantization is an automated quantization workflow in PyTorch, and currently it's a prototype feature, it is in maintenance mode since we have PyTorch 2 Export Quantization. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
 
-New users of quantization are encouraged to try out FX Graph Mode Quantization first, if it does not work, user may try to follow the guideline of `using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ or fall back to eager mode quantization.
+PyTorch 2 Export Quantization is the new full graph mode quantization workflow, released as prototype feature in PyTorch 2.1. With PyTorch 2, we are moving to a better solution for full program capture (torch.export) since it can capture a higher percentage (88.8% on 14K models) of models compared to torch.fx.symbolic_trace (72.7% on 14K models), the program capture solution used by FX Graph Mode Quantization. torch.export still has limitations around some python constructs and requires user involvement to support dynamism in the exported model, but overall it is an improvement over the previous program capture solution. PyTorch 2 Export Quantization is built for models captured by torch.export, with flexibility and productivity of both modeling users and backend developers in mind. The main features are
+(1). Programmable API for configuring how a model is quantized that can scale to many more use cases
+(2). Simplified UX for modeling users and backend developers since they only need to interact with a single object (Quantizer) for expressing user’s intention about how to quantize a model and what the backend support.
+(3). Optional reference quantized model representation that can represent quantized computation with integer operations that maps closer to actual quantized computations that happens in hardware.
 
-The following table compares the differences between Eager Mode Quantization and FX Graph Mode Quantization:
+New users of quantization are encouraged to try out PyTorch 2 Export Quantization first, if it does not work well, user can try eager mode quantization.
 
-+-----------------+-------------------+-------------------+
-|                 |Eager Mode         |FX Graph           |
-|                 |Quantization       |Mode               |
-|                 |                   |Quantization       |
-+-----------------+-------------------+-------------------+
-|Release          |beta               |prototype          |
-|Status           |                   |                   |
-+-----------------+-------------------+-------------------+
-|Operator         |Manual             |Automatic          |
-|Fusion           |                   |                   |
-+-----------------+-------------------+-------------------+
-|Quant/DeQuant    |Manual             |Automatic          |
-|Placement        |                   |                   |
-+-----------------+-------------------+-------------------+
-|Quantizing       |Supported          |Supported          |
-|Modules          |                   |                   |
-+-----------------+-------------------+-------------------+
-|Quantizing       |Manual             |Automatic          |
-|Functionals/Torch|                   |                   |
-|Ops              |                   |                   |
-+-----------------+-------------------+-------------------+
-|Support for      |Limited Support    |Fully              |
-|Customization    |                   |Supported          |
-+-----------------+-------------------+-------------------+
-|Quantization Mode|Post Training      |Post Training      |
-|Support          |Quantization:      |Quantization:      |
-|                 |Static, Dynamic,   |Static, Dynamic,   |
-|                 |Weight Only        |Weight Only        |
-|                 |                   |                   |
-|                 |Quantiztion Aware  |Quantiztion Aware  |
-|                 |Training:          |Training:          |
-|                 |Static             |Static             |
-+-----------------+-------------------+-------------------+
-|Input/Output     |``torch.nn.Module``|``torch.nn.Module``|
-|Model Type       |                   |(May need some     |
-|                 |                   |refactors to make  |
-|                 |                   |the model          |
-|                 |                   |compatible with FX |
-|                 |                   |Graph Mode         |
-|                 |                   |Quantization)      |
-+-----------------+-------------------+-------------------+
+The following table compares the differences between Eager Mode Quantization, FX Graph Mode Quantization and PyTorch 2 Export Quantization:
+
++-----------------+-------------------+-------------------+-------------------------+
+|                 |Eager Mode         |FX Graph           |PyTorch 2 Export         |
+|                 |Quantization       |Mode               |Quantization             |
+|                 |                   |Quantization       |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Release          |beta               |prototype          |prototype                |
+|Status           |                   |(maintenance)      |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Operator         |Manual             |Automatic          |Automatic                |
+|Fusion           |                   |                   |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Quant/DeQuant    |Manual             |Automatic          |Automatic                |
+|Placement        |                   |                   |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Quantizing       |Supported          |Supported          |Supported                |
+|Modules          |                   |                   |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Quantizing       |Manual             |Automatic          |Supported                |
+|Functionals/Torch|                   |                   |                         |
+|Ops              |                   |                   |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Support for      |Limited Support    |Fully              |Fully Supported          |
+|Customization    |                   |Supported          |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Quantization Mode|Post Training      |Post Training      |Defined by               |
+|Support          |Quantization:      |Quantization:      |Backend Specific         |
+|                 |Static, Dynamic,   |Static, Dynamic,   |Quantizer                |
+|                 |Weight Only        |Weight Only        |                         |
+|                 |                   |                   |                         |
+|                 |Quantization Aware |Quantization Aware |                         |
+|                 |Training:          |Training:          |                         |
+|                 |Static             |Static             |                         |
++-----------------+-------------------+-------------------+-------------------------+
+|Input/Output     |``torch.nn.Module``|``torch.nn.Module``|``torch.fx.GraphModule`` |
+|Model Type       |                   |(May need some     |(captured by             |
+|                 |                   |refactors to make  |``torch.export``         |
+|                 |                   |the model          |                         |
+|                 |                   |compatible with FX |                         |
+|                 |                   |Graph Mode         |                         |
+|                 |                   |Quantization)      |                         |
++-----------------+-------------------+-------------------+-------------------------+
+
 
 
 There are three types of quantization supported:
@@ -103,13 +109,12 @@ There are three types of quantization supported:
 3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
-Please see our `Introduction to Quantization on Pytorch
+Please see our `Introduction to Quantization on PyTorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below.
-Note that for FX quantization, the corresponding functionals are also supported.
 
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
@@ -129,7 +134,7 @@ Note that for FX quantization, the corresponding functionals are also supported.
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 | nn.MultiheadAttention     | Y (through        | Not supported      |
 |                           | custom modules)   |                    |
@@ -185,7 +190,7 @@ PTDQ API Example::
   # create a model instance
   model_fp32 = M()
   # create a quantized model instance
-  model_int8 = torch.quantization.quantize_dynamic(
+  model_int8 = torch.ao.quantization.quantize_dynamic(
       model_fp32,  # the original model
       {torch.nn.Linear},  # a set of layers to dynamically quantize
       dtype=torch.qint8)  # the target dtype for quantized weights
@@ -232,11 +237,11 @@ PTSQ API Example::
       def __init__(self):
           super().__init__()
           # QuantStub converts tensors from floating point to quantized
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
           self.relu = torch.nn.ReLU()
           # DeQuantStub converts tensors from quantized to floating point
-          self.dequant = torch.quantization.DeQuantStub()
+          self.dequant = torch.ao.quantization.DeQuantStub()
 
       def forward(self, x):
           # manually specify where tensors will be converted from floating
@@ -256,20 +261,23 @@ PTSQ API Example::
   model_fp32.eval()
 
   # attach a global qconfig, which contains information about what kind
-  # of observers to attach. Use 'fbgemm' for server inference and
-  # 'qnnpack' for mobile inference. Other quantization configurations such
-  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
-  # calibration techniques can be specified here.
-  model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+  # of observers to attach. Use 'x86' for server inference and 'qnnpack'
+  # for mobile inference. Other quantization configurations such as selecting
+  # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
+  # can be specified here.
+  # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
+  # for server inference.
+  # model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
+  model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('x86')
 
   # Fuse the activations to preceding layers, where applicable.
   # This needs to be done manually depending on the model architecture.
   # Common fusions include `conv + relu` and `conv + batchnorm + relu`
-  model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+  model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
 
   # Prepare the model for static quantization. This inserts observers in
   # the model that will observe activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+  model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
 
   # calibrate the prepared model to determine quantization parameters for activations
   # in a real world setting, the calibration would be done with a representative dataset
@@ -280,7 +288,7 @@ PTSQ API Example::
   # quantizes the weights, computes and stores the scale and bias value to be
   # used with each activation tensor, and replaces key operators with quantized
   # implementations.
-  model_int8 = torch.quantization.convert(model_fp32_prepared)
+  model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
   # run the model, relevant calculations will happen in int8
   res = model_int8(input_fp32)
@@ -330,12 +338,12 @@ QAT API Example::
       def __init__(self):
           super().__init__()
           # QuantStub converts tensors from floating point to quantized
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
           self.bn = torch.nn.BatchNorm2d(1)
           self.relu = torch.nn.ReLU()
           # DeQuantStub converts tensors from quantized to floating point
-          self.dequant = torch.quantization.DeQuantStub()
+          self.dequant = torch.ao.quantization.DeQuantStub()
 
       def forward(self, x):
           x = self.quant(x)
@@ -352,21 +360,24 @@ QAT API Example::
   model_fp32.eval()
 
   # attach a global qconfig, which contains information about what kind
-  # of observers to attach. Use 'fbgemm' for server inference and
-  # 'qnnpack' for mobile inference. Other quantization configurations such
-  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
-  # calibration techniques can be specified here.
-  model_fp32.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+  # of observers to attach. Use 'x86' for server inference and 'qnnpack'
+  # for mobile inference. Other quantization configurations such as selecting
+  # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
+  # can be specified here.
+  # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
+  # for server inference.
+  # model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
+  model_fp32.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
 
   # fuse the activations to preceding layers, where applicable
   # this needs to be done manually depending on the model architecture
-  model_fp32_fused = torch.quantization.fuse_modules(model_fp32,
+  model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32,
       [['conv', 'bn', 'relu']])
 
   # Prepare the model for QAT. This inserts observers and fake_quants in
   # the model needs to be set to train for QAT logic to work
   # the model that will observe weight and activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused.train())
+  model_fp32_prepared = torch.ao.quantization.prepare_qat(model_fp32_fused.train())
 
   # run the training loop (not shown)
   training_loop(model_fp32_prepared)
@@ -376,7 +387,7 @@ QAT API Example::
   # used with each activation tensor, fuses modules where appropriate,
   # and replaces key operators with quantized implementations.
   model_fp32_prepared.eval()
-  model_int8 = torch.quantization.convert(model_fp32_prepared)
+  model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
   # run the model, relevant calculations will happen in int8
   res = model_int8(input_fp32)
@@ -415,20 +426,24 @@ to do the following in addition:
    determine output quantization parameters.
 3. Fuse modules: combine operations/modules into a single module to obtain
    higher accuracy and performance. This is done using the
-   :func:`~torch.ao.quantization.fuse_modules` API, which takes in lists of modules
+   :func:`~torch.ao.quantization.fuse_modules.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
-(Prototype) FX Graph Mode Quantization
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(Prototype - maintenance mode) FX Graph Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
 
 FXPTQ API Example::
 
   import torch
-  from torch.ao.quantization import QConfigMapping
-  import torch.quantization.quantize_fx as quantize_fx
+  from torch.ao.quantization import (
+    get_default_qconfig_mapping,
+    get_default_qat_qconfig_mapping,
+    QConfigMapping,
+  )
+  import torch.ao.quantization.quantize_fx as quantize_fx
   import copy
 
   model_fp = UserModel()
@@ -440,7 +455,7 @@ FXPTQ API Example::
   # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
+  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_dynamic_qconfig)
   # a tuple of one or more example inputs are needed to trace the model
   example_inputs = (input_fp32)
   # prepare
@@ -454,7 +469,7 @@ FXPTQ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
+  qconfig_mapping = get_default_qconfig_mapping("qnnpack")
   model_to_quantize.eval()
   # prepare
   model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
@@ -467,7 +482,7 @@ FXPTQ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
+  qconfig_mapping = get_default_qat_qconfig_mapping("qnnpack")
   model_to_quantize.train()
   # prepare
   model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping, example_inputs)
@@ -481,11 +496,76 @@ FXPTQ API Example::
   model_to_quantize = copy.deepcopy(model_fp)
   model_fused = quantize_fx.fuse_fx(model_to_quantize)
 
-Please see the following tutorials for more information about FX Graph Mode Quantization:
+Please follow the tutorials below to learn more about FX Graph Mode Quantization:
 
 - `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_
 - `FX Graph Mode Post Training Static Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_static.html>`_
 - `FX Graph Mode Post Training Dynamic Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_dynamic.html>`_
+
+(Prototype) PyTorch 2 Export Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+API Example::
+
+  import torch
+  from torch.ao.quantization.quantize_pt2e import prepare_pt2e
+  from torch._export import capture_pre_autograd_graph
+  from torch.ao.quantization.quantizer import (
+      XNNPACKQuantizer,
+      get_symmetric_quantization_config,
+  )
+
+  class M(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.linear = torch.nn.Linear(5, 10)
+
+     def forward(self, x):
+         return self.linear(x)
+
+  # initialize a floating point model
+  float_model = M().eval()
+
+  # define calibration function
+  def calibrate(model, data_loader):
+      model.eval()
+      with torch.no_grad():
+          for image, target in data_loader:
+              model(image)
+
+  # Step 1. program capture
+  # NOTE: this API will be updated to torch.export API in the future, but the captured
+  # result should mostly stay the same
+  m = capture_pre_autograd_graph(m, *example_inputs)
+  # we get a model with aten ops
+
+  # Step 2. quantization
+  # backend developer will write their own Quantizer and expose methods to allow
+  # users to express how they
+  # want the model to be quantized
+  quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config())
+  # or prepare_qat_pt2e for Quantization Aware Training
+  m = prepare_pt2e(m, quantizer)
+
+  # run calibration
+  # calibrate(m, sample_inference_data)
+  m = convert_pt2e(m)
+
+  # Step 3. lowering
+  # lower to target backend
+
+
+Please follow these tutorials to get started on PyTorch 2 Export Quantization:
+
+Modeling Users:
+
+- `PyTorch 2 Export Post Training Quantization <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq.html>`_
+- `PyTorch 2 Export Post Training Quantization with X86 Backend through Inductor <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq_x86_inductor.html>`_
+- `PyTorch 2 Export Quantization Aware Training <https://pytorch.org/tutorials/prototype/pt2e_quant_qat.html>`_
+
+Backend Developers (please check out all Modeling Users docs as well):
+
+- `How to Write a Quantizer for PyTorch 2 Export Quantization <https://pytorch.org/tutorials/prototype/pt2e_quantizer.html>`_
+
 
 Quantization Stack
 ------------------------
@@ -632,7 +712,7 @@ Quantization Mode Support
 |                             |Quantization                                          |Dataset         | Works Best For | Accuracy   |      Notes      |
 |                             |Mode                                                  |Requirement     |                |            |                 |
 +-----------------------------+---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|Post Training Quantization   |Dyanmic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
+|Post Training Quantization   |Dynamic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
 |                             |                                 |dynamically         |                |Embedding,      |            |close to static  |
 |                             |                                 |quantized (fp16,    |                |Transformer     |            |quantization when|
 |                             |                                 |int8) or not        |                |                |            |performance is   |
@@ -640,7 +720,7 @@ Quantization Mode Support
 |                             |                                 |statically quantized|                |                |            |bound due to     |
 |                             |                                 |(fp16, int8, in4)   |                |                |            |weights          |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |acivation and       |calibration     |CNN             |good        |Provides best    |
+|                             |Static Quantization              |activation and      |calibration     |CNN             |good        |Provides best    |
 |                             |                                 |weights statically  |dataset         |                |            |perf, may have   |
 |                             |                                 |quantized (int8)    |                |                |            |big impact on    |
 |                             |                                 |                    |                |                |            |accuracy, good   |
@@ -652,7 +732,7 @@ Quantization Mode Support
 |                             |                                 |weight are fake     |dataset         |                |            |for now          |
 |                             |                                 |quantized           |                |                |            |                 |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |activatio nand      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
+|                             |Static Quantization              |activation and      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
 |                             |                                 |weight are fake     |dataset         |Embedding       |            |when static      |
 |                             |                                 |quantized           |                |                |            |quantization     |
 |                             |                                 |                    |                |                |            |leads to bad     |
@@ -728,7 +808,7 @@ Backend/Hardware Support
 |                 |               |Quantization|Mode        |Mode Support|
 |                 |               |            |Quantization|            |
 +-----------------+---------------+------------+------------+------------+
-|server CPU       |fbgemm         |Supported                |All         |
+|server CPU       |fbgemm/onednn  |Supported                |All         |
 |                 |               |                         |Supported   |
 +-----------------+---------------+                         |            +
 |mobile CPU       |qnnpack/xnnpack|                         |            |
@@ -736,43 +816,44 @@ Backend/Hardware Support
 +-----------------+---------------+------------+------------+------------+
 |server GPU       |TensorRT (early|Not support |Supported   |Static      |
 |                 |prototype)     |this it     |            |Quantization|
-|                 |               |requries a  |            |            |
+|                 |               |requires a  |            |            |
 |                 |               |graph       |            |            |
 +-----------------+---------------+------------+------------+------------+
 
 Today, PyTorch supports the following backends for running quantized operators efficiently:
 
-* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `fbgemm <https://github.com/pytorch/FBGEMM>`_
-* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack <https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `x86` optimized by `fbgemm <https://github.com/pytorch/FBGEMM>`_ and `onednn <https://github.com/oneapi-src/oneDNN>`_ (see the details at `RFC <https://github.com/pytorch/pytorch/issues/83888>`_)
+* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack <https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native/quantized/cpu/qnnpack>`_
 * (early prototype) support for NVidia GPU via `TensorRT <https://developer.nvidia.com/tensorrt>`_ through `fx2trt` (to be open sourced)
 
 
 Note for native CPU backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We expose both `fbgemm` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of `fbgemm` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
+We expose both `x86` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of  `x86` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantization.engine` to `x86` or `qnnpack`.
 
 When preparing a quantized model, it is necessary to ensure that qconfig
 and the engine used for quantized computations match the backend on which
 the model will be executed. The qconfig controls the type of observers used
-during the quantization passes. The qengine controls whether `fbgemm` or
-`qnnpack` specific packing function is used when packing weights for linear
-and convolution functions and modules. For example:
+during the quantization passes. The qengine controls whether `x86` or `qnnpack`
+specific packing function is used when packing weights for
+linear and convolution functions and modules. For example:
 
-Default settings for fbgemm::
+Default settings for x86::
 
     # set the qconfig for PTQ
-    qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    # Note: the old 'fbgemm' is still available but 'x86' is the recommended default on x86 CPUs
+    qconfig = torch.ao.quantization.get_default_qconfig('x86')
     # or, set the qconfig for QAT
-    qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+    qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
     # set the qengine to control weight packing
-    torch.backends.quantized.engine = 'fbgemm'
+    torch.backends.quantized.engine = 'x86'
 
 Default settings for qnnpack::
 
     # set the qconfig for PTQ
-    qconfig = torch.quantization.get_default_qconfig('qnnpack')
+    qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
     # or, set the qconfig for QAT
-    qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')
+    qconfig = torch.ao.quantization.get_default_qat_qconfig('qnnpack')
     # set the qengine to control weight packing
     torch.backends.quantized.engine = 'qnnpack'
 
@@ -799,7 +880,7 @@ Note that for FX Graph Mode Quantization, the corresponding functionals are also
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 |nn.MultiheadAttention      |Not Supported      | Not supported      |
 +---------------------------+-------------------+--------------------+
@@ -896,7 +977,7 @@ be done at a future time.
 Custom API Example::
 
   import torch
-  import torch.nn.quantized as nnq
+  import torch.ao.nn.quantized as nnq
   from torch.ao.quantization import QConfigMapping
   import torch.ao.quantization.quantize_fx
 
@@ -992,11 +1073,35 @@ Custom API Example::
 Best Practices
 --------------
 
-1. If you are using the ``fbgemm`` backend, we need to use 7 bits instead of 8 bits. Make sure you reduce the range for the ``quant\_min``, ``quant\_max``, e.g.
+1. If you are using the ``x86`` backend, we need to use 7 bits instead of 8 bits. Make sure you reduce the range for the ``quant\_min``, ``quant\_max``, e.g.
 if ``dtype`` is ``torch.quint8``, make sure to set a custom ``quant_min`` to be ``0`` and ``quant_max`` to be ``127`` (``255`` / ``2``)
 if ``dtype`` is ``torch.qint8``, make sure to set a custom ``quant_min`` to be ``-64`` (``-128`` / ``2``) and ``quant_max`` to be ``63`` (``127`` / ``2``), we already set this correctly if
 you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.quantization.get_default_qat_qconfig(backend)` function to get the default ``qconfig`` for
-``fbgemm`` or ``qnnpack`` backend
+``x86`` or ``qnnpack`` backend
+
+2. If ``onednn`` backend is selected, 8 bits for activation will be used in the default qconfig mapping ``torch.ao.quantization.get_default_qconfig_mapping('onednn')``
+and default qconfig ``torch.ao.quantization.get_default_qconfig('onednn')``. It is recommended to be used on CPUs with Vector Neural Network Instruction (VNNI)
+support. Otherwise, setting ``reduce_range`` to True of the activation's observer to get better accuracy on CPUs without VNNI support.
+
+Frequently Asked Questions
+--------------------------
+
+1. How can I do quantized inference on GPU?:
+
+   We don't have official GPU support yet, but this is an area of active development, you can find more information
+   `here <https://github.com/pytorch/pytorch/issues/87395>`_
+
+2. Where can I get ONNX support for my quantized model?
+
+   If you get errors exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository. Prefix the issue title with ``[ONNX]`` and tag the issue as ``module: onnx``.
+
+   If you encounter issues with ONNX Runtime, open an issue at `GitHub - microsoft/onnxruntime <https://github.com/microsoft/onnxruntime/issues/>`_.
+
+3. How can I use quantization with LSTM's?:
+
+   LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at
+   Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/core/test_quantized_op.py#L2782>`_
+   FX Graph Mode: `pytorch/test_quantize_fx.py TestQuantizeFx.test_static_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/fx/test_quantize_fx.py#L4116>`_
 
 Common Errors
 ---------------------------------------
@@ -1009,14 +1114,14 @@ If you see an error similar to::
   RuntimeError: Could not run 'quantized::some_operator' with arguments from the 'CPU' backend...
 
 This means that you are trying to pass a non-quantized Tensor to a quantized
-kernel. A common workaround is to use ``torch.quantization.QuantStub`` to
+kernel. A common workaround is to use ``torch.ao.quantization.QuantStub`` to
 quantize the tensor.  This needs to be done manually in Eager mode quantization.
 An e2e example::
 
   class M(torch.nn.Module):
       def __init__(self):
           super().__init__()
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
 
       def forward(self, x):
@@ -1034,18 +1139,18 @@ If you see an error similar to::
   RuntimeError: Could not run 'aten::thnn_conv2d_forward' with arguments from the 'QuantizedCPU' backend.
 
 This means that you are trying to pass a quantized Tensor to a non-quantized
-kernel. A common workaround is to use ``torch.quantization.DeQuantStub`` to
+kernel. A common workaround is to use ``torch.ao.quantization.DeQuantStub`` to
 dequantize the tensor.  This needs to be done manually in Eager mode quantization.
 An e2e example::
 
   class M(torch.nn.Module):
       def __init__(self):
           super().__init__()
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv1 = torch.nn.Conv2d(1, 1, 1)
           # this module will not be quantized (see `qconfig = None` logic below)
           self.conv2 = torch.nn.Conv2d(1, 1, 1)
-          self.dequant = torch.quantization.DeQuantStub()
+          self.dequant = torch.ao.quantization.DeQuantStub()
 
       def forward(self, x):
           # during the convert step, this will be replaced with a
@@ -1122,11 +1227,11 @@ An example::
 
 Symbolic Trace Error when using FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Symbolic traceability is a requirement for `(Prototype) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
+Symbolic traceability is a requirement for `(Prototype - maintenance mode) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
 
   torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
 
-Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pytorch.org/76223/fx.html#limitations-of-symbolic-tracing>`_ and use - `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ to workaround the problem.
+Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs/2.0/fx.html#limitations-of-symbolic-tracing>`_ and use - `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ to workaround the problem.
 
 
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
@@ -1136,26 +1241,170 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.nn.quantizable
 .. py:module:: torch.ao.nn.quantizable.modules
 .. py:module:: torch.ao.nn.quantized
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
 .. py:module:: torch.ao.ns
 .. py:module:: torch.ao.ns.fx
-.. py:module:: torch.ao.quantization
-.. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
-.. py:module:: torch.ao.sparsity
-.. py:module:: torch.ao.sparsity.scheduler
-.. py:module:: torch.ao.sparsity.sparsifier
-
-.. py:module:: torch.nn.qat
-.. py:module:: torch.nn.qat.modules
-.. py:module:: torch.nn.qat.dynamic
-.. py:module:: torch.nn.qat.dynamic.modules
-.. py:module:: torch.nn.quantized
-.. py:module:: torch.nn.quantized.modules
-.. py:module:: torch.nn.quantized.dynamic
-.. py:module:: torch.nn.quantized.dynamic.modules
-
-.. py:module:: torch.ao.nn.quantized.reference
-.. py:module:: torch.ao.nn.quantized.reference.modules
+.. py:module:: torch.ao.pruning
+.. py:module:: torch.ao.pruning.scheduler
+.. py:module:: torch.ao.pruning.sparsifier
+.. py:module:: torch.ao.nn.intrinsic.modules.fused
+.. py:module:: torch.ao.nn.intrinsic.qat.modules.conv_fused
+.. py:module:: torch.ao.nn.intrinsic.qat.modules.linear_fused
+.. py:module:: torch.ao.nn.intrinsic.qat.modules.linear_relu
+.. py:module:: torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu
+.. py:module:: torch.ao.nn.intrinsic.quantized.modules.bn_relu
+.. py:module:: torch.ao.nn.intrinsic.quantized.modules.conv_add
+.. py:module:: torch.ao.nn.intrinsic.quantized.modules.conv_relu
+.. py:module:: torch.ao.nn.intrinsic.quantized.modules.linear_relu
+.. py:module:: torch.ao.nn.qat.dynamic.modules.linear
+.. py:module:: torch.ao.nn.qat.modules.conv
+.. py:module:: torch.ao.nn.qat.modules.embedding_ops
+.. py:module:: torch.ao.nn.qat.modules.linear
+.. py:module:: torch.ao.nn.quantizable.modules.activation
+.. py:module:: torch.ao.nn.quantizable.modules.rnn
+.. py:module:: torch.ao.nn.quantized.dynamic.modules.conv
+.. py:module:: torch.ao.nn.quantized.dynamic.modules.linear
+.. py:module:: torch.ao.nn.quantized.dynamic.modules.rnn
+.. py:module:: torch.ao.nn.quantized.modules.activation
+.. py:module:: torch.ao.nn.quantized.modules.batchnorm
+.. py:module:: torch.ao.nn.quantized.modules.conv
+.. py:module:: torch.ao.nn.quantized.modules.dropout
+.. py:module:: torch.ao.nn.quantized.modules.embedding_ops
+.. py:module:: torch.ao.nn.quantized.modules.functional_modules
+.. py:module:: torch.ao.nn.quantized.modules.linear
+.. py:module:: torch.ao.nn.quantized.modules.normalization
+.. py:module:: torch.ao.nn.quantized.modules.rnn
+.. py:module:: torch.ao.nn.quantized.modules.utils
+.. py:module:: torch.ao.nn.quantized.reference.modules.conv
+.. py:module:: torch.ao.nn.quantized.reference.modules.linear
+.. py:module:: torch.ao.nn.quantized.reference.modules.rnn
+.. py:module:: torch.ao.nn.quantized.reference.modules.sparse
+.. py:module:: torch.ao.nn.quantized.reference.modules.utils
+.. py:module:: torch.ao.nn.sparse.quantized.dynamic.linear
+.. py:module:: torch.ao.nn.sparse.quantized.linear
+.. py:module:: torch.ao.nn.sparse.quantized.utils
+.. py:module:: torch.ao.ns.fx.graph_matcher
+.. py:module:: torch.ao.ns.fx.graph_passes
+.. py:module:: torch.ao.ns.fx.mappings
+.. py:module:: torch.ao.ns.fx.n_shadows_utils
+.. py:module:: torch.ao.ns.fx.ns_types
+.. py:module:: torch.ao.ns.fx.pattern_utils
+.. py:module:: torch.ao.ns.fx.qconfig_multi_mapping
+.. py:module:: torch.ao.ns.fx.utils
+.. py:module:: torch.ao.ns.fx.weight_utils
+.. py:module:: torch.ao.pruning.scheduler.base_scheduler
+.. py:module:: torch.ao.pruning.scheduler.cubic_scheduler
+.. py:module:: torch.ao.pruning.scheduler.lambda_scheduler
+.. py:module:: torch.ao.pruning.sparsifier.base_sparsifier
+.. py:module:: torch.ao.pruning.sparsifier.nearly_diagonal_sparsifier
+.. py:module:: torch.ao.pruning.sparsifier.utils
+.. py:module:: torch.ao.pruning.sparsifier.weight_norm_sparsifier
+.. py:module:: torch.ao.quantization.backend_config.backend_config
+.. py:module:: torch.ao.quantization.backend_config.executorch
+.. py:module:: torch.ao.quantization.backend_config.fbgemm
+.. py:module:: torch.ao.quantization.backend_config.native
+.. py:module:: torch.ao.quantization.backend_config.observation_type
+.. py:module:: torch.ao.quantization.backend_config.onednn
+.. py:module:: torch.ao.quantization.backend_config.qnnpack
+.. py:module:: torch.ao.quantization.backend_config.tensorrt
+.. py:module:: torch.ao.quantization.backend_config.utils
+.. py:module:: torch.ao.quantization.backend_config.x86
+.. py:module:: torch.ao.quantization.fake_quantize
+.. py:module:: torch.ao.quantization.fuser_method_mappings
+.. py:module:: torch.ao.quantization.fuse_modules
+.. py:module:: torch.ao.quantization.fx.convert
+.. py:module:: torch.ao.quantization.fx.custom_config
+.. py:module:: torch.ao.quantization.fx.fuse
+.. py:module:: torch.ao.quantization.fx.fuse_handler
+.. py:module:: torch.ao.quantization.fx.graph_module
+.. py:module:: torch.ao.quantization.fx.lower_to_fbgemm
+.. py:module:: torch.ao.quantization.fx.lower_to_qnnpack
+.. py:module:: torch.ao.quantization.fx.lstm_utils
+.. py:module:: torch.ao.quantization.fx.match_utils
+.. py:module:: torch.ao.quantization.fx.pattern_utils
+.. py:module:: torch.ao.quantization.fx.prepare
+.. py:module:: torch.ao.quantization.fx.qconfig_mapping_utils
+.. py:module:: torch.ao.quantization.fx.quantize_handler
+.. py:module:: torch.ao.quantization.fx.tracer
+.. py:module:: torch.ao.quantization.fx.utils
+.. py:module:: torch.ao.quantization.observer
+.. py:module:: torch.ao.quantization.pt2e.duplicate_dq_pass
+.. py:module:: torch.ao.quantization.pt2e.export_utils
+.. py:module:: torch.ao.quantization.pt2e.graph_utils
+.. py:module:: torch.ao.quantization.pt2e.port_metadata_pass
+.. py:module:: torch.ao.quantization.pt2e.prepare
+.. py:module:: torch.ao.quantization.pt2e.qat_utils
+.. py:module:: torch.ao.quantization.pt2e.representation.rewrite
+.. py:module:: torch.ao.quantization.pt2e.utils
+.. py:module:: torch.ao.quantization.qconfig
+.. py:module:: torch.ao.quantization.qconfig_mapping
+.. py:module:: torch.ao.quantization.quant_type
+.. py:module:: torch.ao.quantization.quantization_mappings
+.. py:module:: torch.ao.quantization.quantize
+.. py:module:: torch.ao.quantization.quantize_fx
+.. py:module:: torch.ao.quantization.quantize_jit
+.. py:module:: torch.ao.quantization.quantize_pt2e
+.. py:module:: torch.ao.quantization.quantizer.composable_quantizer
+.. py:module:: torch.ao.quantization.quantizer.embedding_quantizer
+.. py:module:: torch.ao.quantization.quantizer.quantizer
+.. py:module:: torch.ao.quantization.quantizer.utils
+.. py:module:: torch.ao.quantization.quantizer.x86_inductor_quantizer
+.. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer
+.. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer_utils
+.. py:module:: torch.ao.quantization.stubs
+.. py:module:: torch.ao.quantization.utils
+.. py:module:: torch.nn.intrinsic.modules.fused
+.. py:module:: torch.nn.intrinsic.qat.modules.conv_fused
+.. py:module:: torch.nn.intrinsic.qat.modules.linear_fused
+.. py:module:: torch.nn.intrinsic.qat.modules.linear_relu
+.. py:module:: torch.nn.intrinsic.quantized.dynamic.modules.linear_relu
+.. py:module:: torch.nn.intrinsic.quantized.modules.bn_relu
+.. py:module:: torch.nn.intrinsic.quantized.modules.conv_relu
+.. py:module:: torch.nn.intrinsic.quantized.modules.linear_relu
+.. py:module:: torch.nn.qat.dynamic.modules.linear
+.. py:module:: torch.nn.qat.modules.conv
+.. py:module:: torch.nn.qat.modules.embedding_ops
+.. py:module:: torch.nn.qat.modules.linear
+.. py:module:: torch.nn.quantizable.modules.activation
+.. py:module:: torch.nn.quantizable.modules.rnn
+.. py:module:: torch.nn.quantized.dynamic.modules.conv
+.. py:module:: torch.nn.quantized.dynamic.modules.linear
+.. py:module:: torch.nn.quantized.dynamic.modules.rnn
+.. py:module:: torch.nn.quantized.functional
+.. py:module:: torch.nn.quantized.modules.activation
+.. py:module:: torch.nn.quantized.modules.batchnorm
+.. py:module:: torch.nn.quantized.modules.conv
+.. py:module:: torch.nn.quantized.modules.dropout
+.. py:module:: torch.nn.quantized.modules.embedding_ops
+.. py:module:: torch.nn.quantized.modules.functional_modules
+.. py:module:: torch.nn.quantized.modules.linear
+.. py:module:: torch.nn.quantized.modules.normalization
+.. py:module:: torch.nn.quantized.modules.rnn
+.. py:module:: torch.nn.quantized.modules.utils
+.. py:module:: torch.quantization.fake_quantize
+.. py:module:: torch.quantization.fuse_modules
+.. py:module:: torch.quantization.fuser_method_mappings
+.. py:module:: torch.quantization.fx.convert
+.. py:module:: torch.quantization.fx.fuse
+.. py:module:: torch.quantization.fx.fusion_patterns
+.. py:module:: torch.quantization.fx.graph_module
+.. py:module:: torch.quantization.fx.match_utils
+.. py:module:: torch.quantization.fx.pattern_utils
+.. py:module:: torch.quantization.fx.prepare
+.. py:module:: torch.quantization.fx.quantization_patterns
+.. py:module:: torch.quantization.fx.quantization_types
+.. py:module:: torch.quantization.fx.utils
+.. py:module:: torch.quantization.observer
+.. py:module:: torch.quantization.qconfig
+.. py:module:: torch.quantization.quant_type
+.. py:module:: torch.quantization.quantization_mappings
+.. py:module:: torch.quantization.quantize
+.. py:module:: torch.quantization.quantize_fx
+.. py:module:: torch.quantization.quantize_jit
+.. py:module:: torch.quantization.stubs
+.. py:module:: torch.quantization.utils

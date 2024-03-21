@@ -119,7 +119,7 @@ class TestHsm(hu.HypothesisTestCase):
         for i in range(names.shape[0]):
             for j in range(names.shape[1]):
                 if names[i][j]:
-                    self.assertEquals(
+                    self.assertEqual(
                         names[i][j], p_names[i][j].item().encode('utf-8'))
                     self.assertAlmostEqual(
                         scores[i][j], p_scores[i][j], delta=0.001)

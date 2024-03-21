@@ -8,10 +8,12 @@ from .parallel import DataParallel as DataParallel
 from . import init
 from . import functional
 from . import utils
+from . import attention
 
 
 def factory_kwargs(kwargs):
-    r"""
+    r"""Return a canonicalized dict of factory kwargs.
+
     Given kwargs, returns a canonicalized dict of factory kwargs that can be directly passed
     to factory functions like torch.empty, or errors if unrecognized kwargs are present.
 

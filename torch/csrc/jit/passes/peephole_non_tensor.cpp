@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_non_tensor.h>
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
@@ -15,7 +16,7 @@ namespace {
  * constant int value if there exists one.
  *
  * @pre node is integer arithmetic.
- * @post if there's one constant in two oprands, then the second operand is
+ * @post if there's one constant in two operands, then the second operand is
  *       constant.
  */
 c10::optional<int64_t> checkArithNode(Node& node) {

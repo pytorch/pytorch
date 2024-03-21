@@ -76,3 +76,27 @@ struct binary_function_traits {
   using arg1_t = typename traits::template arg<0>::type;
   using arg2_t = typename traits::template arg<1>::type;
 };
+
+
+// Traits for calling with c10::guts::invoke, where member_functions have a first argument of ClassType
+template <typename T>
+struct invoke_traits : public function_traits<T>{
+};
+
+template <typename T>
+struct invoke_traits<T&> : public invoke_traits<T>{
+};
+
+template <typename T>
+struct invoke_traits<T&&> : public invoke_traits<T>{
+};
+
+template <typename ClassType, typename ReturnType, typename... Args>
+struct invoke_traits<ReturnType(ClassType::*)(Args...)> :
+  public function_traits<ReturnType(ClassType&, Args...)> {
+};
+
+template <typename ClassType, typename ReturnType, typename... Args>
+struct invoke_traits<ReturnType(ClassType::*)(Args...) const> :
+  public function_traits<ReturnType(const ClassType&, Args...)> {
+};

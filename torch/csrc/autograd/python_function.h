@@ -13,32 +13,54 @@
 #include <c10/util/Optional.h>
 
 #include <memory>
-#include <utility>
+#include <optional>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct Graph;
 }
-} // namespace torch
-namespace torch {
-namespace autograd {
+
+namespace torch::autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 struct PyNode : public Node {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
+  PyObject* to_py_args(
+      const variable_list& inputs,
+      at::OptionalDeviceGuard* device_guard);
+  variable_list to_variable_list(
+      const PyObject* r,
+      const std::vector<bool>& is_variable_input);
+
   variable_list apply(variable_list&& inputs) override;
+  variable_list compiled_apply(
+      variable_list&& inputs,
+      std::optional<PyObject*> compiler);
 
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
 
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
+
+  bool compiled_autograd_should_lift() const;
+
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
+  // The AutogradCompilerCall::hooks idx corresponding to this node's backward
+  std::optional<int> _backward_idx;
+
+  // The AutogradCompilerCall::hooks idx corresponding to this node's
+  // backward_state
+  std::optional<int> _backward_state_idx;
+
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
@@ -67,8 +89,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
   return true;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPFunction {
@@ -93,6 +114,19 @@ struct THPFunction {
   // into tensors full of zeros. Set by Python with 'set_materialize_grads'.
   // Default is true.
   bool materialize_grads;
+
+  // boolean indicating whether to materialize output grad tensors
+  // corresponding to non-differentiable outputs. Normally, someone would
+  // already get this behavior by switching off materialize_grads,
+  // but there are certain use cases where that is not feasible:
+  // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
+  bool materialize_non_diff_grads;
+
+  // This is enabled by compiled autograd as a way to signal to AotAutograd it
+  // should call the original FX graph rather than compiling.
+  bool compiled_autograd_tracing;
+  PyObject* compiled_autograd_backward_state;
+  std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;
@@ -119,6 +153,7 @@ struct THPFunction {
 bool THPFunction_initModule(PyObject* module);
 extern PyTypeObject THPFunctionType;
 extern PyObject* THPFunctionClass;
+extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

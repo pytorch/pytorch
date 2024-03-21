@@ -29,7 +29,7 @@ class LengthsSplitOp final : public Operator<Context> {
           "`n_split` must contain a positive value for defined behavior.");
     }
   }
-  ~LengthsSplitOp() {}
+  ~LengthsSplitOp() override {}
 
   bool RunOnDevice() override {
     const auto& L = Input(0);

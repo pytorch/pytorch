@@ -7,7 +7,7 @@
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <iostream>
+#include <iosfwd>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,7 +46,7 @@ struct BenchmarkConfig {
   int num_calling_threads{1};
   // Worker threads are not supported yet. This is just an example that we plan
   // to support some sort of multi-threaded forward calls. We may change this
-  // setting in the future to support different intra and inter op parallelizm
+  // setting in the future to support different intra and inter op parallelism
   // which is not available in PyTorch yet
   int num_worker_threads{1};
   // Warmup iters are used to make sure we run a module a few times before
@@ -71,16 +71,16 @@ template <class Input, class Output, class Model>
 class BenchmarkHelper {
  public:
   BenchmarkHelper();
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  explicit BenchmarkHelper(Model model) : model_(model), initialized_(true) {}
+  explicit BenchmarkHelper(Model model)
+      : model_(std::move(model)), initialized_(true) {}
 
   // This method to be used in benchmark() method
   // Note that there is no result. This way we don't have to call this under GIL
   // even when running in the nn.Module mode. Otherwise destructor of the result
   // would race with Python
   void runOnce(Input&&) const;
-  // This method is to be used when calling from Python dirrectly
-  Output runOnce(py::args&&, py::kwargs&&) const;
+  // This method is to be used when calling from Python directly
+  Output runOnce(py::args&&, const py::kwargs&) const;
   // Aggregate input in the format Model expects in order to avoid further
   // conversions at the benchmark time
   void addInput(py::args&&, py::kwargs&&);
@@ -136,13 +136,13 @@ void ScriptModuleBenchmark::runOnce(ScriptModuleInput&& input) const;
 template <>
 ScriptModuleOutput ScriptModuleBenchmark::runOnce(
     py::args&& args,
-    py::kwargs&& kwargs) const;
+    const py::kwargs& kwargs) const;
 
 template <>
 void ModuleBenchmark::runOnce(ModuleInput&& input) const;
 
 template <>
-ModuleOutput ModuleBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)
+ModuleOutput ModuleBenchmark::runOnce(py::args&& args, const py::kwargs& kwargs)
     const;
 
 template <>
@@ -162,7 +162,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  * component to support inter and intra-op parallelism as well as multiple
  * models running in a single process.
  *
- * For current available configurations refer to the BenchmkarConfig
+ * For current available configurations refer to the BenchmarkConfig
  * documentation
  *
  * The class supports working with either nn.Module or ScriptModule.
@@ -171,7 +171,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(jit::Module module);
+  explicit ThroughputBenchmark(const jit::Module& module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact
@@ -180,8 +180,8 @@ class C10_HIDDEN ThroughputBenchmark {
   // validation of its own
   void addInput(py::args args, py::kwargs kwargs);
 
-  // Equivalent to just running the model dirrectly on the given input
-  py::object runOnce(py::args&& args, py::kwargs&& kwargs);
+  // Equivalent to just running the model directly on the given input
+  py::object runOnce(py::args&& args, const py::kwargs& kwargs);
 
   // The main method of the class allows to perform a multi-threaded benchmark
   // It returns BenchmarkExecutionStats object with a lot of useful statistics

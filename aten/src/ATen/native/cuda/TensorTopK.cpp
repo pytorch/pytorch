@@ -17,8 +17,7 @@
 #include <ATen/ops/topk_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // TODO: remove this when CUDA <11.6 is no longer supported
 void topk_out_with_sort(
@@ -27,8 +26,7 @@ void topk_out_with_sort(
   const Tensor& values,
   const Tensor& indices
 ) {
-  Tensor sorted_values, sorted_indices;
-  std::tie(sorted_values, sorted_indices) = at::cuda::sort(self, /* stable= */false, dim, largest);
+  auto [sorted_values, sorted_indices] = at::cuda::sort(self, /* stable= */false, dim, largest);
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
@@ -95,4 +93,4 @@ TORCH_IMPL_FUNC(topk_out_cuda)
   }
 }
 
-}} // namespace at::native
+} // namespace at::native

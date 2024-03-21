@@ -101,8 +101,15 @@ private:
 // this wraps map_type::iterator to make sure user code can't rely
 // on it being the type of the underlying map.
 template<class Key, class Value, class Iterator>
-class DictIterator final : public std::iterator<std::forward_iterator_tag, DictEntryRef<Key, Value, Iterator>> {
+class DictIterator final {
 public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = DictEntryRef<Key, Value, Iterator>;
+  using difference_type = std::ptrdiff_t;
+  using pointer = value_type*;
+  using reference = value_type&;
+
   explicit DictIterator() = default;
   ~DictIterator() = default;
 
@@ -136,7 +143,7 @@ public:
     return &entryRef_;
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, DictEntryRef<Key, Value, Iterator>>::difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
+  friend difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
     return lhs.entryRef_.iterator_ - rhs.entryRef_.iterator_;
   }
 
@@ -200,7 +207,7 @@ template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Va
 template<class Key, class Value>
 class Dict final {
 private:
-  static_assert((std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
+  static_assert((std::is_same_v<IValue, Key> && std::is_same_v<IValue, Value>) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
 
   // impl_ stores the underlying map as a ska_ordered::order_preserving_flat_hash_map.
   // We intentionally don't offer conversion from/to

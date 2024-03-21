@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <stack>
+#include <utility>
 
 namespace c10 {
 
@@ -18,6 +19,9 @@ const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) 
 }
 
 FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
+  auto alwaysCloneWithRealTypes = [&](const Argument& a) {
+    return a.cloneWithType(a.real_type());
+  };
   auto cloneWithRealTypes = [&](const Argument& a) {
     if (with_symint) {
       return a.cloneWithType(a.real_type());
@@ -27,7 +31,8 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     if (
       *a.real_type() == *getTypePtr<c10::SymInt>() ||
       *a.real_type() == *getTypePtr<c10::optional<c10::SymInt>>() ||
-      *a.real_type() == *getTypePtr<c10::SymIntArrayRef>()
+      *a.real_type() == *getTypePtr<c10::SymIntArrayRef>() ||
+      *a.real_type() == *getTypePtr<at::OptionalSymIntArrayRef>()
     ) {
       // Keep the fake type
       return a.cloneWithType(a.type());
@@ -37,7 +42,8 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
   };
   std::vector<Argument> new_arguments, new_returns;
   std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);
-  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), cloneWithRealTypes);
+  // NB: SymInt returns are always SymInt
+  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), alwaysCloneWithRealTypes);
   return FunctionSchema(
     name(),
     overload_name(),
@@ -107,7 +113,7 @@ c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
               (*maybe_inner_types).end());
         }
       }
-      if (mutable_types.size() == 0) {
+      if (mutable_types.empty()) {
         return c10::nullopt;
       }
       return mutable_types;
@@ -128,10 +134,10 @@ c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
               (*maybe_inner_types).end());
         }
       }
-      if (mutable_types.size() == 0) {
+      if (mutable_types.empty()) {
         return c10::nullopt;
       }
-      return {AliasTypeSet{TupleType::create(mutable_types)}};
+      return {AliasTypeSet{TupleType::create(std::move(mutable_types))}};
     }
     default:
       return c10::nullopt;

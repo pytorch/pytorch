@@ -26,8 +26,8 @@ public:
     }
     Y_scales_ = ConvertScales({scale_});
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8FullyConnectedOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8FullyConnectedOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -63,6 +63,7 @@ public:
       Y_.init({{X.get_dim(0), filter.get_dim(0)}, idtype::f32});
     }
 
+    X_in = X_in.to_public();
     if (InputSize() > BIAS) {
       ideep::inner_product_forward::compute(
           X_in, filter_, bias_, Y_);

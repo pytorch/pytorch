@@ -17,18 +17,9 @@ class DelayWarningHandler : public at::WarningHandler {
   void replay_warnings();
 
  private:
-  void process(
-      const at::SourceLocation& source_location,
-      const std::string& msg,
-      bool verbatim) override;
+  void process(const c10::Warning& warning) override;
 
-  struct Warning {
-    c10::SourceLocation source_location;
-    std::string msg;
-    bool verbatim;
-  };
-
-  std::vector<Warning> warnings_;
+  std::vector<c10::Warning> warnings_;
   std::mutex mutex_;
 };
 

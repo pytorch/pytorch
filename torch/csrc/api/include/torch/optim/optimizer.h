@@ -34,6 +34,11 @@ namespace optim {
 
 class TORCH_API OptimizerParamState {
  public:
+  OptimizerParamState() = default;
+  OptimizerParamState(const OptimizerParamState&) = default;
+  OptimizerParamState& operator=(const OptimizerParamState&) = default;
+  OptimizerParamState(OptimizerParamState&&) noexcept = default;
+  OptimizerParamState& operator=(OptimizerParamState&&) noexcept = default;
   virtual std::unique_ptr<OptimizerParamState> clone() const;
   virtual void serialize(torch::serialize::InputArchive& archive);
   virtual void serialize(torch::serialize::OutputArchive& archive) const;
@@ -49,6 +54,11 @@ class OptimizerCloneableParamState : public OptimizerParamState {
 
 class TORCH_API OptimizerOptions {
  public:
+  OptimizerOptions() = default;
+  OptimizerOptions(const OptimizerOptions&) = default;
+  OptimizerOptions& operator=(const OptimizerOptions&) = default;
+  OptimizerOptions(OptimizerOptions&&) noexcept = default;
+  OptimizerOptions& operator=(OptimizerOptions&&) noexcept = default;
   virtual std::unique_ptr<OptimizerOptions> clone() const;
   virtual void serialize(torch::serialize::InputArchive& archive);
   virtual void serialize(torch::serialize::OutputArchive& archive) const;
@@ -91,9 +101,7 @@ class TORCH_API OptimizerParamGroup {
   const std::vector<Tensor>& params() const;
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<Tensor> params_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<OptimizerOptions> options_;
 };
 
@@ -114,12 +122,11 @@ class TORCH_API Optimizer {
   }
 
   /// Constructs the `Optimizer` from a vector of parameters.
-  // NOLINTNEXTLINE(performance-move-const-arg)
   explicit Optimizer(
       std::vector<Tensor> parameters,
       std::unique_ptr<OptimizerOptions> defaults)
       : Optimizer(
-            {std::move(OptimizerParamGroup(parameters))},
+            {OptimizerParamGroup(std::move(parameters))},
             std::move(defaults)){};
 
   /// Adds the given param_group to the optimizer's param_group list.
@@ -135,7 +142,7 @@ class TORCH_API Optimizer {
   void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
-  void zero_grad();
+  void zero_grad(bool set_to_none = true);
 
   /// Provides a const reference to the parameters in the first param_group this
   /// optimizer holds.
@@ -159,12 +166,12 @@ class TORCH_API Optimizer {
   const std::vector<OptimizerParamGroup>& param_groups() const noexcept;
 
   /// Provides a reference to the state this optimizer holds
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
   state() noexcept;
 
   /// Provides a const reference to the state this optimizer holds
-  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
-  state() const noexcept;
+  const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& state()
+      const noexcept;
 
   /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
@@ -173,11 +180,8 @@ class TORCH_API Optimizer {
   virtual void load(serialize::InputArchive& archive);
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<OptimizerParamGroup> param_groups_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>> state_;
   std::unique_ptr<OptimizerOptions> defaults_;
 };
 

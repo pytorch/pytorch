@@ -12,10 +12,30 @@ namespace utils {
 
 std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
   switch (scalarType) {
+    case at::ScalarType::UInt1:
+      return std::make_pair("uint1", "bit");
+    case at::ScalarType::UInt2:
+      return std::make_pair("uint2", "");
+    case at::ScalarType::UInt3:
+      return std::make_pair("uint3", "");
+    case at::ScalarType::UInt4:
+      return std::make_pair("uint4", "");
+    case at::ScalarType::UInt5:
+      return std::make_pair("uint5", "");
+    case at::ScalarType::UInt6:
+      return std::make_pair("uint6", "");
+    case at::ScalarType::UInt7:
+      return std::make_pair("uint7", "");
     case at::ScalarType::Byte:
       // no "byte" because byte is signed in numpy and we overload
       // byte to mean bool often
       return std::make_pair("uint8", "");
+    case at::ScalarType::UInt16:
+      return std::make_pair("uint16", "");
+    case at::ScalarType::UInt32:
+      return std::make_pair("uint32", "");
+    case at::ScalarType::UInt64:
+      return std::make_pair("uint64", "");
     case at::ScalarType::Char:
       // no "char" because it is not consistently signed or unsigned; we want
       // to move to int8
@@ -52,6 +72,24 @@ std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
       return std::make_pair("quint4x2", "");
     case at::ScalarType::QUInt2x4:
       return std::make_pair("quint2x4", "");
+    case at::ScalarType::Bits1x8:
+      return std::make_pair("bits1x8", "");
+    case at::ScalarType::Bits2x4:
+      return std::make_pair("bits2x4", "");
+    case at::ScalarType::Bits4x2:
+      return std::make_pair("bits4x2", "");
+    case at::ScalarType::Bits8:
+      return std::make_pair("bits8", "");
+    case at::ScalarType::Bits16:
+      return std::make_pair("bits16", "");
+    case at::ScalarType::Float8_e5m2:
+      return std::make_pair("float8_e5m2", "");
+    case at::ScalarType::Float8_e4m3fn:
+      return std::make_pair("float8_e4m3fn", "");
+    case at::ScalarType::Float8_e5m2fnuz:
+      return std::make_pair("float8_e5m2fnuz", "");
+    case at::ScalarType::Float8_e4m3fnuz:
+      return std::make_pair("float8_e4m3fnuz", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
@@ -69,8 +107,7 @@ void initializeDtypes() {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   for (at::ScalarType scalarType : all_scalar_types) {
-    std::string primary_name, legacy_name;
-    std::tie(primary_name, legacy_name) = getDtypeNames(scalarType);
+    auto [primary_name, legacy_name] = getDtypeNames(scalarType);
     PyObject* dtype = THPDtype_New(scalarType, primary_name);
     torch::registerDtypeObject((THPDtype*)dtype, scalarType);
     Py_INCREF(dtype);
@@ -78,7 +115,7 @@ void initializeDtypes() {
         0) {
       throw python_error();
     }
-    if (legacy_name != "") {
+    if (!legacy_name.empty()) {
       Py_INCREF(dtype);
       if (PyModule_AddObject(torch_module.get(), legacy_name.c_str(), dtype) !=
           0) {

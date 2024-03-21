@@ -24,7 +24,7 @@ class PackedSequenceTest(TestCase):
     }
 
     def __init__(self, *args, **kwargs):
-        super(PackedSequenceTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.batch_size = 5
         self.max_length = 6
 
@@ -48,7 +48,7 @@ class PackedSequenceTest(TestCase):
 
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
-        for _, (input_type, _) in self._type_by_name.items():
+        for (input_type, _) in self._type_by_name.values():
             for expected_type_str, (_, cast_str) in self._type_by_name.items():
                 for enforce_sorted in [True, False]:
                     padded, lengths = self._padded_sequence(input_type)
@@ -386,6 +386,9 @@ class PackedSequenceTest(TestCase):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
         with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(0, 0), [])
+        with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
+            packed = rnn_utils.pack_padded_sequence(torch.randn([0, 1, 10]),
+                                                    torch.randn([11, 14, 14, 2]), True)
 
 
 if __name__ == '__main__':

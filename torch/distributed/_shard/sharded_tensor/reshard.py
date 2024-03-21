@@ -101,7 +101,7 @@ def reshuffle_local_shard(
     the new shard directly based on the resharding spec.
 
     Args:
-        local_tensor (Tensor): Local tensor stored in the current rank.
+        local_shard (Tensor): Local tensor stored in the current rank.
         st_size (torch.Size): The size of the sharded tensor.
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The
             specification describing how the tensor is sharded originally.
@@ -232,8 +232,8 @@ def reshard_local_shard(
             rearrange_output_list = True
 
     # Perform autograd enabled all2all.
-    input_tensor_list = torch.split(local_tensor, input_split_sizes, dim=reshard_dim)
-    input_tensor_list = [tensor.contiguous() for tensor in input_tensor_list]
+    input_tensor_tuple = torch.split(local_tensor, input_split_sizes, dim=reshard_dim)
+    input_tensor_list = [tensor.contiguous() for tensor in input_tensor_tuple]
     output_tensor_list = all_to_all(
         output_tensor_list,
         input_tensor_list,

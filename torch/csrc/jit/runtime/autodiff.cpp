@@ -3,10 +3,8 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -16,17 +14,10 @@
 #include <algorithm>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
-
-void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
-  if (dim < 0) {
-    dim += sizes.size();
-  }
-}
 
 // need_trim_grad_ops contains functions that return multiple outputs in
 // forward, but only the first one requires grad.
@@ -34,7 +25,7 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
 // kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
 // supports at most one output that requires grad. Thus we need to remove
 // the grad for index that doesn't require grad.
-bool needTrimGrad(Node* n) {
+static bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
       "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
@@ -132,7 +123,7 @@ bool isDifferentiable(Graph& g) {
 //
 // The output of compiled forward graph is [real_outputs, ctx]
 // The input of compiled backward graph is [ctx, grad_values]
-// We run LowerSimpleTuples afterwards to elmininate all tuples generated in
+// We run LowerSimpleTuples afterwards to eliminate all tuples generated in
 // this process. The original node and TupleConstruct nodes in forward graph
 // will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
 // backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
@@ -304,7 +295,7 @@ class GradientHelper {
 // If we have a function y = f(x) with jacobian J, the backwards of f is dx =
 // J^t dy. Note that because the backwards always implements this matrix
 // multiply, we know that it maps an input vector of zeros to an output vector
-// of zero regardless of what operations it choses to do inside to actually
+// of zero regardless of what operations it chooses to do inside to actually
 // implement the matrix multiply (most use some optimized form and never
 // generate J^t). More generally, we know that all of the backward computations
 // are linear and can use this property to do more aggressive optimizations
@@ -400,7 +391,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
       auto autograd_zero = graph.insertNode(graph.createAutogradZero());
-      std::tie(it, std::ignore) = grad_map.emplace(v, autograd_zero->output());
+      it = grad_map.emplace(v, autograd_zero->output()).first;
     }
     return it->second;
   };
@@ -752,7 +743,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
       // an output
     } else {
       // we need to create a new temporary output for this capture because it
-      // wasn't availiable.
+      // wasn't available.
 
       auto out_index = graph.registerOutput(capture_val);
       GRAPH_DEBUG(
@@ -835,7 +826,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-void packReturnValuesIntoTuple(const std::shared_ptr<Graph>& graph) {
+static void packReturnValuesIntoTuple(const std::shared_ptr<Graph>& graph) {
   auto returnNode = graph->block()->return_node();
   WithInsertPoint wip(returnNode);
   auto tuple = graph->insertNode(graph->createTuple(returnNode->inputs()));
@@ -874,5 +865,4 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   UpdateDifferentiableGraphRequiresGrad(grad_desc.f, false);
   return grad_desc;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

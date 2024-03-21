@@ -1,5 +1,6 @@
-from . import benchmark
 import torch
+
+from . import benchmark
 
 
 class SwishBench(benchmark.Benchmark):
@@ -7,7 +8,9 @@ class SwishBench(benchmark.Benchmark):
         super().__init__(mode, device, dtype)
         self.M = M
         self.N = N
-        self.data = self.rand([M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.data = self.rand(
+            [M, N], device=device, dtype=dtype, requires_grad=self.requires_grad
+        )
         self.inputs = [self.data]
         self.zeros = torch.zeros(M, N, device=device)
         self.six = self.zeros + 6.0

@@ -29,6 +29,7 @@ torch::nn::FractionalMaxPool2d|Yes|No
 torch::nn::FractionalMaxPool3d|Yes|No
 torch::nn::LPPool1d|Yes|No
 torch::nn::LPPool2d|Yes|No
+torch::nn::LPPool3d|Yes|No
 torch::nn::AdaptiveMaxPool1d|Yes|No
 torch::nn::AdaptiveMaxPool2d|Yes|No
 torch::nn::AdaptiveMaxPool3d|Yes|No
@@ -41,7 +42,9 @@ torch::nn::ReflectionPad3d|Yes|No
 torch::nn::ReplicationPad1d|Yes|No
 torch::nn::ReplicationPad2d|Yes|No
 torch::nn::ReplicationPad3d|Yes|No
+torch::nn::ZeroPad1d|Yes|No
 torch::nn::ZeroPad2d|Yes|No
+torch::nn::ZeroPad3d|Yes|No
 torch::nn::ConstantPad1d|Yes|No
 torch::nn::ConstantPad2d|Yes|No
 torch::nn::ConstantPad3d|Yes|No
@@ -171,6 +174,7 @@ F::max_unpool2d|Yes|No
 F::max_unpool3d|Yes|No
 F::lp_pool1d|Yes|No
 F::lp_pool2d|Yes|No
+F::lp_pool3d|Yes|No
 F::adaptive_max_pool1d|Yes|No
 F::adaptive_max_pool2d|Yes|No
 F::adaptive_max_pool3d|Yes|No

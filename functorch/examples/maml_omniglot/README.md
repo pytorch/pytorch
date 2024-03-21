@@ -1,6 +1,6 @@
 # Omniglot MAML examples
 
-In this directory we've provided some examples of traning omniglot that reproduce the experiments from [the original MAML paper](https://arxiv.org/abs/1703.03400).
+In this directory we've provided some examples of training omniglot that reproduce the experiments from [the original MAML paper](https://arxiv.org/abs/1703.03400).
 
 They can be run via `python {filename}`.
 

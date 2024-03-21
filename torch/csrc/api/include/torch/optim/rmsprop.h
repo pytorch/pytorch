@@ -37,7 +37,6 @@ struct TORCH_API RMSpropOptions
   TORCH_API friend bool operator==(
       const RMSpropOptions& lhs,
       const RMSpropOptions& rhs);
-  ~RMSpropOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -55,7 +54,6 @@ struct TORCH_API RMSpropParamState
   TORCH_API friend bool operator==(
       const RMSpropParamState& lhs,
       const RMSpropParamState& rhs);
-  ~RMSpropParamState() override = default;
 };
 
 class TORCH_API RMSprop : public Optimizer {
@@ -80,11 +78,8 @@ class TORCH_API RMSprop : public Optimizer {
         defaults.alpha() >= 0, "Invalid alpha value: ", defaults.alpha());
   }
 
-  explicit RMSprop(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      RMSpropOptions defaults = {})
-      : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit RMSprop(std::vector<Tensor> params, RMSpropOptions defaults = {})
+      : RMSprop({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

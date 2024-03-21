@@ -47,7 +47,11 @@ from tensor_ops import (
     TensorViewOpsModule,
 )
 from torch.jit.mobile import _load_for_lite_interpreter
-from torchvision_models import MobileNetV2Module
+from torchvision_models import (
+    MobileNetV2Module,
+    MobileNetV2VulkanModule,
+    Resnet18Module,
+)
 
 test_path_ios = "ios/TestApp/models/"
 test_path_android = "android/pytorch_android/src/androidTest/assets/"
@@ -98,6 +102,8 @@ all_modules = {
     "torchscript_collection_ops": TSCollectionOpsModule(),
     # vision
     "mobilenet_v2": MobileNetV2Module(),
+    "mobilenet_v2_vulkan": MobileNetV2VulkanModule(),
+    "resnet18": Resnet18Module(),
     # android api module
     "android_api_module": AndroidAPIModule(),
 }
@@ -140,7 +146,7 @@ def calcOpsCoverage(ops):
                 "_coverage": round(coverage, 2),
                 "uncovered_ops": uncovered_ops_dict,
                 "covered_ops": covered_ops_dict,
-                "all_generated_ops": sorted(list(all_generated_ops)),
+                "all_generated_ops": sorted(all_generated_ops),
             },
             f,
         )

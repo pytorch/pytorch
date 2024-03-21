@@ -1,18 +1,31 @@
 # Owner(s): ["module: nn"]
 
 import tempfile
-import torch
 from copy import deepcopy
 from functools import partial
+from unittest import expectedFailure
+
+import torch
 from torch import nn
-from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.nn.utils.parametrize import (
+    register_parametrization,
+    remove_parametrizations,
+)
+from torch.testing._internal.common_subclass import (
+    DiagTensorBelow,
+    subclass_db,
+)
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, parametrize, skipIfTorchDynamo, subtest, instantiate_parametrized_tests)
-from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
+    TestCase,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    subtest,
+)
 from torch.testing._internal.logging_tensor import LoggingTensor
 from torch.utils._pytree import tree_map
-from unittest import expectedFailure
 
 # The current test methodology in this file is to test a variety of real use cases
 # with a set of fully-fledged tensor subclasses. In the future, this may change
@@ -43,6 +56,7 @@ class TestSubclass(TestCase):
         self.assertNotIsInstance(x, nn.Parameter)
         self.assertEqual(x.requires_grad, tensor_requires_grad)
 
+    @skipIfTorchDynamo()
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_deepcopy(self, tensor_cls, as_param):
@@ -128,7 +142,7 @@ class TestSubclass(TestCase):
                     nn.init.normal_(self.p1)
                     for p in self.p_list:
                         nn.init.uniform_(p)
-                    for _, p in self.p_dict.items():
+                    for p in self.p_dict.values():
                         nn.init.uniform_(p)
 
             def forward(self, x):
@@ -136,7 +150,7 @@ class TestSubclass(TestCase):
                 for p in self.p_list:
                     out = p + out
 
-                for _, v in self.p_dict.items():
+                for v in self.p_dict.values():
                     out = v + out
 
                 return out
@@ -214,14 +228,12 @@ class TestSubclass(TestCase):
             def __new__(
                 cls, t: torch.Tensor
             ):
-                r = super(NonRewrappingTensor, cls)._make_wrapper_subclass(
+                r = super()._make_wrapper_subclass(
                     cls, t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device=t.device)
                 return r
 
             def __init__(self, t) -> None:
                 self.tensor: torch.Tensor = t
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -239,6 +251,27 @@ class TestSubclass(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
             param = nn.Parameter(NonRewrappingTensor(torch.randn(3)))
+
+    def test_tensor_subclass_storage_data_accesses_throw(self):
+        from torch.testing._internal.logging_tensor import LoggingTensor
+        x = torch.ones(2)
+        x_log = LoggingTensor(x)
+        # Accessing storage on a tensor subclass is valid
+        storage = x_log.untyped_storage()
+        # This includes accessing metadata on the storage
+        sz = storage.size()
+        # But storage methods that access data will throw
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.resize_(0)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.copy_(storage)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage.fill_(0)
+        with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
+            storage._write_file("file")
+
 
 instantiate_parametrized_tests(TestSubclass)
 

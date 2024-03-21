@@ -17,7 +17,7 @@ make_clean_env(){
 
     conda create -yn "${ENV_NAME}" python=3
     source activate "${ENV_NAME}"
-    conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi hypothesis
+    conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake hypothesis
     conda install -y -c pytorch magma-cuda102
     conda deactivate
 }
@@ -29,7 +29,7 @@ make_clean_env pr_39967
 make_clean_env ref_39744
 make_clean_env pr_39744
 
-git submodule update --init --recursive --jobs 0
+git submodule update --init --recursive
 wget https://github.com/pytorch/pytorch/pull/39850.diff
 wget https://github.com/pytorch/pytorch/pull/39744.diff
 

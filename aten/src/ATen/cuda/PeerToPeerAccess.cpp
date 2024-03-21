@@ -1,13 +1,15 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
+
+#include <ATen/cuda/CUDAContext.h>
+
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <vector>
-#include <algorithm>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 static std::vector<int8_t> p2pAccessEnabled_;
 static int64_t num_devices_ = -1;
@@ -32,6 +34,8 @@ void init_p2p_access_cache(int64_t num_devices) {
 }  // namespace detail
 
 bool get_p2p_access(int dev, int dev_to_access) {
+  at::globalContext().lazyInitCUDA();
+
   TORCH_CHECK(dev >= 0 || dev < num_devices_,
               dev, " is not a device");
   TORCH_CHECK(dev_to_access >= 0 || dev_to_access < num_devices_,
@@ -44,23 +48,14 @@ bool get_p2p_access(int dev, int dev_to_access) {
     return cache;
   }
 
-  c10::cuda::CUDAGuard device_guard(dev);
-
-  int access = 0;
-  C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
-  if (access) {
-    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
-    if (err == cudaErrorPeerAccessAlreadyEnabled) {
-      // ignore and clear the error if access was already enabled
-      cudaGetLastError();
-    } else {
-      C10_CUDA_CHECK(err);
-    }
-    cache = 1;
-  } else {
-    cache = 0;
+  int result;
+  C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&result, dev, dev_to_access));
+  cache = result ? 1 : 0;
+  if (cache) {
+    CUDACachingAllocator::enablePeerAccess(dev, dev_to_access);
   }
+
   return cache;
 }
 
-}}  // namespace at::cuda::detail
+}  // namespace at::cuda::detail

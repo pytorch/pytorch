@@ -1,5 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type.h>
+#include <c10/core/GradMode.h>
+
+#include <utility>
 
 namespace c10 {
 
@@ -73,6 +76,7 @@ std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
       out << ", ";
     }
     if (vs[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       out << vs[i].value();
     } else {
       out << "*";
@@ -219,9 +223,9 @@ VaryingShape<Stride> TensorType::computeStrideProps(
       has_overlap = possible_cross_dimension_overlap(sizes, strides);
     }
   }
+
   std::vector<Stride> stride_properties;
-
-
+  stride_properties.reserve(stride_indices.size());
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
     if (!contiguous_) {
@@ -278,18 +282,23 @@ TensorTypePtr TensorType::create(
     c10::optional<bool> undefined, bool tensor_contiguity) {
   if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
     // handles case where strides are set
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
     auto sprops = strides.concrete_sizes().has_value()
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
     return TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
   } else {
     // strides are all null, but still have number of strides equal to number of ranks
     TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto symbol_sizes = SymbolicShape(*sizes.sizes());
     return TensorType::create(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
   }
 }
@@ -335,6 +344,7 @@ VaryingShape<int64_t> TensorType::sizes() const {
     return VaryingShape<int64_t>();
   }
   return VaryingShape<int64_t>(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       fmap(*sizes_.sizes(), [](ShapeSymbol ss) {
         // we turn symbolic shapes into unknowns
         return ss.is_static()
@@ -416,22 +426,21 @@ VaryingShape<int64_t> TensorType::strides() const {
       ss[*s.stride_index_] = *s.stride_;
     }
   }
-  return VaryingShape<int64_t>(ss);
+  return VaryingShape<int64_t>(std::move(ss));
 }
 
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    SymbolicShape sizes,
+    VaryingShape<Stride> strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
     : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
-      sizes_(sizes),
-      strides_(strides),
+      sizes_(std::move(sizes)),
+      strides_(std::move(strides)),
       requires_grad_(requires_grad),
       undefined_(undefined) {}
 

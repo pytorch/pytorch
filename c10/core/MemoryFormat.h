@@ -1,10 +1,11 @@
 #pragma once
 
-#include <c10/core/Backend.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
 #include <ostream>
+#include <vector>
 
 // Memory format is not the property of a Tensor. It is the way to tell an
 // operator how the result should be organized in memory and nothing more. That
@@ -61,8 +62,9 @@ inline std::ostream& operator<<(
 
 // Note: Hardcoded the channel last stride indices here to get better
 // performance
-inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
-  std::vector<int64_t> strides(sizes.size());
+template <typename T>
+inline std::vector<T> get_channels_last_strides_2d(ArrayRef<T> sizes) {
+  std::vector<T> strides(sizes.size());
   switch (sizes.size()) {
     case 4:
       strides[1] = 1;
@@ -81,8 +83,13 @@ inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
   }
 }
 
-inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
-  std::vector<int64_t> strides(sizes.size());
+inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
+  return get_channels_last_strides_2d<int64_t>(sizes);
+}
+
+template <typename T>
+std::vector<T> get_channels_last_strides_3d(ArrayRef<T> sizes) {
+  std::vector<T> strides(sizes.size());
   switch (sizes.size()) {
     case 5:
       strides[1] = 1;
@@ -103,6 +110,10 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
   }
 }
 
+inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
+  return get_channels_last_strides_3d<int64_t>(sizes);
+}
+
 // NOTE:
 // Below are Helper functions for is_channels_last_strides_xd.
 // 1. Please do not combine these helper functions, each helper function handles
@@ -114,10 +125,11 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // input
 // 3. All helper functions have similar comments, only 1st helper function is
 // commented here.
+template <typename T>
 inline bool is_channels_last_strides_2d_s4(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int64_t min = 0;
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
+  T min = 0;
   // special case for trivial C dimension. default to NCHW
   if (strides[1] == 0) {
     return false;
@@ -155,10 +167,11 @@ inline bool is_channels_last_strides_2d_s4(
   return true;
 }
 
+template <typename T>
 inline bool is_channels_last_strides_3d_s5(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int64_t min = 0;
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
+  T min = 0;
   if (strides[1] == 0) {
     return false;
   }
@@ -230,12 +243,14 @@ inline bool is_channels_last_strides_3d_s5(
 // implementation. Please check the helper functions
 // (is_channels_last_strides_*d_s*) for more details.
 
+template <typename T>
 inline bool is_channels_last_strides_2d(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 4:
       return is_channels_last_strides_2d_s4(sizes, strides);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
     case 3:
       // TODO dim == 3 case will be enabled once it is fully tested
       return false;
@@ -244,18 +259,32 @@ inline bool is_channels_last_strides_2d(
   }
 }
 
+template <typename T>
 inline bool is_channels_last_strides_3d(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 5:
       return is_channels_last_strides_3d_s5(sizes, strides);
+      // NOLINTNEXTLINE(bugprone-branch-clone)
     case 4:
       // TODO dim == 4 case will be enabled once it is fully tested
       return false;
     default:
       return false;
   }
+}
+
+inline bool is_channels_last_strides_2d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  return is_channels_last_strides_2d<int64_t>(sizes, strides);
+}
+
+inline bool is_channels_last_strides_3d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  return is_channels_last_strides_3d<int64_t>(sizes, strides);
 }
 
 } // namespace c10

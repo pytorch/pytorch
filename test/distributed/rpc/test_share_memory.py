@@ -4,13 +4,14 @@
 import torch
 import torch.distributed as dist
 
+import contextlib
+import copyreg
+import os
+import sys
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
-
-import copyreg
-import os
-import contextlib
 
 from torch import multiprocessing
 import torch.multiprocessing.reductions as TorchMpReductions
@@ -53,9 +54,6 @@ def worker_fn(m):
     pass
 
 class TestRPCPickler(TestCase):
-    def setUp(self):
-        super().setUp()
-
     def test_case(self):
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '29500'

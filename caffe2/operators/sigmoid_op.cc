@@ -35,7 +35,7 @@ $$Sigmoid(x) = \frac{1}{1+\exp(-x)}$$
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sigmoid_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sigmoid_op.cc
 
 
 <details>

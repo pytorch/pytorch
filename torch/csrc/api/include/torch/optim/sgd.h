@@ -34,7 +34,6 @@ struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
   TORCH_API friend bool operator==(
       const SGDOptions& lhs,
       const SGDOptions& rhs);
-  ~SGDOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -49,7 +48,6 @@ struct TORCH_API SGDParamState
   TORCH_API friend bool operator==(
       const SGDParamState& lhs,
       const SGDParamState& rhs);
-  ~SGDParamState() override = default;
 };
 
 class TORCH_API SGD : public Optimizer {
@@ -75,11 +73,8 @@ class TORCH_API SGD : public Optimizer {
         "Nesterov momentum requires a momentum and zero dampening");
   }
 
-  explicit SGD(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      SGDOptions defaults)
-      : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
+      : SGD({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
 

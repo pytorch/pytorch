@@ -25,19 +25,22 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
+#include <type_traits>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
-template <typename T>
-inline __device__ bool _isinf(T x) { return ::isinf(x); }
-
-inline __device__ bool _isinf(c10::Half x) {
-  return ::isinf(static_cast<float>(x));
-}
-inline __device__ bool _isinf(c10::BFloat16 x) {
-  return ::isinf(static_cast<float>(x));
+template <
+    typename T,
+    typename = std::enable_if_t<
+        std::is_floating_point_v<T> || std::is_convertible_v<T, float>>>
+inline __device__ bool _isinf(T x) {
+  if constexpr (std::is_floating_point_v<T>) {
+    return ::isinf(x);
+  } else {
+    return ::isinf(static_cast<float>(x));
+  }
 }
 
 #define MAX_NUM_BLOCKS 200
@@ -80,7 +83,7 @@ void renormRows(Tensor& t) {
   int64_t cols = t.size(1);
 
   auto props = at::cuda::getCurrentDeviceProperties();
-  CUDA_KERNEL_ASSERT(props != NULL);
+  TORCH_CHECK(props != nullptr);
   int numSM = props->multiProcessorCount;
   const int64_t maxThreads = std::min(
       props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
@@ -89,18 +92,18 @@ void renormRows(Tensor& t) {
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(std::min(maxThreads, warp_size * ceil_div(cols, int64_t{warp_size})));
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, (block.x / warp_size) * sizeof(scalar_t),
-        at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
+        at::cuda::getCurrentCUDAStream()>>>(t.mutable_data_ptr<scalar_t>(),
             rows, cols);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
 template <typename scalar_t>
-__device__ int binarySearchForMultinomial(scalar_t* cumdist,
-                                          scalar_t* dist,
+__device__ int binarySearchForMultinomial(const scalar_t* cumdist,
+                                          const scalar_t* dist,
                                           int size,
                                           scalar_t val) {
   int start = 0;
@@ -140,8 +143,8 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
                                  int64_t* dest,
                                  int64_t distributions,
                                  int categories,
-                                 scalar_t* normDistPrefixSum,
-                                 scalar_t* normDist) {
+                                 const scalar_t* normDistPrefixSum,
+                                 const scalar_t* normDist) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
@@ -188,8 +191,8 @@ __global__ void sampleMultinomialOnce(
     int64_t* dest,
     int64_t distributions,
     int categories,
-    scalar_t* sampled,
-    scalar_t* dist,
+    const scalar_t* sampled,
+    const scalar_t* dist,
     int stride_dist, // dist->stride(0)
     int stride_categories // dist->stride(1)
 ) {
@@ -339,10 +342,10 @@ void multinomial_with_replacement_kernel_impl(
 
   result.resize_({numDist, n_sample});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
-    CUDA_KERNEL_ASSERT(props != NULL);
+    TORCH_CHECK(props != nullptr);
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
@@ -367,11 +370,11 @@ void multinomial_with_replacement_kernel_impl(
           <<<grid, block,
           requiredShared,
           at::cuda::getCurrentCUDAStream()>>>(
-              result.data_ptr<int64_t>(),
+              result.mutable_data_ptr<int64_t>(),
                   numDist,
                   numCategories,
-                  sampled.data_ptr<scalar_t>(),
-                  self_v.data_ptr<scalar_t>(),
+                  sampled.const_data_ptr<scalar_t>(),
+                  self_v.const_data_ptr<scalar_t>(),
                   self_v.stride(0),
                   self_v.stride(1)
           );
@@ -440,10 +443,10 @@ void multinomial_with_replacement_kernel_impl(
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
                 rng_engine_inputs,
                 n_sample,
-                result.data_ptr<int64_t>(),
+                result.mutable_data_ptr<int64_t>(),
                 numDist, numCategories,
-                prefixSum.data_ptr<scalar_t>(),
-                normDist.data_ptr<scalar_t>());
+                prefixSum.const_data_ptr<scalar_t>(),
+                normDist.const_data_ptr<scalar_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
@@ -457,4 +460,4 @@ void multinomial_with_replacement_kernel_impl(
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-}}
+} // namespace at::native

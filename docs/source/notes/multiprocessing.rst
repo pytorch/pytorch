@@ -132,3 +132,101 @@ example below as well::
             p.join()
 
 .. __: https://github.com/pytorch/examples/tree/master/mnist_hogwild
+
+
+
+CPU in multiprocessing
+----------------------
+
+Inappropriate multiprocessing can lead to CPU oversubscription, causing
+different processes to compete for CPU resources, resulting in low
+efficiency.
+
+This tutorial will explain what CPU oversubscription is and how to
+avoid it.
+
+CPU oversubscription
+^^^^^^^^^^^^^^^^^^^^
+
+CPU oversubscription is a technical term that refers to a situation
+where the total number of vCPUs allocated to a system exceeds the total
+number of vCPUs available on the hardware.
+
+This leads to severe contention for CPU resources. In such cases, there
+is frequent switching between processes, which increases processes
+switching overhead and decreases overall system efficiency.
+
+See CPU oversubscription with the code examples in the Hogwild
+implementation found in the `example
+repository <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__.
+
+When running the training example with the following command on CPU
+using 4 processes:
+
+.. code-block:: bash
+
+   python main.py --num-processes 4
+
+Assuming there are N vCPUs available on the machine, executing the above
+command will generate 4 subprocesses. Each subprocess will allocate N
+vCPUs for itself, resulting in a requirement of 4*N vCPUs. However, the
+machine only has N vCPUs available. Consequently, the different
+processes will compete for resources, leading to frequent process
+switching.
+
+The following observations indicate the presence of CPU over
+subscription:
+
+#. High CPU Utilization: By using the ``htop`` command, you can observe
+   that the CPU utilization is consistently high, often reaching or
+   exceeding its maximum capacity. This indicates that the demand for
+   CPU resources exceeds the available physical cores, causing
+   contention and competition among processes for CPU time.
+
+#. Frequent Context Switching with Low System Efficiency: In an
+   oversubscribed CPU scenario, processes compete for CPU time, and the
+   operating system needs to rapidly switch between different processes
+   to allocate resources fairly. This frequent context switching adds
+   overhead and reduces the overall system efficiency.
+
+Avoid CPU oversubscription
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A good way to avoid CPU oversubscription is proper resource allocation.
+Ensure that the number of processes or threads running concurrently does
+not exceed the available CPU resources.
+
+In this case, a solution would be to specify the appropriate number of
+threads in the subprocesses. This can be achieved by setting the number
+of threads for each process using the ``torch.set_num_threads(int)``
+function in subprocess.
+
+Assuming there are N vCPUs on the machine and M processes will be
+generated, the maximum ``num_threads`` value used by each process would
+be ``floor(N/M)``. To avoid CPU oversubscription in the mnist_hogwild
+example, the following changes are needed for the file ``train.py`` in
+`example
+repository <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__.
+
+.. code:: python
+
+   def train(rank, args, model, device, dataset, dataloader_kwargs):
+       torch.manual_seed(args.seed + rank)
+
+       #### define the num threads used in current sub-processes
+       torch.set_num_threads(floor(N/M))
+
+       train_loader = torch.utils.data.DataLoader(dataset, **dataloader_kwargs)
+
+       optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+       for epoch in range(1, args.epochs + 1):
+           train_epoch(epoch, args, model, device, train_loader, optimizer)
+
+Set ``num_thread`` for each process using
+``torch.set_num_threads(floor(N/M))``. where you replace N with the
+number of vCPUs available and M with the chosen number of processes. The
+appropriate ``num_thread`` value will vary depending on the specific
+task at hand. However, as a general guideline, the maximum value for the
+``num_thread`` should be ``floor(N/M)`` to avoid CPU oversubscription.
+In the `mnist_hogwild <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__ training example, after avoiding CPU over
+subscription, you can achieve a 30x performance boost.

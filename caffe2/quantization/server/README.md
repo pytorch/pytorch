@@ -19,8 +19,8 @@ To compute the quantization parameters of activation tensors, we need to know th
 
 * Floating-point requantization
 
-Unlike gemmlowp using fixed-point operations that emulates floating point operations of requantization, fbgemm just uses single-precison floating-point operations. This is because in x86 just using single-precision floating-point operations is faster. Probably, gemmlowp used pure fixed-point operations for low-end mobile processors. QNNPACK also has similar constraints as gemmlowp and provides multiple options of requantization implementations.
-The users could modify the code to use a different requantization implementation to be bit-wise idential to the HW they want to emulate for example. If there're enough requests, we could consider implementing a few popular fixed-point requantization as QNNPACK did.
+Unlike gemmlowp using fixed-point operations that emulates floating point operations of requantization, fbgemm just uses single-precision floating-point operations. This is because in x86 just using single-precision floating-point operations is faster. Probably, gemmlowp used pure fixed-point operations for low-end mobile processors. QNNPACK also has similar constraints as gemmlowp and provides multiple options of requantization implementations.
+The users could modify the code to use a different requantization implementation to be bit-wise identical to the HW they want to emulate for example. If there're enough requests, we could consider implementing a few popular fixed-point requantization as QNNPACK did.
 
 * 16-bit accumulation with outlier-aware quantization
 

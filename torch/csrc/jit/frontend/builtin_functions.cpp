@@ -5,8 +5,7 @@
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 auto scalar_operators_source = at::jit::CodeTemplate(
     R"SCRIPT(
@@ -183,5 +182,4 @@ const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
   return registry.getAllBuiltinFunctionsFor(name);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

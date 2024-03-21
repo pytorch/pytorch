@@ -9,24 +9,24 @@ namespace internal {
 TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
   return OptionalTensorRef(self)->expand(size);
 }
-}
+} // namespace internal
 
 namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
-template <typename Container>
-Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
-  size_t dimsA = a.size();
-  size_t dimsB = b.size();
-  size_t ndim = dimsA > dimsB ? dimsA : dimsB;
+template <typename Container, typename ArrayType>
+Container infer_size_impl(ArrayType a, ArrayType b) {
+  // Use ptrdiff_t to ensure signed comparison.
+  auto dimsA = static_cast<ptrdiff_t>(a.size());
+  auto dimsB = static_cast<ptrdiff_t>(b.size());
+  auto ndim = dimsA > dimsB ? dimsA : dimsB;
   Container expandedSizes(ndim);
 
-  // Use ptrdiff_t to ensure signed comparison.
-  for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
+  for (ptrdiff_t i = ndim - 1; i >= 0; --i) {
     ptrdiff_t offset = ndim - 1 - i;
     ptrdiff_t dimA = dimsA - 1 - offset;
     ptrdiff_t dimB = dimsB - 1 - offset;
-    int64_t sizeA = (dimA >= 0) ? a[dimA] : 1;
-    int64_t sizeB = (dimB >= 0) ? b[dimB] : 1;
+    auto sizeA = (dimA >= 0) ? a[dimA] : 1;
+    auto sizeB = (dimB >= 0) ? b[dimB] : 1;
 
     TORCH_CHECK(
         sizeA == sizeB || sizeA == 1 || sizeB == 1,
@@ -35,7 +35,7 @@ Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
         ") at non-singleton dimension ", i);
 
       // 1s map to the other size (even 0).
-      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
+      expandedSizes[i] = sizeA == 1 ? std::move(sizeB) : std::move(sizeA);
   }
 
   return expandedSizes;
@@ -46,8 +46,16 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   return infer_size_impl<std::vector<int64_t>>(a, b);
 }
 
+std::vector<SymInt> infer_size_symint(SymIntArrayRef a, SymIntArrayRef b) {
+  return infer_size_impl<std::vector<SymInt>>(a, b);
+}
+
 DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
-  return infer_size_impl<DimVector>(a, b);
+  return infer_size_impl<DimVector, IntArrayRef>(a, b);
+}
+
+SymDimVector infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b) {
+  return infer_size_impl<SymDimVector, SymIntArrayRef>(a, b);
 }
 
 template<typename Container>
@@ -55,8 +63,8 @@ C10_ALWAYS_INLINE InferExpandGeometryResult<Container> inferExpandGeometryImpl(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes) {
-  int64_t ndim = sizes.size();
-  int64_t tensor_dim = tensor_sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
+  int64_t tensor_dim = static_cast<int64_t>(tensor_sizes.size());
 
   if (tensor_dim == 0) {
     return InferExpandGeometryResult<Container>(sizes, ndim);

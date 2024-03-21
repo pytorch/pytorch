@@ -98,7 +98,7 @@ def adagrad_sparse_test_helper(
     # Create an indexing array containing values that are lists of indices,
     # which index into grad
     if grad.size == 0:
-        indices = np.empty(shape=(0,), dtype=np.int)
+        indices = np.empty(shape=(0,), dtype=int)
     else:
         indices = np.random.choice(
             np.arange(grad.shape[0]),

@@ -9,9 +9,9 @@
 #include <ATen/native/PointwiseOps.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
-const char addcmul_name[] = "addcmul";
+CONSTEXPR_EXCEPT_WIN_CUDA char addcmul_name[] = "addcmul";
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -56,7 +56,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 // return a + alpha * (b / static_cast<accscalar_t>(c));
-const char addcdiv_name[] = "addcdiv";
+CONSTEXPR_EXCEPT_WIN_CUDA char addcdiv_name[] = "addcdiv";
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -102,7 +102,7 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 void smooth_l1_backward_cuda_kernel(TensorIterator& iter, const Scalar& norm, double beta) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_backward_cuda", [&iter, &norm, beta] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "smooth_l1_backward_cuda", [&iter, &norm, beta] {
       auto norm_val = norm.to<scalar_t>();
       scalar_t beta_val(beta);
       gpu_kernel(iter, [norm_val, beta_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
@@ -148,4 +148,4 @@ REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
-}} // namespace at::native
+} // namespace at::native

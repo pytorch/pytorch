@@ -1,7 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
 #include <tuple>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_batch_norm_with_update_native.h>
+#include <ATen/ops/batch_norm_backward_native.h>
+#include <ATen/ops/_native_batch_norm_legit_native.h>
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/native_batch_norm_backward_native.h>
+#include <ATen/ops/native_batch_norm_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -25,11 +37,42 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
   TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+static std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace) {
   TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
+    bool train,
+    double momentum,
+    double eps) {
+  TORCH_CHECK(false, "_mkldnn_batch_norm_legit: ATen not compiled with MKLDNN support");
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    bool train,
+    double momentum,
+    double eps) {
+  TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
+  TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+  TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -163,6 +206,45 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
                                 weight.options().device_opt()));
   }
 }
+
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
+  Tensor output, save_mean, save_var;
+  std::tie(output, save_mean, save_var) =
+    mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, /*train*/true, momentum, eps);
+  Tensor reserve = empty_mkldnn({0}, input.scalar_type());
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
+    bool train,
+    double momentum,
+    double eps) {
+  return mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    bool train,
+    double momentum,
+    double eps) {
+  return mkldnn_batch_norm(input, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+  return mkldnn_batch_norm_backward(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
+}
+
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad_output,
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
