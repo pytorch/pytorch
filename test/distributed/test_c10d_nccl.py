@@ -4394,7 +4394,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
-        if timing_enabled:
+        if timing_enabled or compute_duration:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
 
@@ -4472,7 +4472,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     dist.send(tensor, 0)
 
         torch.cuda.synchronize()
-        if timing_enabled:
+        if timing_enabled or compute_duration:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
 
@@ -4534,7 +4534,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
-        if timing_enabled:
+        if timing_enabled or compute_duration:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
 
