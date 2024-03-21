@@ -545,7 +545,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         # Merge the List[LoopNestWithSplit] from cpp_kernel_proxy_list
         # into cpp_kernel_proxy_list[0].loop_nest
         _merge_outer_fusion_loop_levels(
-            [_loop_nest.root for _loop_nest in loop_nest_list],
+            [_loop_nest.root for _loop_nest in loop_nest_list],  # type: ignore[misc]
             self.outer_loop_fusion_depth,
         )
         return cpp_kernel_proxy_list[0]
