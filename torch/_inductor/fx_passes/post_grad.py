@@ -638,7 +638,11 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
-    for out in output_node.args[0]:
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (list, tuple)):
+        # nested subgraphs can have singleton outputs
+        outputs = (outputs,)
+    for out in outputs:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
