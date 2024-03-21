@@ -710,6 +710,9 @@ class ONNXProgram:
         # TODO: If ONNX used absolute paths on the initializers external data files,
         # users could call ONNXProgram.save and use ONNXProgram.__call__ without the internal save below
         with contextlib.ExitStack() as stack:
+            # model specified by the user has precedence, when specified
+            model_with_state_dict = model_with_state_dict or self._model_torch
+
             if self.fake_context:
                 tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
                 warnings.warn(
@@ -720,14 +723,11 @@ class ONNXProgram:
                 )
                 # TODO: Revisit the need of `model_with_state_dict` being a real model and not just its state
                 onnx_model = os.path.join(tmpdir_path, "model.onnx")
-                self.save(onnx_model)
+                self.save(onnx_model, model_state=model_with_state_dict.state_dict())  # type: ignore[union-attr]
             else:
                 onnx_model = self.model_proto.SerializeToString()  # type: ignore[assignment]
 
             import onnxruntime  # type: ignore[import]
-
-            # model specified by the user has precedence, when specified
-            model_with_state_dict = model_with_state_dict or self._model_torch
 
             onnx_input = self.adapt_torch_inputs_to_onnx(
                 *args, model_with_state_dict=model_with_state_dict, **kwargs
