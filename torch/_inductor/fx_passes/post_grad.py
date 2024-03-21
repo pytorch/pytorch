@@ -119,6 +119,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     gm.recompile()
     gm.graph.lint()
+    print(gm.graph)
 
 
 @init_once_fakemode
@@ -352,6 +353,114 @@ def shape_of_mm(a, b):
     m, _ = a.get_size()
     _, n = b.get_size()
     return [m, n]
+
+
+# TODO: this pattern is generalizable to all accumulate funcions
+@register_graph_pattern(
+    CallFunction(
+        aten.add.Tensor,
+        CallFunction(
+            aten._unsafe_index_put,
+            KeywordArg("x1"),
+            KeywordArg("indices1"),
+            KeywordArg("values1"),
+            True,
+        ),
+        CallFunction(
+            aten._unsafe_index_put,
+            KeywordArg("x2"),
+            KeywordArg("indices2"),
+            KeywordArg("values2"),
+            True,
+        ),
+    ),
+    pass_dict=pass_patterns[0],
+)
+def add_index_put(match, x1, indices1, values1, x2, indices2, values2):
+    def repl(x1, indices1, values1, x2, indices2, values2):
+        result = aten.add(x1, x2)
+        result = aten._unsafe_index_put(result, indices1, values1, True)
+        result = aten._unsafe_index_put(result, indices2, values2, True)
+        return result
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [x1, indices1, values1, x2, indices2, values2])
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten._unsafe_index_put,
+        CallFunction(
+            aten._unsafe_index_put,
+            KeywordArg("x"),
+            KeywordArg("indices1"),
+            KeywordArg("values1"),
+            True,
+        ),
+        KeywordArg("indices2"),
+        KeywordArg("values2"),
+        True,
+    ),
+    pass_dict=pass_patterns[1],
+)
+def index_put_multiple(match, x, indices1, values1, indices2, values2):
+    def repl(x, indices1, values1, indices2, values2):
+        count = 0
+        indices: List[Optional[torch.Tensor]] = []
+        concat_dim = -1
+        for dim, (idx1, idx2) in enumerate(zip(indices1, indices2)):
+            if idx1 is None:
+                if idx2 is None:
+                    indices.append(None)
+                else:
+                    indices.append(
+                        aten.cat(
+                            [
+                                aten.arange(
+                                    x.shape[dim], device=x.device, dtype=idx2.dtype
+                                ),
+                                idx2,
+                            ],
+                            dim=0,
+                        )
+                    )
+                count += 1
+                concat_dim = dim
+            elif idx2 is None:
+                indices.append(
+                    aten.cat(
+                        [
+                            idx1,
+                            aten.arange(
+                                x.shape[dim], device=x.device, dtype=idx1.dtype
+                            ),
+                        ],
+                        dim=0,
+                    )
+                )
+            else:
+                indices.append(
+                    aten.cat([idx1, aten.add(idx2, values1.shape[dim])], dim=0)
+                )
+                concat_dim = dim
+                count += 1
+
+        if count > 1:
+            return aten._unsafe_index_put(
+                aten._unsafe_index_put(x, indices1, values1, True),
+                indices2,
+                values2,
+                True,
+            )
+        elif count == 0:
+            return aten._unsafe_index_put(x, indices1, aten.sum(values1, values2), True)
+        else:
+            return aten._unsafe_index_put(
+                x, indices, aten.cat([values1, values2], dim=concat_dim), True
+            )
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [x, indices1, values1, indices2, values2])
 
 
 @register_lowering_pattern(
