@@ -2,7 +2,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, NoReturn, Optional
+from typing import Any, cast, NoReturn, Optional
 
 import torch._guards
 
