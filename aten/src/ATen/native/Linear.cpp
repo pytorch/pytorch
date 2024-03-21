@@ -60,7 +60,7 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
     for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
       flattened_dim = flattened_dim * input_sizes[i];
     }
-    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
+    auto inp_reshape = input.reshape_symint({-1, input_sizes.at(input_sizes.size() -1)});
     const auto result = at::addmm(bias, inp_reshape, weight.t());
     auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
     c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
