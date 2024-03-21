@@ -1550,10 +1550,6 @@ if(MSVC AND BUILD_SHARED_LIBS)
   target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 
-if(MSVC)
-  target_link_libraries(torch_cpu PRIVATE sleef)
-endif()
-
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
 if(USE_CUDA)
