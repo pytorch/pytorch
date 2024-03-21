@@ -1082,7 +1082,9 @@ class OutputGraph:
             (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
             {},
         )
-        self.insert_deferred_runtime_asserts(root, name)
+        if not config.do_not_emit_runtime_asserts:
+            self.insert_deferred_runtime_asserts(root, name)
+
         # NB: deferred runtime asserts can keep graphargs live, so make sure
         # those are inserted before pruning
         self.remove_unused_graphargs()
@@ -1091,6 +1093,9 @@ class OutputGraph:
 
         # free a bit of memory
         self.real_value_cache.clear()
+
+        if config.do_not_emit_runtime_asserts:
+            self.graph.eliminate_dead_code()
 
         gm = _make_graph_module(root, self.graph)
         for register_finalizer in self.register_finalizer_fns:
