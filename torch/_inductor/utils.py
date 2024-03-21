@@ -977,7 +977,12 @@ def use_triton_template(layout, *, enable_int32=False):
     )
 
 
-def use_cutlass_template(layout):
+def use_cutlass_template(layout, m, n, k):
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
+        return False
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
