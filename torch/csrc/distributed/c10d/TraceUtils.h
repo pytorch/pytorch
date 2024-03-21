@@ -528,13 +528,12 @@ struct NCCLTraceBuffer {
   This is called by the watchdog thread, and is asynchronous from the
   perspective of the main thread.
 
-  compute_duration defaults to true since retire_id is only called in the
-  watchdog thread, which is currently a place we call cuda APIs which may hang,
-  but care should be taken to avoid computing duration in any function that must
-  never hang. (timing must also be enabled for compute_duration - see
-  TORCH_NCCL_ENABLE_TIMING).
+  compute_duration defaults to false since it requires calling the cuda APIs in
+  getDurationFromEvent which might increase the peak memory usage. Also
+  enableTiming_ automatically enabled if compute_duration is true for
+  computation to work correctly - see TORCH_NCCL_ENABLE_TIMING.
   */
-  void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
+  void retire_id(c10::optional<size_t> id, bool compute_duration = false) {
     if (!enabled_ || !id) {
       return;
     }

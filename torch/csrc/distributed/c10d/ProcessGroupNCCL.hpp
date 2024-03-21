@@ -102,6 +102,11 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
     "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
 
+// Whether to compute duration between start and end cuda events.
+// If true, timing (enableTiming_) will also be automatically enabled.
+static std::vector<std::string> TORCH_NCCL_COMPUTE_DURATION = {
+    "TORCH_NCCL_COMPUTE_DURATION"};
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
@@ -1025,6 +1030,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not to compute duration between start and end cuda events.
+  bool computeDuration_;
 
   // Whether or not to dump debug info on timeout
   bool dumpOnTimeout_;
