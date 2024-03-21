@@ -1477,6 +1477,7 @@ def get_include_and_linking_paths(
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
+        ipaths.append(build_paths.python())
         ipaths.append(build_paths.cc_include())
         ipaths.append(build_paths.libgcc())
         ipaths.append(build_paths.libgcc_arch())
