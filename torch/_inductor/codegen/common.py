@@ -11,6 +11,7 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
+    Generator,
     List,
     NamedTuple,
     Optional,
@@ -194,9 +195,6 @@ DTYPE_TO_COMPUTATION_DTYPE = {
             torch.int32,
             torch.int64,
             torch.uint8,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
         ]
     },
 }
@@ -1701,17 +1699,19 @@ class KernelTemplate:
         Maybe generates a new ChoiceCaller and appends it into existing choices.
 
         choices: A list of ChoiceCallers.
-        kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
+        kwargs: Additional kwargs to be passed to self.generate() to generate new ChoiceCallers.
         """
 
         try:
-            choices.append(self.generate(**kwargs))
+            choices.extend(self.generate(**kwargs))
         except NotImplementedError:
             pass
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(
+        self, **kwargs
+    ) -> Generator["torch._inductor.ir.ChoiceCaller", None, None]:
         """
-        Generates a ChoiceCaller instance from the given arguments.
+        Generates a sequence of ChoiceCaller instances from the given arguments.
         """
 
         raise NotImplementedError()

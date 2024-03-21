@@ -2,7 +2,9 @@ import functools
 import logging
 import os
 import sys
+
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, List, Optional
 
 import sympy
@@ -72,9 +74,9 @@ def try_import_cutlass() -> bool:
                 os.symlink(cutlass_py_full_path, dst_link)
             sys.path.append(tmp_cutlass_py_full_path)
         try:
-            import cutlass_library.generator  # noqa: F401
-            import cutlass_library.library  # noqa: F401
-            import cutlass_library.manifest  # noqa: F401
+            import cutlass_library.generator  # type: ignore[import]  # noqa: F401
+            import cutlass_library.library  # type: ignore[import]  # noqa: F401
+            import cutlass_library.manifest  # type: ignore[import]  # noqa: F401
 
             return True
 
@@ -140,8 +142,8 @@ def _gen_ops_cached(arch, version) -> List[Any]:
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library.generator as cutlass_generator
-    import cutlass_library.manifest as cutlass_manifest
+    import cutlass_library.generator as cutlass_generator  # type: ignore[import]
+    import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
 
     if arch is None or version is None:
         log.error(
@@ -157,8 +159,8 @@ def _gen_ops_cached(arch, version) -> List[Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "90":
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM90(manifest, args.cuda_version)  # type: ignore[attr-defined]
+        cutlass_generator.GenerateSM80(manifest, args.cuda_version)  # type: ignore[attr-defined]
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)
@@ -179,13 +181,30 @@ def gen_ops() -> List[Any]:
     return _gen_ops_cached(arch, version)
 
 
+def torch_dtype_to_cutlass_type(
+    torch_dtype: torch.dtype,
+) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
+    # Import cutlass python scripts.
+    assert try_import_cutlass()
+    import cutlass_library  # type: ignore[import]
+
+    if torch_dtype == torch.float:
+        return cutlass_library.library.DataType.f32
+    elif torch_dtype == torch.half:
+        return cutlass_library.library.DataType.f16
+    elif torch_dtype == torch.bfloat16:
+        return cutlass_library.library.DataType.bf16
+    else:
+        raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
+
+
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library
+    import cutlass_library  # type: ignore[import]
 
     if torch_dtype == torch.float:
         return (
@@ -274,10 +293,69 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     def is_static_int(number):
         return isinstance(number, (int, sympy.Integer))
 
-    if is_static_int(size[-1]) and is_static_int(offset):
-        alignments = get_alignments(dtype)
-        for alignment in alignments:
-            if int(size[-1]) % alignment == 0 and int(offset) % alignment == 0:
+    try:
+        contiguous_dim = inductor_layout.stride.index(1)
+        if is_static_int(size[contiguous_dim]) and is_static_int(offset):
+            alignments = get_alignments(dtype)
+            for alignment in alignments:
+                if (
+                    int(size[contiguous_dim]) % alignment != 0
+                    or int(offset) % alignment != 0
+                ):
+                    continue
+                do_continue = False
+                for dim in range(len(size)):
+                    # All non-contiguous strides must be aligned
+                    if dim == contiguous_dim:
+                        continue
+                    dim_stride = int(inductor_layout.stride[dim])
+                    if dim_stride % alignment != 0:
+                        do_continue = True
+                        break
+                if do_continue:
+                    continue
                 return alignment
+        return 1
+    except ValueError:
+        # No dim with stride 1 found, return 1
+        return 1
 
-    return 1
+
+class CUDACompileSourceCapturingContext:
+    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
+    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
+
+    def __init__(self):
+        self.sources = []
+        self._compile_patch = None
+
+    def __enter__(self, *args, **kwargs):
+        import unittest.mock as mock
+
+        import torch._inductor.codecache
+
+        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
+
+        def my_compile(source_code, dst_file_ext):
+            self.sources.append(source_code)
+            return _compile_method_orig(source_code, dst_file_ext)
+
+        self._compile_patch = mock.patch(
+            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
+        )
+        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+
+    def __exit__(self, *args, **kwargs):
+        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+
+
+def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
+    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
+    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
+    from torch._inductor.codecache import cuda_compile_command
+
+    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
+    compile_command = cuda_compile_command(
+        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+    )
+    return compile_command
