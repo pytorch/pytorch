@@ -623,6 +623,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             infer_schema(g), """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()"""
         )
 
+        self.assertExpectedInline(
+            infer_schema(g, mutated_args={"x", "w", "z"}),
+            """(Tensor(a0!) x, Tensor[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
+        )
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
@@ -665,6 +670,13 @@ class TestCustomOp(CustomOpTestCaseBase):
                 raise NotImplementedError()
 
             infer_schema(foo)
+
+        with self.assertRaisesRegex(ValueError, "can be mutated"):
+
+            def foo(x: Tensor, y: int) -> Tensor:
+                raise NotImplementedError()
+
+            infer_schema(foo, mutated_args={"y"})
 
     def _generate_examples(self, typ):
         if typ is int:
