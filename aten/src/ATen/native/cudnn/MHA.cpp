@@ -363,8 +363,8 @@ auto build_graph_and_tensors_backward(
     Tensor& dQ,
     Tensor& dK,
     Tensor& dV,
-    Tensor& dropoutseed,
-    Tensor& dropoutoffset,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset,
     cudnnHandle_t& handle,
     MHAParams& params) {
     auto dtype = fe::DataType_t::HALF;
@@ -559,8 +559,8 @@ void run_cudnn_SDP_bprop(
     Tensor& dQ,
     Tensor& dK,
     Tensor& dV,
-    Tensor& dropoutseed,
-    Tensor& dropoutoffset) {
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset) {
    cudnnHandle_t handle = getCudnnHandle();
    auto key = MHACacheKeyWrapper(
        b,

@@ -40,8 +40,8 @@ void run_cudnn_SDP_bprop(
     Tensor& dQ,
     Tensor& dK,
     Tensor& dV,
-    Tensor& dropoutseed,
-    Tensor& dropoutoffset
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset
     );
 
 }
