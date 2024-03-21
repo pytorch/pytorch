@@ -141,7 +141,7 @@ def generate_ttir(kernel, kwargs):
             ordered_args[name] = 2
         elif isinstance(a, FakeTensor):
             with torch._C._DisableTorchDispatch():
-                ordered_args[name] = torch.empty(2, dtype=a.dtype, device=a.device)
+                ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
             ordered_args[name] = a
 
