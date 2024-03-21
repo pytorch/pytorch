@@ -723,7 +723,16 @@ class ONNXProgram:
                 )
                 # TODO: Revisit the need of `model_with_state_dict` being a real model and not just its state
                 onnx_model = os.path.join(tmpdir_path, "model.onnx")
-                self.save(onnx_model, model_state=model_with_state_dict.state_dict())  # type: ignore[union-attr]
+                if isinstance(model_with_state_dict, torch.nn.Module):
+                    model_state = model_with_state_dict.state_dict()
+                elif isinstance(model_with_state_dict, torch_export.ExportedProgram):
+                    model_state = model_with_state_dict.state_dict
+                else:
+                    model_state = None
+                self.save(
+                    onnx_model,
+                    model_state=model_state,
+                )
             else:
                 onnx_model = self.model_proto.SerializeToString()  # type: ignore[assignment]
 
