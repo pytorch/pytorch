@@ -819,7 +819,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # source as the origional line
                 from .builder import SourcelessBuilder
 
-                return SourcelessBuilder()(tx, subobj)
+                return SourcelessBuilder.create(tx, subobj)
 
         if (
             name not in getattr(value, "__dict__", {})

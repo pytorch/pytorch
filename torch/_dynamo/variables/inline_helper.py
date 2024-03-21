@@ -131,10 +131,10 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
     # print(fx_g.code)
 
     # now inline this fx graph and return the output
-    user_fn_variable_with_kwargs = SourcelessBuilder()(
+    user_fn_variable_with_kwargs = SourcelessBuilder.create(
         tx, dummy_user_function_to_inline_wrapped_gm
     )
-    gm_variable = SourcelessBuilder()(tx, fx_g)
+    gm_variable = SourcelessBuilder.create(tx, fx_g)
     cls = BaseListVariable.cls_for(list)
     input_args_variable = cls(
         args,
