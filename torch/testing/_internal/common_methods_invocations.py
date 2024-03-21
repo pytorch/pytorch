@@ -2316,6 +2316,12 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         ),
         (
             [
+                torch.Size([1, 2, 129]),
+                torch.Size([1, 2, 297]),
+            ], -1, 5
+        ),
+        (
+            [
                 torch.Size([1, 2, 3]),
                 torch.Size([1, 2, 3]),
             ], 1, 5
@@ -2339,6 +2345,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         torch.Size([2, 3, 1, 2]),
         torch.Size([2, 3]),
         torch.Size([2, 3, 2]),
+        torch.Size([2, 3, 271]),
     ]
     max_dim, num_chunks = 2, 3
     for dim in range(max_dim):

@@ -3236,7 +3236,7 @@ PyObject* torch_c_dynamo_guards_init() {
              std::string source,
              py::handle example_value) -> GuardManager* {
             if (self.is_exact_dict_type()) {
-              std::runtime_error(
+              throw std::runtime_error(
                   "getattr_manager on a DictGuardManager is supported only for dict subclasses");
             }
             return self.get_child_manager<GetAttrGuardAccessor>(
