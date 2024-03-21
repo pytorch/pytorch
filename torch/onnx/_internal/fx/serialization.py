@@ -183,6 +183,11 @@ def save_model_with_external_data(
                     else:
                         raise e
         for name, tensor in state_dict.items():
+            # Fetching existing initializers in the model proto for eventual replacement (delete + add)
+            existing_initializers = {
+                k.name: idx for idx, k in enumerate(onnx_model.graph.initializer)
+            }
+
             if rename_initializer:
                 # Basically, "transformer.attention.self.query.weight" is mapped
                 # to "transformer_attention_self_query_weight" for mimicking the
@@ -216,6 +221,10 @@ def save_model_with_external_data(
             # tensor_proto.raw_data is stored to external file at
             # os.path.join(basepath, relative_tensor_file_path).
             model_input_types = {k.name: k.type for k in onnx_model.graph.input}
+
+            # Delete existing initializer before adding a replacement - otherwise there will be dupes
+            if name in existing_initializers:
+                del onnx_model.graph.initializer[existing_initializers[name]]
 
             tensor_proto = _create_tensor_proto_with_external_data(
                 tensor,
