@@ -1,4 +1,5 @@
 from .graph_module import GraphModule
+from ._lazy_graph_module import _make_graph_module
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
@@ -211,7 +212,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -241,7 +242,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -259,7 +260,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -279,7 +280,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -301,7 +302,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -325,7 +326,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -458,7 +459,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -476,7 +477,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -508,4 +509,4 @@ class Transformer(Interpreter):
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
             self.new_graph.output(map_aggregate(result, strip_proxy))
-        return GraphModule(self.module, self.new_graph)
+        return _make_graph_module(self.module, self.new_graph)

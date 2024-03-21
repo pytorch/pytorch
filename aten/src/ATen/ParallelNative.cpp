@@ -152,7 +152,7 @@ void invoke_parallel(
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
     std::mutex mutex;
-    volatile size_t remaining{0};
+    std::atomic_size_t remaining{0};
     std::condition_variable cv;
   } state;
 

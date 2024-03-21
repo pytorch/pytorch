@@ -635,6 +635,15 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
+    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
+    # XNNPACK does conditionally compile this based on GCC version. Once it also does
+    # so based on Clang version, this logic can be removed.
+    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
+        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
+      ENDIF()
+    ENDIF()
+
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -1222,6 +1231,9 @@ endif(USE_LLVM)
 
 # ---[ cuDNN
 if(USE_CUDNN)
+  if(CUDNN_VERSION VERSION_LESS 8.5)
+    message(FATAL_ERROR "PyTorch needs CuDNN-8.5 or above, but found ${CUDNN_VERSION}. Builds are still possible with `USE_CUDNN=0`")
+  endif()
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
@@ -1275,6 +1287,12 @@ if(USE_ROCM)
     endif()
     if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
+    endif()
+    if(HIPBLASLT_HAS_GETINDEXFROMALGO)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_HAS_GETINDEXFROMALGO)
+    endif()
+    if(HIP_NEW_TYPE_ENUMS)
+      list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
     endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1951,7 +1969,7 @@ if(USE_KINETO)
   endif()
 
   if(NOT LIBKINETO_NOROCTRACER)
-    if(NOT ENV{ROCM_SOURCE_DIR})
+    if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
       set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
     endif()
   endif()

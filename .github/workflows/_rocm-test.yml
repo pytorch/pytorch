@@ -71,6 +71,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
+          role-duration-seconds: 18000
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -101,6 +102,10 @@ jobs:
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
 
       - name: Parse ref
         id: parse-ref
@@ -148,6 +153,9 @@ jobs:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -196,6 +204,9 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
+            -e VERBOSE_TEST_LOGS \
+            -e NO_TEST_TIMEOUT \
+            -e NO_TD \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \

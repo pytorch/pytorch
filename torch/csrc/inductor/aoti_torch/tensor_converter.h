@@ -1,20 +1,13 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
 #include <ATen/Tensor.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 namespace torch {
 namespace aot_inductor {
 
 // Functions declared here are not meant to be called from the AOTInductor
 // generated model.so
-
-// No ownership transfer, just pointer type conversion
-TORCH_API at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle);
-
-// No ownership transfer, just pointer type conversion
-TORCH_API AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor);
 
 // unsafe_alloc_new_handles_from_tensors is used for allocating new aten
 // tensor objects and return them as a vector of AtenTensorHandle (raw

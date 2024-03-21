@@ -51,15 +51,16 @@ class TestScriptProfile(JitTestCase):
     def test_script(self):
         seq = Sequence()
 
+        p = torch.jit._ScriptProfile()
+        p.enable()
+
         @torch.jit.script
         def fn():
-            p = torch.jit._ScriptProfile()
-            p.enable()
             _ = seq(torch.rand((10, 100)))
-            p.disable()
-            return p
+        fn()
+        p.disable()
 
-        self.assertNotEqual(fn().dump_string(), "")
+        self.assertNotEqual(p.dump_string(), "")
 
     def test_multi(self):
         seq = torch.jit.script(Sequence())
@@ -82,25 +83,24 @@ class TestScriptProfile(JitTestCase):
         seq = Sequence()
 
         @torch.jit.script
-        def fn():
-            p = torch.jit._ScriptProfile()
-            p.enable()
-            _ = seq(torch.rand((10, 100)))
-            p.disable()
-            stats0 = p.dump_string()
+        def fn(max : int):
+            _ = seq(torch.rand((10, max)))
 
-            _ = seq(torch.rand((10, 10)))
-            stats1 = p.dump_string()
+        p = torch.jit._ScriptProfile()
+        p.enable()
+        fn(100)
+        p.disable()
+        s0 = p.dump_string()
 
-            p.enable()
-            _ = seq(torch.rand((10, 10)))
-            p.disable()
-            stats2 = p.dump_string()
+        fn(10)
+        p.disable()
+        s1 = p.dump_string()
 
-            p.enable()
-            return stats0, stats1, stats2
+        p.enable()
+        fn(10)
+        p.disable()
+        s2 = p.dump_string()
 
-        s0, s1, s2 = fn()
         self.assertEqual(s0, s1)
         self.assertNotEqual(s1, s2)
 

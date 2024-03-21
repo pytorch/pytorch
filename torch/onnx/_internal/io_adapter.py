@@ -71,7 +71,7 @@ class InputAdapter:
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         **model_kwargs,
-    ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", None]]:
+    ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", torch.dtype, None]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -611,11 +611,15 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
         ordered_params = tuple(
             model.state_dict[name] for name in model.graph_signature.parameters  # type: ignore[union-attr,index]
         )
-        ordered_buffers = tuple(
-            model.state_dict[name] for name in model.graph_signature.buffers  # type: ignore[union-attr,index]
-        )
+        non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
+        ordered_buffers = []
+        for name in model.graph_signature.buffers:  # type: ignore[union-attr]
+            if name in non_persistent_buffers:
+                ordered_buffers.append(model.constants[name])  # type: ignore[union-attr]
+            else:
+                ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(
-            getattr(model.module(), name) for name in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
@@ -665,6 +669,8 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
         ), "'model' must be torch_export.ExportedProgram"
         ordered_buffers = tuple(
             model.state_dict[name]
+            if name in model.state_dict
+            else model.constants[name]
             for name in model.graph_signature.buffers_to_mutate.values()
         )
 

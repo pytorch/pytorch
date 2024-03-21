@@ -1,11 +1,13 @@
 import itertools
 from collections import defaultdict
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from typing import Callable, List, Tuple
 
 import torch
 import torch.utils.benchmark as benchmark
 from tabulate import tabulate
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention
 from tqdm import tqdm
 
@@ -30,6 +32,7 @@ class ExperimentConfig:
     embed_dim: int
     is_causal: bool
     dtype: torch.dtype
+    backend: SDPBackend
     device: torch.device = torch.device("cuda")
 
     @property
@@ -89,22 +92,25 @@ def get_input(
 def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     q, k, v = get_input(config)
     is_causal = config.is_causal
-
-    forward_time = benchmark_torch_function_in_microseconds(
-        scaled_dot_product_attention,
-        q,
-        k,
-        v,
-        is_causal=is_causal,
-        attn_mask=None,
+    context = (
+        sdpa_kernel(config.backend) if config.backend is not None else nullcontext()
     )
-    out_torch = scaled_dot_product_attention(
-        q, k, v, is_causal=is_causal, attn_mask=None
-    )
-    dOut = torch.randn_like(out_torch)
-    backward_time = benchmark_torch_function_in_microseconds(
-        out_torch.backward, dOut, retain_graph=True
-    )
+    with context:
+        forward_time = benchmark_torch_function_in_microseconds(
+            scaled_dot_product_attention,
+            q,
+            k,
+            v,
+            is_causal=is_causal,
+            attn_mask=None,
+        )
+        out_torch = scaled_dot_product_attention(
+            q, k, v, is_causal=is_causal, attn_mask=None
+        )
+        dOut = torch.randn_like(out_torch)
+        backward_time = benchmark_torch_function_in_microseconds(
+            out_torch.backward, dOut, retain_graph=True
+        )
 
     return ExperimentResults(
         forward_time=forward_time,
@@ -120,6 +126,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     num_heads = [16]
     q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024)]
     embed_dims = [2048]
+    backends = [None]  # If set to None, all backends are enabled
     dtypes = [
         torch.bfloat16,
     ]
@@ -132,8 +139,9 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
         embed_dim,
         causal,
         dtype,
+        backend,
     ) in itertools.product(
-        batch_sizes, num_heads, q_kv_seq_lens, embed_dims, is_causal, dtypes
+        batch_sizes, num_heads, q_kv_seq_lens, embed_dims, is_causal, dtypes, backends
     ):
         all_configs.append(
             ExperimentConfig(
@@ -144,6 +152,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
                 embed_dim=embed_dim,
                 is_causal=causal,
                 dtype=dtype,
+                backend=backend,
             )
         )
 
@@ -156,6 +165,8 @@ def print_results(experiments: List[Experiment]):
         for key, value in experiment.asdict().items():
             table_data[key].append(value)
     del table_data["device"]
+    if table_data["backend"][0] is None:
+        del table_data["backend"]
     print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
 
 

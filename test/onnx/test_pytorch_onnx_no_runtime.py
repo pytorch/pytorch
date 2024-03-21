@@ -1314,6 +1314,18 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
                 decoder_attention_mask=ids["attention_mask"],
             )
 
+    def test_aten_linalg_vector_norm_with_reducel2(self):
+        class Net(torch.nn.Module):
+            def forward(self, x):
+                x = F.normalize(x)
+                return x
+
+        f = io.BytesIO()
+        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
+        self.assertIn("ReduceL2", onnx_nodes)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

@@ -1,7 +1,6 @@
 #include <c10/core/impl/PyObjectSlot.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 PyObjectSlot::PyObjectSlot() : pyobj_interpreter_(nullptr), pyobj_(nullptr) {}
 
@@ -71,5 +70,4 @@ void PyObjectSlot::set_owns_pyobj(bool b) {
       reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

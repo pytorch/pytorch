@@ -63,7 +63,6 @@ constexpr const char* unknown_eventname = "eventname not specified";
 
 MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
-  , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
@@ -72,7 +71,6 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 #else
   , fd_(fd)
 #endif
-  , base_ptr_(nullptr)
 {
 
   if (!(flags & ALLOCATOR_MAPPED_SHARED) && !(flags & ALLOCATOR_MAPPED_SHAREDMEM)) {
@@ -252,11 +250,13 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 
     if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
       if (flags_ & ALLOCATOR_MAPPED_SHARED) {
+        // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
         if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
           TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode: ", strerror(errno), " (", errno, ")");
         }
       } else if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
+        // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
         if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
           TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode: ", strerror(errno), " (", errno, ")");
         }
@@ -264,6 +264,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
         TORCH_CHECK(false, "unable to open file <", filename_, "> in sharedmem mode, shm_open unavailable on this platform");
 #endif
       } else {
+        // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
         if ((fd = open(filename_.c_str(), O_RDONLY)) == -1) {
           TORCH_CHECK(false, "unable to open file <", filename_, "> in read-only mode: ", strerror(errno), " (", errno, ")");
         }
@@ -272,7 +273,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       fd = fd_;
     }
 
-    struct stat file_stat;
+    struct stat file_stat{};
     if (fstat(fd, &file_stat) == -1) {
       int last_err = errno;
       if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
@@ -284,7 +285,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
     if (size > 0) {
       if (static_cast<int64_t>(size) > file_stat.st_size) {
         if (flags_) {
-          if (ftruncate(fd, size) == -1) {
+          if (ftruncate(fd, static_cast<off_t>(size)) == -1) {
             TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", strerror(errno), " (", errno, ")");
           }
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
@@ -311,7 +312,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       size = file_stat.st_size;
     }
 
-    size_ = size; /* if we are here, it must be the right size */
+    size_ = static_cast<ptrdiff_t>(size); /* if we are here, it must be the right size */
 
     /* map it */
     if (flags_ & (ALLOCATOR_MAPPED_SHARED | ALLOCATOR_MAPPED_SHAREDMEM)) {
@@ -324,6 +325,11 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       base_ptr_ = nullptr; /* let's be sure it is NULL */
       TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
     }
+
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+    /* attempt to use larger block size on Linux, which is important for getting better CUDA upload speed */
+    posix_fadvise(fd, 0, static_cast<off_t>(size), POSIX_FADV_SEQUENTIAL);
+#endif
 
     if (flags_ & ALLOCATOR_MAPPED_KEEPFD) {
       fd_ = fd;
@@ -601,8 +607,7 @@ void* RefcountedMapAllocator::data() const {
 }
 
 MapAllocator::~MapAllocator() {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  close();
+  MapAllocator::close();
   c10::reportMemoryUsageToProfiler(base_ptr_, -size_, 0, 0, c10::Device(c10::DeviceType::CPU));
 }
 

@@ -26,8 +26,8 @@ void sampled_addmm_sparse_csr_kernel_impl(
   auto beta_ = beta.to<scalar_t>();
   auto alpha_ = alpha.to<scalar_t>();
 
-  scalar_t* mat1_data = mat1.data_ptr<scalar_t>();
-  scalar_t* mat2_data = mat2.data_ptr<scalar_t>();
+  const scalar_t* mat1_data = mat1.const_data_ptr<scalar_t>();
+  const scalar_t* mat2_data = mat2.const_data_ptr<scalar_t>();
 
   // mat1: {B, M, K}
   // mat2: {B, N, K}
@@ -43,8 +43,8 @@ void sampled_addmm_sparse_csr_kernel_impl(
   auto col = result.col_indices().reshape({-1, nnz});
 
   auto values_acc = values.accessor<scalar_t, 2>();
-  auto crow_acc = crow.accessor<index_t, 2>();
-  auto col_acc = col.accessor<index_t, 2>();
+  auto crow_acc = crow.accessor<const index_t, 2>();
+  auto col_acc = col.accessor<const index_t, 2>();
 
   // usually, collapse B and M is a better option,
   // but for most commonly used case (mat1 and mat2 is 2d tensor), B = 1,
@@ -54,8 +54,8 @@ void sampled_addmm_sparse_csr_kernel_impl(
     auto crow_slice = crow_acc[b];
     auto col_slice = col_acc[b];
     auto values_slice = values_acc[b];
-    scalar_t* mat1_ptr = mat1_data + b * M * K;
-    scalar_t* mat2_ptr = mat2_data + b * N * K;
+    const scalar_t* mat1_ptr = mat1_data + b * M * K;
+    const scalar_t* mat2_ptr = mat2_data + b * N * K;
 
     utils::parallel_sparse_csr(crow_slice, M, nnz, [&](int64_t begin, int64_t end) {
       for (const auto m : c10::irange(begin, end)) {

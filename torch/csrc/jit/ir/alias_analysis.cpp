@@ -228,7 +228,7 @@ AliasDb::AliasDb(
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
 
-  memoryDAG_ = std::make_unique<MemoryDAG>(std::move(memoryDAGBuilder_));
+  memoryDAG_ = std::move(*memoryDAGBuilder_).createMemoryDAG();
   memoryDAGBuilder_ = nullptr; // to make further access a hard error
 
   memoryDAG_->setWildcards(

@@ -909,7 +909,6 @@ def _trace_and_get_graph_from_model(model, args):
     # Disable Autocast cache because it replaces kernel's weight and bias
     # by (undesired) constants.
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
-    # TODO: https://github.com/pytorch/pytorch/issues/84092
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(

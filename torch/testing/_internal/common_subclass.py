@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from copy import deepcopy
 from torch.utils._pytree import tree_map
@@ -61,9 +63,6 @@ class DiagTensorBelow(WrapperTensor):
         self.diag = diag
 
     handled_ops = {}
-
-    # We disable torch function here to avoid any unwanted wrapping of the output
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

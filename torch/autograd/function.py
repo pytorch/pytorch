@@ -279,7 +279,14 @@ class _HookMixin:
 
 
 class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
+    r"""
+    This class is used for internal autograd work. Do not use.
+    """
+
     def apply(self, *args):
+        r"""
+        Apply method used when executing this Node during the backward
+        """
         # _forward_cls is defined by derived class
         # The user should define either backward or vjp but never both.
         backward_fn = self._forward_cls.backward  # type: ignore[attr-defined]
@@ -294,11 +301,31 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         return user_fn(self, *args)
 
     def apply_jvp(self, *args):
+        r"""
+        Apply method used when executing forward mode AD during the forward
+        """
         # _forward_cls is defined by derived class
         return self._forward_cls.jvp(self, *args)  # type: ignore[attr-defined]
 
     def _compiled_autograd_key(self):
         return self._forward_cls._compiled_autograd_key(self)  # type: ignore[attr-defined]
+
+
+def _warn_traceable_deprecated():
+    warnings.warn(
+        "The is_traceable field on torch.autograd.Function is deprecated "
+        "and will be removed in PyTorch 2.4.",
+        stacklevel=3,
+    )
+
+
+class _IsTraceableWarning:
+    def __init__(self, value):
+        self.value = value
+
+    def __get__(self, obj, klass=None):
+        _warn_traceable_deprecated()
+        return self.value
 
 
 class FunctionMeta(type):
@@ -320,14 +347,30 @@ class FunctionMeta(type):
         )
         cls._backward_cls = backward_fn
 
+        if "is_traceable" in attrs:
+            if attrs["is_traceable"] is True:
+                _warn_traceable_deprecated()
+                # already emitted warning, no need to install _IsTraceableWarning
+            else:
+                cls.is_traceable = _IsTraceableWarning(attrs.pop("is_traceable"))
+
         super().__init__(name, bases, attrs)
+
+    def __setattr__(cls, name, value):
+        if name == "is_traceable" and value is True:
+            warnings.warn(
+                "The is_traceable field on torch.autograd.Function is deprecated "
+                "and will be removed in PyTorch 2.4.",
+                stacklevel=2,
+            )
+        return super().__setattr__(name, value)
 
 
 class _SingleLevelFunction(
     _C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta
 ):
     @staticmethod
-    def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+    def forward(*args: Any, **kwargs: Any) -> Any:
         r"""Define the forward of the custom autograd Function.
 
         This function is to be overridden by all subclasses.
@@ -378,10 +421,10 @@ class _SingleLevelFunction(
 
         Either:
 
-        1. Override forward with the signature forward(ctx, *args, **kwargs).
+        1. Override forward with the signature ``forward(ctx, *args, **kwargs)``.
            ``setup_context`` is not overridden. Setting up the ctx for backward
            happens inside the ``forward``.
-        2. Override forward with the signature forward(*args, **kwargs) and
+        2. Override forward with the signature ``forward(*args, **kwargs)`` and
            override ``setup_context``. Setting up the ctx for backward happens
            inside ``setup_context`` (as opposed to inside the ``forward``)
 
@@ -487,6 +530,7 @@ class Function(_SingleLevelFunction):
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
             DeprecationWarning,
+            stacklevel=2,
         )
 
     def __call__(self, *args, **kwargs):
@@ -566,7 +610,7 @@ class Function(_SingleLevelFunction):
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
                 "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/master/notes/extending.func.html"
+                "https://pytorch.org/docs/main/notes/extending.func.html"
             )
 
         return custom_function_call(cls, *args, **kwargs)
@@ -634,11 +678,21 @@ def traceable(fn_cls):
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).
     """
+    warnings.warn(
+        "torch.autograd.function.traceable is deprecated "
+        "and will be removed in PyTorch 2.4.",
+        stacklevel=2,
+    )
     fn_cls.is_traceable = True
     return fn_cls
 
 
 class InplaceFunction(Function):
+    r"""
+    This class is here only for backward compatibility reasons.
+    Use :class:`Function` instead of this for any new use case.
+    """
+
     def __init__(self, inplace=False):
         super().__init__()
         self.inplace = inplace
@@ -754,6 +808,10 @@ _map_tensor_data = _nested_map(
 
 
 class NestedIOFunction(Function):
+    r"""
+    This class is here only for backward compatibility reasons.
+    Use :class:`Function` instead of this for any new use case.
+    """
     # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
     # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 
@@ -774,6 +832,9 @@ class NestedIOFunction(Function):
         return result
 
     def backward(self, *gradients: Any) -> Any:  # type: ignore[override]
+        r"""
+        Shared backward utility.
+        """
         nested_gradients = _unflatten(gradients, self._nested_output)
         result = self.backward_extended(*nested_gradients)  # type: ignore[func-returns-value]
         return tuple(_iter_None_tensors(result))
@@ -781,6 +842,9 @@ class NestedIOFunction(Function):
     __call__ = _do_forward
 
     def forward(self, *args: Any) -> Any:  # type: ignore[override]
+        r"""
+        Shared forward utility.
+        """
         nested_tensors = _map_tensor_data(self._nested_input)
         result = self.forward_extended(*nested_tensors)  # type: ignore[func-returns-value]
         del self._nested_input
@@ -788,22 +852,40 @@ class NestedIOFunction(Function):
         return tuple(_iter_tensors(result))
 
     def save_for_backward(self, *args: Any) -> None:
+        r"""
+        See :meth:`Function.save_for_backward`.
+        """
         self.to_save = tuple(_iter_tensors(args))
         self._to_save_nested = args
 
     @property
     def saved_tensors(self):
+        r"""
+        See :meth:`Function.saved_tensors`.
+        """
         flat_tensors = super().saved_tensors  # type: ignore[misc]
         return _unflatten(flat_tensors, self._to_save_nested)
 
     def mark_dirty(self, *args: Any, **kwargs: Any) -> None:
+        r"""
+        See :meth:`Function.mark_dirty`.
+        """
         self.dirty_tensors = tuple(_iter_tensors((args, kwargs)))
 
     def mark_non_differentiable(self, *args: Any, **kwargs: Any) -> None:
+        r"""
+        See :meth:`Function.mark_non_differentiable`.
+        """
         self.non_differentiable = tuple(_iter_tensors((args, kwargs)))
 
     def forward_extended(self, *input: Any) -> None:
+        r"""
+        User defined forward.
+        """
         raise NotImplementedError
 
     def backward_extended(self, *grad_output: Any) -> None:
+        r"""
+        User defined backward.
+        """
         raise NotImplementedError

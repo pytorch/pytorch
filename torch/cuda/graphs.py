@@ -1,8 +1,9 @@
 import gc
+from typing import Optional
 
 import torch
 from torch.utils import _pytree
-from ._utils import _dummy_type
+from .._utils import _dummy_type
 
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
@@ -141,7 +142,7 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream = None
+    default_capture_stream: Optional["torch.cuda.Stream"] = None
 
     def __init__(
         self,
@@ -186,7 +187,7 @@ class graph:
 
 
 def make_graphed_callables(
-    callables, sample_args, num_warmup_iters=3, allow_unused_input=False
+    callables, sample_args, num_warmup_iters=3, allow_unused_input=False, pool=None
 ):
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -217,7 +218,9 @@ def make_graphed_callables(
             11 iterations for warm up. Default: ``3``.
         allow_unused_input (bool): If False, specifying inputs that were not used when computing outputs
             (and therefore their grad is always zero) is an error. Defaults to False.
-
+        pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
+            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
+            with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
@@ -303,7 +306,7 @@ def make_graphed_callables(
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
     bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
 
-    mempool = graph_pool_handle()
+    mempool = graph_pool_handle() if pool is None else pool
 
     # Warmup
     # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work
@@ -324,7 +327,7 @@ def make_graphed_callables(
                     only_inputs=True,
                     allow_unused=allow_unused_input,
                 )
-            del outputs, grad_inputs
+            del outputs, grad_inputs  # type: ignore[possibly-undefined]
     torch.cuda.synchronize()
 
     # All captures here share a mempool. To avoid replays corrupting each other's memory,
@@ -383,8 +386,8 @@ def make_graphed_callables(
         per_callable_static_grad_inputs.append(static_grad_inputs)
 
     # Reverses the most recent two lists
-    per_callable_static_grad_outputs = list(reversed(per_callable_static_grad_outputs))
-    per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
+    per_callable_static_grad_outputs.reverse()
+    per_callable_static_grad_inputs.reverse()
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
 
     def make_graphed_autograd_function(

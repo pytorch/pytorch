@@ -53,8 +53,8 @@ class _TestJITIRToONNX:
     check_dtype = True
     ignore_none = True  # True for tracing, and Flase for scripting
 
-    def run_test(self, graph_ir, example_inputs):
-        graph = torch._C.parse_ir(graph_ir)
+    def run_test(self, graph_ir, example_inputs, parse_tensor_constants=False):
+        graph = torch._C.parse_ir(graph_ir, parse_tensor_constants)
         jit_outs = torch._C._jit_interpret_graph(graph, example_inputs)
 
         onnx_proto = _jit_graph_to_onnx_model(
@@ -90,6 +90,18 @@ class _TestJITIRToONNX:
         a = torch.randn(2, 3)
         b = torch.randn(2, 3)
         self.run_test(graph_ir, (a, b))
+
+    def test_where_constants(self):
+        graph_ir = """
+        graph(%0 : Bool(8, device=cpu),
+              %1 : Float(8, device=cpu)):
+          %3 : Double(device=cpu) = prim::Constant[value={0.}]()
+          %4 : Float(8) = aten::where(%0, %1, %3)
+          return (%4)
+        """
+        a = torch.zeros(8, dtype=bool)
+        b = torch.zeros(8)
+        self.run_test(graph_ir, (a, b), parse_tensor_constants=True)
 
     def test_add_sub_with_graph_inputs(self):
         for op in ["add", "sub", "rsub"]:

@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
+#include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
 
@@ -842,10 +843,15 @@ This class does not support ``__members__`` property.)");
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
 
-  // TODO(yifu): _{register, resolve}_process_group currently only work for
-  // c10d_functional. Later, we'll unify the name -> group mapping across
-  // Python and C++, and spanning both functional and non-functional
-  // collectives.
+  module.def(
+      "_set_thread_isolation_mode",
+      &::c10d::set_thread_isolation_mode,
+      py::arg("enable"));
+
+  // Bindings for GroupRegistry.hpp
+  //
+  // Register a process group in the native registry. Process groups registered
+  // via `_register_process_group` can be resolved from both Python and C++.
   module.def(
       "_register_process_group",
       [](const std::string& group_name,
@@ -855,12 +861,26 @@ This class does not support ``__members__`` property.)");
       py::arg("group_name"),
       py::arg("group"));
 
+  // Resolve a process group from the native registry
   module.def(
       "_resolve_process_group",
       [](const std::string& group_name) {
         return ::c10d::resolve_process_group(group_name);
       },
       py::arg("group_name"));
+
+  // Remove a group from the native registry
+  module.def(
+      "_unregister_process_group",
+      [](const std::string& group_name) {
+        return ::c10d::unregister_process_group(group_name);
+      },
+      py::arg("group_name"));
+
+  // Remove all process groups from the native registry
+  module.def("_unregister_all_process_groups", []() {
+    return ::c10d::unregister_all_process_groups();
+  });
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -1820,6 +1840,7 @@ The hook must have the following signature:
 >>> def hook(work_info: torch._C._distributed_c10d.WorkInfo) -> None:
 >>>     # custom code
 >>>     # work_info.op_type: type of collective of this work
+>>>     # work_info.seq: sequence number of collective of this work
 >>>     # work_info.time_started: system time when user code called this collective
 >>>     # work_info.time_finished: system time when the watchdog thread detected
 >>>     #     completion of this work. Note that, there can be delays between the
@@ -2377,6 +2398,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroupNCCL::getBoundDeviceId,
@@ -2523,6 +2545,7 @@ Example::
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")
       .def_readonly("op_type", &::c10d::WorkInfo::opType)
+      .def_readonly("seq", &::c10d::WorkInfo::seq)
       .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
       .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
       .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
@@ -2658,6 +2681,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         auto ivalue = torch::jit::toIValue(obj, typePtr);
         return ivalue.toCustomClass<::c10d::Work>();
       });
+
+  auto fakeProcessGroup =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
+          module, "FakeProcessGroup", backend)
+          .def(py::init([](int rank, int size) {
+            return c10::make_intrusive<::c10d::FakeProcessGroup>(rank, size);
+          }));
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())

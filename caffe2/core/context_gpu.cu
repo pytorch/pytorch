@@ -306,7 +306,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
     baseAllocator_ = GetDefaultCPUAllocator();
   }
   ~PinnedCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     if (nbytes == 0) {
       // replicate c10::alloc_cpu behavior - return nullptr
       return {nullptr, nullptr, &Delete, at::Device(CPU)};
@@ -513,7 +513,7 @@ void TrackMemoryAlloc(size_t nbytes) {
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
   ~DefaultCUDAAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     // Lock the mutex
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     // A one-time caffe2 cuda initializer.

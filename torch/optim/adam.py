@@ -74,7 +74,10 @@ class Adam(Optimizer):
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
-                    p_state["step"] = torch.tensor(float(p_state["step"]), dtype=_get_scalar_dtype(is_fused=fused))
+                    step_val = float(p_state["step"])
+                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(is_fused=fused), device=p.device)
+                                       if group['capturable'] or group['fused']
+                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
     def _init_group(
         self,
@@ -489,15 +492,15 @@ def _multi_tensor_adam(params: List[Tensor],
         device_state_steps,
     ), _) in grouped_tensors.values():
 
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
         # Handle complex parameters
         if has_complex:
             if amsgrad:
                 _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs, device_max_exp_avg_sqs)
             else:
                 _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over

@@ -187,10 +187,10 @@ std::stringstream update_bytecode_version(
       "bytecode",
   };
 
-  std::stringstream ouput_model_stream;
+  std::stringstream output_model_stream;
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
+    output_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !output_model_stream ? 0 : nbytes;
   };
 
   PyTorchStreamWriter writer_bytecode(writer_func);
@@ -218,7 +218,7 @@ std::stringstream update_bytecode_version(
       /*use_storage_context=*/true,
       storage_context);
 
-  return ouput_model_stream;
+  return output_model_stream;
 }
 } // namespace
 
@@ -307,10 +307,10 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
       "bytecode",
   };
 
-  std::stringstream ouput_model_stream;
+  std::stringstream output_model_stream;
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
+    output_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !output_model_stream ? 0 : nbytes;
   };
 
   PyTorchStreamWriter writer(writer_func);
@@ -361,7 +361,7 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   auto constants_tuple =
       c10::ivalue::Tuple::create(std::move(constants_values));
   writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
-  return ouput_model_stream;
+  return output_model_stream;
 }
 
 /*

@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -14,7 +15,7 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 template <> class Vectorized<float> {
 private:
@@ -148,6 +149,9 @@ public:
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf8_u10(values));
   }
+  Vectorized<float> acosh() const {
+    return Vectorized<float>(Sleef_acoshf8_u10(values));
+  }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf8_u10(values));
   }
@@ -223,14 +227,14 @@ public:
     static __m256 vec_factorial_5 =
         _mm256_set1_ps(0.00828929059f); // 1/factorial(5)
     static __m256 vec_exp_log2ef =
-        (__m256)_mm256_set1_epi32(0x3fb8aa3b); // log2(e)
+        _mm256_castsi256_ps(_mm256_set1_epi32(0x3fb8aa3b)); // log2(e)
     static __m256 vec_half = _mm256_set1_ps(0.5f);
     static __m256 vec_one = _mm256_set1_ps(1.f);
     static __m256 vec_zero = _mm256_set1_ps(0.f);
     static __m256 vec_two = _mm256_set1_ps(2.f);
-    static __m256 vec_ln2f = (__m256)_mm256_set1_epi32(0x3f317218); // ln(2)
-    static __m256 vec_ln_flt_min = (__m256)_mm256_set1_epi32(0xc2aeac50);
-    static __m256 vec_ln_flt_max = (__m256)_mm256_set1_epi32(0x42b17218);
+    static __m256 vec_ln2f = _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
+    static __m256 vec_ln_flt_min = _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    static __m256 vec_ln_flt_max = _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
     static __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
     static int n_mantissa_bits = 23;
 
@@ -263,7 +267,7 @@ public:
     auto vec_exp_number_i = _mm256_cvtps_epi32(vec_exp_number);
     auto vec_two_pow_n_i = _mm256_add_epi32(vec_exp_number_i, vec_127);
     vec_two_pow_n_i = _mm256_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
-    auto vec_two_pow_n = (__m256)vec_two_pow_n_i;
+    auto vec_two_pow_n = _mm256_castsi256_ps(vec_two_pow_n_i);
     vec_two_pow_n =
         _mm256_blendv_ps(vec_two_pow_n, vec_zero, less_ln_flt_min_mask);
 

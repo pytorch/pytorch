@@ -123,7 +123,7 @@ class RedirectsTest(unittest.TestCase):
                 print_fn(i)
 
         with open(stdout_log) as fp:
-            actual = {int(line.split(":")[1]) for line in fp.readlines()}
+            actual = {int(line.split(":")[1]) for line in fp}
             expected = set(range(num_lines))
             self.assertSetEqual(expected, actual)
 

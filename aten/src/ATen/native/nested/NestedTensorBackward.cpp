@@ -44,16 +44,16 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
   }
   Tensor grad_input, grad_weight, grad_bias;
-  auto grad_ouput_contiguous = grad_output.contiguous();
-  auto* nt_grad_output = get_nested_tensor_impl(grad_ouput_contiguous);
+  auto grad_output_contiguous = grad_output.contiguous();
+  auto* nt_grad_output = get_nested_tensor_impl(grad_output_contiguous);
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_INTERNAL_ASSERT(nt_grad_output != nullptr);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
   TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(nt_grad_output));
-  auto grad_ouput_buffer = nt_grad_output->get_buffer();
+  auto grad_output_buffer = nt_grad_output->get_buffer();
   auto input_buffer = nt_input->get_buffer();
 
-  auto reshaped_grad = grad_ouput_buffer.reshape({-1, weight.size(0)});
+  auto reshaped_grad = grad_output_buffer.reshape({-1, weight.size(0)});
 
   if (output_mask[0]) {
     auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});

@@ -143,6 +143,47 @@ uint64_t unpack_uint64(PyObject* pyobj) {
   return unsigned_obj;
 }
 
+static PyObject* THPGenerator_graphSafeGetState(
+    PyObject* _self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto& gen = ((THPGenerator*)_self)->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+
+  return THPGenerator_Wrap(gen.graphsafe_get_state());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_graphSafeSetState(
+    PyObject* _self,
+    PyObject* _state) {
+  HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
+  auto& gen = self->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  gen.graphsafe_set_state(THPGenerator_Unwrap(_state));
+
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto& gen = ((THPGenerator*)_self)->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  auto new_generator = gen.clone();
+
+  return THPGenerator_Wrap(new_generator);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
@@ -218,6 +259,12 @@ static struct PyGetSetDef THPGenerator_properties[] = {
 static PyMethodDef THPGenerator_methods[] = {
     {"get_state", THPGenerator_getState, METH_NOARGS, nullptr},
     {"set_state", THPGenerator_setState, METH_O, nullptr},
+    {"clone_state", THPGenerator_cloneState, METH_NOARGS, nullptr},
+    {"graphsafe_get_state",
+     THPGenerator_graphSafeGetState,
+     METH_NOARGS,
+     nullptr},
+    {"graphsafe_set_state", THPGenerator_graphSafeSetState, METH_O, nullptr},
     {"set_offset", THPGenerator_setOffset, METH_O, nullptr},
     {"manual_seed", THPGenerator_manualSeed, METH_O, nullptr},
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
@@ -302,6 +349,14 @@ PyObject* THPGenerator_Wrap(Generator gen) {
 
   return THPGenerator_NewWithVar(
       (PyTypeObject*)THPGeneratorClass, std::move(gen));
+}
+
+at::Generator THPGenerator_Unwrap(PyObject* state) {
+  if (!Py_IS_TYPE(state, &THPGeneratorType)) {
+    throw torch::TypeError(
+        "expected a Generator, but got %s", Py_TYPE(state)->tp_name);
+  }
+  return reinterpret_cast<THPGenerator*>(state)->cdata;
 }
 
 // Creates a new Python object for a Generator. The Generator must not already

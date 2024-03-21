@@ -10,9 +10,7 @@
 #include <torch/library.h>
 
 #include <fstream>
-#include <list>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -24,9 +22,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace torch::autograd::profiler {
 
 // We decompose the profiler logic into the following components:
 //
@@ -124,7 +120,6 @@ using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::ProfilerStateBase;
 
 struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerLegacyThreadLocalState(
       const torch::profiler::impl::ProfilerConfig& config)
       : ProfilerStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
@@ -167,15 +162,13 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   }
 
  protected:
-  RangeEventList& getEventList(int64_t thread_id = -1);
+  RangeEventList& getEventList(
+      std::optional<uint64_t> thread_id = std::nullopt);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
-      // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
       event_lists_map_;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
 };
 
@@ -317,18 +310,18 @@ void ProfilerLegacyThreadLocalState::reportMemoryUsage(
 }
 
 RangeEventList& ProfilerLegacyThreadLocalState::getEventList(
-    int64_t thread_id) {
-  if (thread_id < 0) {
+    std::optional<uint64_t> thread_id) {
+  if (!thread_id.has_value()) {
     thread_id = at::RecordFunction::currentThreadId();
   }
   RangeEventList* list_ptr = nullptr;
   std::lock_guard<std::mutex> guard(state_mutex_);
-  auto it = event_lists_map_.find(thread_id);
+  auto it = event_lists_map_.find(thread_id.value());
   if (it != event_lists_map_.end()) {
     list_ptr = it->second.get();
   } else {
     auto event_list = std::make_shared<RangeEventList>();
-    event_lists_map_[thread_id] = event_list;
+    event_lists_map_[thread_id.value()] = event_list;
     list_ptr = event_list.get();
   }
   return *list_ptr;
@@ -494,7 +487,7 @@ void LegacyEvent::record(bool record_cuda) {
       " elements to reconstruct LegacyEvent.");
 
   // Reconstruct input shapes from ivalues.
-  auto shapeListIValue = ivalues.get(EventIValueIdx::SHAPES);
+  const auto& shapeListIValue = ivalues.get(EventIValueIdx::SHAPES);
   TORCH_INTERNAL_ASSERT(
       shapeListIValue.isList(),
       "Expected profiler shapes IValue to contain type c10::impl::GenericList.");
@@ -504,7 +497,7 @@ void LegacyEvent::record(bool record_cuda) {
   shapes.reserve(shapeList.size());
   for (const auto i : c10::irange(shapeList.size())) {
     std::vector<int64_t> s;
-    auto shapeIValue = shapeList.get(i);
+    const auto& shapeIValue = shapeList.get(i);
     TORCH_INTERNAL_ASSERT(
         shapeIValue.isList(),
         "Expected each profiler shape element to contain shapes of type c10::impl::GenericList.")
@@ -530,8 +523,10 @@ void LegacyEvent::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::CPU_NS).toInt(), // cpu_ns
       ivalues.get(EventIValueIdx::CUDA_RECORDED).toBool(), // was cuda recorded
       ivalues.get(EventIValueIdx::CUDA_MEM_USAGE).toInt(), // cuda memory usage
-      ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt(), // device
-      ivalues.get(EventIValueIdx::CUDA_US).toInt() // cuda_us
+      c10::DeviceIndex(
+          ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt()), // device
+      static_cast<double>(
+          ivalues.get(EventIValueIdx::CUDA_US).toInt()) // cuda_us
   );
   return evt;
 }
@@ -670,9 +665,9 @@ RecordProfile::~RecordProfile() {
     }
     processEvents(events);
   } catch (const std::exception& e) {
-    LOG(ERROR) << e.what() << std::endl;
+    LOG(ERROR) << e.what() << '\n';
   } catch (...) {
-    LOG(ERROR) << "Unknown error" << std::endl;
+    LOG(ERROR) << "Unknown error" << '\n';
   }
 }
 
@@ -680,6 +675,4 @@ void RecordProfile::processEvents(const std::vector<LegacyEvent*>& events) {
   writeProfilerEventsToStream(out_, events);
 }
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler

@@ -389,9 +389,7 @@ static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
         get_mkldnn_dtype(weight_hh.scalar_type()),
         ideep::format_tag::ldgoi});
 
-  ideep::tensor::desc packed_desc_ih, packed_desc_hh;
-
-  std::tie(packed_desc_ih, packed_desc_hh) =
+  auto [packed_desc_ih, packed_desc_hh] =
       ideep::lstm_forward_inference::expected_weights_desc(
           output_sizes,
           src_layer,
@@ -443,12 +441,11 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
     batch_size = 10;
   }
 
-  ideep::tensor w1_, w2_;
   at::Tensor packed_w1, packed_w2;
 
   int64_t feature_size = weight0.size(-1);
 
-  std::tie(w1_, w2_) = get_lstm_packed_weights(
+  auto [w1_, w2_] = get_lstm_packed_weights(
     weight0,
     weight1,
     at::zeros(

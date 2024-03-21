@@ -248,9 +248,9 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
 
       GRAPH_DEBUG("Tracing ", getHeader(n));
       auto tracer = traceNode(n, td, stack);
-      auto ouputs_size = n->outputs().size();
-      auto iivs = pop(stack, ouputs_size);
-      for (size_t j = 0; j < ouputs_size; j++) {
+      auto outputs_size = n->outputs().size();
+      auto iivs = pop(stack, outputs_size);
+      for (size_t j = 0; j < outputs_size; j++) {
         auto& iiv = iivs[j];
         if (iiv.isTensor()) {
           auto t = iiv.toTensor();

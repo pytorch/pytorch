@@ -10,7 +10,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size, const c10::SymInt& num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
@@ -402,4 +402,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   m.impl("one_hot", one_hot_decomposition_hack);
 }
-}}
+
+} // namespace at::functorch

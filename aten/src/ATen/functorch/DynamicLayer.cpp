@@ -17,8 +17,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <iostream>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 void setDynamicLayerFrontBackKeysIncluded(bool included) {
   c10::impl::tls_set_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerFrontMode, included);
@@ -511,5 +510,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerBackMode, m) {
   SPECIAL_GRAD_CASE(alias);
 }
 
-}
-} // namespace at
+} // namespace at::functorch

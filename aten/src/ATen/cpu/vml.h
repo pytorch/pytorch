@@ -100,11 +100,11 @@ IMPLEMENT_VML(lgamma)
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
-// we need to expect MKL_INT to be of type int, which implies int32_t in most
+// we need to expect MKL_INT to be of type int, which implies int32_t or int64_t in most
 // cases.
 static_assert(
-    std::is_same<MKL_INT, int32_t>::value,
-    "MKL_INT is assumed to be int32_t");
+    std::is_same_v<MKL_INT, int32_t> || std::is_same_v<MKL_INT, int64_t>,
+    "MKL_INT is assumed to be int32_t or int64_t");
 #define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
   inline void v##op(type * out, const type * in, int64_t size) {        \

@@ -257,6 +257,37 @@ class NoChangeTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 0, check_val=False)
 
+    def test_hash_with_numbers(self):
+        # Test to repro issue with fx_graph_cse when
+        # hash((primals_2, 1.0)) == hash((primals_2, 1))
+
+        if torch._dynamo.is_compiling():
+            self.skipTest("Unsupported if test run is compiled")
+
+        def f(inpt, osize):
+            size = inpt.shape[-1]
+            s1 = size - 1
+            s2 = size - 1.0
+            scale = s2 / (osize - 1.0)
+            inpt = torch.clamp(inpt, 0, s1)
+            return scale * inpt
+
+        # Fetch dynamic graph
+        gms = []
+
+        def toy_backend(gm, _):
+            gms.append(gm)
+            return gm.forward
+
+        torch._dynamo.reset()
+        fn = torch.compile(backend=toy_backend, dynamic=True)(f)
+
+        t = torch.rand(3, 100)
+        _ = fn(t, 50)
+        assert len(gms) == 1, gms
+        fx_g = gms[0]
+        check(fx_g, None, 0, check_val=False, graph_input=True)
+
 
 class ReduceTestCase(TestCase):
 

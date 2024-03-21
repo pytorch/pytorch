@@ -44,7 +44,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
     else:
         outp = weight
 
-    ncols, nrows = outp.shape
+    ncols, nrows = outp.shape  # type: ignore[possibly-undefined]
     assert nrows % (32 if dtypeq == torch.quint4x2 else 64) == 0
     assert ncols % 64 == 0
 

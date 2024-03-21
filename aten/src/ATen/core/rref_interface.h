@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/type_ptr.h>
+#include <ATen/core/jit_type_base.h>
 
 namespace c10 {
 

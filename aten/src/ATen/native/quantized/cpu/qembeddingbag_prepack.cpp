@@ -436,8 +436,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float Xmin, Xmax;
       if (optimized_qparams) {
-        at::Tensor xmax_tensor, xmin_tensor;
-        std::tie(xmax_tensor, xmin_tensor) = at::choose_qparams_optimized(
+        auto [xmax_tensor, xmin_tensor] = at::choose_qparams_optimized(
             float_weight[row], embedding_cols, nbins, ratio, bit_width);
         TORCH_CHECK(
             xmax_tensor.numel() == 1 && xmin_tensor.numel() == 1,

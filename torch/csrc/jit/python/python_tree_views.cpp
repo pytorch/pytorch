@@ -34,9 +34,7 @@ struct SourceRangeFactory {
         leading_whitespace_chars_(leading_whitespace_chars) {}
 
   SourceRange create(int line, int start_col, int end_col) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t start_byte_offset, end_byte_offset;
-    std::tie(start_byte_offset, end_byte_offset) = line_col_to_byte_offs(
+    auto [start_byte_offset, end_byte_offset] = line_col_to_byte_offs(
         line,
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         start_col + leading_whitespace_chars_,

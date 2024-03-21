@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["oncall: distributed"]
 
 import copy
@@ -36,10 +38,10 @@ class VerifyStateDictMixin:
         for fqn, param in msd.items():
             dist_param = dist_msd.get(fqn, None)
             if not options.ignore_frozen_params:
-                self.assertIsNotNone(dist_param)
+                self.assertIsNotNone(dist_param, f"{fqn=}")
                 self._compare_tensor(param, dist_param)
             elif dist_param is None:
-                self.assertFalse(param.requires_grad)
+                self.assertFalse(param.requires_grad, f"{fqn=}")
 
     def _verify_osd(
         self,

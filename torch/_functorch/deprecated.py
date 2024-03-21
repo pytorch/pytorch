@@ -26,7 +26,7 @@ def get_warning(api, new_api=None, replace_newlines=False):
         f"2.0 and will be deleted in a future version of PyTorch >= 2.3. \n"
         f"Please use {new_api} instead; see the PyTorch 2.0 release notes \n"
         f"and/or the torch.func migration guide for more details \n"
-        f"https://pytorch.org/docs/master/func.migrating.html"
+        f"https://pytorch.org/docs/main/func.migrating.html"
     )
     if replace_newlines:
         warning = warning.replace("\n", "")
@@ -67,7 +67,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     warn_deprecated('grad_and_value')
-    return _impl.grad_and_value(func, argnums, has_aux)
+    return apis.grad_and_value(func, argnums, has_aux)
 
 def vjp(func: Callable, *primals, has_aux: bool = False):
     warn_deprecated('vjp')
@@ -110,7 +110,7 @@ def combine_state_for_ensemble(models):
 
 setup_docs(vmap, apis.vmap, 'torch.vmap')
 setup_docs(grad, apis.grad)
-setup_docs(grad_and_value)
+setup_docs(grad_and_value, apis.grad_and_value)
 setup_docs(vjp)
 setup_docs(jvp)
 setup_docs(jacrev)

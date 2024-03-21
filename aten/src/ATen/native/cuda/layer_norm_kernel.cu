@@ -297,7 +297,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 
 //to avoid windows SFINAE errors
 template <typename T, typename T_ACC>
-__global__ __inline__ void vectorized_layer_norm_kernel(
+__global__ void vectorized_layer_norm_kernel(
   const int N,
   T_ACC eps,
   const  T* __restrict__ X,
@@ -393,7 +393,7 @@ __global__ void layer_norm_grad_input_kernel(
 
 // This implementation gets called when input buffers (dY, X, gamma and dX) are aligned
 // to vec_size * sizeof(T). Compared to the unvectorized implementation, it is about 10%
-// faster measuread at PT operator level, with cases seeing a 2X speedup (where N >> M).
+// faster measured at PT operator level, with cases seeing a 2X speedup (where N >> M).
 // There are no noticeable regressions on the rest of the sizes.
 
 template<typename T, typename T_ACC>

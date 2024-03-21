@@ -104,25 +104,37 @@ class TestSafeguard(TestCase):
             export(f3, (torch.randn(10, requires_grad=False),))
 
     def test_global_autograd_exempt_predispatch(self):
-        def f1(a):
-            with torch.no_grad():
-                b = a + a
-            return b
+        class F1(torch.nn.Module):
+            def forward(self, a):
+                with torch.no_grad():
+                    b = a + a
+                return b
 
-        def f2(a):
-            with torch.enable_grad():
-                b = a + a
-            return b
+        f1 = F1()
 
-        def f3(a):
-            with torch.set_grad_enabled(False):
-                b = a + a
-            return b
+        class F2(torch.nn.Module):
+            def forward(self, a):
+                with torch.enable_grad():
+                    b = a + a
+                return b
 
-        def f4(a):
-            with torch.set_grad_enabled(True):
-                b = a + a
-            return b
+        f2 = F2()
+
+        class F3(torch.nn.Module):
+            def forward(self, a):
+                with torch.set_grad_enabled(False):
+                    b = a + a
+                return b
+
+        f3 = F3()
+
+        class F4(torch.nn.Module):
+            def forward(self, a):
+                with torch.set_grad_enabled(True):
+                    b = a + a
+                return b
+
+        f4 = F4()
 
         a = torch.randn(10)
 

@@ -186,7 +186,7 @@ struct cpu_scatter_gather_base_kernel {
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(buffer)
-      .add_input(index)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
@@ -273,8 +273,8 @@ struct cpu_scatter_gather_base_kernel {
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(buffer)
-      .add_input(src)
-      .add_input(index)
+      .add_const_input(src)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
@@ -369,8 +369,8 @@ struct cpu_scatter_gather_base_kernel {
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(buffer)
-      .add_input(src)
-      .add_input(index)
+      .add_const_input(src)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
@@ -464,8 +464,8 @@ struct cpu_scatter_gather_base_kernel {
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(buffer)
-      .add_input(src)
-      .add_input(index)
+      .add_const_input(src)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
@@ -560,8 +560,8 @@ struct cpu_scatter_gather_base_kernel {
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(buffer)
-      .add_input(src)
-      .add_input(index)
+      .add_const_input(src)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
@@ -687,9 +687,9 @@ std::pair<K*, V*> radix_sort_parallel(
 
 template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  int64_t* index_data = index.data_ptr<int64_t>();
+  const int64_t* index_data = index.const_data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
-  scalar_t* src_data = src.data_ptr<scalar_t>();
+  const scalar_t* src_data = src.const_data_ptr<scalar_t>();
 
   const int64_t M = ensure_nonempty_size(self, 0);
   const int64_t nnz = ensure_nonempty_size(index, 0);
@@ -812,9 +812,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
 template <typename scalar_t>
 void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
-  int64_t* index_data = index.data_ptr<int64_t>();
+  const int64_t* index_data = index.const_data_ptr<int64_t>();
   scalar_t* result_data = result.data_ptr<scalar_t>();
-  scalar_t* self_data = self.data_ptr<scalar_t>();
+  const scalar_t* self_data = self.const_data_ptr<scalar_t>();
 
   const int64_t M = ensure_nonempty_size(result, 0);
   const int64_t N = ensure_nonempty_size(self, 0);
@@ -832,7 +832,7 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index,
                   "index ", index,
                   " is out of bounds for dimension ", 0,
                   " with size ", index_upper_bound);
-      scalar_t* self_ptr = self_data + index * K;
+      const scalar_t* self_ptr = self_data + index * K;
       int64_t d = 0;
       for (; d < K - (K % Vec::size()); d += Vec::size()) {
         Vec out_vec = Vec::loadu(self_ptr + d);

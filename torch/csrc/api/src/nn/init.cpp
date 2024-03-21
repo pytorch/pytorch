@@ -134,8 +134,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
   }
 
   // Compute the qr factorization
-  Tensor q, r;
-  std::tie(q, r) = torch::linalg::qr(flattened);
+  auto [q, r] = torch::linalg::qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();

@@ -1,8 +1,11 @@
 import cProfile
+import inspect
 import io
 import itertools
 import os
+import warnings
 from contextlib import contextmanager
+from functools import wraps
 from pstats import Stats
 from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
 
@@ -35,12 +38,14 @@ def _get_failure_dict(
     )
 
 
-def _all_gather_keys(local_dict: Dict[Any, Any]) -> List[Any]:
+def _all_gather_keys(
+    local_dict: Dict[Any, Any], group: Optional[dist.ProcessGroup] = None
+) -> List[Any]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
     gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
 
-    dist.all_gather_object(gathered_keys, keys)
+    dist.all_gather_object(gathered_keys, keys, group=group)
     return sorted(set(itertools.chain.from_iterable(gathered_keys)))
 
 
@@ -395,3 +400,30 @@ def _profile():
             stats.sort_stats("time").print_stats(10)
     else:
         yield
+
+
+def _api_bc_check(func):
+    @wraps(func)
+    def inner_func(*args, **kwargs) -> Any:
+        if len(args) == 2:
+            warnings.warn(
+                f"The argument order of {func.__name__} has been changed. "
+                "Please check the document to avoid future breakages."
+            )
+            sig = inspect.signature(func)
+            kwonlyargs = [
+                p.name for p in sig.parameters.values() if p.kind == p.KEYWORD_ONLY
+            ]
+            if "storage_writer" in kwonlyargs:
+                assert "storage_writer" not in kwargs, (args, kwargs)
+                kwargs["storage_writer"] = args[1]
+            elif "storage_reader" in kwonlyargs:
+                assert "storage_reader" not in kwargs, (args, kwargs)
+                kwargs["storage_reader"] = args[1]
+            else:
+                raise RuntimeError(f"Unexpected kwonlyargs = {kwonlyargs}")
+            return func(args[0], **kwargs)
+        else:
+            return func(*args, **kwargs)
+
+    return inner_func

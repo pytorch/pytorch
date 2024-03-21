@@ -19,6 +19,7 @@ import torch
 import torch._jit_internal as _jit_internal
 from torch._classes import classes
 from torch._jit_internal import _qualified_name
+from torch._utils_internal import log_torchscript_usage
 from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for, _script_method_graph_for
 
@@ -1286,6 +1287,8 @@ def script(
     global type_trace_db
     if not _enabled:
         return obj
+
+    log_torchscript_usage("script")
 
     if optimize is not None:
         warnings.warn(

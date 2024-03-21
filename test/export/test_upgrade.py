@@ -10,6 +10,7 @@ from torch._export.serde.upgrade import get_target_version, get_upgraders
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
+    IS_WINDOWS,
 )
 
 TEST_UPGRADERS = {
@@ -115,6 +116,7 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         custom_op_count = count_op(upgraded.graph, "aten::div__Scalar_mode_0_3")
         self.assertEqual(custom_op_count, 1)
 
+    @unittest.skipIf(IS_WINDOWS, "Test case not supported on Windows")
     def test_div_upgrader_pass_return_new_op_after_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, a: torch.Tensor, b):

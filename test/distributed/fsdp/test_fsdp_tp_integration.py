@@ -32,7 +32,10 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
-from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    MLPModule,
+    RMSNormPython,
+)
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -66,27 +69,12 @@ class SimpleModel(torch.nn.Module):
         return ["net3.weight", "net3.bias"]
 
 
-# simple RMSNorm layer for testing
-class RMSNormPython(torch.nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-        self.weight = torch.nn.Parameter(torch.ones(dim))
-
-    def _norm(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
-
-    def forward(self, x):
-        output = self._norm(x)
-        return output * self.weight
-
-
 def distribute_rmsnorm(module, device_mesh):
-    def prepare_input_fn(inputs, device_mesh):
+    def prepare_input_fn(mod, inputs, device_mesh):
         shard_tensor = DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
         return shard_tensor
 
-    def prepare_output_fn(outputs, device_mesh):
+    def prepare_output_fn(mod, outputs, device_mesh):
         return outputs.to_local()
 
     return distribute_module(

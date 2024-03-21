@@ -13,14 +13,14 @@ class SingletonInt(sympy.AtomicExpr):
         instance = super().__new__(cls, *args, **kwargs)
         return instance
 
-    # The semantics of this class should match that of SingletonSymNodeImpl in
-    # c10/core/SingletonSymNodeImpl.h
+    # The semantics of this class should match that of NestedIntSymNodeImpl in
+    # c10/core/NestedIntSymNodeImpl.h
     def __init__(self, val, *, coeff=1):
         self._val = val
         self._coeff = coeff
         super().__init__()
 
-    # See NOTE [ Inequalities with SingletonInt ]
+    # See NOTE [ Inequalities with nested int ]
     def _eval_Eq(self, other):
         if (
             isinstance(other, SingletonInt)
@@ -69,7 +69,7 @@ class SingletonInt(sympy.AtomicExpr):
         raise NotImplementedError("NYI")
 
 
-# See NOTE [ Inequalities with SingletonInt ]
+# See NOTE [ Inequalities with nested int ]
 @dispatch(sympy.Integer, SingletonInt)
 def _eval_is_ge(a, b):
     if a < 2:

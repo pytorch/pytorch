@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -15,7 +16,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <> class Vectorized<float> {
 private:
@@ -168,6 +169,9 @@ public:
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf16_u10(values));
   }
+  Vectorized<float> acosh() const {
+    return Vectorized<float>(Sleef_acoshf16_u10(values));
+  }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf16_u10(values));
   }
@@ -243,14 +247,14 @@ public:
     static __m512 vec_factorial_5 =
         _mm512_set1_ps(0.00828929059f); // 1/factorial(5)
     static __m512 vec_exp_log2ef =
-        (__m512)_mm512_set1_epi32(0x3fb8aa3b); // log2(e)
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x3fb8aa3b)); // log2(e)
     static __m512 vec_half = _mm512_set1_ps(0.5f);
     static __m512 vec_one = _mm512_set1_ps(1.f);
     static __m512 vec_zero = _mm512_set1_ps(0.f);
     static __m512 vec_two = _mm512_set1_ps(2.f);
-    static __m512 vec_ln2f = (__m512)_mm512_set1_epi32(0x3f317218); // ln(2)
-    static __m512 vec_ln_flt_min = (__m512)_mm512_set1_epi32(0xc2aeac50);
-    static __m512 vec_ln_flt_max = (__m512)_mm512_set1_epi32(0x42b17218);
+    static __m512 vec_ln2f = _mm512_castsi512_ps(_mm512_set1_epi32(0x3f317218)); // ln(2)
+    static __m512 vec_ln_flt_min = _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
+    static __m512 vec_ln_flt_max = _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
     static __m512i vec_127 = _mm512_set1_epi32(0x0000007f);
     static int n_mantissa_bits = 23;
 
@@ -285,7 +289,7 @@ public:
     auto vec_exp_number_i = _mm512_cvtps_epi32(vec_exp_number);
     auto vec_two_pow_n_i = _mm512_add_epi32(vec_exp_number_i, vec_127);
     vec_two_pow_n_i = _mm512_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
-    auto vec_two_pow_n = (__m512)vec_two_pow_n_i;
+    auto vec_two_pow_n = _mm512_castsi512_ps(vec_two_pow_n_i);
     vec_two_pow_n =
         _mm512_mask_blend_ps(less_ln_flt_min_mask, vec_two_pow_n, vec_zero);
 

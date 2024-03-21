@@ -15,53 +15,36 @@ permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
-  lintrunner:
+  lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       timeout: 120
       runner: linux.2xlarge
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
+      submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        # The generic Linux job chooses to use base env, not the one setup by the image
-        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
-        conda activate "${CONDA_ENV}"
+        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT"
+        export CLANG=1
+        .github/scripts/lintrunner.sh
 
-        CACHE_DIRECTORY="/tmp/.lintbin"
-        # Try to recover the cached binaries
-        if [[ -d "${CACHE_DIRECTORY}" ]]; then
-          # It's ok to fail this as lintrunner init would download these binaries
-          # again if they do not exist
-          cp -r "${CACHE_DIRECTORY}" . || true
-        fi
-
-        # This has already been cached in the docker image
-        lintrunner init 2> /dev/null
-
-        # Do build steps necessary for linters
-        python3 -m tools.linter.clang_tidy.generate_build_files
-        python3 -m tools.generate_torch_version --is_debug=false
-        python3 -m tools.pyi.gen_pyi \
-          --native-functions-path aten/src/ATen/native/native_functions.yaml \
-          --tags-path aten/src/ATen/native/tags.yaml \
-          --deprecated-functions-path "tools/autograd/deprecated.yaml"
-
-        RC=0
-        # Run lintrunner on all files
-        if ! lintrunner --force-color --all-files --tee-json=lint.json 2> /dev/null; then
-          echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
-          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
-          RC=1
-        fi
-
-        # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
-        jq --raw-output \
-          '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
-          lint.json || true
-
-        exit $RC
+  lintrunner-noclang:
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      timeout: 120
+      runner: linux.2xlarge
+      docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
+        .github/scripts/lintrunner.sh
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
@@ -225,7 +208,7 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: |
-          pip install pytest-rerunfailures==11.1.* pytest-shard==0.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
+          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
         run: |

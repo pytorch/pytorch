@@ -4,6 +4,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
 namespace torch::jit {
@@ -73,26 +74,12 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 }
 
 #ifndef C10_MOBILE
-class VectorReader : public caffe2::serialize::ReadAdapterInterface {
- public:
-  VectorReader(std::vector<char> data) : data_(std::move(data)) {}
-
-  size_t size() const override {
-    return data_.size();
-  }
-
-  size_t read(uint64_t pos, void* buf, size_t n, const char* what)
-      const override {
-    std::copy(
-        data_.data() + pos,
-        data_.data() + pos + n,
-        reinterpret_cast<char*>(buf));
-    return n;
-  }
-
- private:
-  std::vector<char> data_;
-};
+size_t VectorReader::read(uint64_t pos, void* buf, size_t n, const char* what)
+    const {
+  std::copy(
+      data_.data() + pos, data_.data() + pos + n, reinterpret_cast<char*>(buf));
+  return n;
+}
 #endif
 
 IValue pickle_load(const std::vector<char>& data) {

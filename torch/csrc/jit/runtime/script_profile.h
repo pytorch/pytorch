@@ -33,6 +33,8 @@ class TORCH_API InstructionSpan {
   std::unique_ptr<Datapoint> datapoint_;
 };
 
+bool TORCH_API isProfilingOngoing();
+
 } // namespace profiling
 
 struct TORCH_API InstructionStats : public CustomClassHolder {
@@ -71,6 +73,8 @@ class TORCH_API SourceStats : public CustomClassHolder {
  * ...
  * scriptProfile.disable();
  * ...
+ *
+ * NOTE: you cannot attach the profiler while the script is running.
  *
  * To retrieve collected runtime data, users may call dumpStats() and do
  * arbitrary filtering on the data they want. Note that dumpStats() should

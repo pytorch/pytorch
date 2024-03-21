@@ -353,7 +353,7 @@ def _scatter_wait_result(
             gm.graph.node_replace_all_uses_with(orig_wait, wait_output_node)
 
         if last_split_reshape_node == split_node:
-            last_split_reshape_node = wait_output_node
+            last_split_reshape_node = wait_output_node  # type: ignore[possibly-undefined]
 
     need_sort_nodes = sorted(need_sort_nodes, key=lambda node: node_indices[node])
     gm.graph.move_after(need_sort_nodes, last_split_reshape_node)

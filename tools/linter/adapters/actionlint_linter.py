@@ -66,7 +66,14 @@ def check_file(
     file: str,
 ) -> List[LintMessage]:
     try:
-        proc = run_command([binary, file])
+        proc = run_command(
+            [
+                binary,
+                "-ignore",
+                '"runs-on" section must be sequence node but got mapping node with "!!map" tag',
+                file,
+            ]
+        )
     except OSError as err:
         return [
             LintMessage(

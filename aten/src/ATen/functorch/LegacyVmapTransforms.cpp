@@ -10,8 +10,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // Takes a BatchedTensorImpl, permutes all of the batch dims to the front,
 // and then returns a physical version of the Tensor.
@@ -227,5 +226,4 @@ void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensor
   }
 }
 
-}
-} // namespace at
+} // namespace at::functorch

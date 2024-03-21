@@ -2,6 +2,13 @@
 
 #include <string>
 
+#ifndef _WIN32
+#include <codecvt>
+#include <locale>
+#else
+#include <c10/util/Unicode.h>
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -26,6 +33,37 @@ std::string ExcludeFileExtension(const std::string& file_name) {
       ? -1
       : file_name.find_last_of(sep);
   return file_name.substr(0, end_index);
+}
+
+// Narrows the wstr argument and then passes it to _str.
+// Assumes that the input (wide) text is encoded as UTF-16.
+std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
+
+#ifndef _WIN32
+
+std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  return _str(ss, converter.to_bytes(wString));
+}
+
+#else // #ifndef _WIN32
+// The WIN32 implementation of wstring_convert leaks memory; see
+// https://github.com/microsoft/STL/issues/443
+
+std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+  return _str(ss, u16u8(wString));
+}
+
+#endif // _WIN32
+
+std::ostream& _str(std::ostream& ss, const wchar_t* wCStr) {
+  return _strFromWide(ss, std::wstring(wCStr));
+}
+std::ostream& _str(std::ostream& ss, const wchar_t& wChar) {
+  return _strFromWide(ss, std::wstring(1, wChar));
+}
+std::ostream& _str(std::ostream& ss, const std::wstring& wString) {
+  return _strFromWide(ss, wString);
 }
 
 } // namespace detail

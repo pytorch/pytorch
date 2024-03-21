@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/macros/Export.h>
 #include <ATen/core/Tensor.h>
+#include <c10/macros/Export.h>
 
 // A little explanation about why this file exists at all.  We have
 // a few methods on Tensor class which require access to reified access to
@@ -29,20 +29,20 @@
 // have weird signatures that are not supported by autograd, and (2)
 // see this bug https://github.com/pytorch/pytorch/issues/30102
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 struct TORCH_API VariableHooksInterface {
   virtual ~VariableHooksInterface() = default;
   virtual TensorBase tensor_data(const TensorBase&) const = 0;
   virtual TensorBase variable_data(const TensorBase&) const = 0;
-  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const TensorBase&) const = 0;
+  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(
+      const TensorBase&) const = 0;
   virtual unsigned _register_hook(
       const TensorBase&,
       std::function<TensorBase(const TensorBase&)> hook) const = 0;
@@ -57,9 +57,17 @@ struct TORCH_API VariableHooksInterface {
   virtual int64_t _version(const TensorBase&) const = 0;
   virtual void retain_grad(const TensorBase&) const = 0;
   virtual bool retains_grad(const TensorBase&) const = 0;
-  virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
+  virtual void _backward(
+      const Tensor&,
+      TensorList,
+      const c10::optional<Tensor>&,
+      c10::optional<bool>,
+      bool) const = 0;
   virtual void requires_grad_(const TensorBase&, bool) const = 0;
-  virtual void basic_autograd_not_implemented_fallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) const = 0;
+  virtual void basic_autograd_not_implemented_fallback(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet dispatch_keys,
+      torch::jit::Stack* stack) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);
@@ -72,4 +80,4 @@ struct TORCH_API VariableHooksRegisterer {
   }
 };
 
-}} // namespace at::impl
+} // namespace at::impl

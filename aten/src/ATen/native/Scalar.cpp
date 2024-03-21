@@ -40,7 +40,7 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
     self.scalar_type(),
     "_local_scalar_dense_cpu",
     AT_WRAP([&] {
-      scalar_t value = *self.data_ptr<scalar_t>();
+      scalar_t value = *self.const_data_ptr<scalar_t>();
       r = Scalar(value);
     }),
     AT_EXPAND(AT_SD_TYPES)

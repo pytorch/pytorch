@@ -77,6 +77,7 @@ __all__ = [
     "ScriptModule",
     "annotate",
     "enable_onednn_fusion",
+    "export",
     "export_opnames",
     "fork",
     "freeze",

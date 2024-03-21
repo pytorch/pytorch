@@ -2,8 +2,7 @@
 
 #include <cstdlib>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 namespace {
 PythonGILHooks* python_gil_hooks = nullptr;
@@ -28,5 +27,4 @@ void SetPythonGILHooks(PythonGILHooks* hooks) {
   python_gil_hooks = hooks;
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

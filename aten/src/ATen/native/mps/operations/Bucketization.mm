@@ -252,7 +252,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
@@ -308,7 +308,7 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
     return result;
   }
 
-  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing
+  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaining
   // the original result tensor
   Tensor out = result.contiguous();
 

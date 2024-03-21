@@ -901,6 +901,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     current_data.push(e);
     data.push(e);
     total_mem += size;
+    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
   }
 
   for (const elem of initially_allocated) {
@@ -969,9 +970,11 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     elements_length: elements.length,
     context_for_id: id => {
       const elem = elements[id];
-      let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
-        elem.size
-      } bytes)`;
+      let text = `Addr: ${formatAddr(elem)}`;
+      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+      text = `${text}, Total memory used after allocation: ${formatSize(
+        elem.max_allocated_mem,
+      )}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }

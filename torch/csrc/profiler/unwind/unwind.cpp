@@ -1,5 +1,6 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -43,6 +44,7 @@ Stats stats() {
 #include <vector>
 
 #include <c10/util/irange.h>
+#include <cxxabi.h>
 #include <torch/csrc/profiler/unwind/communicate.h>
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
@@ -334,6 +336,19 @@ c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
 }
 
 struct Symbolizer {
+  Symbolizer() {
+    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+    if (envar != nullptr) {
+      // currently we take user's input as is without checking
+      addr2line_binary_ = envar;
+      TORCH_WARN("Use custom addr2line binary: ", addr2line_binary_);
+    } else {
+      addr2line_binary_ = "addr2line"; // default
+    }
+    if (torch::get_disable_addr2line()) {
+      addr2line_binary_ = nullptr;
+    }
+  }
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
     return std::lock_guard<std::mutex>(mutex);
@@ -342,6 +357,7 @@ struct Symbolizer {
     static Symbolizer singleton;
     return singleton;
   }
+
   void request(void* addr) {
     if (frame_map_.count(addr)) {
       return;
@@ -349,6 +365,16 @@ struct Symbolizer {
     auto maybe_library = libraryFor(addr);
     if (!maybe_library) {
       frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
+      return;
+    }
+    if (addr2line_binary_ == nullptr) {
+      Dl_info dlinfo;
+      std::string funcname = "??";
+      if (dladdr(addr, &dlinfo) && dlinfo.dli_sname) {
+        funcname = demangle(dlinfo.dli_sname);
+      }
+      frame_map_[addr] = Frame{
+          maybe_library->first, std::move(funcname), maybe_library->second - 1};
       return;
     }
     has_pending_results_ = true;
@@ -382,6 +408,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
+  const char* addr2line_binary_;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -396,11 +423,13 @@ struct Symbolizer {
     if (it == entries_.end()) {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-          "addr2line", "-C", "-f", "-e", name.c_str(), nullptr};
+          addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
                .insert_or_assign(
                    name,
-                   Entry{std::make_unique<Communicate>("addr2line", args), {}})
+                   Entry{
+                       std::make_unique<Communicate>(addr2line_binary_, args),
+                       {}})
                .first;
     }
     return it->second;
@@ -417,6 +446,19 @@ struct Symbolizer {
       std::string lineno_str = filename_lineno.substr(colon + 1);
       frame.lineno = lineno_str == "?" ? 0 : std::stoi(lineno_str);
       frame_map_[e.queried[e.completed]] = std::move(frame);
+    }
+  }
+  std::string demangle(const std::string& mangled_name) {
+    int status = 0;
+    char* realname =
+        abi::__cxa_demangle(mangled_name.c_str(), nullptr, nullptr, &status);
+    if (status == 0) {
+      std::string demangled_name(realname);
+      // NOLINTNEXTLINE
+      free(realname);
+      return demangled_name;
+    } else {
+      return mangled_name;
     }
   }
 };

@@ -79,7 +79,7 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
     assert isinstance(
         jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)
     ), f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
-    jit_model.save(artifact_path)
+    jit_model.save(artifact_path)  # type: ignore[call-arg]
 
     # Cleanup now that we have the actual serialized model.
     os.remove(module_path)

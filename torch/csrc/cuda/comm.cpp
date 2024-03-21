@@ -103,8 +103,9 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     if (device != tensor.get_device()) {
       diff_device_dst_tensors.emplace_back(at::empty(
           tensor.sizes(),
-          tensor.options().device(
-              at::Device(DeviceType::CUDA, device)))); // preserve memory format
+          tensor.options().device(at::Device(
+              DeviceType::CUDA,
+              static_cast<DeviceIndex>(device))))); // preserve memory format
     }
   }
   _broadcast_out_impl(tensor, diff_device_dst_tensors);
@@ -178,7 +179,7 @@ tensor_list2d broadcast_coalesced(
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
-  at::cuda::CUDAGuard device_guard(devices[0]);
+  at::cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(devices[0]));
   for (auto& chunk : torch::utils::take_tensors(tensors, buffer_size)) {
     auto type_id = chunk.type_id();
     type_checker.show(type_id);
@@ -189,7 +190,7 @@ tensor_list2d broadcast_coalesced(
       auto broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        device_guard.set_index(devices[i]);
+        device_guard.set_index(static_cast<DeviceIndex>(devices[i]));
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
@@ -203,7 +204,7 @@ tensor_list2d broadcast_coalesced(
       auto results = broadcast(
           torch::utils::flatten_dense_tensors(chunk.tensors), devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        device_guard.set_index(devices[i]);
+        device_guard.set_index(static_cast<DeviceIndex>(devices[i]));
         auto& device_outputs = outputs[i];
         for (auto& var :
              torch::utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
@@ -327,10 +328,10 @@ std::vector<at::Tensor> scatter(
         chunk_sizes->size());
   }
   dim = at::maybe_wrap_dim(dim, tensor);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> chunks = chunk_sizes
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
-      : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
+      : tensor.chunk(
+            /*chunks=*/static_cast<int64_t>(devices.size()), /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (const auto i : c10::irange(chunks.size())) {
     const auto device_index = static_cast<int16_t>(devices[i]);
@@ -494,7 +495,9 @@ at::Tensor gather(
   at::Device device(DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
     device = at::Device(
-        DeviceType::CUDA, destination_index ? *destination_index : -1);
+        DeviceType::CUDA,
+        destination_index ? static_cast<DeviceIndex>(*destination_index)
+                          : DeviceIndex(-1));
   }
 
   at::Tensor result =

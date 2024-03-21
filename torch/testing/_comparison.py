@@ -71,16 +71,10 @@ _DTYPE_PRECISIONS = {
 # The default tolerances of torch.float32 are used for quantized dtypes, because quantized tensors are compared in
 # their dequantized and floating point representation. For more details see `TensorLikePair._compare_quantized_values`
 _DTYPE_PRECISIONS.update(
-    {
-        dtype: _DTYPE_PRECISIONS[torch.float32]
-        for dtype in (
-            torch.quint8,
-            torch.quint2x4,
-            torch.quint4x2,
-            torch.qint8,
-            torch.qint32,
-        )
-    }
+    dict.fromkeys(
+        (torch.quint8, torch.quint2x4, torch.quint4x2, torch.qint8, torch.qint32),
+        _DTYPE_PRECISIONS[torch.float32],
+    )
 )
 
 

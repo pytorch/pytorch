@@ -535,7 +535,7 @@ class TestIndexing(TestCase):
             [[[2]], [[0, 3], [4, 1]], slice(None)],
             # non-contiguous indexing subspace
             [[0, 2, 3], slice(None), [1, 3, 4]],
-
+            # [...]
             # less dim, ellipsis
             [[0, 2], ],
             [[0, 2], slice(None)],

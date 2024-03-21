@@ -63,8 +63,8 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
     .check_all_same_dtype(false)
     .declare_static_dtype_and_device(self.scalar_type(), self.device())
     .add_output(out_tensor)
-    .add_input(self)
-    .add_input(restrided_self)
+    .add_const_input(self)
+    .add_const_input(restrided_self)
     .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));

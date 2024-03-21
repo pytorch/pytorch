@@ -56,7 +56,7 @@ class PackedSequence(PackedSequence_):
         However, :attr:`batch_sizes` should always be a CPU ``torch.int64`` tensor.
 
         This invariant is maintained throughout :class:`PackedSequence` class,
-        and all functions that construct a `:class:PackedSequence` in PyTorch
+        and all functions that construct a :class:`PackedSequence` in PyTorch
         (i.e., they only pass in tensors conforming to this constraint).
 
     """

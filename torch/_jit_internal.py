@@ -46,6 +46,7 @@ import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
+from torch._utils_internal import log_torchscript_usage
 from torch.futures import Future
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
@@ -65,7 +66,7 @@ try:
 
     LockType = _thread.LockType
 except ImportError:
-    import _dummy_thread
+    import _dummy_thread  # type: ignore[import-not-found]
 
     LockType = _dummy_thread.LockType
 
@@ -105,9 +106,7 @@ def createResolutionCallbackFromEnv(lookup_base):
 
     def lookupInModule(qualified_name, module):
         if "." in qualified_name:
-            parts = qualified_name.split(".")
-            base = parts[0]
-            remaining_pieces = ".".join(parts[1:])
+            base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
             return lookupInModule(remaining_pieces, module_value)
         else:
@@ -584,6 +583,7 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
+    log_torchscript_usage("export")
     fn._torchscript_modifier = FunctionModifiers.EXPORT
     return fn
 
@@ -625,6 +625,7 @@ def unused(fn):
             # exception raised
             m(torch.rand(100))
     """
+    log_torchscript_usage("unused")
     if isinstance(fn, property):
         prop = fn
         setattr(  # noqa: B010
@@ -712,6 +713,7 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
+    log_torchscript_usage("ignore")
 
     if callable(drop):
         # used without any args, so drop is actually a function
@@ -937,7 +939,7 @@ _overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno = {}
+_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
 
 
 def _overload_method(func):
@@ -1099,8 +1101,10 @@ else:
 
 
 def is_final(ann) -> bool:
-    return ann.__module__ in {"typing", "typing_extensions"} and (
-        get_origin(ann) is Final or isinstance(ann, type(Final))
+    return (
+        hasattr(ann, "__module__")
+        and ann.__module__ in {"typing", "typing_extensions"}
+        and (get_origin(ann) is Final or isinstance(ann, type(Final)))
     )
 
 

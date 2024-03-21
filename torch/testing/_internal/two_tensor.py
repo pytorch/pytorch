@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing

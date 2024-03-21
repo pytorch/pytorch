@@ -395,6 +395,8 @@ bool InterpreterState::run(Stack& stack) {
 }
 
 IValue& InterpreterState::reg(size_t reg) {
+  TORCH_CHECK(
+      reg > 0 && reg <= registers_.size(), "Invalid register index: ", reg);
   return *(registers_.end() - reg);
 }
 

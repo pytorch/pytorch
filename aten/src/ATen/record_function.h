@@ -7,7 +7,6 @@
 #include <c10/util/SmallVector.h>
 
 #include <array>
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <variant>
@@ -244,7 +243,7 @@ constexpr CallbackHandle INVALID_CALLBACK_HANDLE{0};
 // thread-local function callbacks. Moreover, it prevents saving to
 // ThreadLocalState because std::atomic is non-copyable.
 struct RecordFunctionCallbacksEntry {
-  RecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+  RecordFunctionCallbacksEntry(RecordFunctionCallback cb, CallbackHandle h)
       : callback_(cb), handle_(h) {}
 
   RecordFunctionCallback callback_;

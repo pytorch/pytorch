@@ -84,7 +84,7 @@ Registration serves two purposes:
 
 * You can pass a string containing your backend function's name to ``torch.compile`` instead of the function itself,
   for example, ``torch.compile(model, backend="my_compiler")``.
-* It is required for use with the `minifier <https://pytorch.org/docs/main/compile/troubleshooting.html>`__. Any generated
+* It is required for use with the `minifier <https://pytorch.org/docs/main/torch.compiler_troubleshooting.html>`__. Any generated
   code from the minifier must call your code that registers your backend function, typically through an ``import`` statement.
 
 Custom Backends after AOTAutograd

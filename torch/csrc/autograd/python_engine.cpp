@@ -22,7 +22,6 @@
 #endif
 
 #include <memory> // for unique_ptr
-#include <unordered_set>
 #include <utility>
 
 using namespace torch::autograd;
