@@ -5,10 +5,9 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
-from ..codegen.common import ChoiceCaller
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
-from ..ir import FixedLayout
+from ..ir import ChoiceCaller, FixedLayout
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
