@@ -2044,8 +2044,10 @@ class ExportedProgramDeserializer:
         constants: Union[Dict[str, torch.Tensor], bytes],
     ) -> ep.ExportedProgram:
         assert isinstance(exported_program, ExportedProgram)
+        version = exported_program.schema_version
 
-        if exported_program.schema_version.major != SCHEMA_VERSION[0]:
+        # TODO(zhxchen17) blocked on thrift schema refactor
+        if version.major != SCHEMA_VERSION[0] and not (version.major == 0 and version.minor == 0):
             raise SerializeError(
                 f"Serialized schema version {exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."
