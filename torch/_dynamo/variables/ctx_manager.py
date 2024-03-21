@@ -120,9 +120,10 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
-            raise unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function"
-            ) from e
+            unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
+                from_exc=e,
+            )
 
     def exit(self, tx, *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
@@ -141,9 +142,10 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 {},
             )
         except Unsupported as e:
-            raise unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function"
-            ) from e
+            unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __exit__ function",
+                from_exc=e,
+            )
 
         tx.generic_context_manager_depth -= 1
         return x
