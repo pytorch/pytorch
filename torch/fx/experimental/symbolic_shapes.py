@@ -511,7 +511,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     if min is None:
         min = 0
     if max is None:
-        max = sympy.oo
+        max = sys.maxsize - 1
 
     if max < min:
         raise ValueError(
