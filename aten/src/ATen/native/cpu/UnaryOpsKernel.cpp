@@ -143,6 +143,7 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
+          iter.cast_outputs();
         } else if (eps < scalar_t(0)) {
           const Vectorized<scalar_t> kOneVec(scalar_t(1));
           cpu_kernel_vec(
