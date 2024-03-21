@@ -3583,8 +3583,19 @@ class CppScheduling(BaseScheduling):
 
                 def get_indexing_ranges_exprs(node):
                     if isinstance(node, FusedSchedulerNode):
-                        assert len(node.snodes) > 0
-                        return get_indexing_ranges_exprs(node.snodes[0])
+                        assert len(node.snodes) > 0, node.snodes
+                        var_ranges = None
+                        indexing_exprs = set()
+                        for snode in node.snodes:
+                            v, exprs = get_indexing_ranges_exprs(snode)
+                            if var_ranges is None:
+                                var_ranges = v
+                            # TODO: this can be also a strong assumption that fused nodes have
+                            # the same variable and ranges
+                            assert var_ranges == v, (var_ranges, v, node.snodes)
+                            for expr in exprs:
+                                indexing_exprs.add(expr)
+                        return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
                         comp_buffer = node.node
