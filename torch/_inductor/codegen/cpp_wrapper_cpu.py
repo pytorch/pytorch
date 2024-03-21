@@ -257,42 +257,21 @@ class CppWrapperCpu(WrapperCodeGen):
     def generate_input_output_runtime_checks(self):
         from .cpp import DTYPE_TO_ATEN
 
-        dtype_to_enum = {
-            torch.uint8: 0,
-            torch.int8: 1,
-            torch.int16: 2,
-            torch.int32: 3,
-            torch.int64: 4,
-            torch.float16: 5,
-            torch.float32: 6,
-            torch.float64: 7,
-            # the following dtype(s) are not supported by cpp_wrapper
-            # torch.uint16, torch.uint32, torch.uint64, torch.uint32
-            torch.complex32: 8,
-            torch.complex64: 9,
-            torch.complex128: 10,
-            torch.bool: 11,
-            torch.bfloat16: 15,
-            torch.float8_e4m3fn: 23,
-            torch.float8_e5m2: 24,
-            torch.float8_e4m3fnuz: 25,
-            torch.float8_e5m2fnuz: 26,
-        }
-
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
         # real input/output tensor match ones provided at compile time via sample
         # input/output.
         def gen_check(handle_kind, idx, name, tensor):
             self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
-            expected_dtype = dtype_to_enum[tensor.dtype]
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
+            dtype_str = str(tensor.dtype).split(".")[-1]
             self.prefix.splice(
                 f"""
-                    if ({expected_dtype} != {name}_dtype) {{
+                    int32_t {name}_expected_dtype = aoti_torch_dtype_{dtype_str}();
+                    if ({name}_expected_dtype != {name}_dtype) {{
                         std::stringstream ss;
                         ss << "{handle_kind}[{idx}]: unmatched dtype, "
-                           << "expected: {expected_dtype} ({expected_dtype_name=}, "
+                           << "expected: {name}_expected_dtype ({expected_dtype_name=}, "
                            << "but got: " << {name}_dtype << "\\n";
                         throw std::runtime_error(ss.str());
                     }}
