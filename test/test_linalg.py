@@ -2399,7 +2399,7 @@ class TestLinalg(TestCase):
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
-            A = u.matmul(s.diag_embed()).matmul(v.mT)
+            A = u.matmul(s.to(a_input.dtype).diag_embed()).matmul(v.mT)
             self.assertEqual(A, a, rtol=1e-7, atol=2e-7)
 
             # check if svd_lowrank produces same singular values as torch.svd
