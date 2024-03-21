@@ -833,7 +833,7 @@ class ONNXProgram:
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         **model_kwargs,
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    ) -> Sequence[Union[torch.Tensor, int, float, bool, torch.dtype]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
