@@ -317,7 +317,8 @@ def meta_randperm_default(
     )
 
 
-@register_meta(aten.randint.default)
+@register_meta([aten.randint.default, aten.randint.out])
+@out_wrapper()
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
@@ -326,7 +327,8 @@ def meta_randint(
     )
 
 
-@register_meta(aten.randint.low)
+@register_meta([aten.randint.low, aten.randint.low_out])
+@out_wrapper()
 def meta_randint_low(
     low,
     high,
@@ -342,7 +344,8 @@ def meta_randint_low(
     )
 
 
-@register_meta(aten.rand.default)
+@register_meta([aten.rand.default, aten.rand.out])
+@out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
