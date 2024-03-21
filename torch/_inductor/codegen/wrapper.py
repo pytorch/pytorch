@@ -1303,9 +1303,9 @@ class WrapperCodeGen(CodeGen):
         raise NotImplementedError()
 
     def val_to_arg_str(self, s):
-        from torch.utils._triton import dtype_to_string, has_triton
+        from torch.utils._triton import dtype_to_string, has_triton_package
 
-        if has_triton():
+        if has_triton_package():
             import triton
 
         if isinstance(s, SymTypes):
@@ -1326,7 +1326,7 @@ class WrapperCodeGen(CodeGen):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
-        elif has_triton() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
+        elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
         else:
             return repr(s)

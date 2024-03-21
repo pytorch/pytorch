@@ -66,6 +66,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    do_bench,
     get_kernel_metadata,
     is_dynamic,
     pad_listlike,
@@ -3476,6 +3477,99 @@ class TritonTemplateBuffer(TemplateBuffer):
     pass
 
 
+PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
+
+
+class ChoiceCaller:
+    """
+    Represents a possible choice used in autotune_process.py.
+    During autotuning, self.benchmark() is first called to get benchmark result,
+    and if this choice is selected, self.output_node() is called to get the output_node.
+
+    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    """
+
+    def __init__(self, name, input_nodes, layout):
+        super().__init__()
+        self.name = name
+        self.layout = layout
+        self.input_nodes = input_nodes
+
+    def benchmark(self, *args, out) -> float:
+        algo = self.to_callable()
+        return do_bench(lambda: algo(*args, out=out))
+
+    def call_name(self) -> str:
+        raise NotImplementedError()
+
+    def to_callable(self):
+        raise NotImplementedError()
+
+    def hash_key(self) -> str:
+        raise NotImplementedError()
+
+    def output_node(self) -> "TensorBox":
+        raise NotImplementedError()
+
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        return {}
+
+
+class TritonTemplateCallerBase(ChoiceCaller):
+    def get_make_kernel_render(self) -> Any:
+        raise NotImplementedError()
+
+
+class MultiTemplateBuffer(TritonTemplateBuffer):
+    """
+    Represents a Buffer with multiple backing implementation choices.
+
+    Choices can be TritonTemplates or ExternKernels. During scheduling if there is a potential
+    epilogue we will benchmark each of the choices with the epilogue to determine an implementation.
+    Otherwise, the fastest base choice will be chosen.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: List[IRNode],
+        choice_timings: Callable[[], Dict[ChoiceCaller, float]],
+    ):
+        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        self._choice_timings_fn = choice_timings
+        self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
+        self.original_inputs = inputs
+
+    @property
+    def choice_timings(self) -> Dict[ChoiceCaller, float]:
+        if self._choice_timings is None:
+            self._choice_timings = self._choice_timings_fn()
+        return self._choice_timings
+
+    @contextlib.contextmanager
+    def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):
+        assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        assert self.layout == caller.layout
+
+        render = self.make_kernel_render
+        self.make_kernel_render = caller.get_make_kernel_render()
+        try:
+            yield
+        finally:
+            self.make_kernel_render = render
+
+    def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase):
+        assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        assert self.layout.size == caller.layout.size
+        assert self.layout.stride == caller.layout.stride
+        self.make_kernel_render = caller.get_make_kernel_render()
+
+    def get_min_choice(self) -> Tuple[ChoiceCaller, float]:
+        min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
+        return (min_choice, self.choice_timings[min_choice])
+
+
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(
         self,
@@ -5477,9 +5571,22 @@ def _prepare_convolution_fusion_create(
 
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
-        output_stride = make_channels_last_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
+
+    # We won't do weight prepack for Conv if dynamic_shapes.
+    # In static shape cases, since weight is prepacked, we'll always force output to be channels last in the Conv kernel.
+    # In dynamic shape cases, for input with channels = 1, like tensor of size (s0, 1, 28, 28) and stride (784, 784, 28, 1),
+    # x = cls.require_stride_order(x, req_stride_order) where req_stride_order is in the channels last order
+    # won't change the stride of this tensor since stride for dimensions of size 1 is ignored. While in Conv kernel,
+    # this tensor is considered as channels first and the output will be in contiguous format.
+    # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
+    dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
+    if dynamic_shapes and is_contiguous_storage_and_layout(x):
+        output_stride = make_contiguous_strides_for(output_size)
+    else:
+        output_stride = make_channels_last_strides_for(output_size)
+
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
@@ -6927,113 +7034,6 @@ def _has_aliased_buffers(buffers):
 
 
 @dataclasses.dataclass
-class WhileLoop(ExternKernel):
-    operands: Optional[List[TensorBox]] = None
-    cond_subgraph: Optional[Subgraph] = None
-    body_subgraph: Optional[Subgraph] = None
-    outputs: Optional[List[MultiOutput]] = None
-
-    def __init__(
-        self,
-        operands: List[TensorBox],
-        cond_subgraph: Subgraph,
-        body_subgraph: Subgraph,
-        layout: MultiOutputLayout,
-    ):
-        self.operands = operands
-        self.cond_subgraph = cond_subgraph
-        self.body_subgraph = body_subgraph
-
-        super().__init__(
-            name=None,
-            layout=layout,  # type: ignore[arg-type]
-            inputs=operands,  # type: ignore[list-item]
-        )
-
-        self.name = V.graph.register_buffer(self)
-
-    @classmethod
-    def create(
-        cls,
-        cond_fn: Subgraph,
-        body_fn: Subgraph,
-        operands: List[TensorBox],
-    ):
-        operands = [cls.realize_input(x) for x in operands]
-
-        fx_operands = V.graph.current_node.args[-1]
-        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
-
-        for subgraph in (cond_fn, body_fn):
-            if subgraph.graph is None:
-                # create and lower subgraphs
-                subgraph.graph = V.graph.make_subgraph(
-                    gm=subgraph.graph_module,
-                    example_inputs=fake_operands,
-                    subgraph_name=subgraph.name,
-                )
-                with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_operands)
-
-        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
-        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
-
-        if _has_aliased_buffers(body_outputs):
-            raise AssertionError(
-                "Output aliasing is currently not supported in compiled torch.while_loop. "
-                f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
-            )
-
-        # make sure cond_fn returns a boolean scalar Tensor
-        assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
-
-        breakpoint()
-
-        # make sure operands and body outputs are structurally equivalent
-        assert len(operands) == len(body_outputs), (operands, body_outputs)
-        for i, (op, bo) in enumerate(zip(operands, body_outputs)):
-            assert op.get_size() == bo.get_size(), (i, op, bo)
-            assert op.get_stride() == bo.get_stride(), (i, op, bo)
-            assert op.get_device() == bo.get_device(), (i, op, bo)
-            assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
-        assert (
-            len(operands) > 0
-        ), "torch.while_loop is assumed to have at least one operand"
-
-        while_loop = WhileLoop(
-            operands=operands,
-            cond_subgraph=cond_fn,
-            body_subgraph=body_fn,
-            # asserted above that there is at least one operand
-            layout=MultiOutputLayout(operands[0].get_device()),
-        )
-
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                ),
-                while_loop,
-                [(list, i)],
-            )
-            for i, output in enumerate(body_outputs)
-        ]
-
-        while_loop.outputs = outputs
-        return outputs
-
-    def codegen(self, wrapper):
-        wrapper.codegen_while_loop(self)
-
-
-@dataclasses.dataclass
 class Conditional(ExternKernel):
     predicate: Optional[DynamicScalar] = None
     operands: Optional[List[TensorBox]] = None
@@ -7137,6 +7137,111 @@ class Conditional(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_conditional(self)
+
+
+@dataclasses.dataclass
+class WhileLoop(ExternKernel):
+    operands: Optional[List[TensorBox]] = None
+    cond_subgraph: Optional[Subgraph] = None
+    body_subgraph: Optional[Subgraph] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self,
+        operands: List[TensorBox],
+        cond_subgraph: Subgraph,
+        body_subgraph: Subgraph,
+        layout: MultiOutputLayout,
+    ):
+        self.operands = operands
+        self.cond_subgraph = cond_subgraph
+        self.body_subgraph = body_subgraph
+
+        super().__init__(
+            name=None,
+            layout=layout,  # type: ignore[arg-type]
+            inputs=operands,  # type: ignore[list-item]
+        )
+
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(
+        cls,
+        cond_fn: Subgraph,
+        body_fn: Subgraph,
+        operands: List[TensorBox],
+    ):
+        operands = [cls.realize_input(x) for x in operands]
+
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
+
+        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
+        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
+
+        if _has_aliased_buffers(body_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.while_loop. "
+                f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
+            )
+
+        # make sure cond_fn returns a boolean scalar Tensor
+        assert len(cond_outputs) == 1, cond_outputs
+        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
+        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+
+        # make sure operands and body outputs are structurally equivalent
+        assert len(operands) == len(body_outputs), (operands, body_outputs)
+        for i, (op, bo) in enumerate(zip(operands, body_outputs)):
+            assert op.get_size() == bo.get_size(), (i, op, bo)
+            assert op.get_stride() == bo.get_stride(), (i, op, bo)
+            assert op.get_device() == bo.get_device(), (i, op, bo)
+            assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
+            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+        assert (
+            len(operands) > 0
+        ), "torch.while_loop is assumed to have at least one operand."
+
+        while_loop = WhileLoop(
+            operands=operands,
+            cond_subgraph=cond_fn,
+            body_subgraph=body_fn,
+            # asserted above that there is at least one operand
+            layout=MultiOutputLayout(operands[0].get_device()),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                while_loop,
+                [(list, i)],
+            )
+            for i, output in enumerate(body_outputs)
+        ]
+
+        while_loop.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_while_loop(self)
 
 
 class InterpreterShim(torch.fx.Interpreter):
