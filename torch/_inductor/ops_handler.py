@@ -214,7 +214,6 @@ class OpsHandler(Protocol[T]):
         dtypes: Tuple[torch.dtype, ...],
         combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
         values: Tuple[T, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
@@ -515,9 +514,9 @@ class MockHandler:
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, inits):
+    def scan(dtypes, combine_fn, values):
         return tuple(
-            f"ops.scan({dtypes}, {combine_fn}, {values}, {inits})[{i}]"
+            f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
             for i in range(len(values))
         )
 

@@ -5432,7 +5432,7 @@ def cumsum(x, axis=None, dtype=None):
         return (ops.add(a, b),)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(0,))
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -5456,7 +5456,7 @@ def cumprod(x, axis=None, dtype=None):
         return (ops.mul(a, b),)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(1,))
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
@@ -5478,9 +5478,7 @@ def logcumsumexp(x, dim):
         return clone(x)
 
     kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
-    (result,) = ir.Scan.create(
-        **kwargs, combine_fn=log_add_exp_helper, inits=(float("-inf"),)
-    )
+    (result,) = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper)
     if result is None:
         return fallback_logcumsumexp(x, dim=dim)
     return result
@@ -5510,9 +5508,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(
-        **kwargs, combine_fn=combine_fn, inits=(min_value, 0)
-    )
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5542,9 +5538,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(
-        **kwargs, combine_fn=combine_fn, inits=(max_value, 0)
-    )
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
