@@ -1487,8 +1487,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(
                 counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
             )
-            # 3. QLinear Unary fusion in post-grad fusion pass * 1
-            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
+            # 3. QLinear Unary fusion in post-grad fusion pass * 2
+            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 2)
 
         self._test_common(
             mod,
