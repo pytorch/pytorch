@@ -8,7 +8,7 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.codegen.common import ChoiceCaller
+from torch._inductor.ir import ChoiceCaller
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
