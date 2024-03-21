@@ -1470,7 +1470,6 @@ const auto options = TensorOptions()
     .layout({arg_parser_outputs['layout'].expr})
     .requires_grad({arg_parser_outputs['requires_grad'].expr})
     .pinned_memory({arg_parser_outputs['pin_memory'].expr});
-torch::utils::maybe_initialize_device(options);
 """
         )
         lambda_args_exprs["options"] = "options"

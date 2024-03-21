@@ -1622,6 +1622,17 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
 
+    @unittest.skipIf(RUN_CUDA, "requires CUDA to not be initalized")
+    def test_factory_does_not_initialize_cuda(self):
+        for api in [torch.empty, torch.ones, torch.zeros, torch.rand]:
+            with FakeTensorMode():
+                t = api(10, device='cuda')
+            self.assertFalse(torch.cuda.is_initialized())
+
+            self.assertEqual(t.device.type, "cuda")
+            self.assertEqual(t.device.index, 0)
+            self.assertEqual(t.shape, (10,))
+
     def test_inference_mode(self):
         """
         Test that caching handles inference mode correctly.

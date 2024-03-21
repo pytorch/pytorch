@@ -491,9 +491,16 @@ class FakeTensor(torch.Tensor):
             in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            device = torch.device(
-                f"{device.type}:{getattr(torch, device.type).current_device()}"
-            )
+            device_mod = getattr(torch, device.type)
+            # If the device isn't initialized, then we assume that the current
+            # device index is 0 (because the user isn't able to change it to
+            # something else), to avoid initialization.
+            if device_mod.is_initialized():
+                device_idx = device_mod.current_device()
+            else:
+                device_idx = 0
+            device = torch.device(f"{device.type}:{device_idx}")
+
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
