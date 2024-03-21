@@ -95,7 +95,6 @@ def generate_ttir(kernel, kwargs):
     """
     Uses Triton's internal code generation to create TTIR
     """
-    import triton
     from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
@@ -145,15 +144,21 @@ def generate_ttir(kernel, kwargs):
         if i not in kernel.constexprs
     }
 
-    context = triton._C.libtriton.ir.context()
-    target = triton.runtime.driver.active.get_current_target()
-    backend = triton.compiler.compiler.make_backend(target)
+    def get_backend():
+        from triton.compiler.backends.cuda import CUDABackend
+        from triton.runtime.driver import driver
+
+        target = driver.get_current_target()
+        return CUDABackend(target)
+
+    backend = get_backend()
+
     options = backend.parse_options(dict())
-    triton._C.libtriton.ir.load_dialects(context)
-    backend.load_dialects(context)
+    # triton._C.libtriton.triton.ir.load_dialects(context)
+    # backend.load_dialects(context)
 
     src = ASTSource(kernel, signature, constants, specialization)
-    ttir_module = src.make_ir(options, context)
+    ttir_module = src.make_ir(options)
     if not ttir_module.verify():
         raise Exception("Verification for TTIR module has failed")
 
