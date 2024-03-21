@@ -861,6 +861,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
+        if not isinstance(result, (tuple, list)):
+            # nested subgraphs can have singleton outputs
+            result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
@@ -878,7 +881,10 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
-        fx_node_args = list(V.graph.current_node.args[0])  # type: ignore[arg-type]
+        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
+        if not isinstance(fx_node_args, (tuple, list)):
+            # nested subgraphs can have singleton outputs
+            fx_node_args = (fx_node_args,)
         result = [ir.ExternKernel.realize_input(x) for x in result]
         result_correct_strides = []
 
