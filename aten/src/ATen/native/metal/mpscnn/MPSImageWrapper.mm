@@ -40,8 +40,7 @@ using namespace at::native::metal;
     if (_imageWrapper) {
       _imageWrapper->release();
     }
-    // throw an exception with error details
-    METAL_THROW_IF_ERROR(error, "Command buffer execution failed!");
+    // T159183991: ignore error. We prefer to not crash the app.
   }
 }
 
