@@ -2477,7 +2477,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
-    def test_outer_loop_fusion(self):
+    def test_outer_loop_fusion_amax(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
             return x - max

@@ -1892,10 +1892,31 @@ class CppKernel(Kernel):
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
+            def gen_loop_kernel(loop: LoopLevel):
+                def is_parallel_reduction(loop):
+                    root = loop.get_root()
+                    return root.is_reduction and root.parallel
+
+                kernels = loop.get_kernels()
+                assert len(kernels) == 1
+                if type(
+                    kernels[0]
+                ) is not OuterLoopFusedKernel and is_parallel_reduction(loop):
+                    kernels[0].update_stores_with_parallel_reduction()
+                gen_kernel(kernels[0])
+
             def gen_kernel(kernel):
                 if type(kernel) is OuterLoopFusedKernel:
-                    for loop_level in kernel.inner:
-                        gen_loops(loop_level.inner, loop_level.is_reduction)
+                    for loop in kernel.inner:
+                        if loop.inner:
+                            gen_loops(loop.inner, loop.is_reduction)
+                        else:
+                            with contextlib.ExitStack() as stack:
+                                # If there is any kernel existing at the final outer loop
+                                # fusion level, the kernel code should be placed within its
+                                # respective indent to prevent the duplication of variable definitions.
+                                stack.enter_context(code.indent())
+                                gen_loop_kernel(loop)
                 else:
                     with contextlib.ExitStack() as stack:
                         assert kernel
@@ -1962,10 +1983,6 @@ class CppKernel(Kernel):
                             code.splice(get_reduction_code_buffer(loops, "suffix"))
 
             def gen_loop(loop: LoopLevel):
-                def is_parallel_reduction(loop):
-                    root = loop.get_root()
-                    return root.is_reduction and root.parallel
-
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
                     if loop_lines is None:
@@ -1976,12 +1993,7 @@ class CppKernel(Kernel):
                     if loop.inner:
                         gen_loops(loop.inner, loop.is_reduction)
                     else:
-                        kernels = loop.get_kernels()
-                        assert len(kernels) == 1
-                        if type(kernels[0]) is not OuterLoopFusedKernel:
-                            if is_parallel_reduction(loop):
-                                kernels[0].update_stores_with_parallel_reduction()
-                        gen_kernel(kernels[0])
+                        gen_loop_kernel(loop)
 
             stack.enter_context(code.indent())
             if loop_nest.root:
@@ -3887,13 +3899,17 @@ class CppScheduling(BaseScheduling):
                             == getattr(_right_loop_level, _attr_compare)
                             for _attr_compare in _outer_loops_attr_compare_list
                         )
-                        and _left_loop_level.kernel is None
-                        and _right_loop_level.kernel is None
                     ):
                         return False
 
                     assert _loop_fusion_depth >= 1
                     if (_loop_fusion_depth := _loop_fusion_depth - 1) > 0:
+                        # If the next loop level is expected to undergo outer loop fusion,
+                        # there should be no kernel present at the current loop level.
+                        assert (
+                            _left_loop_level.kernel is None
+                            and _right_loop_level.kernel is None
+                        )
                         # Check next loop level attr
                         if len(_left_loop_level.inner) != len(
                             _right_loop_level.inner
