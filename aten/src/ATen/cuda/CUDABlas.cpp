@@ -1312,10 +1312,10 @@ void int8_gemm(
 #if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
-  cudaDataType_t scaleType = HIPTOLT(CUDA_R_32I);
+  cudaDataType_t scaleType = CUDA_R_32I;
 
   cudaDataType_t abType = CUDA_R_8I;
-  cudaDataType_t cType = HIPTOLT(CUDA_R_32I);
+  cudaDataType_t cType = CUDA_R_32I;
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -1331,6 +1331,7 @@ void int8_gemm(
   // cublas team: alpha and beta need to be the same dtype as of scaleType
   at::opmath_type<int32_t> alpha_val = 1;
   int32_t beta_val = 0;
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
 
 #ifdef USE_ROCM
   CuBlasLtMatmulPreference preference;
@@ -1340,7 +1341,6 @@ void int8_gemm(
   auto workspace = allocator.allocate(workspaceSize);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
