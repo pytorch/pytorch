@@ -21,6 +21,14 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2)
 
+#ifndef SLEEF_CONST
+#if defined (__GNUC__) || defined (__clang__) || defined(__INTEL_COMPILER)
+#define SLEEF_CONST __attribute__((const))
+#elif defined(_MSC_VER)
+#define SLEEF_CONST
+#endif
+#endif
+
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
   o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
