@@ -22,7 +22,15 @@ struct TORCH_XPU_API XPUEvent {
   XPUEvent(bool enable_timing = false) noexcept
       : enable_timing_{enable_timing} {}
 
-  ~XPUEvent() = default;
+  ~XPUEvent() {
+    if (isCreated()) {
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_deletion(
+            at::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+      }
+    }
+  }
 
   XPUEvent(const XPUEvent&) = delete;
   XPUEvent& operator=(const XPUEvent&) = delete;
@@ -77,6 +85,13 @@ struct TORCH_XPU_API XPUEvent {
   void record(const XPUStream& stream) {
     if (!isCreated()) {
       device_index_ = stream.device_index();
+      event_ = std::make_unique<sycl::event>(
+          stream.queue().ext_oneapi_submit_barrier());
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_creation(
+            at::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+      }
     } else {
       TORCH_CHECK(
           device_index_ == stream.device_index(),
@@ -86,9 +101,16 @@ struct TORCH_XPU_API XPUEvent {
           stream.device_index(),
           ".");
       event_.reset();
+      event_ = std::make_unique<sycl::event>(
+          stream.queue().ext_oneapi_submit_barrier());
     }
-    event_ = std::make_unique<sycl::event>(
-        stream.queue().ext_oneapi_submit_barrier());
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          at::kXPU,
+          reinterpret_cast<uintptr_t>(event_.get()),
+          reinterpret_cast<uintptr_t>(&stream.queue()));
+    }
   }
 
   void block(const XPUStream& stream) {
@@ -96,6 +118,13 @@ struct TORCH_XPU_API XPUEvent {
       std::vector<sycl::event> event_list{event()};
       // Make this stream wait until event_ is completed.
       stream.queue().ext_oneapi_submit_barrier(event_list);
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_wait(
+            at::kXPU,
+            reinterpret_cast<uintptr_t>(event_.get()),
+            reinterpret_cast<uintptr_t>(&stream.queue()));
+      }
     }
   }
 
@@ -117,6 +146,11 @@ struct TORCH_XPU_API XPUEvent {
 
   void synchronize() const {
     if (isCreated()) {
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_synchronization(
+            at::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+      }
       event().wait_and_throw();
     }
   }
