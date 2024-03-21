@@ -8,7 +8,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
+from ..pattern_matcher import fwd_only, gen_register_replacement, joint_fwd_bwd, Match
 
 aten = torch.ops.aten
 
@@ -436,7 +436,8 @@ def pad_bmm(
         return aten.bmm(mat1, mat2)[:, :-m_padded_length, :].contiguous()
 
 
-def _get_mm_patterns():
+@functools.lru_cache(None)
+def _pad_mm_init():
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -486,33 +487,24 @@ def _get_mm_patterns():
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
         name = pattern.__name__
 
-        yield f"{name}_training", {
-            "search_fn": pattern,
-            "replace_fn": replacement,
-            "example_inputs": args,
-            "trace_fn": joint_fwd_bwd,
-            "pass_dicts": patterns,
-            "extra_check": extra_check,
-            "scalar_workaround": workaround,
-        }
+        gen_register_replacement(
+            f"{name}_training",
+            pattern,
+            replacement,
+            args,
+            joint_fwd_bwd,
+            patterns,
+            extra_check=extra_check,
+            scalar_workaround=workaround,
+        )
 
-        yield f"{name}_inference", {
-            "search_fn": pattern,
-            "replace_fn": replacement,
-            "example_inputs": args,
-            "trace_fn": fwd_only,
-            "pass_dicts": patterns,
-            "extra_check": extra_check,
-            "scalar_workaround": workaround,
-        }
-
-
-@functools.lru_cache(None)
-def _pad_mm_init():
-    from .serialized_patterns.central_index import get_serialized_pattern
-
-    for key, register_replacement_kwargs in _get_mm_patterns():
-        search_fn_pattern = get_serialized_pattern(key)
-        register_replacement(
-            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
+        gen_register_replacement(
+            f"{name}_inference",
+            pattern,
+            replacement,
+            args,
+            fwd_only,
+            patterns,
+            extra_check=extra_check,
+            scalar_workaround=workaround,
         )

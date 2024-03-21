@@ -137,7 +137,7 @@ expand_default_4 = CallFunction(aten.expand.default, permute_default_3, Ignored(
 clone_default_3 = CallFunction(aten.clone.default, expand_default_4, memory_format=torch.contiguous_format)
 view_default_5 = CallFunction(aten.view.default, clone_default_3, Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, view_default_4, view_default_5)
-_sfdp_pattern_17_inference = CallFunction(aten.view.default, bmm_default_1, Ignored())
+_sfdp_pattern_17_inference = CallFunction(aten.view.default, bmm_default_1, Ignored(), _users=0)
 
 
 rand_default = CallFunction(aten.rand.default, Ignored(), dtype=Ignored(), device=Ignored(), pin_memory=False)
@@ -253,4 +253,4 @@ expand_default_4 = CallFunction(aten.expand.default, permute_default_3, Ignored(
 clone_default_3 = CallFunction(aten.clone.default, expand_default_4, memory_format=torch.contiguous_format)
 view_default_5 = CallFunction(aten.view.default, clone_default_3, Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, view_default_4, view_default_5)
-_sfdp_pattern_17_half_inference = CallFunction(aten.view.default, bmm_default_1, Ignored())
+_sfdp_pattern_17_half_inference = CallFunction(aten.view.default, bmm_default_1, Ignored(), _users=0)

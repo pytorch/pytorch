@@ -42,4 +42,4 @@ mm_pattern_training = MultiOutputPattern([mm_default,
 ])
 
 
-mm_pattern_inference = CallFunction(aten.mm.default, KeywordArg('mat1'), KeywordArg('mat2'))
+mm_pattern_inference = CallFunction(aten.mm.default, KeywordArg('mat1'), KeywordArg('mat2'), _users=0)
