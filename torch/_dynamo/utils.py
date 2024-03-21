@@ -1359,7 +1359,7 @@ def same(
                 # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
                 # Thus, it's possible that the correctness check failures for these models are
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
-                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
+                multiplier = 3.0 if res.dtype == torch.bfloat16 else 1.3
 
                 if (
                     fp64_ref.numel() < 1000
