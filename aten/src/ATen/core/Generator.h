@@ -1,12 +1,9 @@
 #pragma once
 
-#include <mutex>
-#include <deque>
-#include <atomic>
-#include <typeinfo>
-#include <utility>
-#include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <mutex>
+#include <utility>
 
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
