@@ -1695,6 +1695,8 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         outputs=None,
     ):
+        # No stack allocation when there is a fallback op
+        self.allow_stack_allocation = False
         if config.is_fbcode():
             assert op_overload is not None
             assert raw_args is not None
