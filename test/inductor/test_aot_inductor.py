@@ -992,6 +992,22 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_buffer_mutation(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("foo", torch.randn(4, 4, device=device))
+
+            def forward(self, x):
+                self.foo.add_(1)
+                return self.foo + x
+
+        example_inputs = (torch.rand(4, 4, device=self.device),)
+        torch._export.aot_compile(Model(self.device), example_inputs)
+        with self.assertRaisesRegex(AssertionError, "False is not true"):
+            # TODO: AOTI seems to mutate the buffer while tracing
+            self.check_model(Model(self.device), example_inputs)
+
     @skipIfRocm
     @requires_multigpu()
     def test_replicate_on_devices(self):
@@ -2045,6 +2061,7 @@ CPU_TEST_FAILURES = {
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
+    "test_buffer_mutation": fail_stack_allocation(is_skip=True),
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
