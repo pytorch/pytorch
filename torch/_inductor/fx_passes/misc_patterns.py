@@ -11,7 +11,8 @@ from ..pattern_matcher import fwd_only, register_replacement
 aten = torch.ops.aten
 
 
-def _get_misc_patterns():
+@functools.lru_cache(None)
+def _misc_patterns_init():
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
@@ -41,17 +42,13 @@ def _get_misc_patterns():
             index,
         )
 
-    yield "randperm_index_add_inference", {
-        "search_fn": randperm_index_add_pattern,
-        "replace_fn": randperm_index_add_replacement,
-        "example_inputs": [
-            torch.empty(4, 8, device=device),
-            torch.empty(2, 8, device=device),
-        ],
-        "trace_fn": fwd_only,
-        "pass_dicts": [post_grad_patterns, joint_graph_patterns],
-        "scalar_workaround": {},
-    }
+    register_replacement(
+        randperm_index_add_pattern,
+        randperm_index_add_replacement,
+        [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
+        fwd_only,
+        [post_grad_patterns, joint_graph_patterns],
+    )
 
     def randperm_index_pattern(x, slice_shape):
         index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
@@ -61,25 +58,14 @@ def _get_misc_patterns():
         index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
         return torch.ops.aten._unsafe_index(x, (index,)), index
 
-    yield "randperm_index_inference", {
-        "search_fn": randperm_index_pattern,
-        "replace_fn": randperm_index_replacement,
-        "example_inputs": [torch.empty(4, 8, device=device)],
-        "trace_fn": fwd_only,
-        "pass_dicts": [post_grad_patterns, joint_graph_patterns],
-        "scalar_workaround": {"slice_shape": 42},
-    }
-
-
-@functools.lru_cache(None)
-def _misc_patterns_init():
-    from .serialized_patterns.central_index import get_serialized_pattern
-
-    for key, register_replacement_kwargs in _get_misc_patterns():
-        search_fn_pattern = get_serialized_pattern(key)
-        register_replacement(
-            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
-        )
+    register_replacement(
+        randperm_index_pattern,
+        randperm_index_replacement,
+        [torch.empty(4, 8, device=device)],
+        fwd_only,
+        [post_grad_patterns, joint_graph_patterns],
+        scalar_workaround={"slice_shape": 42},
+    )
 
 
 class NumpyCompatNormalization:

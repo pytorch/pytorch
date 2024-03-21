@@ -87,7 +87,7 @@ class ConstantFolder(torch.fx.Interpreter):
                 seen_uses.add(inp)
                 last_non_output_use[node].append(inp)
 
-            # Since we don't mutate in-place is fine.
+            # In-place is fine since we don't mutate
             pytree.tree_map_only_(torch.fx.Node, add_use, (node.args, node.kwargs))
 
             # if this node is only used in output, we want to gc it right away
@@ -103,7 +103,7 @@ class ConstantFolder(torch.fx.Interpreter):
             def set_env(arg):
                 self.env[arg] = self.unknown_value
 
-            # Since we don't mutate in-place is fine.
+            # In-place is fine since we don't mutate
             pytree.tree_map_only_(torch.fx.Node, set_env, node.args)
             return super().run_node(node)
 

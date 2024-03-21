@@ -42,4 +42,4 @@ bmm_pattern_training = MultiOutputPattern([bmm_default,
 ])
 
 
-bmm_pattern_inference = CallFunction(aten.bmm.default, KeywordArg('mat1'), KeywordArg('mat2'))
+bmm_pattern_inference = CallFunction(aten.bmm.default, KeywordArg('mat1'), KeywordArg('mat2'), _users=0)
