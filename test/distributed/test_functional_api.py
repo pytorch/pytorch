@@ -687,21 +687,27 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
 
 
 
-class TestOpWaitiness(MultiThreadedTestCase):
+class TestOpWaitiness(MultiProcessTestCase):
     @property
     def world_size(self):
         return 1
 
     def setUp(self):
         super().setUp()
-        self._spawn_threads()
+        self._spawn_processes()
 
-    def tearDown(self):
-        super().tearDown()
-        ft_c_impl._wait_all()
+    def _init_process_group(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=FakeStore(),
+        )
 
     @run_with_legacy_funcol  # impl specific
     def test_wait_reduce_outstanding_work_count(self):
+        self._init_process_group()
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
         tensor = torch.ones([4])
@@ -715,6 +721,7 @@ class TestOpWaitiness(MultiThreadedTestCase):
 
     @run_with_legacy_funcol  # impl specific
     def test_add_triggers_wait(self):
+        self._init_process_group()
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
         tensor = torch.ones([4])
@@ -729,6 +736,7 @@ class TestOpWaitiness(MultiThreadedTestCase):
 
     @run_with_legacy_funcol  # impl specific
     def test_view_does_not_trigger_wait(self):
+        self._init_process_group()
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
         tensor = torch.ones([4])
@@ -749,6 +757,7 @@ class TestOpWaitiness(MultiThreadedTestCase):
 
     @run_with_legacy_funcol  # impl specific
     def test_dead_wrapper_triggers_wait(self):
+        self._init_process_group()
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
         tensor = torch.ones([4])
@@ -762,6 +771,7 @@ class TestOpWaitiness(MultiThreadedTestCase):
 
     @run_with_legacy_funcol  # impl specific
     def test_dead_wrapper_plus_view(self):
+        self._init_process_group()
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
         tensor = torch.ones([4])

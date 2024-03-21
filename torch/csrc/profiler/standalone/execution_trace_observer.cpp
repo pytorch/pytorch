@@ -679,7 +679,7 @@ void removeExecutionTraceObserver() {
 }
 
 void enableExecutionTraceObserver() {
-  VLOG(1) << "enableExecutionTraceObserver() ";
+  LOG(WARNING) << "Enabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   // Make sure we are not already enabled.
   if (ob.getState() == ExecutionTraceObserver::RunState::enabled) {
@@ -691,7 +691,7 @@ void enableExecutionTraceObserver() {
 }
 
 void disableExecutionTraceObserver() {
-  VLOG(1) << "disableExecutionTraceObserver()";
+  LOG(WARNING) << "Disabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   if (ob.getState() != ExecutionTraceObserver::RunState::disabled) {
     ob.setState(ExecutionTraceObserver::RunState::disabled);

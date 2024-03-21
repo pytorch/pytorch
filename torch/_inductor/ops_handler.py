@@ -210,8 +210,12 @@ class OpsHandler(Protocol[T]):
         ...
 
     def scan(
-        self, dtype: torch.dtype, combine_fn: Callable[[T, T], T], value: T, init: int
-    ) -> T:
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
+        values: Tuple[T, ...],
+        inits: Tuple[int, ...],
+    ) -> Tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
         """
@@ -509,6 +513,13 @@ class MockHandler:
     @staticmethod
     def frexp(x):
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
+
+    @staticmethod
+    def scan(dtypes, combine_fn, values, inits):
+        return tuple(
+            f"ops.scan({dtypes}, {combine_fn}, {values}, {inits})[{i}]"
+            for i in range(len(values))
+        )
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:

@@ -590,7 +590,7 @@ class TestOperators(hu.HypothesisTestCase):
     @staticmethod
     def _dense_ftrl(alpha, beta, lambda1, lambda2, w, nz, g):
         if isinstance(alpha, np.ndarray):
-            alpha = np.asscalar(alpha)
+            alpha = alpha.item()
         n = np.take(nz, 0, axis=-1)
         z = np.take(nz, 1, axis=-1)
         # python port of Sigrid's implementation
@@ -636,7 +636,7 @@ class TestOperators(hu.HypothesisTestCase):
     @staticmethod
     def _dense_gftrl(alpha, beta, lambda1, lambda2, w, nz, g):
         if isinstance(alpha, np.ndarray):
-            alpha = np.asscalar(alpha)
+            alpha = alpha.item()
 
         old_shape = g.shape
 
