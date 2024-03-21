@@ -6,7 +6,7 @@ from typing import cast, Iterable, List, Sequence, Tuple, Union
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.op_schema import OpStrategy
+from torch.distributed._tensor.op_schema import OpStrategy, RuntimeSchemaInfo
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -26,7 +26,9 @@ def register_prop_rule(op, schema_info=None):
     def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._propagator.register_sharding_prop_rule(overload, impl, schema_info)
+            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
+                overload, impl, schema_info
+            )
         return impl
 
     return wrapper
@@ -36,10 +38,39 @@ def register_op_strategy(op, schema_info=None):
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
+
+    # For every ATen op that accepts any args in this list,
+    # the arg itself can impact the strides (and potentially the sharding strategy)
+    # of the output tensor.
+    # thus, we will detect ATen schemas with any of these args and ensure
+    # that they get specialized here.
+    arg_names_that_require_specializing_cache_strategy = [
+        "memory_format",
+    ]
+
     def wrapper(impl):
-        overloads = op if isinstance(op, list) else [op]
+        if isinstance(op, list):
+            overloads = op
+        else:
+            overloads = [op]
+
         for overload in overloads:
-            DTensor._propagator.register_op_strategy(overload, impl, schema_info)
+            curr_schema_info = None
+            if schema_info is None:
+                specialized_args = [
+                    a.name
+                    for a in overload._schema.arguments
+                    if a.name in arg_names_that_require_specializing_cache_strategy
+                ]
+                if any(specialized_args):
+                    curr_schema_info = RuntimeSchemaInfo(
+                        static_kwargkey=specialized_args
+                    )
+            else:
+                curr_schema_info = schema_info
+            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
+                overload, impl, curr_schema_info
+            )
         return impl
 
     return wrapper
@@ -63,10 +94,7 @@ def normalize_dim(dim: int, ndim: int) -> int:
 
 
 def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
-    """
-    normalize a dim or a sequence of dims, so that they
-    are all positive.
-    """
+    """Normalize a dim or a sequence of dims, so that they are all positive."""
     if isinstance(dims, int):
         dims = (normalize_dim(dims, ndim),)
     elif isinstance(dims, list):
@@ -76,14 +104,31 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
     return dims
 
 
+def normalize_to_torch_size(size) -> torch.Size:
+    """
+    Unify variable types of size argument to torch.Size
+    Acceptable types include:
+        int, Sequence[int], Tuple[int], Tuple[Sequence[int]],
+        or torch.Size
+    """
+    if isinstance(size, torch.Size):
+        return size
+
+    if isinstance(size, int):
+        torch_size = [size]
+    elif len(size) == 1 and isinstance(size[0], Sequence):
+        torch_size = list(size[0])
+    else:
+        torch_size = list(size)
+    return torch.Size(torch_size)
+
+
 def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
 
 
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """
-    Check if the shape is shardable according to the spec.
-    """
+    """Check if the shape is shardable according to the spec."""
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -94,19 +139,35 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, dim_size in enumerate(shape):
         # TODO: maybe we should determine is_shardable based on
         #       whether it's evenly sharded or not
-        if dim_size < shards_map[i]:
+        if shards_map[i] > 1 and dim_size < shards_map[i]:
+            return False
+
+    return True
+
+
+def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
+    """Check if the shape is evenly shardable according to the spec."""
+    # number of shards in each tensor dimension
+    shards_map = [1] * len(shape)
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            shards_map[shard_dim] *= spec.mesh.size(i)
+
+    for i, dim_size in enumerate(shape):
+        if shards_map[i] > 1 and (dim_size % shards_map[i] != 0):
             return False
 
     return True
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
-    """Return True if tensor dim is sharded"""
+    """Return True if tensor dim is sharded."""
     return any(p.is_shard(dim) for p in spec.placements)
 
 
 def is_tensor_partial(spec: DTensorSpec) -> bool:
-    """Return True if tensor is partial on the mesh"""
+    """Return True if tensor is partial on the mesh."""
     return any(p.is_partial() for p in spec.placements)
 
 
@@ -129,9 +190,7 @@ def map_placements_after_broadcast(
     shape: torch.Size,
     broadcast_dims_map: List[int],
 ) -> Tuple[Placement, ...]:
-    """
-    Map each placement based on the output shape after broadcast.
-    """
+    """Map each placement based on the output shape after broadcast."""
     new_placements: List[Placement] = []
     for placement in placements:
         if isinstance(placement, (Replicate, _Partial)):

@@ -259,6 +259,10 @@ Tensor NestedTensor_to_padded_tensor_generic(
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nt.get_buffer().numel() == 0);
     return nt.get_buffer().clone();
   }
+  TORCH_CHECK(
+      t.numel() > 0,
+      "to_padded_tensor: at least one constituent tensor should have non-zero numel"
+  )
 
   // TODO: doesn't handle empty/scalar entries because we don't need
   // it for transformers; see to_padded_tensor in
@@ -676,7 +680,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     std::vector<int64_t> size_reshaped_vector(proposed_shape.begin() + 1, proposed_shape.end());
     // only allow one pre-existing dimension to have proposed shape == -1
     int64_t infer_index_old = -1;
-    // some negative sizes remain to be infered
+    // some negative sizes remain to be inferred
     if (ndims_underlying < ndims_underlying_reshaped) {
       int64_t numel = 1, numel_reshaped = 1;
       // replace negative sizes for old dimensions with old sizes
@@ -766,7 +770,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 } // namespace
 
 // Note [Special size rule for nested tensor]
-// Instead of infering size, -1 means "inherit the old size", so:
+// Instead of inferring size, -1 means "inherit the old size", so:
 // * negative size is legal for a ragged dimension
 // * however, we only allow one -1
 // In principle we could still infer a dimension,
@@ -857,6 +861,12 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
+std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
+  return std::make_tuple(
+      construct_nested_strides(nested_size),
+      construct_offsets(nested_size));
+}
+
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
@@ -890,7 +900,26 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   }
 }
 
+Tensor reshape_nested_symint(const Tensor& self, SymIntArrayRef proposed_shape) {
+  // Jagged layout NT decomp
+  if (self.layout() == at::kJagged) {
+    // TODO: Expand decomp to handle other viewable cases
+    bool viewable = self.is_contiguous();
+    return (
+        viewable ? self.view_symint(proposed_shape) :
+        self.clone(at::MemoryFormat::Contiguous).view_symint(proposed_shape)
+    );
+  }
+
+  return reshape_nested(self, C10_AS_INTARRAYREF_SLOW(proposed_shape));
+}
+
 Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
+  // Jagged layout NT decomp
+  if (self.layout() == at::kJagged) {
+    return self.reshape_symint(other.sym_sizes());
+  }
+
   auto other_ptr = get_nested_tensor_impl(other);
   // TODO: this is to reproduce other_ptr->opt_sizes_
   //       if an accessor is provided in the future, can replace this

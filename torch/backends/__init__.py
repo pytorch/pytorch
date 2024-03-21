@@ -60,9 +60,11 @@ from torch.backends import (
     cpu as cpu,
     cuda as cuda,
     cudnn as cudnn,
+    mha as mha,
     mkl as mkl,
     mkldnn as mkldnn,
     mps as mps,
+    nnpack as nnpack,
     openmp as openmp,
     quantized as quantized,
 )

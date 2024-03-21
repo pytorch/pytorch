@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import warnings
 from typing import Callable, Union
@@ -42,6 +44,28 @@ def output_alias_each_other(outputs):
         if stor in storages:
             return True
         storages.add(stor)
+    return False
+
+
+def is_sdpa_error(func, idx, e):
+    if (
+        (
+            func is aten._scaled_dot_product_flash_attention.default
+            or func is aten._flash_attention_forward.default
+        )
+        and idx in (6, 7)
+        and "Devices" in repr(e)
+    ):
+        return True
+    if (
+        (
+            func is aten._scaled_dot_product_efficient_attention.default
+            or func is aten._efficient_attention_forward.default
+        )
+        and idx in (2, 3)
+        and "Devices" in repr(e)
+    ):
+        return True
     return False
 
 
@@ -155,17 +179,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                             allow_rhs_unbacked=True,
                         )
                     except Exception as e:
-                        if (
-                            func is aten._scaled_dot_product_flash_attention.default
-                            and idx in (6, 7)
-                            and "Devices" in repr(e)
-                        ):
-                            continue
-                        if (
-                            func is aten._scaled_dot_product_efficient_attention.default
-                            and idx in (2, 3)
-                            and "Devices" in repr(e)
-                        ):
+                        if is_sdpa_error(func, idx, e):
                             continue
                         error_message = (
                             f"{context} mismatched tensor metadata: {e}"

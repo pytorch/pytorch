@@ -10,6 +10,7 @@ namespace impl {
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct RawTensorInfo {
   TensorImplAddress impl_;
   StorageImplData storage_;
@@ -128,6 +129,7 @@ void calculateUniqueTensorIDs(
     ska::flat_hash_set<AllocationID> tensor_set;
     for (const auto& t : tensors) {
       if (t.impl_ != NoTensorImpl) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         tensor_set.insert(*t.allocation_id_ref_.get());
       }
     }
@@ -155,6 +157,7 @@ void calculateUniqueTensorIDs(
         continue;
       }
 
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       const auto allocation_id = *t.allocation_id_ref_.get();
       const auto it = impl_map.insert({t.impl_, allocation_id}).first;
 
@@ -186,6 +189,7 @@ void calculateUniqueTensorIDs(
   // Write back to Tensor IDs.
   // --------------------------------------------------------------------------
   for (const auto& t : tensors) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto id = id_map.at(*t.allocation_id_ref_.get());
     t.id_ref_.get().emplace(TensorID(id));
   }

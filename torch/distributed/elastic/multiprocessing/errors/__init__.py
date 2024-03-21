@@ -81,8 +81,8 @@ T = TypeVar("T")
 @dataclass
 class ProcessFailure:
     """
-    Represents the failed process result. When the worker process fails,
-    it may record failure root cause into the file.
+    Represent the failed process result. When the worker process fails, it may record failure root cause into the file.
+
     Tries to read the failure timestamp from the provided ``error_file``,
     if the ``error_file`` does not exist, the timestamp is the current
     timestamp (seconds since epoch).
@@ -160,9 +160,7 @@ class ProcessFailure:
             return _NOT_AVAILABLE
 
     def timestamp_isoformat(self):
-        """
-        Returns timestamp in ISO format (YYYY-MM-DD_HH:MM:SS)
-        """
+        """Return timestamp in ISO format (YYYY-MM-DD_HH:MM:SS)."""
         return datetime.fromtimestamp(self.timestamp).isoformat(sep="_")
 
 
@@ -205,7 +203,6 @@ class ChildFailedError(Exception):
               support both function and binary launches.
 
     Example:
-
     ::
 
      # process tree on a host (container)
@@ -338,7 +335,6 @@ def record(
         main()
 
     """
-
     if not error_handler:
         error_handler = get_error_handler()
 
@@ -349,6 +345,13 @@ def record(
             error_handler.initialize()
             try:
                 return f(*args, **kwargs)
+            except SystemExit as se:
+                # For run_path based entrypoints, SystemExit with code = 0 will never exit.
+                # Handling it here by returning a value:
+                if se.code == 0:
+                    return None
+                else:
+                    raise
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
                 if failure.error_file != _NOT_AVAILABLE:

@@ -5,8 +5,10 @@
 #include <ATen/native/AdaptivePooling.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 namespace at::native {
 
@@ -20,7 +22,7 @@ void cpu_adaptive_avg_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t ndim = input.ndimension();
@@ -34,7 +36,7 @@ void cpu_adaptive_avg_pool(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
@@ -66,7 +68,8 @@ void cpu_adaptive_avg_pool(
 }
 
 template <typename scalar_t>
-void cpu_adaptive_avg_pool_channels_last(
+typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+cpu_adaptive_avg_pool_channels_last(
     Tensor& output_,
     const Tensor& input_,
     IntArrayRef output_size) {
@@ -74,7 +77,7 @@ void cpu_adaptive_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -104,7 +107,7 @@ void cpu_adaptive_avg_pool_channels_last(
       scalar_t* out = output_data + i * channels;
       int64_t size = channels;
 
-      // Note: For oridinary usage scenario, each out lane should
+      // Note: For ordinary usage scenario, each out lane should
       //   fit in L1 cache; otherwise consider block dim C.
       // Pass I: zero the out lane
       int64_t d1 = 0;
@@ -118,7 +121,7 @@ void cpu_adaptive_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -151,8 +154,9 @@ void cpu_adaptive_avg_pool_channels_last(
   }
 }
 
-template <>
-void cpu_adaptive_avg_pool_channels_last<BFloat16>(
+template <typename scalar_t>
+typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+cpu_adaptive_avg_pool_channels_last(
     Tensor& output_,
     const Tensor& input_,
     IntArrayRef output_size) {
@@ -160,8 +164,8 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<BFloat16>();
-  auto output_data = output.data_ptr<BFloat16>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -170,7 +174,7 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
   int64_t output_height = output_size[0];
   int64_t output_width = output_size[1];
 
-  using bVec = vec::Vectorized<BFloat16>;
+  using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
@@ -180,7 +184,7 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
     data_index_init(begin, n, nbatch, oh, output_height, ow, output_width);
 
     // temp buffer for sum, use float as accumulation type
-    // can't reuse output buffer to store sum since it is BFloat16
+    // can't reuse output buffer to store sum since it is BFloat16/Half
     auto sum_arr = std::make_unique<float []>(channels);
     float* sum = sum_arr.get();
 
@@ -193,7 +197,7 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
       int64_t iw1 = end_index(ow, output_width, input_width);
       int64_t kw = iw1 - iw0;
 
-      BFloat16* out = output_data + i * channels;
+      scalar_t* out = output_data + i * channels;
       int64_t size = channels;
 
       // Pass I: zero the out lane
@@ -208,14 +212,14 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          BFloat16* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
           for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
             bVec data_bvec = bVec::loadu(in + d2);
             fVec data_fvec0, data_fvec1;
-            std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+            std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
 
             fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
             fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
@@ -233,11 +237,11 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
         fVec out_fvec0 = fVec::loadu(sum + d3) / fVec(float(kh * kw));
         fVec out_fvec1 = fVec::loadu(sum + d3 + fVec::size()) / fVec(float(kh * kw));
 
-        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        bVec out_bvec = convert_from_float<scalar_t>(out_fvec0, out_fvec1);
         out_bvec.store(out + d3);
       }
       for (; d3 < size; d3++) {
-        out[d3] = BFloat16(sum[d3] / kh / kw);
+        out[d3] = scalar_t(sum[d3] / kh / kw);
       }
 
       // move on to next output index
@@ -367,17 +371,14 @@ void adaptive_avg_pool2d_kernel_impl(
     IntArrayRef output_size) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_avg_pool2d", [&] {
-        if (input.scalar_type() == ScalarType::BFloat16) {
-          cpu_adaptive_avg_pool<BFloat16, /*accscalar_t*/float>(output, input, output_size);
-        } else {
-          cpu_adaptive_avg_pool<scalar_t, scalar_t>(output, input, output_size);
-        }
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_avg_pool2d", [&] {
+        using param_t = at::opmath_type<scalar_t>;
+        cpu_adaptive_avg_pool<scalar_t, /*accscalar_t*/param_t>(output, input, output_size);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
         cpu_adaptive_avg_pool_channels_last<scalar_t>(output, input, output_size);
       });
       break;
@@ -392,13 +393,13 @@ void adapative_avg_pool2d_backward_kernel_impl(
     const Tensor& grad_output) {
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "adaptive_avg_pool2d_backward", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, grad_output.scalar_type(), "adaptive_avg_pool2d_backward", [&] {
         cpu_adaptive_avg_pool_backward<scalar_t>(grad_input, grad_output);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "adaptive_avg_pool2d_backward_channels_last", [&]{
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, grad_output.scalar_type(), "adaptive_avg_pool2d_backward_channels_last", [&]{
         cpu_adaptive_avg_pool_backward_channels_last<scalar_t>(grad_input, grad_output);
       });
       break;

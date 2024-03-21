@@ -76,9 +76,9 @@ enum class ncclDataType {
 // manages group and lock lifetimes.
 struct AutoNcclGroup {
   AutoNcclGroup();
-  AutoNcclGroup(std::vector<ncclComm_t>& comms, bool comm_nonblocking);
+  AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);
-  std::vector<ncclComm_t> comms_;
+  ncclComm_t comm_;
   bool comm_nonblocking_;
 };
 
@@ -114,6 +114,7 @@ using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
 TORCH_CUDA_CPP_API std::uint64_t version();
+TORCH_CUDA_CPP_API const char* version_suffix();
 
 bool is_available(at::TensorList tensors);
 

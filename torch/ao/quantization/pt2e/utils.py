@@ -10,6 +10,7 @@ from torch.fx import (
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
+from torch.export.unflatten import _AttrKind, _assign_attr
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -19,7 +20,7 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
+    "_get_aten_graph_module_for_pattern",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -36,6 +37,27 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
+# Example inputs for conv-bn1d patterns
+_conv1d_bn_example_inputs = (
+    torch.randn(1, 1, 3),  # x
+    torch.randn(1, 1, 1),  # conv_weight
+    torch.randn(1),        # conv_bias
+    torch.randn(1),        # bn_weight
+    torch.randn(1),        # bn_bias
+    torch.randn(1),        # bn_running_mean
+    torch.randn(1),        # bn_running_var
+)
+
+# Example inputs for conv-bn2d patterns
+_conv2d_bn_example_inputs = (
+    torch.randn(1, 1, 3, 3),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
+)
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -111,7 +133,13 @@ def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
     assert node.op == "get_attr"
-    return getattr(m, node.target)
+    target_atoms = node.target.split('.')
+    attr_itr = m
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 def _get_all_arguments(orig_args, orig_kwargs, args_schema):
     all_args = []
@@ -138,6 +166,29 @@ def _is_supported_batch_norm_for_training(node: Node):
     ]
     return node.target in supported_ops
 
+# TODO: move this to torch/ao/quantization/utils.py
+def _is_conv_node(n: Node):
+    """
+    Return whether the node refers to an aten conv or conv transpose op.
+    """
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv2d.default,
+    ]
+
+def _is_conv_transpose_node(n: Node):
+    """
+    Return whether the node refers to an aten conv_transpose op.
+    """
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv_transpose1d,
+        torch.ops.aten.conv_transpose2d,
+        torch.ops.aten.conv_transpose2d.input,
+    ]
+
+def _is_bn_node(n: Node):
+    return _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
+
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
@@ -145,12 +196,10 @@ def fold_bn_weights_into_conv_node(
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv2d args: input, weight, bias, stride, padding, dilation, ...
-    # Note: this should also work for conv1d, conv3d and transposed conv1-3d as well with
-    # easy tweaks
+    # conv args: input, weight, bias, stride, padding, dilation, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
+    transpose = _is_conv_transpose_node(conv_node)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -179,13 +228,13 @@ def fold_bn_weights_into_conv_node(
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
     assert isinstance(weight_attr_name, str)
-    setattr(m, weight_attr_name, fused_weight)
+    _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
-        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
+        _assign_attr(fused_bias, m, str(bias_attr_name), _AttrKind.PARAMETER)
     else:
         bias_attr_name = weight_attr_name + "_bias"
-        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
+        _assign_attr(fused_bias, m, bias_attr_name, _AttrKind.PARAMETER)
         with m.graph.inserting_before(conv_node):
             get_bias_node = m.graph.get_attr(bias_attr_name)
         # NOTE: here we assume the bias of conv is not quantized!
@@ -213,12 +262,15 @@ def fold_bn_weights_into_conv_node(
 
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
+    if not has_bn:
+        return
     for n in m.graph.nodes:
         if n.op != "call_function" or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.conv2d.default:
+        if not (_is_conv_node(n) or _is_conv_transpose_node(n)):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
@@ -240,7 +292,7 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
 
-def get_aten_graph_module(
+def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
@@ -258,6 +310,16 @@ def get_aten_graph_module(
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
+
+    # ep.module() adds copy_ nodes for the mutated inputs.
+    # For patterns, it doesn't matter
+    for node in aten_pattern.graph.nodes:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default and len(node.users) == 0:
+            aten_pattern.graph.erase_node(node)
+
+    aten_pattern.graph.eliminate_dead_code()
+    aten_pattern.recompile()
+
     return aten_pattern
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
@@ -318,8 +380,8 @@ def _replace_literals_with_new_placeholders(
         return x - 3
 
     example_inputs = (torch.randn(1, 3, 3, 3),)
-    pattern_gm = get_aten_graph_module(pattern, example_inputs)
-    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+    pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x):
@@ -346,6 +408,8 @@ def _replace_literals_with_new_placeholders(
     if exclude_literals is None:
         exclude_literals = []
 
+    in_spec = gm._in_spec
+    args_spec = in_spec.children_specs[0]
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -360,7 +424,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
+                        args_spec.children_specs.append(LeafSpec())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -369,6 +433,10 @@ def _replace_literals_with_new_placeholders(
             new_args = tuple(new_args)
 
         node.args = new_args
+
+    # Update `num_nodes`, `num_leaves`, `num_children`.
+    args_spec.__post_init__()
+    in_spec.__post_init__()
     return gm
 
 
@@ -398,8 +466,8 @@ def _replace_literals_with_existing_placeholders(
         -128,
         127,
     )
-    pattern_gm = get_aten_graph_module(pattern, example_inputs)
-    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+    pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):
@@ -459,11 +527,23 @@ def _disallow_eval_train(model: GraphModule):
     Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
     This is useful for exported models, where these methods don't actually behave as expected.
     """
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Please call `torch.ao.quantization.move_exported_model_to_train(model)` (or eval) instead.
+
+        If you cannot replace the calls to `model.train()` and `model.eval()`, you may override
+        the behavior for these methods by calling `torch.ao.quantization.allow_exported_model_train_eval(model)`,
+        which does the above automatically for you. Note that this has limited effect on switching
+        behavior between train and eval modes, and should be used only for special ops such as dropout
+        and batchnorm.
+        """
+
     def _train(self, mode: bool = True):
-        raise NotImplementedError("Calling train() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     def _eval(self, mode: bool = True):
-        raise NotImplementedError("Calling eval() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
     model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]

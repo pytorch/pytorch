@@ -1,15 +1,11 @@
 #include <ATen/core/interned_strings.h>
-#include <c10/core/CPUAllocator.h>
-#include <c10/core/impl/alloc_cpu.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/in_memory_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/istream_adapter.h>
 #include <caffe2/serialize/read_adapter_interface.h>
-#include <caffe2/serialize/versions.h>
 
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
@@ -31,22 +27,18 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
 #include <ATen/ATen.h>
 #include <fmt/format.h>
 
-#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace torch::jit {
 
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
@@ -268,10 +260,7 @@ Module ScriptModuleDeserializer::deserialize(
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
-      at::DataPtr meta_ptr;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t meta_size;
-      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
+      auto [meta_ptr, meta_size] = reader_->getRecord(key);
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
@@ -391,9 +380,7 @@ Module import_ir_module(
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files, restore_shapes);
   }
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return _load_jit_module_from_bytes(
       data, size, cu, device, extra_files, restore_shapes);
 }
@@ -440,9 +427,7 @@ Module import_ir_module(
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files, restore_shapes);
   }
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return _load_jit_module_from_bytes(
       data, size, cu, device, extra_files, restore_shapes);
 }

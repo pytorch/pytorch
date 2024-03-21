@@ -7,12 +7,14 @@ import collections
 import itertools
 import os
 import re
+import sys
 import typing
 
 import torch._custom_ops as custom_ops
 
 import torch.testing._internal.custom_op_db
 import torch.testing._internal.optests as optests
+import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
@@ -26,9 +28,11 @@ class CustomOpTestCaseBase(TestCase):
     test_ns = "_test_custom_op"
 
     def setUp(self):
+        super().setUp()
         self.libraries = []
 
     def tearDown(self):
+        super().tearDown()
         import torch._custom_op
 
         keys = list(torch._custom_op.impl.global_registry.keys())
@@ -46,7 +50,7 @@ class CustomOpTestCaseBase(TestCase):
         return getattr(torch.ops, self.test_ns)
 
     def lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         self.libraries.append(result)
         return result
 
@@ -55,6 +59,9 @@ class CustomOpTestCaseBase(TestCase):
 
 
 @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))
     @parametrize("dynamic", (True, False))
@@ -1476,6 +1483,9 @@ def forward(self, x_1):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -1491,7 +1501,9 @@ def forward(self, x_1):
 
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"dynamic shape operator: _torch_testing.numpy_nonzero.default": 1},
+            {
+                "dynamic shape operator: _torch_testing.numpy_nonzero.default; to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True": 1  # noqa: B950
+            },
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
@@ -1697,6 +1709,10 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_builtin_torchscript_ops(self):
+        for op in [torch.ops.aten.sub.complex, torch.ops.aten.mul.complex]:
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
             torch.ops.aten._foreach_copy.default,
@@ -1713,7 +1729,7 @@ def forward(self, x_1):
         result = torch._C._jit_resolve_packet("aten::sum", x, dim=1)
         self.assertEqual(result, "dim_IntList")
 
-        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+        with self.assertRaisesRegex(RuntimeError, "failed to match any schema"):
             result = torch._C._jit_resolve_packet("aten::sum", x, x, x)
 
     def test_define_bad_schema(self):
@@ -1772,6 +1788,20 @@ def forward(self, x_1):
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
 
+    def test_defined_in_python(self):
+        self.assertFalse(torch.ops.aten.sin.default._defined_in_python)
+        self.assertFalse(torch.ops.aten.sum.dim_IntList._defined_in_python)
+
+        lib = self.lib()
+        torch.library.define("{self._test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+        ns = self.ns()
+        self.assertTrue(ns.foo.default._defined_in_python)
+
+        torch.library.define(
+            "{self._test_ns}::bar.overload", "(Tensor x) -> Tensor", lib=lib
+        )
+        self.assertTrue(ns.bar.overload._defined_in_python)
+
     def _test_impl_device(self, name, types, device):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
@@ -1814,6 +1844,47 @@ def forward(self, x_1):
     def test_impl_device_invalid(self):
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
+
+    def test_autograd_function_backed_op(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    return grad_output;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(mylib, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        temp = x.clone().detach()
+        out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
+        loss = out.sum()
+        loss.backward()
+        self.assertEqual(x.grad, temp)
 
 
 def op_with_incorrect_schema(testcase, name):

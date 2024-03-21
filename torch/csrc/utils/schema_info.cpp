@@ -20,8 +20,9 @@ void SchemaInfo::addArgumentValues(
       "Schema does not have enough arguments for value list");
 
   for (size_t i = 0; i < value_list.size(); i++) {
-    if (value_list[i] != c10::nullopt) {
-      value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
+    if (value_list[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      value_map_[schema_.arguments()[i].name()] = *value_list[i];
       alias_maps_current_ = false;
     }
   }
@@ -107,7 +108,7 @@ bool SchemaInfo::has_argument(c10::string_view name) {
 bool SchemaInfo::is_mutable(c10::string_view name) {
   c10::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
-      index != c10::nullopt, "Schema has no argument named ", name);
+      index.has_value(), "Schema has no argument named ", name);
 
   return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
 }

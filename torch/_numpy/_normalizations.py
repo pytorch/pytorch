@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """ "Normalize" arguments: convert array_likes to tensors, dtypes to torch dtypes and so on.
 """
 from __future__ import annotations
@@ -17,7 +19,7 @@ ArrayLikeOrScalar = typing.Union[ArrayLike, Scalar]
 
 DTypeLike = typing.TypeVar("DTypeLike")
 AxisLike = typing.TypeVar("AxisLike")
-NDArray = typing.TypeVar("NDarray")
+NDArray = typing.TypeVar("NDArray")
 CastingModes = typing.TypeVar("CastingModes")
 KeepDims = typing.TypeVar("KeepDims")
 
@@ -106,8 +108,12 @@ def normalize_outarray(arg, parm=None):
     # almost normalize_ndarray, only return the array, not its tensor
     if arg is None:
         return arg
-
     from ._ndarray import ndarray
+
+    # Dynamo can pass torch tensors as out arguments,
+    # wrap it in an ndarray before processing
+    if isinstance(arg, torch.Tensor):
+        arg = ndarray(arg)
 
     if not isinstance(arg, ndarray):
         raise TypeError(f"'{parm.name}' must be an array")

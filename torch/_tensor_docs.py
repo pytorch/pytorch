@@ -2,7 +2,7 @@
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-from ._torch_docs import parse_kwargs, reproducibility_notes
+from torch._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
@@ -1086,6 +1086,9 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 .. math::
 
     f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
+
+.. note::
+  Sigma (:math:`\sigma`) is used to denote the scale parameter in Cauchy distribution.
 """,
 )
 
@@ -1906,11 +1909,19 @@ add_docstr_all(
     r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
 
-Fills :attr:`self` tensor with elements drawn from the exponential distribution:
+Fills :attr:`self` tensor with elements drawn from the PDF (probability density function):
 
 .. math::
 
-    f(x) = \lambda e^{-\lambda x}
+    f(x) = \lambda e^{-\lambda x}, x > 0
+
+.. note::
+  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`)
+  implying that zero can be sampled from the exponential distribution.
+  However, :func:`torch.Tensor.exponential_` does not sample zero,
+  which means that its actual support is the interval (0, :math:`\inf`).
+
+  Note that :func:`torch.distributions.exponential.Exponential` is supported on the interval [0, :math:`\inf`) and can sample zero.
 """,
 )
 
@@ -2103,8 +2114,12 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...
 
+.. note::
+  :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`, whereas
+  :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success
+  hence draws samples in :math:`\{0, 1, \ldots\}`.
 """,
 )
 
@@ -4027,8 +4042,10 @@ add_docstr_all(
     r"""
 record_stream(stream)
 
-Ensures that the tensor memory is not reused for another tensor until all
-current work queued on :attr:`stream` are complete.
+Marks the tensor as having been used by this stream.  When the tensor
+is deallocated, ensure the tensor memory is not reused for another tensor
+until all work queued on :attr:`stream` at the time of deallocation is
+complete.
 
 .. note::
 
@@ -4363,7 +4380,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 add_docstr_all(
     "scatter_",
     r"""
-scatter_(dim, index, src, reduce=None) -> Tensor
+scatter_(dim, index, src, *, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -4426,7 +4443,9 @@ Args:
     index (LongTensor): the indices of elements to scatter, can be either empty
         or of the same dimensionality as ``src``. When empty, the operation
         returns ``self`` unchanged.
-    src (Tensor or float): the source element(s) to scatter.
+    src (Tensor): the source element(s) to scatter.
+
+Keyword args:
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
 
@@ -4456,6 +4475,32 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
+.. function:: scatter_(dim, index, value, *, reduce=None) -> Tensor:
+   :noindex:
+
+Writes the value from :attr:`value` into :attr:`self` at the indices
+specified in the :attr:`index` tensor.  This operation is equivalent to the previous version,
+with the :attr:`src` tensor filled entirely with :attr:`value`.
+
+Args:
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter, can be either empty
+        or of the same dimensionality as ``src``. When empty, the operation
+        returns ``self`` unchanged.
+    value (Scalar): the value to scatter.
+
+Keyword args:
+    reduce (str, optional): reduction operation to apply, can be either
+        ``'add'`` or ``'multiply'``.
+
+Example::
+
+    >>> index = torch.tensor([[0, 1]])
+    >>> value = 2
+    >>> torch.zeros(3, 5).scatter_(0, index, value)
+    tensor([[2., 0., 0., 0., 0.],
+            [0., 2., 0., 0., 0.],
+            [0., 0., 0., 0., 0.]])
 """,
 )
 
@@ -6032,7 +6077,7 @@ Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
-    P(x) = \dfrac{1}{\text{to} - \text{from}}
+    f(x) = \dfrac{1}{\text{to} - \text{from}}
 """,
 )
 

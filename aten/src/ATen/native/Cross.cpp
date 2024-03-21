@@ -17,8 +17,7 @@
 #include <ATen/ops/linalg_cross_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(linalg_cross)
 (const Tensor & input, const Tensor & other, int64_t dim) {
@@ -36,8 +35,8 @@ TORCH_META_FUNC(linalg_cross)
   set_output_raw_strided(0, out_size, {}, input.options());
 }
 
-}
-namespace native {
+} // namespace at::meta
+namespace at::native {
 
 DEFINE_DISPATCH(cross_stub);
 
@@ -86,4 +85,4 @@ TORCH_IMPL_FUNC(linalg_cross_out)
   cross_stub(input.device().type(), out, input_broadcasted, other_broadcasted, dim);
 }
 
-}} // namespace at::native
+} // namespace at::native

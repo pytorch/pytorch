@@ -11,7 +11,8 @@ import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
-    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype
+    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import gradcheck
@@ -1387,6 +1388,21 @@ class TestNNParametrization(NNTestCase):
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
+    def test_new_spectral_norm_value(self):
+        # a test that the spectral norm (= top singular value)
+        # is in fact properly calculated, using example of a simple diagonal matrix.
+        for dtype in (torch.float, torch.cfloat):
+            m = nn.Linear(2, 2, dtype=dtype)
+            with torch.no_grad():
+                # set weight to be diagonal
+                x = torch.diagonal(m.weight)
+                m.weight = nn.Parameter(torch.diag(x))
+                torch.nn.utils.parametrizations.spectral_norm(m)
+                # weights should be rescaled by spectral norm, (i.e., largest diagonal element in norm)
+                expected = torch.diag(x / x.abs().max())
+                self.assertEqual(m.weight.data, expected)
+
     @skipIfNoLapack
     def test_orthogonal_parametrization(self):
         # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
@@ -1519,36 +1535,6 @@ class TestNNParametrization(NNTestCase):
             m.weight = torch.randn(5, 5)
         torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
 
-
-    def test_weight_norm_parametrization(self):
-        for dtype in [torch.float, torch.bfloat16]:
-            input = torch.randn(3, 4, dtype=dtype)
-            m = nn.Linear(4, 5).to(dtype=dtype)
-            expected_output = m(input)
-
-            # add weight normalization
-            m = torch.nn.utils.parametrizations.weight_norm(m)
-            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
-            self.assertEqual(m.parametrizations.weight.original0.size(), (5, 1))
-            self.assertEqual(m(input), expected_output)
-
-            # remove weight norm
-            torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
-            self.assertFalse(hasattr(m, "parametrizations"))
-            self.assertEqual(m(input), expected_output)
-
-            # test with dim=1
-            m = torch.nn.utils.parametrizations.weight_norm(m, dim=1)
-            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
-            self.assertEqual(m.parametrizations.weight.original0.size(), (1, 4))
-            self.assertEqual(m(input), expected_output)
-
-            # test with dim=None
-            m = nn.Linear(4, 5).to(dtype=dtype)
-            expected_output = m(input)
-            m = torch.nn.utils.parametrizations.weight_norm(m, dim=None)
-            self.assertEqual(m(input), expected_output)
-
     def test_weight_norm_state_dict_compat(self):
         m = nn.Linear(4, 5)
         m = torch.nn.utils.weight_norm(m)
@@ -1575,6 +1561,40 @@ class TestNNParametrization(NNTestCase):
         self.assertEqual(m(input), m2(input))
 
 
+class TestNNParametrizationDevice(NNTestCase):
+    def test_weight_norm_parametrization(self, device):
+        for dtype in [torch.float, torch.bfloat16]:
+            input = torch.randn(3, 4, dtype=dtype, device=device)
+            m = nn.Linear(4, 5, dtype=dtype, device=device)
+            expected_output = m(input)
+
+            # add weight normalization
+            m = torch.nn.utils.parametrizations.weight_norm(m)
+            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(m.parametrizations.weight.original0.size(), (5, 1))
+            self.assertEqual(m(input), expected_output)
+
+            # remove weight norm
+            torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
+            self.assertFalse(hasattr(m, "parametrizations"))
+            self.assertEqual(m(input), expected_output)
+
+            # test with dim=1
+            m = torch.nn.utils.parametrizations.weight_norm(m, dim=1)
+            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(m.parametrizations.weight.original0.size(), (1, 4))
+            self.assertEqual(m(input), expected_output)
+
+            # test with dim=None
+            m = nn.Linear(4, 5, dtype=dtype, device=device)
+            expected_output = m(input)
+            m = torch.nn.utils.parametrizations.weight_norm(m, dim=None)
+            self.assertEqual(m(input), expected_output)
+
+
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestNNParametrizationDevice, globals(), only_for=only_for)
 instantiate_parametrized_tests(TestNNParametrization)
 
 if __name__ == '__main__':

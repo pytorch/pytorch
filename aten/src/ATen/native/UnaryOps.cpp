@@ -170,9 +170,7 @@
 
 #include <cmath>
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 // Unary float operations always produce floating point
 // outputs for floating point and integral types
@@ -292,9 +290,9 @@ TORCH_META_FUNC(ceil) (const Tensor& self) {
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -414,7 +412,6 @@ template <typename Stub, typename ...Args>
 static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args... args) {
   auto iter = TensorIterator::unary_float_op(result, self);
   stub(iter.device_type(), iter, args...);
-  iter.cast_outputs();
   return result;
 }
 
@@ -870,7 +867,7 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
-    .add_input(self)
+    .add_const_input(self)
     .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
@@ -966,7 +963,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   auto iter = TensorIteratorConfig()
     .add_output(mantissa)
     .add_output(exponent)
-    .add_input(self)
+    .add_const_input(self)
     .check_all_same_dtype(false)
     .set_check_mem_overlap(true)
     .build();
@@ -975,7 +972,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
 }
 
-// alias for lgamma, implements special.gammanln equivalent to
+// alias for lgamma, implements special.gammaln equivalent to
 // scipy.special.gammaln
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
 Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }
@@ -1050,5 +1047,4 @@ DEFINE_DISPATCH(special_scaled_modified_bessel_k0_stub); // NOLINT(cppcoreguidel
 DEFINE_DISPATCH(special_scaled_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_spherical_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-} // namespace native
-} // namespace at
+} // namespace at::native

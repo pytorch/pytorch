@@ -112,13 +112,28 @@ class SymPyOps:
         return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
 
     @staticmethod
-    def remainder(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
+    def mod(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
 
         result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
         return TypedExpr(result_expr, result_type)
+
+    @staticmethod
+    def remainder(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        if not is_integer_dtype(result_type):
+            return NotImplemented
+        # In these cases, remainder in Python == remainder in C++, so this transformation
+        # is sound
+        if (
+            x.expr.is_nonnegative is not None
+            and x.expr.is_nonnegative == y.expr.is_positive
+        ):
+            result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+            return TypedExpr(result_expr, result_type)
+        return NotImplemented
 
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:

@@ -1,13 +1,21 @@
 # Owner(s): ["module: inductor"]
 
 
+from unittest import skipIf
+
 import torch
+import torch.distributed as dist
+
 from torch._inductor import metrics
+from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import is_collective
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
+c10d = torch.ops.c10d_functional
+_c10d = torch.ops._c10d_functional
 
 
 def count_bytes_inductor(gm, example_inputs):
@@ -36,7 +44,7 @@ def T(*size, dtype=torch.float32, device=DEVICE, grad=False) -> torch.Tensor:
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     device = DEVICE
 
     """
@@ -165,8 +173,137 @@ class MemoryBoundedTests(TestCase):
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@skipIf(not dist.is_available(), "requires distributed")
+class TestCommAnalysis(TestCase):
+    WORLD_SIZE: int = 8
+    RANKS = list(range(8))
+
+    def _verify_runtime_estimation(self, fn, inps):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.WORLD_SIZE, store=store
+        )
+        try:
+            metrics.reset()
+            torch._dynamo.optimize(count_bytes_inductor)(fn)(*inps)
+            found_collective = False
+            for snode, runtime in metrics.node_runtimes:
+                if not is_collective(snode.node):
+                    continue
+                found_collective = True
+                # Inductor swallows errors from snode runtime estimations.
+                # We call estimate_nccl_collective_runtime in a white-box
+                # fashion here so potential issues can be surfaced in tests.
+                est = estimate_nccl_collective_runtime(snode.node)
+                self.assertNotZero(est)
+                # Also make sure estimate_nccl_collective_runtime works
+                # correctly in inductor.
+                self.assertNotZero(runtime)
+            # Make sure a collective kernel is found in graph
+            self.assertTrue(found_collective)
+        finally:
+            dist.destroy_process_group()
+
+    def test_legacy_all_reduce(self):
+        def fn(x):
+            r = c10d.all_reduce(x, "sum", "", self.RANKS, self.WORLD_SIZE)
+            return c10d.wait_tensor(r)
+
+        inp = T(10, 10)
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_legacy_all_reduce_coalesced(self):
+        def fn(x):
+            rs = c10d.all_reduce_coalesced(x, "sum", "", self.RANKS, self.WORLD_SIZE)
+            return [c10d.wait_tensor(r) for r in rs]
+
+        inp = [T(10, 10), T(15, 15)]
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_legacy_all_gather_into_tensor_coalesced(self):
+        def fn(x):
+            rs = c10d.all_gather_into_tensor_coalesced(
+                x,
+                "",
+                self.RANKS,
+                self.WORLD_SIZE,
+            )
+            return [c10d.wait_tensor(r) for r in rs]
+
+        inp = [T(10, 10), T(15, 15)]
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_all_reduce(self):
+        def fn(x):
+            r = _c10d.all_reduce(x, "sum", "0")
+            return _c10d.wait_tensor(r)
+
+        inp = T(10, 10)
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_all_reduce_coalesced(self):
+        def fn(x):
+            rs = _c10d.all_reduce_coalesced(x, "sum", "0")
+            return [_c10d.wait_tensor(r) for r in rs]
+
+        inp = [T(10, 10), T(15, 15)]
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_all_gather_into_tensor(self):
+        def fn(x):
+            rs = _c10d.all_gather_into_tensor(
+                x,
+                self.WORLD_SIZE,
+                "0",
+            )
+            return [_c10d.wait_tensor(r) for r in rs]
+
+        inp = T(10, 10)
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_all_gather_into_tensor_coalesced(self):
+        def fn(x):
+            rs = _c10d.all_gather_into_tensor_coalesced(
+                x,
+                self.WORLD_SIZE,
+                "0",
+            )
+            return [_c10d.wait_tensor(r) for r in rs]
+
+        inp = [T(10, 10), T(15, 15)]
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_reduce_scatter_tensor(self):
+        def fn(x):
+            rs = _c10d.reduce_scatter_tensor(
+                x,
+                "sum",
+                self.WORLD_SIZE,
+                "0",
+            )
+            return [_c10d.wait_tensor(r) for r in rs]
+
+        inp = T(self.WORLD_SIZE, 10)
+        self._verify_runtime_estimation(fn, (inp,))
+
+    def test_reduce_scatter_tensor_coalesced(self):
+        def fn(x):
+            rs = _c10d.reduce_scatter_tensor_coalesced(
+                x,
+                "sum",
+                self.WORLD_SIZE,
+                "0",
+            )
+            return [_c10d.wait_tensor(r) for r in rs]
+
+        inp = [T(self.WORLD_SIZE, 10), T(self.WORLD_SIZE, 15)]
+        self._verify_runtime_estimation(fn, (inp,))
+
+
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests(needs="filelock")

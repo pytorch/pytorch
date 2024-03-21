@@ -177,12 +177,14 @@ Initialization
 --------------
 
 The package needs to be initialized using the :func:`torch.distributed.init_process_group`
-function before calling any other methods. This blocks until all processes have
-joined.
+or :func:`torch.distributed.device_mesh.init_device_mesh` function before calling any other methods.
+Both block until all processes have joined.
 
 .. autofunction:: is_available
 
 .. autofunction:: init_process_group
+
+.. autofunction:: torch.distributed.device_mesh.init_device_mesh
 
 .. autofunction:: is_initialized
 
@@ -339,6 +341,18 @@ an opaque group handle that can be given as a ``group`` argument to all collecti
 
 .. autofunction:: get_process_group_ranks
 
+
+DeviceMesh
+----------
+
+DeviceMesh is a higher level abstraction that manages process groups (or NCCL communicators).
+It allows user to easily create inter node and intra node process groups without worrying about
+how to set up the ranks correctly for different sub process groups, and it helps manage those
+distributed process group easily. :func:`~torch.distributed.device_mesh.init_device_mesh` function can be
+used to create new DeviceMesh, with a mesh shape describing the device topology.
+
+.. autoclass:: torch.distributed.device_mesh.DeviceMesh
+
 Point-to-point communication
 ----------------------------
 
@@ -453,6 +467,8 @@ Collective functions
 
 .. autofunction:: monitored_barrier
 
+.. autoclass:: Work
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
@@ -483,72 +499,11 @@ Multi-GPU collective functions
 ------------------------------
 
 .. warning::
-    The multi-GPU functions will be deprecated. If you must use them, please revisit our documentation later.
-
-If you have more than one GPU on each node, when using the NCCL and Gloo backend,
-:func:`~torch.distributed.broadcast_multigpu`
-:func:`~torch.distributed.all_reduce_multigpu`
-:func:`~torch.distributed.reduce_multigpu`
-:func:`~torch.distributed.all_gather_multigpu` and
-:func:`~torch.distributed.reduce_scatter_multigpu` support distributed collective
-operations among multiple GPUs within each node. These functions can potentially
-improve the overall distributed training performance and be easily used by
-passing a list of tensors. Each Tensor in the passed tensor list needs
-to be on a separate GPU device of the host where the function is called. Note
-that the length of the tensor list needs to be identical among all the
-distributed processes. Also note that currently the multi-GPU collective
-functions are only supported by the NCCL backend.
-
-For example, if the system we use for distributed training has 2 nodes, each
-of which has 8 GPUs. On each of the 16 GPUs, there is a tensor that we would
-like to all-reduce. The following code can serve as a reference:
-
-Code running on Node 0
-
-::
-
-    import torch
-    import torch.distributed as dist
-
-    dist.init_process_group(backend="nccl",
-                            init_method="file:///distributed_test",
-                            world_size=2,
-                            rank=0)
-    tensor_list = []
-    for dev_idx in range(torch.cuda.device_count()):
-        tensor_list.append(torch.FloatTensor([1]).cuda(dev_idx))
-
-    dist.all_reduce_multigpu(tensor_list)
-
-Code running on Node 1
-
-::
-
-    import torch
-    import torch.distributed as dist
-
-    dist.init_process_group(backend="nccl",
-                            init_method="file:///distributed_test",
-                            world_size=2,
-                            rank=1)
-    tensor_list = []
-    for dev_idx in range(torch.cuda.device_count()):
-        tensor_list.append(torch.FloatTensor([1]).cuda(dev_idx))
-
-    dist.all_reduce_multigpu(tensor_list)
-
-After the call, all 16 tensors on the two nodes will have the all-reduced value
-of 16
-
-.. autofunction:: broadcast_multigpu
-
-.. autofunction:: all_reduce_multigpu
-
-.. autofunction:: reduce_multigpu
-
-.. autofunction:: all_gather_multigpu
-
-.. autofunction:: reduce_scatter_multigpu
+    The multi-GPU functions (which stand for multiple GPUs per CPU thread) are
+    deprecated. As of today, PyTorch Distributed's preferred programming model
+    is one device per thread, as exemplified by the APIs in this document. If
+    you are a backend developer and want to support multiple devices per thread,
+    please contact PyTorch Distributed's maintainers.
 
 
 .. _distributed-launch:
@@ -605,6 +560,19 @@ Debugging ``torch.distributed`` applications
 
 Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. ``torch.distributed`` provides
 a suite of tools to help debug training applications in a self-serve fashion:
+
+Python Breakpoint
+^^^^^^^^^^^^^^^^^
+
+It is extremely convenient to use python's debugger in a distributed environment, but because it does not work out of the box many people do not use it at all.
+PyTorch offers a customized wrapper around pdb that streamlines the process.
+
+`torch.distributed.breakpoint` makes this process easy.  Internally, it customizes `pdb`'s breakpoint behavior in two ways but otherwise behaves as normal `pdb`.
+1. Attaches the debugger only on one rank (specified by the user).
+2. Ensures all other ranks stop, by using a `torch.distributed.barrier()` that will release once the debugged rank issues a `continue`
+3. Reroutes stdin from the child process such that it connects to your terminal.
+
+To use it, simply issue `torch.distributed.breakpoint(rank)` on all ranks, using the same value for `rank` in each case.
 
 Monitored Barrier
 ^^^^^^^^^^^^^^^^^
@@ -857,6 +825,10 @@ Distributed components raise custom Exception types derived from `RuntimeError`:
 .. autoclass:: torch.distributed.DistNetworkError
 .. autoclass:: torch.distributed.DistStoreError
 
+If you are running single node training, it may be convenient to interactively breakpoint your script.  We offer a way to conveniently breakpoint a single rank:
+
+.. autofunction:: torch.distributed.breakpoint
+
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.distributed.algorithms
@@ -898,10 +870,12 @@ Distributed components raise custom Exception types derived from `RuntimeError`:
 .. py:module:: torch.distributed.checkpoint.resharding
 .. py:module:: torch.distributed.checkpoint.state_dict_loader
 .. py:module:: torch.distributed.checkpoint.state_dict_saver
+.. py:module:: torch.distributed.checkpoint.stateful
 .. py:module:: torch.distributed.checkpoint.storage
 .. py:module:: torch.distributed.checkpoint.utils
 .. py:module:: torch.distributed.collective_utils
 .. py:module:: torch.distributed.constants
+.. py:module:: torch.distributed.device_mesh
 .. py:module:: torch.distributed.distributed_c10d
 .. py:module:: torch.distributed.elastic.agent.server.api
 .. py:module:: torch.distributed.elastic.agent.server.local_elastic_agent
@@ -986,6 +960,7 @@ Distributed components raise custom Exception types derived from `RuntimeError`:
 .. py:module:: torch.distributed.tensor.parallel.ddp
 .. py:module:: torch.distributed.tensor.parallel.fsdp
 .. py:module:: torch.distributed.tensor.parallel.input_reshard
+.. py:module:: torch.distributed.tensor.parallel.loss
 .. py:module:: torch.distributed.tensor.parallel.style
 .. py:module:: torch.distributed.utils
 .. py:module:: torch.distributed.checkpoint.state_dict

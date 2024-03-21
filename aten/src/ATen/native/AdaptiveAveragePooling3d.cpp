@@ -19,14 +19,13 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
 template <typename scalar_t>
 static void adaptive_avg_pool3d_out_frame(
-    scalar_t* input_p,
+    const scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeD,
     int64_t isizeT,
@@ -58,7 +57,7 @@ static void adaptive_avg_pool3d_out_frame(
             int kW = iendW - istartW;
 
             /* local pointers */
-            scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
+            const scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
                 istartH * istrideH + istartW * istrideW;
             scalar_t* op = output_p + d * osizeT * osizeH * osizeW +
                 ot * osizeH * osizeW + oh * osizeW + ow;
@@ -129,7 +128,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool3d_out_frame<scalar_t>(
               input_data,
@@ -152,7 +151,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
             for (const auto b : c10::irange(start, end)) {
@@ -339,5 +338,4 @@ Tensor adaptive_avg_pool3d_backward_cpu(const Tensor& gradOutput_,
   return gradInput;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

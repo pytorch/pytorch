@@ -9,10 +9,11 @@ namespace c10 {
 size_t TaskThreadPoolBase::defaultNumThreads() {
   size_t num_threads = 0;
 #if !defined(__powerpc__) && !defined(__s390x__)
-  cpuinfo_initialize();
-  num_threads = cpuinfo_get_processors_count();
-  if (num_threads > 0) {
-    return num_threads;
+  if (cpuinfo_initialize()) {
+    num_threads = cpuinfo_get_processors_count();
+    if (num_threads > 0) {
+      return num_threads;
+    }
   }
 #endif
   num_threads = std::thread::hardware_concurrency();

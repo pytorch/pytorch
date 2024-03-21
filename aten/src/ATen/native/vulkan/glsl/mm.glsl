@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 // To convince the SPIR-V compiler to unroll the loops optimally, need this
 // macro
@@ -60,7 +60,7 @@ void main() {
     for (int idx_c = 0; idx_c < FOUR; idx_c++) {
       for (int idx_r = 0; idx_r < FOUR; idx_r++) {
         const ivec3 out_pos =
-            ivec3(idx_r + FOUR * pos.x, idx_c + FOUR * pos.y, 0);
+            ivec3(idx_r + FOUR * pos.x, idx_c + FOUR * pos.y, pos.z);
         imageStore(
             uOutput, out_pos, vec4(results[idx_c][idx_r], 0.0, 0.0, 0.0));
       }

@@ -249,6 +249,9 @@ class Vectorized<double> {
   Vectorized<double> expm1() const {
      return {Sleef_expm1d2_u10(_vec0), Sleef_expm1d2_u10(_vec1)};
   }
+  Vectorized<double> C10_ALWAYS_INLINE exp_u20() const {
+     return exp();
+  }
 
   Vectorized<double> lgamma() const __ubsan_ignore_undefined__ {
      return {Sleef_lgammad2_u10(_vec0), Sleef_lgammad2_u10(_vec1)};
@@ -379,6 +382,19 @@ class Vectorized<double> {
     auto x = *this;
     auto ret = (x == x);
     return ret._nor();
+  }
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   DEFINE_MEMBER_OP(operator==, double, vec_cmpeq)

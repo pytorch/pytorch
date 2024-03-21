@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from typing import Dict, List
 
@@ -6,8 +8,8 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder
-from ..utils import np
+from ..guards import GuardBuilder, install_guard
+from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
 _type_to_assert_reason = {
@@ -29,7 +31,7 @@ _type_to_assert_reason = {
 
 class ConstantVariable(VariableTracker):
     @staticmethod
-    def create(value, **kwargs):
+    def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)
         is_literal = ConstantVariable.is_literal(value)
         if not is_literal:
@@ -41,21 +43,15 @@ class ConstantVariable(VariableTracker):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                guards = (
-                    {item_source.make_guard(GuardBuilder.CONSTANT_MATCH)}
-                    if item_source
-                    else None
-                )
+                if item_source:
+                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,
                         source=item_source,
-                        guards=guards,
                     )
                 )
-            return variables.BaseListVariable.cls_for(type(value))(
-                items, regen_guards=True, **kwargs
-            )
+            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
 
         return ConstantVariable(value, **kwargs)
 
@@ -77,14 +73,16 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        # return f"ConstantVariable({self.value})"
-        return f"ConstantVariable({type(self.value).__name__})"
+        return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def python_type(self):
         return type(self.value)
 
     def as_python_constant(self):
         return self.value
+
+    def is_python_constant(self):
+        return True
 
     @property
     def items(self):
@@ -97,21 +95,11 @@ class ConstantVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
-            **VariableTracker.propagate([self, arg]),
         )
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            Ellipsis.__class__,
-            torch.dtype,
-            torch.device,
-        ):
+        if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
@@ -120,10 +108,7 @@ class ConstantVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         try:
-            options = VariableTracker.propagate([self])
-            return [
-                ConstantVariable.create(x, **options) for x in self.as_python_constant()
-            ]
+            return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
@@ -149,7 +134,10 @@ class ConstantVariable(VariableTracker):
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "format" and istype(self.value, str):
+            return variables.BuiltinVariable(str.format).call_function(
+                tx, [self, *args], kwargs
+            )
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -173,9 +161,7 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
-            return ConstantVariable.create(
-                method(*const_args, **const_kwargs), **options
-            )
+            return ConstantVariable.create(method(*const_args, **const_kwargs))
         elif has_arith_binop(int) or has_arith_binop(float):
             op = getattr(operator, name)
             add_target = const_args[0]
@@ -189,21 +175,21 @@ class ConstantVariable(VariableTracker):
                 proxy = tx.output.create_proxy(
                     "call_function", op, (self.value, add_target), {}
                 )
-                return SymNodeVariable.create(tx, proxy, add_target, **options)
-            return ConstantVariable.create(op(self.value, add_target), **options)
+                return SymNodeVariable.create(tx, proxy, add_target)
+            return ConstantVariable.create(op(self.value, add_target))
         elif name == "__len__" and not (args or kwargs):
-            return ConstantVariable.create(len(self.value), **options)
+            return ConstantVariable.create(len(self.value))
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
             result = search in self.value
-            return ConstantVariable.create(result, **options)
+            return ConstantVariable.create(result)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result).add_options(self)
+        return variables.ConstantVariable.create(result)
 
 
 class EnumVariable(VariableTracker):

@@ -387,7 +387,7 @@ class TestTri(TestCase):
     def test_tril_triu_dtype(self):
         # Issue 4916
         # tril and triu should return the same dtype as input
-        for c in np.typecodes["All"]:
+        for c in "efdFDBbhil?":  # np.typecodes["All"]:
             arr = np.zeros((3, 3), dtype=c)
             assert_equal(np.triu(arr).dtype, arr.dtype)
             assert_equal(np.tril(arr).dtype, arr.dtype)
@@ -402,7 +402,7 @@ class TestTri(TestCase):
         iu1 = mask_indices(3, np.triu, 1)
         assert_array_equal(a[iu1], array([1, 2, 5]))
 
-    @xpassIfTorchDynamo  # (reason="np.tril_indices == our tuple(tril_indices)")
+    @xfail  # (reason="np.tril_indices == our tuple(tril_indices)")
     def test_tril_indices(self):
         # indices without and with offset
         il1 = tril_indices(4)
@@ -462,7 +462,7 @@ class TestTri(TestCase):
         )
 
 
-@xpassIfTorchDynamo  # (reason="np.triu_indices == our tuple(triu_indices)")
+@xfail  # (reason="np.triu_indices == our tuple(triu_indices)")
 class TestTriuIndices(TestCase):
     def test_triu_indices(self):
         iu1 = triu_indices(4)

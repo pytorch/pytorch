@@ -22,9 +22,6 @@
 
 #include <ATen/Context.h>
 
-#include <deque>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -167,7 +164,12 @@ struct MetadataBase {
 
   void addMetadata(const std::string& key, const std::string& value) {
     if (kineto_activity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
+      torch::profiler::impl::kineto::addMetadata(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<torch::profiler::impl::kineto::activity_t*>(
+              kineto_activity_),
+          key,
+          value);
     }
   }
 
@@ -779,16 +781,16 @@ int64_t KinetoEvent::debugHandle() const {
       [](const auto&) -> int64_t { return -1; }));
 }
 
-uint8_t KinetoEvent::deviceIndex() const {
+int KinetoEvent::deviceIndex() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::Allocation>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [](const ExtraFields<EventType::OutOfMemory>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [&](const auto&) {
-        return static_cast<uint8_t>(result_->kineto_info_.device);
+        return static_cast<int>(result_->kineto_info_.device);
       }));
 }
 
@@ -884,7 +886,9 @@ TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(
     TorchOp,
     flops,
-    !e.extra_args_.empty() ? computeFlops(e.name_, e.extra_args_) : 0)
+    !e.extra_args_.empty()
+        ? torch::profiler::impl::computeFlops(e.name_, e.extra_args_)
+        : 0)
 TYPED_ATTR(Backend, backend, e.backend_)
 TYPED_ATTR(Allocation, nBytes, e.alloc_size_)
 TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {

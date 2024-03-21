@@ -193,6 +193,9 @@ Reducer::Reducer(
 #endif
                     this->autograd_hook(variable_index);
                     return outputs;
+                  },
+                  [=](torch::autograd::CompiledNodeArgs& args) {
+                    // Make post_hook an noop if compiled_autograds is enabled.
                   })),
           grad_accumulator);
 
@@ -724,7 +727,7 @@ void Reducer::autograd_hook(size_t index) {
 void Reducer::all_reduce_local_used_map() {
   // See Note [Skip allreducing local_used_map_dev]
   // H2D from local_used_map_ to local_used_map_dev_
-  if (local_used_map_dev_.is_cuda()) {
+  if (local_used_map_dev_.is_cuda() || local_used_map_dev_.is_privateuseone()) {
     // Note [local_used_map_ -> local_used_map_dev copying]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We do async H2D to avoid the blocking overhead. The async copy and
@@ -734,8 +737,8 @@ void Reducer::all_reduce_local_used_map() {
     // Correct sequencing with respect to host operations is also
     // essential. The H2D copy_ is stream ordered, while the host's
     // changes to local_used_map_ are host ordered. If a large backlog of
-    // cuda-stream work pushes the copy_ far into the future, and if no
-    // blocking calls occur between now and finalize_backward()** such
+    // cuda/privateuseone-stream work pushes the copy_ far into the future, and
+    // if no blocking calls occur between now and finalize_backward()** such
     // that finalize_backward() re-zeroes local_used_map_ on the host
     // before the stream executes the copy_, copy_ will read those zeros
     // instead of the values we thought we told it to read here. Copying
@@ -751,7 +754,7 @@ void Reducer::all_reduce_local_used_map() {
     // local_used_map_
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
-        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
         local_used_map_.options().layout_opt(),
         local_used_map_.options().device_opt(),
         true /* pinned_memory */);
@@ -766,11 +769,11 @@ void Reducer::all_reduce_local_used_map() {
   } else if (local_used_map_dev_.is_mtia()) {
     // MTIA probably will have special logic in the future, following code might
     // be changed drastically. Therefore, a new if case is created for MTIA, for
-    // now, the implementation is similar to the CUDA one, except for
-    // the pin memory step.
+    // now, the implementation is similar to the CUDA/privateuseone one, except
+    // for the pin memory step.
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
-        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
         local_used_map_.options().layout_opt(),
         local_used_map_.options().device_opt());
     local_used_map_tmp.copy_(local_used_map_);
@@ -950,6 +953,22 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   // these operations are implicitly sequenced, and we don't need to
   // do any extra synchronization here.
   const auto& tensor = bucket.gradients;
+
+  // TODO(@egienvalue): remove special case after view ops are fully
+  // supported on MTIA.
+  // If the bucket.gradients is on MTIA, bucket.bucket_views_in might not
+  // point to the same storage as bucket.gradients due to the special
+  // memory layout. It has to explicitly copy the data back to 1-D gradients.
+  if (tensor.is_mtia()) {
+    for (const auto i : c10::irange(bucket.variables.size())) {
+      const auto offset = bucket.offsets[i];
+      const auto length = bucket.lengths[i];
+      if (!bucket.bucket_views_in[i].is_alias_of(tensor)) {
+        tensor.narrow(0, offset, length)
+            .copy_(bucket.bucket_views_in[i].flatten());
+      }
+    }
+  }
 
   GradBucket grad_bucket(
       next_bucket_,
@@ -1206,7 +1225,12 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    if (v.is_non_overlapping_and_dense()) {
+    // TODO(@egienvalue): remove special case after view ops are fully
+    // supported on MTIA.
+    // In general, on MTIA, due to the special memory layout, it doesn't
+    // support as_strided which creates a view tensor and aten::view will
+    // create a new tensor on MTIA for now.
+    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1257,7 +1281,12 @@ void Reducer::populate_bucket_views_out(
     const auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    if (v.is_non_overlapping_and_dense()) {
+    // TODO(@egienvalue): remove special case after view ops are fully
+    // supported on MTIA.
+    // In general, on MTIA, due to the special memory layout, it doesn't
+    // support as_strided which creates a view tensor and aten::view will
+    // create a new tensor on MTIA for now.
+    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1776,13 +1805,11 @@ bool Reducer::rebuild_buckets() {
           params_.size(),
           " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
-  std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
-  std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
+      (getCvarString({"DDP_SET_LAST_BUCKET_CAP"}, "N/A") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -1793,7 +1820,7 @@ bool Reducer::rebuild_buckets() {
     std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
     std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
   }
-  std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
+  auto [rebuilt_bucket_indices, per_bucket_size_limits] =
       compute_bucket_assignment_by_size(
           rebuilt_params_,
           bucket_size_limits,
@@ -2306,6 +2333,28 @@ void Reducer::remove_autograd_hooks() {
 void Reducer::check_finalized() {
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
+}
+
+void Reducer::update_process_group(
+    c10::intrusive_ptr<c10d::ProcessGroup> new_process_group) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  process_group_ = std::move(new_process_group);
+}
+
+void Reducer::reset_state() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  // Force rebuild of buckets.
+  has_rebuilt_bucket_ = false;
+  rebuilt_params_.clear();
+  rebuilt_param_indices_.clear();
+
+  // Ensure forward can run despite previous backward not succeeding.
+  expect_autograd_hooks_ = false;
+  require_finalize_ = false;
+
+  // Unset allreduce division factor, as it may change in next backwards pass
+  // when running with DDP join mode.
+  div_factor_ = kUnsetDivFactor;
 }
 
 } // namespace c10d

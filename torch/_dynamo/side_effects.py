@@ -1,6 +1,5 @@
-import collections
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
 
@@ -40,7 +39,7 @@ class AttributeMutation(MutableLocalBase):
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    def __init__(self, typ: MutableLocalSource, source: Source):
+    def __init__(self, typ: MutableLocalSource, source: Optional[Source]):
         super().__init__(typ)
         self.source = source
 
@@ -52,7 +51,7 @@ class AttributeMutationExisting(AttributeMutation):
 
 
 class AttributeMutationNew(AttributeMutation):
-    def __init__(self, source: Source, cls_source: Source):
+    def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
 
@@ -64,7 +63,7 @@ class SideEffects:
     """
 
     id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    store_attr_mutations: Dict[MutableLocalBase, Dict[str, VariableTracker]]
     keepalive: List[Any]
 
     def __init__(
@@ -76,8 +75,8 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
-        self.id_to_variable = id_to_variable or collections.OrderedDict()
-        self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
+        self.id_to_variable = id_to_variable or {}
+        self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
@@ -109,38 +108,22 @@ class SideEffects:
             return "store_attr_mutations: unknown diff"
         elif self.save_for_backward != other.save_for_backward:
             return "save_for_backward"
+        elif self.tensor_hooks != other.tensor_hooks:
+            return "tensor_hooks"
         else:
             return None
 
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
-            id_to_variable=collections.OrderedDict(self.id_to_variable),
-            store_attr_mutations=collections.OrderedDict(
-                (k, collections.OrderedDict(v))
-                for k, v in self.store_attr_mutations.items()
-            ),
+            id_to_variable=dict(self.id_to_variable),
+            store_attr_mutations={
+                k: dict(v) for k, v in self.store_attr_mutations.items()
+            },
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
-
-    def apply(self, fn, cache=None, skip_fn=lambda _: False):
-        if cache is None:
-            cache = dict()
-
-        self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache, skip_fn))
-            for k, v in self.id_to_variable.items()
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache, skip_fn))
-            for k, v in self.store_attr_mutations.items()
-        )
-        self.save_for_backward = VariableTracker.apply(
-            fn, self.save_for_backward, cache, skip_fn
-        )
-        self.tensor_hooks = VariableTracker.apply(fn, self.tensor_hooks, cache, skip_fn)
 
     def __contains__(self, item):
         return id(item) in self.id_to_variable
@@ -164,7 +147,7 @@ class SideEffects:
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
-            self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
+            self.store_attr_mutations[item.mutable_local] = {}
         self.store_attr_mutations[item.mutable_local][name] = value
 
     def load_attr(self, item, name, deleted_ok=False):
@@ -216,29 +199,25 @@ class SideEffects:
 
     def _track_obj(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
         mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=mutable_cls(source), source=source)
+        assert variable.source is not None
+        variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
-    track_list = _track_obj
-    track_dict = _track_obj
+    track_mutable = _track_obj
 
     def track_object_existing(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(
-            source, item, variable, mutable_cls=AttributeMutationExisting
-        )
+        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
 
     def track_object_new(
         self,
@@ -293,6 +272,18 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
+    def track_tensor_variables_from_runahead_side_effects(self, other):
+        # In higher order ops we want to keep track of tensors seen in the
+        # speculate_subgraph so that we don't lift them again as a new input in
+        # other speculate_subgraph or in the root tracer.
+        for other_item in other.keepalive:
+            other_id = id(other_item)
+            other_variable = other.id_to_variable[other_id]
+            if other_id not in self.id_to_variable and isinstance(
+                other_variable, variables.TensorVariable
+            ):
+                self.track_object_existing(other_item, other_variable)
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
@@ -303,35 +294,33 @@ class SideEffects:
                 and var.mutable_local is not skip_obj
             ):
                 live_new_objects.add(var.mutable_local)
-            return var
 
-        def is_live(var: VariableTracker):
+        def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
                 return var in live_new_objects
             if isinstance(var, VariableTracker):
                 return is_live(var.mutable_local)
             return True
 
-        VariableTracker.apply(visit, (tx.stack, tx.symbolic_locals))
+        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
         for var in self.id_to_variable.values():
             if not isinstance(var.mutable_local, AttributeMutationNew):
-                VariableTracker.apply(visit, var)
+                VariableTracker.visit(visit, var)
 
         for skip_obj, setattrs in self.store_attr_mutations.items():
-            VariableTracker.apply(visit, setattrs)
+            VariableTracker.visit(visit, setattrs)
 
-        self.id_to_variable = collections.OrderedDict(
-            (k, v) for k, v in self.id_to_variable.items() if is_live(v)
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, v) for k, v in self.store_attr_mutations.items() if is_live(k)
-        )
+        self.id_to_variable = {
+            k: v for k, v in self.id_to_variable.items() if is_live(v)
+        }
+        self.store_attr_mutations = {
+            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+        }
 
-    def mutation(self, oldvar, newvar):
-        self.check_allowed_side_effect(oldvar)
-        return newvar.clone(
-            mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
+    def mutation(self, var):
+        self.check_allowed_side_effect(var)
+        if isinstance(var.mutable_local, MutableSideEffects):
+            var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -345,7 +334,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -381,7 +370,17 @@ class SideEffects:
             )
 
     def register_hook(self, tensor, hook, handle, name):
+        assert isinstance(tensor, variables.TensorVariable)
+        assert isinstance(hook, variables.VariableTracker)
+        assert (
+            isinstance(handle, variables.RemovableHandleVariable)
+            and handle.mutable_local
+        )
+        assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
+        # duplicate index possible because of self.remove_hook()
+        while idx in self.tensor_hooks:
+            idx += 1
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
         assert not handle.idx
         handle.idx = idx
@@ -434,27 +433,10 @@ class SideEffects:
             cg.extend_output([cg.create_load_attr(name)])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
-            # Let's go over how handles work.
-            #
-            # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
-            # time after that, or never. In dynamo, we track and associate a name with a handle (user_code_variable_name) to
-            # determine if a handle is accessed. If a handle has no user_code_variable_name, we just pop the produced value
-            # off the top of the stack, discarding the handle.
-            #
-            # If a handle is seen, we store it under that name. This is extremely important, because, the handle
-            # can be generated at any time after this point, and can be generated multiple times! If we were to defer
-            # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
-            # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
-            # essentially a lookup.
-            if (
-                hasattr(handle, "user_code_variable_name")
-                and handle.user_code_variable_name
-            ):
-                # register_hook stored with variable name assigned to the handle
-                cg.extend_output([cg.create_store(handle.user_code_variable_name)])
-            else:
-                # register_hook stored w/o a variable name assigned to the handle
-                cg.extend_output([create_instruction("POP_TOP")])
+
+            # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
+            # be associated with the return value of register_hook().  This consumes the top of stack.
+            cg.add_cache(handle)
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
@@ -462,7 +444,7 @@ class SideEffects:
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -475,11 +457,11 @@ class SideEffects:
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
@@ -516,6 +498,12 @@ class SideEffects:
                         cg(value)
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            elif isinstance(var, variables.TupleIteratorVariable):
+                for _ in range(var.index):
+                    cg.load_import_from(utils.__name__, "iter_next")
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.extend_output(create_call_function(1, True))
+                    cg.append_output(create_instruction("POP_TOP"))
             else:
                 raise AssertionError(type(var))
 

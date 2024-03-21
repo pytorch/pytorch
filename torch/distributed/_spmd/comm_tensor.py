@@ -6,7 +6,7 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
-    fetch_tensor_proxy,
+    fetch_object_proxy,
     get_innermost_proxy_mode,
     get_proxy_slot,
     set_proxy_slot,
@@ -56,9 +56,9 @@ def _get_tracer() -> Optional[torch.fx.Tracer]:
 
 class CommTensor(torch.Tensor):
     r"""
-    A Tensor subclass to wrap input tensors for collective communications. This
-    Tensor subclass works for both eager and tracing mode.
+    A Tensor subclass to wrap input tensors for collective communications.
 
+    This Tensor subclass works for both eager and tracing mode.
     In eager mode, it will record whether the inplace collective communication
     has been launched using this Tensor and remember the corresponding work
     handle. If yes, it will explicitly call wait() in the ``__torch_dispatch__``
@@ -193,7 +193,7 @@ class CommTensor(torch.Tensor):
                     lambda e: e.proxy,
                     tree_map_only(
                         torch.Tensor,
-                        fetch_tensor_proxy(tracer),
+                        fetch_object_proxy(tracer),
                         (unwrapped_args, unwrapped_kwargs),
                     ),
                 )

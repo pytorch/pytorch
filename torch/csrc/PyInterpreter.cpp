@@ -18,17 +18,22 @@ namespace {
 // because passing in constexpr char* as template argument breaks some
 // versions of MSVC that are being used internally at Meta.
 // MSVC 14.16.27023 (vs2017_15.9)
-#define CONCRETE_TRACE_CUDA(func_name, ...)                           \
-  at::impl::MaybeSetTLSOnEntryGuard guard;                            \
-  if (Py_IsInitialized()) {                                           \
-    pybind11::gil_scoped_acquire gil;                                 \
-    try {                                                             \
-      py::module mod = py::module::import("torch.utils._cuda_trace"); \
-      py::object hook = mod.attr(func_name).attr("fire_callbacks");   \
-      hook(__VA_ARGS__);                                              \
-    } catch (const std::exception& e) {                               \
-      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what(); \
-    }                                                                 \
+#define CONCRETE_GPU_TRACE(device_type, func_name, ...)                      \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                                   \
+  if (Py_IsInitialized()) {                                                  \
+    pybind11::gil_scoped_acquire gil;                                        \
+    try {                                                                    \
+      py::module utils_mod = py::module::import("torch._utils");             \
+      py::object get_device_module = utils_mod.attr("_get_device_module");   \
+      py::object hook = get_device_module(DeviceTypeName(device_type, true)) \
+                            .attr("_gpu_trace")                              \
+                            .attr(func_name)                                 \
+                            .attr("fire_callbacks");                         \
+      hook(__VA_ARGS__);                                                     \
+    } catch (const std::exception& e) {                                      \
+      LOG(ERROR) << device_type                                              \
+                 << " trace hook execution failed: " << e.what();            \
+    }                                                                        \
   }
 
 struct ConcretePyInterpreterVTable final
@@ -78,40 +83,56 @@ struct ConcretePyInterpreterVTable final
   c10::IntArrayRef sizes(const c10::TensorImpl* self) const override;
   c10::SymIntArrayRef sym_sizes(const c10::TensorImpl* self) const override;
   c10::Layout layout(const c10::TensorImpl* self) const override;
+  int64_t numel(const c10::TensorImpl* self) const override;
   c10::SymInt sym_numel(const c10::TensorImpl* self) const override;
   c10::SymIntArrayRef sym_strides(const c10::TensorImpl* self) const override;
   c10::SymInt sym_storage_offset(const c10::TensorImpl* self) const override;
 
-  void trace_gpu_event_creation(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventCreationCallbacks", event);
-  }
-  void trace_gpu_event_deletion(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventDeletionCallbacks", event);
-  }
-  void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
+  void trace_gpu_event_creation(at::DeviceType device_type, uintptr_t event)
       const override {
-    CONCRETE_TRACE_CUDA("CUDAEventRecordCallbacks", event, stream);
+    CONCRETE_GPU_TRACE(device_type, "EventCreationCallbacks", event);
   }
-  void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventWaitCallbacks", event, stream);
+  void trace_gpu_event_deletion(at::DeviceType device_type, uintptr_t event)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "EventDeletionCallbacks", event);
   }
-  void trace_gpu_memory_allocation(uintptr_t ptr) const override {
-    CONCRETE_TRACE_CUDA("CUDAMemoryAllocationCallbacks", ptr);
+  void trace_gpu_event_record(
+      at::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "EventRecordCallbacks", event, stream);
   }
-  void trace_gpu_memory_deallocation(uintptr_t ptr) const override {
-    CONCRETE_TRACE_CUDA("CUDAMemoryDeallocationCallbacks", ptr);
+  void trace_gpu_event_wait(
+      at::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "EventWaitCallbacks", event, stream);
   }
-  void trace_gpu_stream_creation(uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAStreamCreationCallbacks", stream);
+  void trace_gpu_memory_allocation(at::DeviceType device_type, uintptr_t ptr)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "MemoryAllocationCallbacks", ptr);
   }
-  void trace_gpu_device_synchronization() const override {
-    CONCRETE_TRACE_CUDA("CUDADeviceSynchronizationCallbacks");
+  void trace_gpu_memory_deallocation(at::DeviceType device_type, uintptr_t ptr)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "MemoryDeallocationCallbacks", ptr);
   }
-  void trace_gpu_stream_synchronization(uintptr_t stream) const override {
-    CONCRETE_TRACE_CUDA("CUDAStreamSynchronizationCallbacks", stream);
+  void trace_gpu_stream_creation(at::DeviceType device_type, uintptr_t stream)
+      const override {
+    CONCRETE_GPU_TRACE(device_type, "StreamCreationCallbacks", stream);
   }
-  void trace_gpu_event_synchronization(uintptr_t event) const override {
-    CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
+  void trace_gpu_device_synchronization(
+      at::DeviceType device_type) const override {
+    CONCRETE_GPU_TRACE(device_type, "DeviceSynchronizationCallbacks");
+  }
+  void trace_gpu_stream_synchronization(
+      at::DeviceType device_type,
+      uintptr_t stream) const override {
+    CONCRETE_GPU_TRACE(device_type, "StreamSynchronizationCallbacks", stream);
+  }
+  void trace_gpu_event_synchronization(
+      at::DeviceType device_type,
+      uintptr_t event) const override {
+    CONCRETE_GPU_TRACE(device_type, "EventSynchronizationCallbacks", event);
   }
 
   void reset_backward_hooks(const c10::TensorImpl* self) const override;
@@ -814,6 +835,29 @@ c10::Layout ConcretePyInterpreterVTable::layout(
   return toLayout(out.ptr());
 }
 
+int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "numel",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("numel")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out.is_none()) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call sizes on a tensor with symbolic shapes/strides");
+    return self->numel_default();
+  }
+  return py::cast<int64_t>(out);
+}
+
 c10::SymInt ConcretePyInterpreterVTable::sym_numel(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
@@ -830,9 +874,6 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
       "torch.ops.aten");
 
   if (out.is_none()) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
   return torch::is_symint(out) ? out.cast<c10::SymInt>()

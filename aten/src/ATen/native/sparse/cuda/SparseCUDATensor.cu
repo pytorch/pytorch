@@ -36,7 +36,7 @@
 #include <thrust/binary_search.h>
 #include <c10/macros/Macros.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 
@@ -166,4 +166,4 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   return dst;
 }
 
-}} // namespace at::native
+} // namespace at::native

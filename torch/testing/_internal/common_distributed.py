@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import faulthandler
 import logging
 import multiprocessing
@@ -36,11 +38,16 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
 )
+from torch.testing._internal.common_utils import (
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
     _uninstall_threaded_pg,
     ProcessLocalGroup,
 )
+import operator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -215,33 +222,33 @@ def verify_ddp_error_logged(model_DDP, err_substr):
 
 def with_nccl_blocking_wait(func):
     """
-    Convenience decorator to set/unset NCCL_BLOCKING_WAIT flag. Note that use of
-    this decorator will override the setting of NCCL_ASYNC_ERROR_HANDLING for
-    the particular test. After the test, both NCCL_BLOCKING_WAIT and
-    NCCL_ASYNC_ERROR_HANDLING will be restored to their original values.
+    Convenience decorator to set/unset TORCH_NCCL_BLOCKING_WAIT flag. Note that use of
+    this decorator will override the setting of TORCH_NCCL_ASYNC_ERROR_HANDLING for
+    the particular test. After the test, both TORCH_NCCL_BLOCKING_WAIT and
+    TORCH_NCCL_ASYNC_ERROR_HANDLING will be restored to their original values.
     """
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        # Save and unset NCCL_ASYNC_ERROR_HANDLING
+        # Save and unset TORCH_NCCL_ASYNC_ERROR_HANDLING
         try:
             cached_nccl_async_error_handling: Union[str, None] = os.environ[
-                "NCCL_ASYNC_ERROR_HANDLING"
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ]
-            del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+            del os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"]
         except KeyError:
-            # NCCL_ASYNC_ERROR_HANDLING was unset
+            # TORCH_NCCL_ASYNC_ERROR_HANDLING was unset
             cached_nccl_async_error_handling = None
 
-        # Save val of NCCL_BLOCKING_WAIT and set it.
+        # Save val of TORCH_NCCL_BLOCKING_WAIT and set it.
         try:
             cached_nccl_blocking_wait: Union[str, None] = os.environ[
-                "NCCL_BLOCKING_WAIT"
+                "TORCH_NCCL_BLOCKING_WAIT"
             ]
         except KeyError:
             cached_nccl_blocking_wait = None
         finally:
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 
         try:
             ret = func(*args, **kwargs)
@@ -250,11 +257,11 @@ def with_nccl_blocking_wait(func):
             # restore old values.
             if cached_nccl_async_error_handling is not None:
                 os.environ[
-                    "NCCL_ASYNC_ERROR_HANDLING"
+                    "TORCH_NCCL_ASYNC_ERROR_HANDLING"
                 ] = cached_nccl_async_error_handling
 
             if cached_nccl_blocking_wait is not None:
-                os.environ["NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
+                os.environ["TORCH_NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
 
     return wrapper
 
@@ -426,7 +433,7 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
 
     def compute_sum(fn, world_size: int):
         return reduce(
-            lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)]
+            operator.add, [fn(rank, world_size) for rank in range(world_size)]
         )
 
     return [
@@ -457,15 +464,6 @@ def init_multigpu_helper(world_size: int, backend: str):
     """
     nGPUs = torch.cuda.device_count()
     visible_devices = range(nGPUs)
-
-    if backend == "nccl":
-        # This is a hack for a known NCCL issue using multiprocess
-        # in conjunction with multiple threads to manage different GPUs which
-        # may cause ncclCommInitRank to fail.
-        # http://docs.nvidia.com/deeplearning/sdk/nccl-release-notes/rel_2.1.4.html#rel_2.1.4
-        # It slows down the performance of collective operations.
-        # Without this setting NCCL might throw unhandled error.
-        os.environ["NCCL_MAX_NRINGS"] = "1"
 
     # If rank is less than or equal to number of available GPU's
     # then each rank can be mapped to corresponding GPU.
@@ -863,7 +861,7 @@ def has_efa() -> bool:
 
     try:
         EFA_PROBE_RESULT = (
-            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"], check=False).returncode == 0
         )
     except FileNotFoundError:
         EFA_PROBE_RESULT = False
@@ -925,9 +923,13 @@ def spawn_threads_and_init_comms(
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # TODO: get test name from kwargs
-        threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
-        # join and error handling
-        MultiThreadedTestCase._join_threads(threads, func)
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
+        try:
+            threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
+            # join and error handling
+            MultiThreadedTestCase._join_threads(threads, func)
+        finally:
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
     return wrapper
 
@@ -995,6 +997,7 @@ class MultiThreadedTestCase(TestCase):
         """
         class method to spawn threads and run test, use this method in the SetUp of your TestCase
         """
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
         test_name = self._current_test_name
         # for each test case, we need to create thread local world, and a global store
         world = _install_threaded_pg()
@@ -1072,6 +1075,7 @@ class MultiThreadedTestCase(TestCase):
                 failed_ranks.append(failure)
         finally:
             _uninstall_threaded_pg()
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
         cls._check_return_codes(failed_ranks, timeout, fn)
 
@@ -1262,3 +1266,57 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
+
+
+# NOTE [test parametrization utils for native funcol migration]
+#
+# Between the time we switch to the native funcol by default and the time when
+# we are confident that we can remove the legacy implementation, we want to
+# ensure that the legacy funcol remains covered by unit tests. This is to
+# prepare for any potential (but unlikely) reverts. The following utilities
+# help achieve this goal.
+#
+# run_with_{native,legacy}_funcol - mark a test to run with only
+# {native,legacy} funcol. These decorators are for impl specific tests (e.g.
+# verifying generated code with FileCheck).
+#
+# run_with_both_funcol_impls - parametrize a test to run with both legacy and
+# native funcol.
+#
+# run_with_both_funcol_impls_with_arg - same as run_with_both_funcol_impls, but
+# passes `enable_native_funcol` to the test so impl specific checks can be
+# carried out.
+def with_native_funcol(use_native_funcol: bool, remove_arg: bool):
+    import torch.distributed._functional_collectives_impl as funcol_impl
+
+    def decorator(fn):
+        def inner(*args, **kwargs):
+            if remove_arg:
+                del kwargs["use_native_funcol"]
+            with patch.object(funcol_impl, '_use_native_funcol', new=use_native_funcol):
+                return fn(*args, **kwargs)
+
+        return inner
+
+    return decorator
+
+
+run_with_native_funcol = with_native_funcol(True, remove_arg=False)
+run_with_legacy_funcol = with_native_funcol(False, remove_arg=False)
+
+
+run_with_both_funcol_impls = parametrize(
+    "use_native_funcol",
+    [
+        subtest(True, decorators=[with_native_funcol(True, remove_arg=True)]),
+        subtest(False, decorators=[with_native_funcol(False, remove_arg=True)]),
+    ]
+)
+
+run_with_both_funcol_impls_with_arg = parametrize(
+    "use_native_funcol",
+    [
+        subtest(True, decorators=[with_native_funcol(True, remove_arg=False)]),
+        subtest(False, decorators=[with_native_funcol(False, remove_arg=False)]),
+    ]
+)

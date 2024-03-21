@@ -129,8 +129,7 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
                 # that should replace it onto non_out_args_replaced.
-                for replacement in g.out.precomputed.replace[a.name]:
-                    non_out_args_replaced.append(replacement)
+                non_out_args_replaced.extend(g.out.precomputed.replace[a.name])
             else:
                 # If not, push a as it is.
                 non_out_args_replaced.append(a)

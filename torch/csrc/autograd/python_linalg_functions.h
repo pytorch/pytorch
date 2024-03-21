@@ -1,9 +1,7 @@
 #pragma once
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 void initLinalgFunctions(PyObject* module);
 
 }
-} // namespace torch

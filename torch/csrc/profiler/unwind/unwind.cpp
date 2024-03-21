@@ -1,21 +1,29 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
-#if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
-    !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
-namespace torch {
-namespace unwind {
+#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
+    !__has_include("ext/stdio_filebuf.h")
+namespace torch::unwind {
 std::vector<void*> unwind() {
   TORCH_CHECK(
       false,
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
 
+c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
+  TORCH_CHECK(
+      false,
+      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+}
+
+#ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   TORCH_CHECK(
       false,
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
+#endif
 
 Stats stats() {
   TORCH_CHECK(
@@ -23,8 +31,7 @@ Stats stats() {
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
 
-} // namespace unwind
-} // namespace torch
+} // namespace torch::unwind
 
 #else
 
@@ -34,16 +41,14 @@ Stats stats() {
 #include <linux/limits.h>
 #include <algorithm>
 #include <climits>
-#include <iostream>
-#include <unordered_map>
 #include <vector>
 
 #include <c10/util/irange.h>
+#include <cxxabi.h>
 #include <torch/csrc/profiler/unwind/communicate.h>
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
 #include <torch/csrc/profiler/unwind/fde.h>
-#include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 
@@ -59,6 +64,7 @@ struct UpgradeExclusive {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::shared_lock<std::shared_timed_mutex>& rdlock_;
 };
 
@@ -97,6 +103,7 @@ struct LibraryInfo {
 };
 
 static const char* process_name() {
+  // NOLINTNEXTLINE(*-c-arrays*)
   static char name[PATH_MAX + 1] = "";
   if (*name == '\0') {
     ssize_t len = readlink("/proc/self/exe", name, PATH_MAX);
@@ -145,6 +152,7 @@ struct UnwindCache {
                 library_name = process_name();
               }
               auto eh_frame_hdr =
+                  // NOLINTNEXTLINE(performance-no-int-to-ptr)
                   (void*)(segments[i].p_vaddr + info->dlpi_addr);
               self->all_libraries_.emplace_back(
                   std::move(library_name),
@@ -272,6 +280,7 @@ extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(cache_mutex_);
   UnwindState state{};
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   state.rip = *(int64_t*)(rsp);
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
@@ -279,6 +288,7 @@ extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   state.rbp = rbp;
   unwind_cache.checkRefresh(lock);
   while (true) { // unwind for _start sets rip as being undefined
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     result->push_back((void*)state.rip);
     const Unwinder& uw = unwind_cache.unwinderFor(state.rip, lock);
     if (uw.terminator()) {
@@ -301,19 +311,11 @@ extern "C" void unwind_entry(std::vector<void*>* result);
 __asm__(
     ".global unwind_entry\n"
     "unwind_entry:\n"
-#ifdef __aarch64__
-    "mov x1, sp;\n"
-    "mov x2, x29;\n"
-    "b unwind_c;\n"
-#else
     "mov %rsp, %rsi;\n"
     "mov %rbp, %rdx;\n"
-    "jmp unwind_c;\n"
-#endif
-);
+    "jmp unwind_c;\n");
 
-namespace torch {
-namespace unwind {
+namespace torch::unwind {
 std::vector<void*> unwind() {
   std::vector<void*> frames;
   unwind_entry(&frames);
@@ -334,6 +336,19 @@ c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
 }
 
 struct Symbolizer {
+  Symbolizer() {
+    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+    if (envar != nullptr) {
+      // currently we take user's input as is without checking
+      addr2line_binary_ = envar;
+      TORCH_WARN("Use custom addr2line binary: ", addr2line_binary_);
+    } else {
+      addr2line_binary_ = "addr2line"; // default
+    }
+    if (torch::get_disable_addr2line()) {
+      addr2line_binary_ = nullptr;
+    }
+  }
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
     return std::lock_guard<std::mutex>(mutex);
@@ -342,6 +357,7 @@ struct Symbolizer {
     static Symbolizer singleton;
     return singleton;
   }
+
   void request(void* addr) {
     if (frame_map_.count(addr)) {
       return;
@@ -351,10 +367,21 @@ struct Symbolizer {
       frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
       return;
     }
+    if (addr2line_binary_ == nullptr) {
+      Dl_info dlinfo;
+      std::string funcname = "??";
+      if (dladdr(addr, &dlinfo) && dlinfo.dli_sname) {
+        funcname = demangle(dlinfo.dli_sname);
+      }
+      frame_map_[addr] = Frame{
+          maybe_library->first, std::move(funcname), maybe_library->second - 1};
+      return;
+    }
     has_pending_results_ = true;
     auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     entry.comm->out() << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
@@ -381,6 +408,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
+  const char* addr2line_binary_;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -393,12 +421,15 @@ struct Symbolizer {
   Entry& getOrCreate(const std::string& name) {
     auto it = entries_.find(name);
     if (it == entries_.end()) {
+      // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-          "addr2line", "-C", "-f", "-e", name.c_str(), nullptr};
+          addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
                .insert_or_assign(
                    name,
-                   Entry{std::make_unique<Communicate>("addr2line", args), {}})
+                   Entry{
+                       std::make_unique<Communicate>(addr2line_binary_, args),
+                       {}})
                .first;
     }
     return it->second;
@@ -416,7 +447,20 @@ struct Symbolizer {
       frame.lineno = lineno_str == "?" ? 0 : std::stoi(lineno_str);
       frame_map_[e.queried[e.completed]] = std::move(frame);
     }
-  };
+  }
+  std::string demangle(const std::string& mangled_name) {
+    int status = 0;
+    char* realname =
+        abi::__cxa_demangle(mangled_name.c_str(), nullptr, nullptr, &status);
+    if (status == 0) {
+      std::string demangled_name(realname);
+      // NOLINTNEXTLINE
+      free(realname);
+      return demangled_name;
+    } else {
+      return mangled_name;
+    }
+  }
 };
 
 #ifndef FBCODE_CAFFE2
@@ -439,6 +483,5 @@ Stats stats() {
   return unwind_cache.stats();
 }
 
-} // namespace unwind
-} // namespace torch
+} // namespace torch::unwind
 #endif

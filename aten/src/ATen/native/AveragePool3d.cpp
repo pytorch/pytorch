@@ -15,10 +15,8 @@
 #include <ATen/ops/avg_pool3d_native.h>
 #endif
 
-namespace at {
-
-namespace meta{
-using namespace native;
+namespace at::meta {
+using namespace ::at::native;
 
 TORCH_META_FUNC(avg_pool3d) (
   const Tensor& input,
@@ -149,15 +147,15 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 namespace {
 
 template <typename scalar_t>
 static void avg_pool3d_out_frame(
-          scalar_t *input_p,
+          const scalar_t *input_p,
           scalar_t *output_p,
           int64_t nslices,
           int64_t itime,
@@ -184,7 +182,7 @@ static void avg_pool3d_out_frame(
       int64_t i, j, ti;
 
       /* local pointers. */
-      scalar_t *ip = input_p + k * itime * iwidth * iheight;
+      const scalar_t *ip = input_p + k * itime * iwidth * iheight;
       scalar_t *op = output_p + k * otime * owidth * oheight;
       for (i = 0; i < otime * oheight * owidth; ++i)
         *(op + i) = 0;
@@ -297,7 +295,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
-        scalar_t *input_data = input.data_ptr<scalar_t>();
+        const scalar_t *input_data = input.const_data_ptr<scalar_t>();
         scalar_t *output_data = output.data_ptr<scalar_t>();
 
         avg_pool3d_out_frame(
@@ -320,7 +318,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
-        scalar_t *input_data = input.data_ptr<scalar_t>();
+        const scalar_t *input_data = input.const_data_ptr<scalar_t>();
         scalar_t *output_data = output.data_ptr<scalar_t>();
 
         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
@@ -525,5 +523,4 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   }
 }
 
-} // at::native
-} // at
+} // namespace at::native

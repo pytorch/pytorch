@@ -5,8 +5,10 @@
 #include <ATen/native/AdaptivePooling.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 namespace at::native {
 
@@ -22,7 +24,7 @@ void cpu_adaptive_max_pool(
   auto output = output_.contiguous();
   auto indices = indices_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -37,7 +39,7 @@ void cpu_adaptive_max_pool(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_height * output_width;
 
@@ -80,7 +82,8 @@ void cpu_adaptive_max_pool(
 }
 
 template <typename scalar_t>
-void cpu_adaptive_max_pool_channels_last(
+typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+cpu_adaptive_max_pool_channels_last(
     const Tensor& output_,
     const Tensor& indices_,
     const Tensor& input_,
@@ -92,7 +95,7 @@ void cpu_adaptive_max_pool_channels_last(
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -106,7 +109,7 @@ void cpu_adaptive_max_pool_channels_last(
   using Vec = vec::Vectorized<scalar_t>;
   using integer_t = vec::int_same_size_t<scalar_t>;
   using iVec = vec::Vectorized<integer_t>;
-  // for the convience of vectorization, use integer of the same size of scalar_t,
+  // for the convenience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
   TORCH_CHECK(input_height * input_width <= std::numeric_limits<integer_t>::max());
@@ -148,7 +151,7 @@ void cpu_adaptive_max_pool_channels_last(
       // Pass II: compute local max
       for (int64_t ih = ih0; ih < ih1; ih ++) {
         for (int64_t iw = iw0; iw < iw1; iw ++) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -195,8 +198,9 @@ void cpu_adaptive_max_pool_channels_last(
   }
 }
 
-template <>
-void cpu_adaptive_max_pool_channels_last<BFloat16>(
+template <typename scalar_t>
+typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+cpu_adaptive_max_pool_channels_last(
     const Tensor& output_,
     const Tensor& indices_,
     const Tensor& input_,
@@ -208,8 +212,8 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<BFloat16>();
-  auto output_data = output.data_ptr<BFloat16>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
   int64_t nbatch = input.size(0);
@@ -219,7 +223,7 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
   int64_t output_height = output_size[0];
   int64_t output_width = output_size[1];
 
-  using bVec = vec::Vectorized<BFloat16>;
+  using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   using iVec = vec::Vectorized<int32_t>;
   // need to make sure doesn't overflow
@@ -247,7 +251,7 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
       int64_t iw0 = start_index(ow, output_width, input_width);
       int64_t iw1 = end_index(ow, output_width, input_width);
 
-      BFloat16* out = output_data + i * channels;
+      scalar_t* out = output_data + i * channels;
       int64_t* ind = indices_data + i * channels;
 
       // Pass I: init out lane
@@ -265,7 +269,7 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
       // Pass II: compute local max
       for (int64_t ih = ih0; ih < ih1; ih ++) {
         for (int64_t iw = iw0; iw < iw1; iw ++) {
-          BFloat16* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -273,7 +277,7 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
             iVec index_ivec = iVec(ih * input_width + iw);
             bVec val_bvec = bVec::loadu(in + d2);
             fVec val_fvec0, val_fvec1;
-            std::tie(val_fvec0, val_fvec1) = convert_bfloat16_float(val_bvec);
+            std::tie(val_fvec0, val_fvec1) = convert_to_float<scalar_t>(val_bvec);
 
             iVec maxindex_ivec0 = iVec::loadu(index_buffer.get() + d2);
             iVec maxindex_ivec1 = iVec::loadu(index_buffer.get() + d2 + iVec::size());
@@ -308,16 +312,16 @@ void cpu_adaptive_max_pool_channels_last<BFloat16>(
           }
         }
       }
-      // Pass III: convert max values from float to bfloat16
+      // Pass III: convert max values from float to bfloat16/Half
       int64_t d3 = 0;
       for (; d3 < len; d3 += bVec::size()) {
         fVec max_fvec0 = fVec::loadu(max + d3);
         fVec max_fvec1 = fVec::loadu(max + d3 + fVec::size());
-        bVec max_bvec = convert_float_bfloat16(max_fvec0, max_fvec1);
+        bVec max_bvec = convert_from_float<scalar_t>(max_fvec0, max_fvec1);
         max_bvec.store(out + d3);
       }
       for (; d3 < size; d3++) {
-        out[d3] = BFloat16(max[d3]);
+        out[d3] = scalar_t(max[d3]);
       }
       // convert indice data type
       vec::convert<int32_t, int64_t>(index_buffer.get(), ind, len);
@@ -437,17 +441,14 @@ void adaptive_max_pool2d_kernel_impl(
     IntArrayRef output_size) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_max_pool2d", [&] {
-        if (input.scalar_type() == ScalarType::BFloat16) {
-          cpu_adaptive_max_pool<BFloat16, /*accscalar_t*/float>(output, indices, input, output_size);
-        } else {
-          cpu_adaptive_max_pool<scalar_t, scalar_t>(output, indices, input, output_size);
-        }
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_max_pool2d", [&] {
+        using param_t = at::opmath_type<scalar_t>;
+        cpu_adaptive_max_pool<scalar_t, /*accscalar_t*/param_t>(output, indices, input, output_size);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "adaptive_max_pool2d_channels_last", [&]{
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_max_pool2d_channels_last", [&]{
         cpu_adaptive_max_pool_channels_last<scalar_t>(output, indices, input, output_size);
       });
       break;
@@ -464,13 +465,13 @@ void adaptive_max_pool2d_backward_kernel_impl(
   // can't use grad_output memory format to switch here since grad_output might be NC11
   switch (grad_input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "adaptive_max_pool2d_backward", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, grad_output.scalar_type(), "adaptive_max_pool2d_backward", [&] {
         cpu_adaptive_max_pool_backward<scalar_t>(grad_input, grad_output, indices);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "adaptive_max_pool2d_backward_channels_last", [&]{
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, grad_output.scalar_type(), "adaptive_max_pool2d_backward_channels_last", [&]{
         cpu_adaptive_max_pool_backward_channels_last<scalar_t>(grad_input, grad_output, indices);
       });
       break;

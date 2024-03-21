@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["module: dataloader"]
 
 import copy
@@ -41,7 +43,10 @@ import torch.nn as nn
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
-from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, suppress_warnings, skipIfTorchDynamo, TEST_DILL, skipIfNoDill,
+)
+from torch.utils._import_utils import import_dill
 from torch.utils.data import (
     DataLoader,
     DataChunk,
@@ -63,19 +68,10 @@ from torch.utils.data.datapipes.utils.snapshot import (
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
+import operator
 
-try:
-    import dill
-
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    HAS_DILL = True
-except ImportError:
-    HAS_DILL = False
-skipIfNoDill = skipIf(not HAS_DILL, "no dill")
+dill = import_dill()
+HAS_DILL = TEST_DILL
 
 try:
     import pandas  # type: ignore[import] # noqa: F401 F403
@@ -228,7 +224,7 @@ class TestStreamWrapper(TestCase):
         for api in ['open', 'read', 'close']:
             self.assertTrue(api in s)
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_api(self):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
@@ -782,6 +778,7 @@ class TestFunctionalIterDataPipe(TestCase):
                 datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 self._serialization_test_for_single_dp(datapipe)
 
+    @skipIfTorchDynamo("Dict with function as keys")
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
@@ -1361,8 +1358,8 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, 1, error=ValueError)
         _helper(None, fn_n1, [0, 1, 2], error=ValueError)
-        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
-        _helper(None, lambda d0, d1: d0 + d1, [0, 1, 2], error=ValueError)
+        _helper(None, operator.add, 0, error=ValueError)
+        _helper(None, operator.add, [0, 1, 2], error=ValueError)
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
         _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)
@@ -1407,7 +1404,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
             return -d
@@ -2926,9 +2923,7 @@ class TestSharding(TestCase):
 
         dp0 = self._get_pipeline().sharding_filter()
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
-        items = []
-        for i in dl:
-            items.append(i)
+        items = list(dl)
 
         self.assertEqual(sorted(expected), sorted(items))
 
@@ -2939,9 +2934,7 @@ class TestSharding(TestCase):
         dp0 = self._get_pipeline()
         dp0 = CustomShardingIterDataPipe(dp0)
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
-        items = []
-        for i in dl:
-            items.append(i)
+        items = list(dl)
 
         self.assertEqual(sorted(expected), sorted(items))
 

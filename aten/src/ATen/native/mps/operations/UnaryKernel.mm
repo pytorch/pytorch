@@ -86,6 +86,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
 
   TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support erfinv op with scalar type: Double");
 
+  Tensor inputTensor = self;
   Tensor outputTensor = output_;
   bool needs_output_copy = false;
   uint32_t length = output_.numel();
@@ -94,7 +95,6 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
   }
   using namespace mps;
   @autoreleasepool {
-    Tensor inputTensor = self;
     id<MTLDevice> device = MPSDevice::getInstance()->device();
     id<MTLComputePipelineState> cplState =
         getCPLState(device, getMetalType(outputTensor), getMetalType(self), "erfinv_mps_kernel");
@@ -108,20 +108,13 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLBuffer> outBuf = getMTLBufferStorage(outputTensor);
-      id<MTLBuffer> inputBuf = getMTLBufferStorage(inputTensor);
 
-      getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {self});
+      getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      [computeEncoder setBuffer:outBuf offset:0 atIndex:0];
-      [computeEncoder setBuffer:inputBuf offset:0 atIndex:1];
-
-      MTLSize gridSize = MTLSizeMake(length, 1, 1);
-      uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
-      NSUInteger threadsPerGroupSize = std::min(maxThreadsPerGroup, length);
-      MTLSize threadGroupSize = MTLSizeMake(threadsPerGroupSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_setBuffer(computeEncoder, outputTensor, 0);
+      mtl_setBuffer(computeEncoder, inputTensor, 1);
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });

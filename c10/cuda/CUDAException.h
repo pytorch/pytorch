@@ -86,8 +86,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
   } while (0)
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 /// In the event of a CUDA failure, formats a nice error message about that
 /// failure and also checks for device-side assertion failures
@@ -98,5 +97,4 @@ C10_CUDA_API void c10_cuda_check_implementation(
     const int line_number,
     const bool include_device_assertions);
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

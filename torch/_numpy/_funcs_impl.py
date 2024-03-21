@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """A thin pytorch / numpy compat layer.
 
 Things imported from here have numpy-compatible signatures but operate on
@@ -887,22 +889,22 @@ def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
 
 def put(
     a: NDArray,
-    ind: ArrayLike,
-    v: ArrayLike,
+    indices: ArrayLike,
+    values: ArrayLike,
     mode: NotImplementedType = "raise",
 ):
-    v = v.type(a.dtype)
-    # If ind is larger than v, expand v to at least the size of ind. Any
+    v = values.type(a.dtype)
+    # If indices is larger than v, expand v to at least the size of indices. Any
     # unnecessary trailing elements are then trimmed.
-    if ind.numel() > v.numel():
-        ratio = (ind.numel() + v.numel() - 1) // v.numel()
+    if indices.numel() > v.numel():
+        ratio = (indices.numel() + v.numel() - 1) // v.numel()
         v = v.unsqueeze(0).expand((ratio,) + v.shape)
     # Trim unnecessary elements, regardless if v was expanded or not. Note
-    # np.put() trims v to match ind by default too.
-    if ind.numel() < v.numel():
+    # np.put() trims v to match indices by default too.
+    if indices.numel() < v.numel():
         v = v.flatten()
-        v = v[: ind.numel()]
-    a.put_(ind, v)
+        v = v[: indices.numel()]
+    a.put_(indices, v)
     return None
 
 
@@ -1353,7 +1355,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
             has_sublistout = len(operands) % 2 == 1
             if has_sublistout:
                 sublistout = operands[-1]
-            operands = list(itertools.chain(*zip(tensors, sublists)))
+            operands = list(itertools.chain.from_iterable(zip(tensors, sublists)))
             if has_sublistout:
                 operands.append(sublistout)
 
@@ -1882,6 +1884,9 @@ def histogram(
 ):
     if normed is not None:
         raise ValueError("normed argument is deprecated, use density= instead")
+
+    if weights is not None and weights.dtype.is_complex:
+        raise NotImplementedError("complex weights histogram.")
 
     is_a_int = not (a.dtype.is_floating_point or a.dtype.is_complex)
     is_w_int = weights is None or not weights.dtype.is_floating_point

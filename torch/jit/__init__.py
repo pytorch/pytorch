@@ -77,6 +77,7 @@ __all__ = [
     "ScriptModule",
     "annotate",
     "enable_onednn_fusion",
+    "export",
     "export_opnames",
     "fork",
     "freeze",
@@ -104,9 +105,11 @@ _set_fusion_strategy = set_fusion_strategy
 
 def export_opnames(m):
     r"""
-    Generates new bytecode for a Script module and returns what the op list
-    would be for a Script Module based off the current code base. If you
-    have a LiteScriptModule and want to get the currently present
+    Generate new bytecode for a Script module.
+
+    Returns what the op list would be for a Script Module based off the current code base.
+
+    If you have a LiteScriptModule and want to get the currently present
     list of ops call _export_operator_list instead.
     """
     return torch._C._export_opnames(m._c)
@@ -122,7 +125,8 @@ Error.__qualname__ = "Error"
 
 # for use in python if using annotate
 def annotate(the_type, the_value):
-    """
+    """Use to give type of `the_value` in TorchScript compiler.
+
     This method is a pass-through function that returns `the_value`, used to hint TorchScript
     compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
 
@@ -170,8 +174,9 @@ def annotate(the_type, the_value):
 
 def script_if_tracing(fn):
     """
-    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
-    has a non-negligible start up time when it is first called due to
+    Compiles ``fn`` when it is first called during tracing.
+
+    ``torch.jit.script`` has a non-negligible start up time when it is first called due to
     lazy-initializations of many compiler builtins. Therefore you should not use
     it in library code. However, you may want to have parts of your library work
     in tracing even if they use control flow. In these cases, you should use
@@ -185,15 +190,15 @@ def script_if_tracing(fn):
         If called during tracing, a :class:`ScriptFunction` created by `torch.jit.script` is returned.
         Otherwise, the original function `fn` is returned.
     """
-
     return _script_if_tracing(fn)
 
 
 # for torch.jit.isinstance
 def isinstance(obj, target_type):
     """
-    This function provides for container type refinement in TorchScript. It can refine
-    parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
+    Provide container type refinement in TorchScript.
+
+    It can refine parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
     ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
     refine basic types such as bools and ints that are available in TorchScript.
 
@@ -234,11 +239,9 @@ def isinstance(obj, target_type):
 
 class strict_fusion:
     """
-    This class errors if not all nodes have been fused in
-    inference, or symbolically differentiated in training.
+    Give errors if not all nodes have been fused in inference, or symbolically differentiated in training.
 
     Example:
-
     Forcing fusion of additions.
 
     .. code-block:: python
@@ -276,17 +279,12 @@ def _hide_source_ranges() -> Iterator[None]:
 
 
 def enable_onednn_fusion(enabled: bool):
-    """
-    Enables or disables onednn JIT fusion based on the parameter `enabled`.
-    """
-
+    """Enable or disables onednn JIT fusion based on the parameter `enabled`."""
     torch._C._jit_set_llga_enabled(enabled)
 
 
 def onednn_fusion_enabled():
-    """
-    Returns whether onednn JIT fusion is enabled
-    """
+    """Return whether onednn JIT fusion is enabled."""
     return torch._C._jit_llga_enabled()
 
 

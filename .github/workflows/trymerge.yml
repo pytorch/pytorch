@@ -33,6 +33,7 @@ jobs:
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
       - name: Merge PR
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
@@ -43,9 +44,13 @@ jobs:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
         run: |
-          set -ex
+          set -x
           if [ -n "${REBASE}" ]; then
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
+            # attempt to rebase, if it fails then comment on the PR that it failed
+            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then
+              python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
+              exit 0
+            fi
             git checkout main
             git fetch -p
             # give github some time between the push and start workflows so that Github's messages
@@ -76,7 +81,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
-          set -ex
+          set -x
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
 
 # We want newer merge commands to supercede old ones

@@ -10,7 +10,6 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -19,7 +18,6 @@
 #include <mutex>
 #include <sstream>
 #include <stack>
-#include <stdexcept>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
@@ -174,7 +172,7 @@ struct TORCH_API ExecutionTraceObserver {
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::mutex g_mutex{};
+  std::recursive_mutex g_mutex{};
   // Stream to write output JSON.
   std::ofstream out{};
 
@@ -279,26 +277,27 @@ static void writeJsonNode(
   out << fmt::format(
       R"JSON(
     {{
-      "name": "{}", "id": {}, "rf_id": {}, "parent": {}, "fw_parent": {}, "seq_id": {}, "scope": {}, "tid": {}, "fw_tid": {}, "op_schema": "{}",
-      "inputs": {}, "input_shapes": {}, "input_types": {},
-      "outputs": {}, "output_shapes": {}, "output_types": {}
+      "id": {}, "name": "{}", "ctrl_deps": {},
+      "inputs": {{"values": {}, "shapes": {}, "types": {}}},
+      "outputs": {{"values": {}, "shapes": {}, "types": {}}},
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}]
     }})JSON",
-      name,
       id,
-      rf_id,
+      name,
       parent,
-      fw_parent,
-      seq_id,
-      scope,
-      tid,
-      fw_tid,
-      operator_schema,
       inputs,
       input_shapes,
       input_types,
       outputs,
       output_shapes,
-      output_types);
+      output_types,
+      rf_id,
+      fw_parent,
+      seq_id,
+      scope,
+      tid,
+      fw_tid,
+      operator_schema);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
@@ -327,7 +326,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.1", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.2-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -450,7 +449,7 @@ static void recordOperatorStart(
   auto tid = fn.threadId();
 
   try {
-    const std::lock_guard<std::mutex> lock(ob.g_mutex);
+    const std::lock_guard<std::recursive_mutex> lock(ob.g_mutex);
 
     // if current thread stack is empty, push the root node to the stack first
     if (ob.op_stack[tid].empty()) {
@@ -584,7 +583,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::mutex> lock(ob->g_mutex);
+      const std::lock_guard<std::recursive_mutex> lock(ob->g_mutex);
       // remove current op id from stack
 
       ob->op_stack[fn.threadId()].pop();
@@ -680,7 +679,7 @@ void removeExecutionTraceObserver() {
 }
 
 void enableExecutionTraceObserver() {
-  VLOG(1) << "enableExecutionTraceObserver() ";
+  LOG(WARNING) << "Enabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   // Make sure we are not already enabled.
   if (ob.getState() == ExecutionTraceObserver::RunState::enabled) {
@@ -692,7 +691,7 @@ void enableExecutionTraceObserver() {
 }
 
 void disableExecutionTraceObserver() {
-  VLOG(1) << "disableExecutionTraceObserver()";
+  LOG(WARNING) << "Disabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   if (ob.getState() != ExecutionTraceObserver::RunState::disabled) {
     ob.setState(ExecutionTraceObserver::RunState::disabled);

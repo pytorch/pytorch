@@ -1,7 +1,8 @@
 import logging
 from typing import List
 
-from ..select_algorithm import autotune_select_algorithm, ChoiceCaller, TritonTemplate
+from ..ir import ChoiceCaller
+from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 from .mm_common import mm_args, mm_configs, mm_grid, mm_options
 
 log = logging.getLogger(__name__)
@@ -77,6 +78,6 @@ def tuned_uint4x2_mixed_mm(mat1, mat2, mat2_mm_shape, mat2_dtype):
             choices,
             input_nodes=(mat1, mat2),
             layout=layout,
-            **mm_options(config, k, layout, b_prologue_cast_type),
+            **mm_options(config, m, n, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("uint4x2_mixed_mm", choices, [mat1, mat2], layout)

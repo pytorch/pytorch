@@ -9,18 +9,19 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable, Iterator, Tuple
 
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
 
 from .constants import default_pg_timeout
 
 
-_rendezvous_handlers = {}
+_rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
 
 
 def register_rendezvous_handler(scheme, handler):
-    """Registers a new rendezvous handler.
+    """
+    Register a new rendezvous handler.
 
     Before we can run collective algorithms, participating processes
     need to find each other and exchange information to be able to
@@ -145,8 +146,9 @@ def _torchelastic_use_agent_store() -> bool:
 
 def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=False) -> Store:
     """
-    Smartly creates a c10d Store object on ``rank`` based on whether
-    we need to re-use agent store. The TCPStore server is assumed to be hosted
+    Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
+
+    The TCPStore server is assumed to be hosted
     on ``hostname:port``.
 
     If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that

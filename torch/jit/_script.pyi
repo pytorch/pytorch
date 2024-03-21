@@ -1,3 +1,4 @@
+# mypy: disable-error-code="type-arg"
 from typing import (
     Any,
     Callable,

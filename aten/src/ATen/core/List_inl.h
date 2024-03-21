@@ -120,8 +120,8 @@ namespace impl {
 
 template <class T, class Iterator>
 ListElementReference<T, Iterator>::operator std::conditional_t<
-    std::is_reference<typename c10::detail::ivalue_to_const_ref_overload_return<
-        T>::type>::value,
+    std::is_reference_v<typename c10::detail::ivalue_to_const_ref_overload_return<
+        T>::type>,
     const T&,
     T>() const {
   return iterator_->template to<T>();
@@ -146,7 +146,7 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 }
 
 template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) {
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs)  noexcept {
   std::swap(*lhs.iterator_, *rhs.iterator_);
 }
 
@@ -186,8 +186,8 @@ void List<T>::set(size_type pos, value_type&& value) const {
 }
 
 template<class T>
-typename List<T>::value_type List<T>::get(size_type pos) const {
-  return c10::detail::list_element_to<T>(impl_->list.at(pos));
+typename List<T>::internal_const_reference_type List<T>::get(size_type pos) const {
+  return operator[](pos);
 }
 
 template<class T>

@@ -1,8 +1,5 @@
-#include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
-#include <array>
-#include <utility>
 
 namespace c10 {
 
@@ -65,6 +62,14 @@ bool SymBool::guard_bool(const char* file, int64_t line) const {
   }
   SymNode a = toSymNodeImpl();
   return a->guard_bool(file, line);
+}
+
+bool SymBool::guard_size_oblivious(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->guard_size_oblivious(file, line);
 }
 
 bool SymBool::expect_true(const char* file, int64_t line) const {

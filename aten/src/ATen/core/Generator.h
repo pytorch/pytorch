@@ -1,15 +1,11 @@
 #pragma once
 
-#include <mutex>
-#include <deque>
-#include <atomic>
-#include <typeinfo>
-#include <utility>
-#include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <mutex>
+#include <utility>
 
 #include <c10/util/Exception.h>
-#include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
@@ -111,6 +107,10 @@ struct TORCH_API Generator {
 
   at::Tensor get_state() const;
 
+  void graphsafe_set_state(const Generator& new_state);
+
+  Generator graphsafe_get_state() const;
+
   std::mutex& mutex() {
     return impl_->mutex_;
   }
@@ -144,9 +144,6 @@ template<class Impl, class... Args>
 Generator make_generator(Args&&... args) {
   return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
-
-Generator make_generator_for_device(
-    c10::Device device, c10::optional<int64_t> seed = c10::nullopt);
 
 /**
  * Utility function to static cast input Generator* to

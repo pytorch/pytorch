@@ -14,8 +14,8 @@ static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device, bool macOS13Plus) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
-  // host_name attribute needs at least Metal 2.2
-  MTLLanguageVersion languageVersion = MTLLanguageVersion2_2;
+  // host_name attribute needs at least Metal 2.2 and ulong needs Metal 2.3 (supported on MacOS 11+
+  MTLLanguageVersion languageVersion = MTLLanguageVersion2_3;
 #if defined(__MAC_13_0)
   if (macOS13Plus) {
     languageVersion = MTLLanguageVersion3_0;
@@ -59,11 +59,7 @@ id<MTLComputePipelineState> MPSDevice::metalIndexingPSO(const std::string& kerne
 
   id<MTLFunction> indexFunction =
       [[indexing_lib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]] autorelease];
-  TORCH_CHECK(indexFunction,
-              "Failed to create specialized function state object: ",
-              kernel,
-              ", error: ",
-              [[error description] UTF8String]);
+  TORCH_CHECK(indexFunction, "Can't find function ", kernel);
 
   state = [_mtl_device newComputePipelineStateWithFunction:indexFunction error:&error];
   TORCH_CHECK(state, error.localizedDescription.UTF8String);
@@ -121,6 +117,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
   static bool _macos_13_3_plus = [compileOptions respondsToSelector:@selector(maxTotalThreadsPerThreadgroup)] == YES;
 
+  static bool _macos_14_0_plus = [mpsCD instancesRespondToSelector:@selector(conjugateWithTensor:name:)] == YES;
+
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:
       return _macos_13_0_plus;
@@ -130,6 +128,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_13_2_plus;
     case MacOSVersion::MACOS_VER_13_3_PLUS:
       return _macos_13_3_plus;
+    case MacOSVersion::MACOS_VER_14_0_PLUS:
+      return _macos_14_0_plus;
     default:
       return false;
   }

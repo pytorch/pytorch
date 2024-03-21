@@ -7,20 +7,16 @@ from typing import cast, NoReturn, Optional
 import torch._guards
 
 from . import config
-from .config import is_fbcode
 
 from .utils import counters
 
-if is_fbcode():
-    from torch.fb.exportdb.logging import exportdb_error_message
-else:
 
-    def exportdb_error_message(case_name):
-        return (
-            "For more information about this error, see: "
-            + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
-            + case_name.replace("_", "-")
-        )
+def exportdb_error_message(case_name):
+    return (
+        "For more information about this error, see: "
+        + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+        + case_name.replace("_", "-")
+    )
 
 
 import logging
@@ -38,7 +34,11 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 
 class RestartAnalysis(TorchDynamoException):
-    pass
+    restart_reason: str
+
+    def __init__(self, *args, restart_reason=None):
+        self.restart_reason = restart_reason
+        super().__init__(*args)
 
 
 class SpeculationRestartAnalysis(RestartAnalysis):
@@ -89,10 +89,11 @@ class Unsupported(TorchDynamoException):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
-        self.category = None
+        self.category: Optional[str] = None
         self.add_to_stats()
 
     def remove_from_stats(self):
+        assert self.category is not None
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
             del counters[self.category][self.msg]
@@ -132,6 +133,7 @@ class UserErrorType(Enum):
     CONSTRAINT_VIOLATION = auto()
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
+    INVALID_OUTPUT = auto()
 
 
 class UserError(Unsupported):
@@ -213,8 +215,11 @@ class KeyErrorMsg:
 def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
     import traceback
 
+    exc.innermost_user_frame_summary = None  # type: ignore[attr-defined]
+
     real_stack = get_real_stack(exc)
-    if real_stack is not None:
+    if real_stack is not None and len(real_stack) > 0:
+        exc.innermost_user_frame_summary = real_stack[-1]  # type: ignore[attr-defined]
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):

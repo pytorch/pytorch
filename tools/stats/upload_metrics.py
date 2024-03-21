@@ -105,13 +105,15 @@ def emit_metric(
     env_var_metrics = [
         EnvVarMetric("repo", "GITHUB_REPOSITORY"),
         EnvVarMetric("workflow", "GITHUB_WORKFLOW"),
-        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
+        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT", required=False),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
         EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),
         EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
         EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
         EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
+        EnvVarMetric("job_id", "JOB_ID", type_conversion_fn=int),
+        EnvVarMetric("job_name", "JOB_NAME"),
     ]
 
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
@@ -167,4 +169,16 @@ def emit_metric(
 
 
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: Decimal(str(v)) if isinstance(v, float) else v for k, v in data.items()}
+    # Attempt to recurse
+    def _helper(o: Any) -> Any:
+        if isinstance(o, float):
+            return Decimal(str(o))
+        if isinstance(o, list):
+            return [_helper(v) for v in o]
+        if isinstance(o, dict):
+            return {_helper(k): _helper(v) for k, v in o.items()}
+        if isinstance(o, tuple):
+            return tuple(_helper(v) for v in o)
+        return o
+
+    return {k: _helper(v) for k, v in data.items()}

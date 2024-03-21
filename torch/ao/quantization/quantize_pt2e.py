@@ -103,6 +103,7 @@ def prepare_pt2e(
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
+    quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
@@ -170,6 +171,7 @@ def prepare_qat_pt2e(
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.prepare_qat_pt2e")
     original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
+    quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
@@ -199,18 +201,14 @@ def _quant_node_constraint(n: Node) -> bool:
 def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
-    fold_quantize: bool = False,
+    fold_quantize: bool = True,
 ) -> GraphModule:
     """Convert a calibrated/trained model to a quantized model
 
     Args:
       * `model` (torch.fx.GraphModule): calibrated/trained model
       * `use_reference_representation` (bool): boolean flag to indicate whether to produce referece representation or not
-      * `fold_quantize` (bool): boolean flag to indicate whether fold the quantize op or not
-
-    Note: please set `fold_quantize` to True whenever you can, we'll deprecate this flag and
-    make True the default option in the future, to make sure the change doesn't break BC for you, it's
-    better to set the flag to True now.
+      * `fold_quantize` (bool): boolean flag for whether fold the quantize op or not
 
     Returns:
         quantized model, either in q/dq representation or reference representation
@@ -227,12 +225,17 @@ def convert_pt2e(
 
     """  # flake8: noqa
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.convert_pt2e")
+    if not isinstance(use_reference_representation, bool):
+        raise ValueError(
+            "Unexpected argument type for `use_reference_representation`, "
+            f"please make sure you intend to pass argument {use_reference_representation} to convert_pt2e")
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
-    pm = PassManager([DuplicateDQPass()])
 
+    pm = PassManager([DuplicateDQPass()])
     model = pm(model).graph_module
+
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 

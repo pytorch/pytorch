@@ -106,7 +106,7 @@ def broadcast_shapes(*shapes):
     if not torch.jit.is_tracing():
         max_len = 0
         for shape in shapes:
-            if isinstance(shape, int):
+            if isinstance(shape, (int, torch.SymInt)):
                 if max_len < 1:
                     max_len = 1
             elif isinstance(shape, (tuple, list)):
@@ -114,14 +114,19 @@ def broadcast_shapes(*shapes):
                 if max_len < s:
                     max_len = s
         result = [1] * max_len
+
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
         for shape in shapes:
-            if isinstance(shape, int):
+            if isinstance(shape, (int, torch.SymInt)):
                 shape = (shape,)
             if isinstance(shape, (tuple, list)):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
                         raise RuntimeError(f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})")
-                    if shape[i] == 1 or shape[i] == result[i]:
+                    # NB: result is initialized to 1 so this is effectively an
+                    # equals one test
+                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(shape[i] == result[i]):
                         continue
                     if result[i] != 1:
                         raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
@@ -635,7 +640,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     Returns:
         Tensor: A tensor containing the STFT result with shape `(B?, N, T, C?)` where
-           - `B?` is an optional batch dimnsion from the input
+           - `B?` is an optional batch dimension from the input.
            - `N` is the number of frequency samples, `(n_fft // 2) + 1` for
              `onesided=True`, or otherwise `n_fft`.
            - `T` is the number of frames, `1 + L // hop_length`
@@ -677,7 +682,7 @@ It has the same parameters (+ additional optional parameter of :attr:`length`) a
 least squares estimation of the original signal. The algorithm will check using the NOLA condition (
 nonzero overlap).
 
-Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
+Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelope
 created by the summation of all the windows is never zero at certain point in time. Specifically,
 :math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
 
@@ -762,7 +767,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
         this function also eliminates non-consecutive duplicate values.
 
-    .. note:: Currently in the CUDA implementation and the CPU implementation when dim is specified,
+    .. note:: Currently in the CUDA implementation and the CPU implementation,
         `torch.unique` always sort the tensor at the beginning regardless of the `sort` argument.
         Sorting could be slow, so if your input tensor is already sorted, it is recommended to use
         :func:`torch.unique_consecutive` which avoids the sorting.
@@ -1171,7 +1176,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims, out=out)
 
-    if not isinstance(dims, (tuple, list, torch.Tensor, int)):
+    if not isinstance(dims, (tuple, list, torch.Tensor, int, torch.SymInt)):
         raise RuntimeError("tensordot expects dims to be int or "
                            + "Tuple[List[int], List[int]] or "
                            + "List[List[int]] containing two lists, but got "
@@ -1196,7 +1201,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
             dims_a = list(range(-dims_val, 0))
             dims_b = list(range(dims_val))
 
-    if isinstance(dims, int):
+    if isinstance(dims, (int, torch.SymInt)):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         if dims > min(a.dim(), b.dim()):
@@ -1597,7 +1602,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     if input.layout == torch.strided and input.device.type in \
             ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
         if dim is not None:
-            if isinstance(dim, int):
+            if isinstance(dim, (int, torch.SymInt)):
                 _dim = [dim]
             else:
                 _dim = dim
@@ -1605,7 +1610,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             _dim = None  # type: ignore[assignment]
 
         if isinstance(p, str):
-            if p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2):
+            if p == "fro" and (dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2):
                 if out is None:
                     return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype)
                 else:
@@ -1642,7 +1647,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     # remove the overloads where dim is an int and replace with BraodcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
-        if isinstance(dim, int):
+        if isinstance(dim, (int, torch.SymInt)):
             _dim = [dim]
         else:
             _dim = dim
@@ -1657,22 +1662,22 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             if _dim is None:
                 _dim = list(range(ndim))
             if out is None:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
             else:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
         elif p == "nuc":
             if dtype is not None:
                 raise ValueError("dtype argument is not supported in nuclear norm")
             if _dim is None:
                 if out is None:
-                    return _VF.nuclear_norm(input, keepdim=keepdim)
+                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore[arg-type]
                 else:
-                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore[arg-type]
             else:
                 if out is None:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
                 else:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
@@ -1689,7 +1694,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
-def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> List[Tensor]:
+def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> Tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
 
@@ -1702,7 +1707,7 @@ def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size])
             tensor. All elements must be non-negative.
 
     Returns:
-        tuple of Tensors: Each ``i``-th tensor in the ouput corresponds with
+        tuple of Tensors: Each ``i``-th tensor in the output corresponds with
         dimension ``i`` of :attr:`shape`. Each tensor has the same shape as
         ``indices`` and contains one index into dimension ``i`` for each of the
         flat indices given by ``indices``.
@@ -1750,15 +1755,15 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
         lambda: f"expected 'indices' to be integer dtype, but got {indices.dtype}")
 
     torch._check_type(
-        isinstance(shape, (int, Sequence)),
+        isinstance(shape, (int, torch.SymInt, Sequence)),
         lambda: f"expected 'shape' to be int or sequence of ints, but got {type(shape)}")
 
-    if isinstance(shape, int):
+    if isinstance(shape, (int, torch.SymInt)):
         shape = torch.Size([shape])
     else:
         for dim in shape:
             torch._check_type(
-                isinstance(dim, int),
+                isinstance(dim, (int, torch.SymInt)),
                 lambda: f"expected 'shape' sequence to only contain ints, but got {type(dim)}")
         shape = torch.Size(shape)
 

@@ -27,6 +27,7 @@ from .grad_mode import (
     set_multithreading_enabled,
 )
 from .gradcheck import gradcheck, gradgradcheck
+from .graph import _engine_run_backward
 
 from .variable import Variable
 
@@ -64,8 +65,20 @@ def _make_grads(
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
+            from torch.fx.experimental.symbolic_shapes import expect_true, sym_eq
+
             first_grad = grad if not is_grads_batched else grad[0]
-            if not torch.is_same_size(out, first_grad):
+            # TODO: We can remove this conditional once we uniformly use
+            # singleton int to represent jagged dimension, so that size() call
+            # on nested tensor works
+            if out.is_nested or first_grad.is_nested:
+                shape_matches = torch.is_same_size(out, first_grad)
+            else:
+                # We need to do a regular size check, without going through
+                # the operator, to be able to handle unbacked symints
+                # (expect_true ensures we can deal with unbacked)
+                shape_matches = expect_true(sym_eq(out.size(), first_grad.size()))
+            if not shape_matches:
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )
@@ -212,7 +225,7 @@ def backward(
         inputs (Sequence[Tensor] or Tensor or Sequence[GradientEdge], optional): Inputs w.r.t. which the gradient
             be will accumulated into ``.grad``. All other Tensors will be ignored. If
             not provided, the gradient is accumulated into all the leaf Tensors that
-            were used to compute the attr::tensors.
+            were used to compute the :attr:`tensors`.
     """
     if torch._C._are_functorch_transforms_active():
         raise RuntimeError(
@@ -251,7 +264,7 @@ def backward(
     # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
-    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    _engine_run_backward(
         tensors,
         grad_tensors_,
         retain_graph,
@@ -259,7 +272,7 @@ def backward(
         inputs,
         allow_unreachable=True,
         accumulate_grad=True,
-    )  # Calls into the C++ engine to run the backward pass
+    )
 
 
 def grad(
@@ -382,7 +395,7 @@ def grad(
     if is_grads_batched:
 
         def vjp(gO):
-            return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+            return _engine_run_backward(
                 t_outputs,
                 gO,
                 retain_graph,
@@ -390,13 +403,13 @@ def grad(
                 inputs,
                 allow_unused,
                 accumulate_grad=False,
-            )  # Calls into the C++ engine to run the backward pass
+            )
 
         result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(
             grad_outputs_
         )
     else:
-        result = Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+        result = _engine_run_backward(
             t_outputs,
             grad_outputs_,
             retain_graph,
@@ -404,7 +417,7 @@ def grad(
             inputs,
             allow_unused,
             accumulate_grad=False,
-        )  # Calls into the C++ engine to run the backward pass
+        )
     if materialize_grads:
         if any(
             result[i] is None and not is_tensor_like(inputs[i])

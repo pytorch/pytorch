@@ -139,6 +139,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 "op_name": "MaxPool",
                 "attributes": [
                     {"name": "ceil_mode", "i": 0, "type": 2},
+                    {"name": "dilations", "ints": [1], "type": 7},
                     {"name": "kernel_shape", "ints": [2], "type": 7},
                     {"name": "pads", "ints": [0, 0], "type": 7},
                     {"name": "strides", "ints": [1], "type": 7},
