@@ -3,7 +3,7 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
+CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
@@ -31,13 +31,12 @@ from torch._dynamo import compiled_autograd
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.distributed._tensor.placement_types import Shard
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed._tensor import init_device_mesh
 # from torchviz import make_dot
 
 torch_log = logging.getLogger("torch")
 
-hidden_dim = 12340
+hidden_dim = 1234
 
 device_type = "cuda"
 
@@ -151,31 +150,36 @@ sys.excepthook = handle_exception
 
 
 def init():
-    per_param_fsdp = True
+    test_case = "nested_fully_shard"  # "simple_mlp" / "nested_fully_shard"
 
     torch.manual_seed(0)
-    # Expectation:
-    # - FWD: 2 all-gathers
-    # - BWD: 2 all-gathers + 2 reduce-scatters
-    model = nn.Sequential(
-        nn.Linear(hidden_dim, hidden_dim, device=device_type),
-        nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim, device=device_type),  # FC->RELU->FC is a good test
-        nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim, device=device_type),
-    )
-    if per_param_fsdp:
-        torch.distributed._composable.fsdp.fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
-    else:
-        fsdp_kwargs = {
-            "use_orig_params": True,
-            "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
-            # "limit_all_gathers": False,
-        }
-        model = FSDP(
-            model,
-            **fsdp_kwargs,
+    if test_case == "simple_mlp":
+        model = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim, device=device_type),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim, device=device_type),  # FC->RELU->FC is a good test
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim, device=device_type),
         )
+        fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
+    elif test_case == "nested_fully_shard":
+        from torch.testing._internal.common_fsdp import MLP
+        model = nn.Sequential(*[MLP(hidden_dim) for _ in range(1)])  # range(3)
+        mesh = init_device_mesh("cuda", (world_size,))
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+    # else:
+    #     # FSDP1
+    #     fsdp_kwargs = {
+    #         "use_orig_params": True,
+    #         "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
+    #         # "limit_all_gathers": False,
+    #     }
+    #     model = FSDP(
+    #         model,
+    #         **fsdp_kwargs,
+    #     )
     optim = torch.optim.SGD(model.parameters(), lr=1e-6)
     return model, optim
 
@@ -186,6 +190,7 @@ def printing_eager(gm, inputs):
 
 
 local_rank = int(os.environ["LOCAL_RANK"])
+world_size = int(os.environ["WORLD_SIZE"])
 
 def create_input():
     torch.manual_seed(0)
