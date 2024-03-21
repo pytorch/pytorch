@@ -219,7 +219,7 @@ struct MHAGraphCache {
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
 thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
-thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper> mhagraphcache_backward;
+thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper> mhagraphbackwardcache;
 
 auto build_graph_and_tensors(
     int64_t b,
@@ -574,7 +574,7 @@ void run_cudnn_SDP_bprop(
        dropout_probability,
        is_causal,
        true);
-   auto graph_and_tensors_backward_ptr = mhagraphcache_backward.find(key); 
+   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key); 
    graph_and_tensors_backward graph_and_tensors_backward_values;
    if (graph_and_tensors_backward_ptr) {
      graph_and_tensors_backward_values = *graph_and_tensors_backward_ptr;
@@ -617,6 +617,16 @@ void run_cudnn_SDP_bprop(
    {Dv, dV.data_ptr()},
    // pass by value
    {attn_scale, &scaling_factor}};
+   if (dropout_probability != 0.0f) {
+       variant_pack[Seed]   = dropoutseed.data_ptr();
+       variant_pack[Offset] = dropoutoffset.data_ptr();
+   }
+  auto workspace_size = mha_graph->get_workspace_size();
+  auto workspace_ptr =
+      c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  TORCH_INTERNAL_ASSERT(
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  mhagraphbackwardcache.update(key, graph_and_tensors_backward_values);
 }
 
 
