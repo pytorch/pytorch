@@ -707,3 +707,18 @@ to detect bugs in our codegen or with a backend compiler.
 
 If you'd like to ensure that random number generation is the same across both torch
 and triton then you can enable ``torch._inductor.config.fallback_random = True``
+
+Extended Debugging
+~~~~~~~~~~~~~~~~~~
+
+Extended debugging can be enabled by using the following experimental flags.
+
+``TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED`` - provides extended debug information if the
+string representation of a guard matches this flag value. For example, set it to
+"Ne(s0, 10)" to generate full Python and C++ backtrace whenever guard was issued.
+``TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL`` - provides extended debug information when
+a particular symbol is allocated. For example, set this to "u2" to generate full Python
+and C++ backtrace whenever this symbol was created.
+``TORCHDYNAMO_EXTENDED_DEBUG_CPP`` - provides extended debug information (C++ backtrace)
+for all extended debug settings as well as errors. For example, set this to "1". The C++
+backtrace is slow and very spammy so it is not included by default with extended debugging.
