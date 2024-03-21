@@ -81,6 +81,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
     "_print",  # no return
+    "_nested_get_ragged_idx",  # returns an int
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
