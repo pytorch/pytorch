@@ -140,7 +140,8 @@ def generate_ttir(kernel, kwargs):
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             ordered_args[name] = 2
         elif isinstance(a, FakeTensor):
-            ordered_args[name] = torch.empty(2, dtype=a.dtype)
+            with torch._C._DisableTorchDispatch():
+                ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
             ordered_args[name] = a
 
