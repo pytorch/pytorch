@@ -27,6 +27,7 @@ def filtered_configs(
     configs: List[Tuple[int, int, int, int, int, int]],
     has_int8_tensor=False,
     out_dtype=None,
+    tune_splitk=False,
 ):
     """Heuristic to shrink configs when they are bigger than the input size"""
 
@@ -106,14 +107,15 @@ def filtered_configs(
                         matrix_instr_nonkdim=matrix_instr_nonkdim,
                     )
 
-                    if out_dtype != torch.bfloat16:
-                        more_split_ks = [k for k in [1] if k != split_k]
-                        for more_split_k in more_split_ks:
+                    # disable split-k for bf16 as tl.atomic doesn't support bf16.
+                    if tune_splitk and out_dtype != torch.bfloat16:
+                        more_split_ks = [sk for sk in [2, 4, 8, 16] if sk != split_k and block_k % sk == 0]
+                        for sk in more_split_ks:
                             yield triton_config(
                                 BLOCK_M=block_m,
                                 BLOCK_N=block_n,
                                 BLOCK_K=block_k,
-                                SPLIT_K=more_split_k,
+                                SPLIT_K=sk,
                                 num_stages=num_stages,
                                 num_warps=num_warps,
                                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -137,14 +139,15 @@ def filtered_configs(
                     num_stages=num_stages,
                     num_warps=num_warps,
                 )
-                if out_dtype != torch.bfloat16:
-                    more_split_ks = [k for k in [1] if k != split_k]
-                    for more_split_k in more_split_ks:
+                # disable split-k for bf16 as tl.atomic doesn't support bf16.
+                if tune_splitk and out_dtype != torch.bfloat16:
+                    more_split_ks = [sk for sk in [2, 4, 8, 16] if sk != split_k and block_k % sk == 0]
+                    for sk in more_split_ks:
                         yield triton_config(
                             BLOCK_M=block_m,
                             BLOCK_N=block_n,
                             BLOCK_K=block_k,
-                            SPLIT_K=more_split_k,
+                            SPLIT_K=sk,
                             num_stages=num_stages,
                             num_warps=num_warps,
                         )
@@ -213,11 +216,13 @@ if torch.version.hip:
 mm_configs = functools.partial(
     filtered_configs,
     configs=mm_platform_configs,
+    tune_splitk=True,
 )
 
 int8_mm_configs = functools.partial(
     filtered_configs,
     configs=int8_platform_configs,
+    tune_splitk=True,
 )
 
 
