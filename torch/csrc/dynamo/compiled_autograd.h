@@ -171,7 +171,7 @@ struct AutogradCompilerCall {
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
   }
 
-  int emplace_hook(c10::SafePyObject&& fn) {
+  size_t emplace_hook(c10::SafePyObject&& fn) {
     hooks.emplace_back(std::move(fn));
     return hooks.size() - 1;
   }
@@ -268,6 +268,7 @@ class CompiledNodeArgs {
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
       collect_size(ordered_dict.size());
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
         collect(it->key());
         collect(it->value());
@@ -418,35 +419,35 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  int add_backward(c10::SafePyObject&& obj) {
+  size_t add_backward(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 
-  int add_backward_state(c10::SafePyObject&& obj) {
+  size_t add_backward_state(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.pre_hooks.emplace_back(fn_id);
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.post_hooks.emplace_back(fn_id);
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(static_cast<size_t>(fn_id));
+    collect_size(fn_id);
     _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
@@ -487,11 +488,11 @@ class CompiledNodeArgs {
   CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
       : _compiler(compiler),
         _node_call(node_call),
-        _specialization_key_size(0),
-        _specialization_key_storage(1024),
         _specialization_key(
+            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
             (uint8_t*)std::malloc(_specialization_key_storage)) {}
   ~CompiledNodeArgs() {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(_specialization_key);
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
@@ -502,6 +503,7 @@ class CompiledNodeArgs {
     while (C10_UNLIKELY(
         _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
       _specialization_key_storage *= 2;
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       _specialization_key = (uint8_t*)std::realloc(
           _specialization_key, _specialization_key_storage);
     }
@@ -511,8 +513,8 @@ class CompiledNodeArgs {
 
   AutogradCompilerCall& _compiler;
   NodeCall& _node_call;
-  size_t _specialization_key_size;
-  size_t _specialization_key_storage;
+  size_t _specialization_key_size{0};
+  size_t _specialization_key_storage{1024};
   uint8_t* _specialization_key;
 };
 
@@ -520,7 +522,7 @@ struct TraceState {
   TraceState(
       const std::vector<c10::optional<c10::SymInt>>& ss,
       size_t num_outputs)
-      : sym_sizes_index(0), sym_sizes(ss), outputs(num_outputs) {}
+      : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
@@ -530,7 +532,7 @@ struct TraceState {
     return sym_sizes[sym_sizes_index++];
   }
 
-  size_t sym_sizes_index;
+  size_t sym_sizes_index{0};
   std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
 };
@@ -769,11 +771,14 @@ class SwapSavedVariables {
     }
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   AutogradCompilerCall& compiler;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
   // it's lifecycle is entirely longer than this objects.
   PyObject* py_compiler;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
 
   // These mappings are used to save the prior values when we overwrite things
