@@ -808,7 +808,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         def f(x: Tensor) -> Tensor:
             return x.view(-1)
 
-        self.assertExpectedInline(f._namespace, """mangled3_____main__""")
+        self.assertExpectedInline(f._namespace, """mangled2__test_custom_ops""")
 
     def _generate_examples(self, typ):
         if typ is int:

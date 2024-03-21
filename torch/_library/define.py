@@ -146,7 +146,7 @@ class BlackBoxDef:
             if types is None or isinstance(types, str):
                 dtypes: List[Union[str, None]] = [types]
             else:
-                dtypes = [types]  # type: ignore[list-item]
+                dtypes = list(types)
             for device_type in dtypes:
                 if device_type not in self._backend_fns:
 
@@ -189,7 +189,7 @@ class BlackBoxDef:
                             _C._dispatch_key_for_device(device_type),
                         )
                 self._backend_fns[device_type] = fn
-                return fn
+            return fn
 
         if fn is None:
             return inner
