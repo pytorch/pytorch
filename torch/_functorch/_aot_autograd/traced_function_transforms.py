@@ -23,7 +23,11 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_false,
+    rename_unbacked_to,
+    sym_eq,
+)
 from torch.nn.utils import stateless
 
 from .. import config
@@ -654,7 +658,7 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
             if isinstance(result, torch.SymInt) and isinstance(
                 result.node.expr, sympy.Symbol
             ):
-                torch._check(result == n.meta["example_value"])
+                rename_unbacked_to(n.meta["example_value"], result)
 
         return result
 
