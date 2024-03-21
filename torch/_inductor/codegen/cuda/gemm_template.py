@@ -8,13 +8,14 @@ from ... import ir
 from ...config import cuda as inductor_cuda_config
 from ...ir import (
     Buffer,
+    ChoiceCaller,
     CUDATemplateBuffer,
     FixedLayout,
     IRNode,
     Layout,
     ReinterpretView,
 )
-from ..common import ChoiceCaller, IndentedBuffer
+from ..common import IndentedBuffer
 
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
