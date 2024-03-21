@@ -1230,6 +1230,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
+        def test_unstable_ptr(self):
+            import torch
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(m, inp):
+                return m(inp)
+
+            def f():
+                l = []
+                m = torch.nn.Linear(20, 20).cuda()
+                for _ in range(4):
+                    inp = torch.rand([20, 20], device="cuda")
+                    foo(m, inp)
+                    m.weight.data = torch.rand([20, 20], device="cuda")
+
+            self.assertRaises(RuntimeError, f)
+
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
