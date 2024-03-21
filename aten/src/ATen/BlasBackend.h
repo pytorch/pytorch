@@ -7,12 +7,12 @@
 
 namespace at {
 
-enum class BlasBackend : int8_t { Default, Cublaslt };
+enum class BlasBackend : int8_t { Cublas, Cublaslt };
 
 inline std::string BlasBackendToString(at::BlasBackend backend) {
   switch (backend) {
-    case BlasBackend::Default:
-      return "at::BlasBackend::Default";
+    case BlasBackend::Cublas:
+      return "at::BlasBackend::Cublas";
     case BlasBackend::Cublaslt:
       return "at::BlasBackend::Cublaslt";
     default:

@@ -268,16 +268,16 @@ at::BlasBackend Context::blasPreferredBackend() const {
 }
 
 void Context::setBlasPreferredBackend(at::BlasBackend b) {
-  blas_preferred_backend = b;
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
-  if (b != at::BlasBackend::Default) {
+  if (b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
       "If you see any error or unexpected behavior when this flag is set "
       "please file an issue on GitHub."
     );
   }
+  blas_preferred_backend = b;
 }
 
 bool Context::allowFP16ReductionCuBLAS() const {

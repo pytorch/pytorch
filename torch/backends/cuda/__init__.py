@@ -209,7 +209,7 @@ def preferred_linalg_library(
 
 
 _BlasBackends = {
-    "default": torch._C._BlasBackend.Default,
+    "cublas": torch._C._BlasBackend.Cublas,
     "cublaslt": torch._C._BlasBackend.Cublaslt,
     "hipblaslt": torch._C._BlasBackend.Cublaslt,  # alias
 }
@@ -220,7 +220,7 @@ def preferred_blas_library(
     backend: Union[None, str, torch._C._BlasBackend] = None
 ) -> torch._C._BlasBackend:
     r"""
-    Override the heuristic PyTorch uses to choose between cuBLAS and cuBLASLt for CUDA BLAS operations.
+    Override the library PyTorch uses for BLAS operations. Choose between cuBLAS and cuBLASLt.
 
     .. warning:: This flag is experimental and subject to change.
 
@@ -230,7 +230,6 @@ def preferred_blas_library(
 
     * If `"cublas"` is set then cuBLAS will be used wherever possible.
     * If `"cublaslt"` is set then cuBLASLt will be used wherever possible.
-    * If `"default"` (the default) is set then cublas will be used.
     * When no input is given, this function returns the currently preferred library.
     * User may use the environment variable TORCH_BLAS_PREFER_CUBLASLT=1 to set the preferred library to cuBLASLt
       globally.

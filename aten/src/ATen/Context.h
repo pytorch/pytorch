@@ -382,7 +382,7 @@ class TORCH_API Context {
       (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
        c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
       ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Default;
+      : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
