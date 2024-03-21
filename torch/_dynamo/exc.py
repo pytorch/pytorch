@@ -2,7 +2,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, Literal, NoReturn, Optional, Union
+from typing import cast, NoReturn, Optional
 
 import torch._guards
 
@@ -34,7 +34,11 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 
 class RestartAnalysis(TorchDynamoException):
-    pass
+    restart_reason: str
+
+    def __init__(self, *args, restart_reason=None):
+        self.restart_reason = restart_reason
+        super().__init__(*args)
 
 
 class SpeculationRestartAnalysis(RestartAnalysis):
@@ -188,9 +192,7 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
 _NOTHING = object()
 
 
-def unimplemented(
-    msg: str, *, from_exc: Union[Optional[Exception], Literal[_NOTHING]] = _NOTHING
-) -> NoReturn:
+def unimplemented(msg: str, *, from_exc: Any = _NOTHING) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
     if from_exc is not _NOTHING:
         raise Unsupported(msg) from from_exc
