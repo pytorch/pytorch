@@ -37,7 +37,6 @@ AOTIEagerKernelRunnerCuda::AOTIEagerKernelRunnerCuda(
 void AOTIEagerKernelRunnerCuda::operator()(
     AtenTensorHandle* input_handles,
     AtenTensorHandle* output_handles) {
-  at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
   return AOTIEagerKernelRunner::operator()(input_handles, output_handles);
 }
 
