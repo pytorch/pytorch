@@ -387,6 +387,13 @@ aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
 
+// Make a shallow copy of the tensor referred to by src and assign
+// it to the handle in the ret_dst. This is similar to the above
+// aoti_torch_assign_tensors function, but creates and sets the
+// ret_dst from within.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
+
 // This function will create a new tensor object and its pointer is returned
 // through *ret. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
@@ -469,6 +476,20 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
 
 #ifdef USE_CUDA
 
+struct CUDAGuardOpaque;
+using CUDAGuardHandle = CUDAGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_guard(
+    int32_t device_index,
+    CUDAGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_guard(CUDAGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_guard_set_index(CUDAGuardHandle guard, int32_t device_index);
+
 struct CUDAStreamGuardOpaque;
 using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
 
@@ -480,6 +501,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
 #endif
 
 // See `ProxyExecutor Design Note` in ir.py for more details

@@ -36,12 +36,15 @@ quantization.
 """
 
 
-def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert=True):
+def _may_generate_pattern_with_dtype_convert(
+    pattern, dtype=Arg(), dtype_convert=True, users=1
+):
     if dtype_convert:
         return CallFunction(
             prims.convert_element_type.default,
             pattern,
             dtype,
+            _users=users,
         )
     else:
         return pattern
@@ -73,6 +76,14 @@ def _generate_linear_t_pattern(
         KeywordArg("permute_axes"),
     )
     return t_pattern
+
+
+def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
+    # only insert to_dtype if is_bf16 is True
+    computation_call = _may_generate_pattern_with_dtype_convert(
+        call_fn, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=users
+    )
+    return unary_fusion(computation_call)
 
 
 """
@@ -150,22 +161,30 @@ def get_dequantize_qconv_pt2e_pattern(users=1):
     )
 
 
-qlinear_pt2e_pattern = CallFunction(
-    torch.ops.onednn.qlinear_pointwise.default,
-    KeywordArg("x"),
-    KeywordArg("x_scale"),
-    KeywordArg("x_zp"),
-    KeywordArg("packed_weight"),
-    KeywordArg("w_scale"),
-    KeywordArg("w_zp"),
-    KeywordArg("b"),
-    KeywordArg("output_scale"),
-    KeywordArg("output_zero_point"),
-    KeywordArg("output_dtype"),
-    KeywordArg("postop_name"),
-    KeywordArg("postop_args"),
-    KeywordArg("postop_algorithm"),
-)
+def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):
+    qlinear_op = (
+        torch.ops.onednn.qlinear_pointwise.tensor
+        if x_scale_zp_are_tensors
+        else torch.ops.onednn.qlinear_pointwise.default
+    )
+    return CallFunction(
+        qlinear_op,
+        KeywordArg("x"),
+        KeywordArg("x_scale"),
+        KeywordArg("x_zp"),
+        KeywordArg("packed_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("b"),
+        KeywordArg("output_scale"),
+        KeywordArg("output_zero_point"),
+        KeywordArg("output_dtype"),
+        KeywordArg("postop_name"),
+        KeywordArg("postop_args"),
+        KeywordArg("postop_algorithm"),
+        _users=users,
+    )
+
 
 dequantize_accum_pattern = CallFunction(
     aten.mul.Tensor,
@@ -598,6 +617,11 @@ def _register_quantized_conv_binary_lowering(
 
 
 def _register_quantization_unary_fusion():
+    from .mkldnn_fusion import (
+        _gelu_fusion_1 as _gelu_fusion_erf,
+        _gelu_fusion_2 as _gelu_fusion_tanh,
+    )
+
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
             self.op_name = op_name
@@ -669,45 +693,87 @@ def _register_quantization_unary_fusion():
                 original_pattern_output_dtype=original_pattern_output_dtype,
             )
 
+        is_bf16 = True if original_pattern_output_dtype == torch.bfloat16 else False
+
         # QLinear
-        # Priority 1 to match: QLinear Unary pattern with int8 output
-        linear_unary_replace_patterns = {
-            UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                qlinear_pt2e_pattern,
-                dtype=original_pattern_output_dtype,
-            ),
-            UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(qlinear_pt2e_pattern, aten.relu.default),
-                dtype=original_pattern_output_dtype,
-            ),
-        }
+        for x_scale_zp_are_tensors in (False, True):
+            qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
+            # Priority 1 to match: QLinear Unary pattern with int8 output
+            linear_unary_replace_patterns = {
+                UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+                    qlinear_pattern,
+                    dtype=original_pattern_output_dtype,
+                ),
+                UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+                    generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
+                    dtype=original_pattern_output_dtype,
+                ),
+                UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_erf,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        2,
+                        is_bf16,
+                    ),
+                    dtype=torch.float32,
+                ),
+                UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_tanh,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        4,
+                        is_bf16,
+                    ),
+                    dtype=torch.float32,
+                ),
+            }
 
-        for unary_attr, patterns in linear_unary_replace_patterns.items():
-            _register_quantized_linear_lowering(
-                patterns,
-                1,  # pass_number
-                torch.ops.onednn.qlinear_pointwise,  # computation_op
-                None,  # output_dtype
-                unary_attr,  # unary_attr
-                original_pattern_output_dtype=original_pattern_output_dtype,
-            )
+            for unary_attr, patterns in linear_unary_replace_patterns.items():
+                _register_quantized_linear_lowering(
+                    patterns,
+                    1,  # pass_number
+                    torch.ops.onednn.qlinear_pointwise,  # computation_op
+                    None,  # output_dtype
+                    unary_attr,  # unary_attr
+                    original_pattern_output_dtype=original_pattern_output_dtype,
+                )
 
-        # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
-        linear_unary_replace_float_out_patterns = {
-            UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                qlinear_pt2e_pattern, aten.relu.default
-            ),
-        }
+            # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
+            linear_unary_replace_float_out_patterns = {
+                UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+                    qlinear_pattern, aten.relu.default
+                ),
+                UnaryAttr("gelu", [], "none"): _unary_fusion_pattern(
+                    _gelu_fusion_erf,
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                    ),
+                    2,
+                    is_bf16,
+                ),
+                UnaryAttr("gelu", [], "tanh"): _unary_fusion_pattern(
+                    _gelu_fusion_tanh,
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 4
+                    ),
+                    4,
+                    is_bf16,
+                ),
+            }
 
-        for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
-            _register_quantized_linear_lowering(
-                patterns,
-                2,  # pass_number
-                torch.ops.onednn.qlinear_pointwise,  # computation_op
-                original_pattern_output_dtype,  # output_dtype
-                unary_attr,  # unary_attr
-                original_pattern_output_dtype=original_pattern_output_dtype,
-            )
+            for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
+                _register_quantized_linear_lowering(
+                    patterns,
+                    2,  # pass_number
+                    torch.ops.onednn.qlinear_pointwise,  # computation_op
+                    original_pattern_output_dtype,  # output_dtype
+                    unary_attr,  # unary_attr
+                    original_pattern_output_dtype=original_pattern_output_dtype,
+                )
 
 
 def _register_quantization_binary_fusion():
@@ -1037,12 +1103,86 @@ def _register_quantization_reshape():
     )
 
 
+def _is_valid_woq_optimization_pattern():
+    def fn(match):
+        assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        x = match.kwargs["x"].meta["val"]
+        weight = match.kwargs["weight"].meta["val"]
+        scales = match.kwargs["scales"].meta["val"]
+        return (
+            # For now, we only support woq mm kernels
+            # with x.type=bfloat16 and w.type=int8
+            x.dtype == torch.bfloat16
+            and weight.dtype == torch.int8
+            and scales.dtype == torch.bfloat16
+            # _weight_int8pack_mm kernel only supports cpu now
+            # TODO: add cuda kernel support instead of calling mul+sum
+            and x.device.type == "cpu"
+            and x.device == weight.device
+            and x.device == scales.device
+        )
+
+    return fn
+
+
+def _register_woq_lowering(pattern, computation_woq, computation_reshape):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_woq_optimization_pattern(),
+    )
+    def woq(match: Match, *args, **kwargs):
+        x = kwargs["x"]
+        weight = kwargs["weight"]
+        scales = kwargs["scales"]
+        counters["inductor"]["woq_matcher_count"] += 1
+        counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
+        out_features = weight.get_size()[0]
+        origin_x_size = x.get_size()
+        x_shape = [-1, origin_x_size[-1]]
+        out_shape = origin_x_size[:-1] + [
+            out_features,
+        ]
+        func1 = L[computation_reshape](x, x_shape)
+        func2 = L[computation_woq](func1, weight, scales)
+        return L[computation_reshape](func2, out_shape)
+
+    return woq
+
+
+def _register_woq_mm_int8():
+    # torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(
+                aten.mm.default,
+                CallFunction(aten.reshape.default, KeywordArg("x"), Arg()),
+                CallFunction(
+                    aten.permute.default,
+                    CallFunction(
+                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                    ),
+                    Arg(),
+                ),
+            ),
+            Arg(),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
     _register_quantization_reshape()
+
+
+def _register_woq_lowerings():
+    _register_woq_mm_int8()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
@@ -1672,9 +1812,15 @@ def _register_qlinear_weight_prepack_pass(
                 [],  # post op args
                 "",  # post op algorithm
             )
-            new_linear_node = graph.call_function(
-                torch.ops.onednn.qlinear_pointwise.default, args=new_args
-            )
+            Node = torch.fx.node.Node
+            if isinstance(x_scale, Node) and isinstance(x_zp, Node):
+                new_linear_node = graph.call_function(
+                    torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
+                )
+            else:
+                new_linear_node = graph.call_function(
+                    torch.ops.onednn.qlinear_pointwise.default, args=new_args
+                )
             if input_dim_exceeds_two:
                 if input_contiguous:
                     output_reshape_node.replace_all_uses_with(new_linear_node)

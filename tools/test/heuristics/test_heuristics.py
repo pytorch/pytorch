@@ -87,9 +87,9 @@ class TestHistoricalClassFailureCorrelation(TestTD):
         expected = TestPrioritizations(
             tests_to_prioritize,
             {
-                TestRun("test1::classA"): 1,
-                TestRun("test2::classA"): 0.4,
-                TestRun("test5::classB"): 0.2,
+                TestRun("test1::classA"): 0.25,
+                TestRun("test2::classA"): 0.1,
+                TestRun("test5::classB"): 0.05,
                 TestRun("test1", excluded=["classA"]): 0.0,
                 TestRun("test2", excluded=["classA"]): 0.0,
                 TestRun("test3"): 0.0,

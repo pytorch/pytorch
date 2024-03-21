@@ -186,7 +186,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         }
 
         if async_op:
-            f = saver._async_save(sd, checkpoint_id=self.temp_dir)
+            f = saver.async_save(sd, checkpoint_id=self.temp_dir)
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
@@ -278,8 +278,24 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
     @with_temp_dir
     def test_no_dist(self):
-        DCP.save({}, checkpoint_id=self.temp_dir, no_dist=True)
-        DCP.load({}, checkpoint_id=self.temp_dir, no_dist=True)
+        # since comm's are not initialized in this method, `no_dist`
+        # is assumed False
+        DCP.save({}, checkpoint_id=self.temp_dir)
+        DCP.load({}, checkpoint_id=self.temp_dir)
+
+
+class TestNoCPU(DTensorTestBase):
+    @property
+    def backend(self):
+        return "nccl"
+
+    @with_comms
+    def test_no_cpu(self):
+        with self.assertRaisesRegex(
+            AssertionError, r"A CPU backend must be enabled for async save;.*?"
+        ):
+            f = saver.async_save({})
+            f.result()
 
 
 instantiate_parametrized_tests(TestE2ESaveAndLoad)
