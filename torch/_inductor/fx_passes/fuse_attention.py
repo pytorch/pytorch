@@ -528,20 +528,21 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op, disable_cuda=False):
+def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     def fn(match):
-        scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
-        # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
-        scale_factor = scale_factor_node.args[1]
-        # make sure the scale_factor a float/int. SymInt?
-        if not isinstance(scale_factor, (float, int)):
-            return False
         if (
             disable_cuda
             and "query" in match.kwargs
             and "cuda" in str(match.kwargs["query"].meta["val"].device)
         ):
             return False
+        if scale_factor_op is not None:
+            scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
+            # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
+            scale_factor = scale_factor_node.args[1]
+            # make sure the scale_factor a float/int. SymInt?
+            if not isinstance(scale_factor, (float, int)):
+                return False
         return _sfdp_params_check(match)
 
     return fn
@@ -754,14 +755,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), c(), c(), m_bool()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                _sfdp_extra_check(disable_cuda=True),
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), c(), c(), m_bs1_bool()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                _sfdp_extra_check(disable_cuda=True),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
