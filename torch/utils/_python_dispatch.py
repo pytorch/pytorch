@@ -21,6 +21,12 @@ from torch._C import (
 # - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 
+_is_in_torch_dispatch_mode = False
+
+
+def is_in_torch_dispatch_mode() -> bool:
+    return _is_in_torch_dispatch_mode
+
 
 class TorchDispatchMode:
     """
@@ -58,10 +64,15 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
+        self.old_dispatch_mode_flag = False
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
     def __enter__(self):
+        global _is_in_torch_dispatch_mode
+        self.old_dispatch_mode_flag = _is_in_torch_dispatch_mode
+        _is_in_torch_dispatch_mode = True
         _push_mode(self)
         return self
 
@@ -71,6 +82,8 @@ class TorchDispatchMode:
             # Today, mode keys are not used at all in the per-dispatch-key-mode logic (for pre-dispatch)
             # We should probably revisit this.
             mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
+        global _is_in_torch_dispatch_mode
+        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flag
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
