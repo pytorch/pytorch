@@ -14,6 +14,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.create_parameter_op import _bind_nn_parameter
+from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -5987,6 +5988,30 @@ def cond(pred, true_fn, false_fn, operands):
 
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
     return list(map(TensorBox.create, result))
+
+
+@register_lowering(associative_scan_op, type_promotion_kind=None)
+def associative_scan(input, dim: int, combine_fn: torch.fx.GraphModule):
+    from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    subgraph_inputs = [
+        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
+        for _ in range(2)
+    ]
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+
+    def combine_fn(lhs, rhs):
+        res = lowered_combine_fn(
+            *pytree.tree_leaves(lhs),
+            *pytree.tree_leaves(rhs),
+        )
+        return (res,)
+
+    kwargs = _make_scan_inner(input, axis=dim, dtype=None)
+    result = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    if result is None:
+        raise RuntimeError("Unable to generate code for associative_scan op")
+    return result[0]
 
 
 try:

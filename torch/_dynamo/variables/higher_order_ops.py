@@ -530,6 +530,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         elif value.__name__ == "strict_mode":
             return StrictModeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "associative_scan":
+            return AssociativeScanHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -878,6 +880,123 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.while_loop, p_args, {}, body_r, body_treespec
+        )
+
+
+class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="associative_scan must be captured completely with torch.compile."
+    )
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from . import NestedUserFunctionVariable, UserFunctionVariable
+        from .builder import wrap_fx_proxy
+
+        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+
+        def arg_extractor(input, dim, combine_fn):
+            return input, dim, combine_fn
+
+        input, dim, combine_fn = arg_extractor(*args, **kwargs)
+
+        assert isinstance(
+            combine_fn,
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+            ),
+        ), str(type(fn_var))
+
+        # operands
+        if input.python_type() != torch.Tensor:
+            unimplemented(
+                f"Expected input to be a tensor but got {input.python_type()}",
+            )
+
+        input_meta = input.as_proxy().node.meta["example_value"]
+        with tx.fake_mode:
+            example_vals = [
+                torch.full(
+                    (), float("nan"), device=input_meta.device, dtype=input_meta.dtype
+                )
+                for _ in range(2)
+            ]
+
+        # Trace the subgraph
+        # NOTE: We don't use speculate_subgraph as it expects subgraph arguments to be
+        # variables in the current graph.
+        with tx.output.subtracer(self.value, prior_tracer=None) as subtracer:
+            sub_args = [
+                wrap_fx_proxy(
+                    tx=tx,
+                    proxy=subtracer.create_graph_input(name),
+                    example_value=example,
+                )
+                for name, example in zip("ab", example_vals)
+            ]
+
+            combine_result = combine_fn.call_function(tx, sub_args, {})
+            combine_result_proxies = combine_result.as_proxy()
+            combine_result_proxies = pytree.tree_map(
+                subtracer.maybe_lift_tracked_freevar_to_input, combine_result_proxies
+            )
+
+            tx.output.create_node(
+                "output",
+                "output",
+                (subtracer.create_arg((combine_result_proxies,))),
+                {},
+            )
+
+        combine_graph = subtracer.graph
+        combine_graph.lint()
+
+        if subtracer.lifted_freevars:
+            unimplemented(
+                f"Combine fn had unexpected freevars: {subtracer.lifted_freevars}"
+            )
+
+        cond_nn_modules = dict(tx.output.nn_modules)
+        if combine_result.python_type() != torch.Tensor:
+            unimplemented(
+                f"Expected combine_fn to return a tensor but got {combine_result.python_type()}",
+            )
+
+        combine_result_meta = combine_result.as_proxy().node.meta["example_value"]
+        if combine_result_meta.device != input_meta.device:
+            unimplemented(
+                f"Expected combine_fn to return a tensor on device {input_meta.device} but "
+                + f"got {combine_result_meta.device}"
+            )
+        if combine_result_meta.dtype != input_meta.dtype:
+            unimplemented(
+                f"Expected combine_fn to return a tensor of {input_meta.dtype} but "
+                + f"got {combine_result_meta.dtype}"
+            )
+
+        if combine_result_meta.shape != ():
+            unimplemented(
+                f"Expected cond_fn to return a tensor with shape () but got {combine_result_meta.shape}"
+            )
+
+        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+        combine_fn_name = add_subgraph(tx, self.source, "scan_combine", combine_gm)
+
+        p_args = (
+            input.as_proxy(),
+            dim.as_proxy(),
+            make_attr(tx, combine_fn_name),
+        )
+
+        with tx.fake_mode:
+            out_meta = input_meta.clone()
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function", torch.ops.higher_order.associative_scan, p_args, {}
+            ),
+            example_value=out_meta,
         )
 
 

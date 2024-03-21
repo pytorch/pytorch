@@ -1,5 +1,15 @@
 import itertools
-from typing import Any, Callable, Generic, Literal, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -663,3 +673,41 @@ class OpCounterCSE:
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
     return h
+
+
+class SimpleCSEHandler(WrapperHandler[T]):
+    """Wraps the underlying handler with a CSE pass
+
+    NOTE: Compared to codegen level CSE this is simplified as it
+    doesn't support stores which require load cache invalidation.
+    """
+
+    cse_cache: Dict[str, Union[T, Tuple[T, ...]]]
+    mock: MockHandler
+
+    def __init__(self, inner: OpsHandler[T]):
+        super().__init__(inner)
+        self.cse_cache = {}
+        self.mock = MockHandler()
+
+    def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
+
+    def store(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def store_reduction(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def __getattr__(self, name) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            key = getattr(self.mock, name)(*args, **kwargs)
+            val = self.cse_cache.get(key)
+            if val is not None:
+                return val
+
+            val = getattr(self._inner, name)(*args, **kwargs)
+            self.cse_cache[key] = val
+            return val
+
+        return inner

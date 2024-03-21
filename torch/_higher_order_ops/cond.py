@@ -18,6 +18,7 @@ from torch._higher_order_ops.utils import (
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
+    unique_graph_id,
     UnsupportedAliasMutationException,
 )
 
@@ -190,19 +191,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
             )
 
-    # There are probably better ways - I know that create_arg has some self incrementing name
-    # magic to it, but since we explicitly have to get the name for register_module,
-    # I was not sure how to do that. This kinda simulates it.
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"true_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
+    i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
-    true_name = next_name
     false_name = f"false_graph_{i}"
     assert not hasattr(proxy_mode.tracer.root, false_name)
 
