@@ -309,21 +309,19 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
     def eval(cls, *args):
         assert len(args) % 2 == 0
         dim = len(args) // 2
+        size_args = args[0:dim]
+        stride_args = args[dim:]
+
         # TODO: it is possible to make progress evaluating this guard
         # even if not all of the inputs are known.  For example, a 2D
         # tensor with non-0/1 sizes but strides (0, 1) is definitely
         # false, because we know its numel > 1 but it's broadcasted
         # in dim 0.
-        if all(isinstance(a, sympy.Integer) for a in args):
+        if all(isinstance(a, sympy.Integer) for a in stride_args):
             # sym_node imported in torch.__init__. Local import to avoid an import cycle
             from torch.fx.experimental.symbolic_shapes import eval_is_non_overlapping_and_dense
 
-            size_args = args[0:dim]
-            stride_args = args[dim:]
-            return eval_is_non_overlapping_and_dense(
-                [int(a) for a in size_args],
-                [int(a) for a in stride_args]
-            )
+            return eval_is_non_overlapping_and_dense(size_args, stride_args)
         return None
 
 

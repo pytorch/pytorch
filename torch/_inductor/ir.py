@@ -2553,10 +2553,10 @@ class Layout(IRNode):
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
+            stride_ordered[order[i]] = V.graph.sizevars.symbolic_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            if stride_ordered[i] > stride_ordered[i + 1]:
+            if V.graph.sizevars.statically_known_gt(stride_ordered[i], stride_ordered[i + 1]):
                 return False
         return True
 
@@ -2668,7 +2668,7 @@ class FlexibleLayout(Layout):
         In this format, channels last would be:
             [3, 0, 2, 1]
         """
-        assert set(range(len(sizes))) == set(order)
+        assert set(range(len(sizes))) == set(order), f"{set(range(len(sizes)))} == {set(order)} failed"
         fill_order = stride_order2fill_order(order)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 

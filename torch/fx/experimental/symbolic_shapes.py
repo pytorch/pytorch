@@ -1048,6 +1048,15 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
     if dim == 1:
         return strides[0] == 1 or sizes[0] < 2
 
+    # Tensors with size > 1 and stride = 0 are easy overlapping cases. Let's find them.
+    # We do this to avoid potentially evaluating expressions w/ unbacked symints.
+    if dim > 1 and 0 in strides:
+        for size, stride in zip(sizes, strides):
+            if not isinstance(size, (int, SymInt)):
+                continue
+            if size > 1 and stride == 0:
+                return False
+
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
