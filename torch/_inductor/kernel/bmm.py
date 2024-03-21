@@ -2,9 +2,8 @@ import logging
 from typing import List
 
 import torch
-from ..codegen.common import ChoiceCaller
 from ..codegen.wrapper import WrapperCodeGen
-from ..ir import FixedLayout
+from ..ir import ChoiceCaller, FixedLayout
 
 from ..lowering import register_lowering
 from ..select_algorithm import (
