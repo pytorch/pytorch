@@ -34,6 +34,7 @@ struct CacheKeyBuffer {
   }
 
  private:
+  // NOLINTNEXTLINE(*c-array*)
   std::unique_ptr<uint8_t[]> data;
 };
 
@@ -73,7 +74,7 @@ struct NodeCall {
       : id(id_), node(std::move(node_)) {}
 
   void mark_output(int input_nr, int output_idx) {
-    graph_output.emplace_back(std::make_pair(input_nr, output_idx));
+    graph_output.emplace_back(input_nr, output_idx);
   }
 
   uint32_t id;
@@ -167,7 +168,7 @@ struct TensorArgs {
 struct AutogradCompilerCall {
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
-        SizeInput(default_dyn_type, s.guard_int(__FILE__, __LINE__)));
+        default_dyn_type, s.guard_int(__FILE__, __LINE__));
   }
 
   int emplace_hook(c10::SafePyObject&& fn) {
@@ -261,8 +262,8 @@ class CompiledNodeArgs {
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
-      for (auto it = list.begin(); it != list.end(); it++) {
-        collect(*it);
+      for (auto&& value : list) {
+        collect(value);
       }
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
@@ -428,7 +429,7 @@ class CompiledNodeArgs {
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(static_cast<size_t>(fn_id));
-    _node_call.tensor_pre_hooks.emplace_back(std::make_pair(fn_id, index));
+    _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
