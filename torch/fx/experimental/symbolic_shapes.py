@@ -665,14 +665,19 @@ def expect_true(a, skip: int = 0):
     assert type(a) is bool, a
     return a
 
-# The goal here is that you have two unbacked symbols, but actually they are
-# the same, and importantly, we don't want to setup a deferred runtime assert
-# because the old unbacked symbol is *literally* vanishing from the graph and
-# we better not try to compute any asserts on it because we won't know how to
-# generate a reference to it in Inductor.  This is all very delicate, TODO
-# find a better way.
 @record_shapeenv_event()
 def rename_unbacked_to(orig: SymInt, new: SymInt):
+    """
+    Rename an unbacked SymInt into a new one.
+
+    The goal here is that you have two unbacked symbols, but actually they are
+    the same (you allocated the second one without knowing that it was going
+    to be the first one, e.g., due to retracing), and importantly, we don't
+    want to setup a deferred runtime assert because the old unbacked symbol is
+    *literally* vanishing from the graph and we better not try to compute any
+    asserts on it because we won't know how to generate a reference to it in
+    Inductor.  This is all very delicate, TODO find a better way.
+    """
     # orig is eliminated, new is preserved
     shape_env = orig.node.shape_env
     assert shape_env is new.node.shape_env
