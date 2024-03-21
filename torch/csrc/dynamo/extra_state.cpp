@@ -15,7 +15,7 @@ Py_ssize_t extra_index = -1;
 
 CacheEntry* ExtraState::get_first_entry() {
   if (this->cache_entry_list.empty()) {
-    return NULL;
+    return nullptr;
   }
   return &this->cache_entry_list.front();
 }
@@ -38,28 +38,28 @@ void ExtraState::invalidate(CacheEntry* cache_entry) {
 }
 
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
-  if (extra_state == NULL || extra_state == SKIP_CODE) {
-    return NULL;
+  if (extra_state == nullptr || extra_state == SKIP_CODE) {
+    return nullptr;
   }
   return extra_state->get_first_entry();
 }
 
 FrameState* extract_frame_state(ExtraState* extra_state) {
-  if (extra_state == NULL || extra_state == SKIP_CODE) {
-    return NULL;
+  if (extra_state == nullptr || extra_state == SKIP_CODE) {
+    return nullptr;
   }
   return (FrameState*)extra_state->frame_state.ptr();
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
-  ExtraState* extra = NULL;
+  ExtraState* extra = nullptr;
   _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
   return extra;
 }
 
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
-  if (extra != NULL && extra != SKIP_CODE) {
+  if (extra != nullptr && extra != SKIP_CODE) {
     delete extra;
   }
 }
@@ -67,15 +67,15 @@ void destroy_extra_state(void* obj) {
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(
-      old_extra_state == NULL || old_extra_state == SKIP_CODE ||
+      old_extra_state == nullptr || old_extra_state == SKIP_CODE ||
       old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Invariant - Extra state should not have been set before, therefore it
-  // should be NULL.
-  CHECK(get_extra_state(code) == NULL);
+  // should be nullptr.
+  CHECK(get_extra_state(code) == nullptr);
   ExtraState* extra_state = new ExtraState();
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
@@ -114,7 +114,7 @@ PyObject* lookup(
         // this function is called from C, so we cannot repropagate
         // the exception
         e.restore();
-        return NULL;
+        return nullptr;
       }
     }
     if (valid) {
