@@ -467,26 +467,27 @@ class NNModuleVariable(VariableTracker):
                             # TODO(JackCaoG): use weakref here?
                             tracer_to_used_names[tx.output.current_tracer] = {}
 
+                        base_module_key = self.module_key.lower()
+
                         if (
-                            self.module_key
+                            base_module_key
                             not in tracer_to_used_names[tx.output.current_tracer].keys()
                         ):
                             tracer_to_used_names[tx.output.current_tracer][
-                                self.module_key
+                                base_module_key
                             ] = 0
 
                         count = tracer_to_used_names[tx.output.current_tracer][
-                            self.module_key
+                            base_module_key
                         ]
                         tracer_to_used_names[tx.output.current_tracer][
-                            self.module_key
+                            base_module_key
                         ] += 1
                         unique_module_key = (
-                            self.module_key
+                            base_module_key
                             if count == 0
-                            else f"{self.module_key}_{count}"
+                            else f"{base_module_key}_{count}"
                         )
-
                         node.meta["source_fn_stack"][-1] = (
                             unique_module_key,
                             type(self.module),
