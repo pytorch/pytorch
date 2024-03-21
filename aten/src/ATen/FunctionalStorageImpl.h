@@ -94,6 +94,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   const Tensor& base() {
     return base_;
   }
+  const Tensor& original_base() {
+    return original_base_;
+  }
   size_t generation() const {
     return generation_;
   }
@@ -128,6 +131,14 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
   }
 
+  void mark_inductor_storage_resize() {
+    inductor_storage_resized_ = true;
+  }
+
+  bool was_inductor_storage_resized() {
+    return inductor_storage_resized_;
+  }
+
  private:
   // NB: base_ should always point to a tensor BELOW the current
   // functionalization layer. This is mainly to avoid reference cycles. e.g.
@@ -138,6 +149,8 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // [Functionalization: Walualias Removal] for a diagram that shows this
   // visually.
   at::Tensor base_;
+  // Keep the original value of the tensor around
+  at::Tensor original_base_;
   std::vector<Update> updates_;
   // generation_ gets incremented every time a mutation is queued onto the
   // alias. It is used to determine if a given tensor is "up to date", or if it
@@ -146,6 +159,8 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // If frozen, no more mutations are allowed on this storage.  Once frozen, a
   // storage cannot be unfrozen.
   bool frozen_ = false;
+
+  bool inductor_storage_resized_ = false;
 
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;
