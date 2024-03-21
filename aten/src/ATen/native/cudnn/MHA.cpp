@@ -561,6 +561,7 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
+   TORCH_WARN("run_cudnn_SDP_bprop");
    cudnnHandle_t handle = getCudnnHandle();
    auto key = MHACacheKeyWrapper(
        b,

@@ -187,7 +187,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         value /*const Tensor& v*/,
                         out /*const Tensor& o*/,
                         dO/*const Tensor& dO*/,
-                        logsumexp/*const Tensor& softmaxstats*/,
+                        logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
                         dq/*Tensor& dQ*/,
                         dk/*Tensor& dK*/,
                         dv/*Tensor& dV*/,
