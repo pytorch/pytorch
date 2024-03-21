@@ -1,5 +1,1 @@
-<<<<<<< Updated upstream
 3.0.0
-=======
-2.3.0
->>>>>>> Stashed changes
