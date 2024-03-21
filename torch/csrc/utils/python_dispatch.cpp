@@ -241,7 +241,8 @@ void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
-      .def("schema", &c10::OperatorHandle::schema);
+      .def("schema", &c10::OperatorHandle::schema)
+      .def("debug", &c10::OperatorHandle::debug);
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
 

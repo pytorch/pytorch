@@ -34,9 +34,6 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable:
-            raise ValueError("Capturable not supported with single tensor Adamax")
-
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -101,6 +98,8 @@ class Adamax(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -267,15 +266,18 @@ def _single_tensor_adamax(
     capturable: bool,
     has_complex: bool,
 ):
-    if capturable:
-        raise RuntimeError("capturable is not supported for single tensor Adamax (when foreach=False)")
-
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
         exp_avg = exp_avgs[i]
         exp_inf = exp_infs[i]
         step_t = state_steps[i]
+
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            assert (param.is_cuda and step_t.is_cuda) or (
+                param.is_xla and step_t.is_xla
+            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
         # update step
         step_t += 1
@@ -304,10 +306,18 @@ def _single_tensor_adamax(
             )
             exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
-        bias_correction = 1 - beta1 ** _get_value(step_t)
-        clr = lr / bias_correction
+        if capturable:
+            # why jump through extra hoops and negate bias_correction? check out #121238
+            # once fixed, we should use bias_correction with addcdiv value=-1 for readability
+            neg_bias_correction = beta1 ** step_t - 1
+            neg_bias_correction.div_(lr)
+            denom = exp_inf * neg_bias_correction
+            param.addcdiv_(exp_avg, denom)
+        else:
+            bias_correction = 1 - beta1 ** _get_value(step_t)
+            clr = lr / bias_correction
 
-        param.addcdiv_(exp_avg, exp_inf, value=-clr)
+            param.addcdiv_(exp_avg, exp_inf, value=-clr)
 
 
 def _multi_tensor_adamax(
@@ -383,13 +393,10 @@ def _multi_tensor_adamax(
             bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_corrections, 1)
-
-            # foreach_div doesn't allow a scalar as the first arg
             torch._foreach_div_(bias_corrections, lr)
-            torch._foreach_reciprocal_(bias_corrections)
 
-            numerator = torch._foreach_mul(grouped_exp_avgs, bias_corrections)
-            torch._foreach_addcdiv_(grouped_params, numerator, grouped_exp_infs)
+            denom = torch._foreach_mul(grouped_exp_infs, bias_corrections)
+            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom)
         else:
             bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
             step_size = [(lr / bc) * -1 for bc in bias_corrections]

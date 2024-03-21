@@ -1055,7 +1055,10 @@ def configure_extension_build():
             "convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx",
             "convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2",
             "torchrun = torch.distributed.run:main",
-        ]
+        ],
+        "torchrun.logs_specs": [
+            "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
+        ],
     }
 
     return extensions, cmdclass, packages, entry_points, extra_install_requires
@@ -1092,9 +1095,8 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
-    if IS_WINDOWS:
-        install_requires.append("mkl>=2021.1.1,<=2021.4.0")
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1186,11 +1188,14 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
+        "include/ATen/xpu/*.h",
+        "include/ATen/xpu/detail/*.h",
         "include/caffe2/serialize/*.h",
         "include/c10/*.h",
         "include/c10/macros/*.h",
@@ -1206,6 +1211,7 @@ def main():
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
         "include/c10/xpu/*.h",
+        "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
@@ -1244,6 +1250,7 @@ def main():
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1266,6 +1273,7 @@ def main():
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
+        "include/torch/csrc/profiler/python/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",

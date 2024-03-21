@@ -16,7 +16,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    TYPE_CHECKING,
     Union,
 )
 
@@ -32,7 +31,6 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .. import config, metrics
 from ..utils import (
     DeferredLineBase,
-    do_bench,
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
@@ -42,8 +40,6 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
-if TYPE_CHECKING:
-    from ..ir import TensorBox
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -612,25 +608,25 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="bessel_j0_forward({x})",
-        triton="tl.math.j0({x})",
+        triton="libdevice.j0({x})",
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="bessel_j1_forward({x})",
-        triton="tl.math.j1({x})",
+        triton="libdevice.j1({x})",
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="bessel_y0_forward({x})",
-        triton="tl.math.y0({x})",
+        triton="libdevice.y0({x})",
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="bessel_y1_forward({x})",
-        triton="tl.math.y1({x})",
+        triton="libdevice.y1({x})",
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
@@ -644,7 +640,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     erfcx=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_erfcx({x})",
-        triton="tl.math.erfcx({x})",
+        triton="libdevice.erfcx({x})",
         name="special_erfcx",
     ),
     # erfinv, exp2, expit, gammaln
@@ -671,7 +667,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_i0({x})",
-        triton="tl.math.cyl_bessel_i0({x})",
+        triton="libdevice.cyl_bessel_i0({x})",
         cppvec="{x}.i0()",
         name="i0",
     ),
@@ -684,7 +680,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_i1({x})",
-        triton="tl.math.cyl_bessel_i1({x})",
+        triton="libdevice.cyl_bessel_i1({x})",
         name="special_i1",
     ),
     i1e=OverridesData(
@@ -701,13 +697,13 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     modified_bessel_i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="modified_bessel_i0_forward({x})",
-        triton="tl.math.cyl_bessel_i0({x})",
+        triton="libdevice.cyl_bessel_i0({x})",
         name="special_modified_bessel_i0",
     ),
     modified_bessel_i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="modified_bessel_i1_forward({x})",
-        triton="tl.math.cyl_bessel_i1({x})",
+        triton="libdevice.cyl_bessel_i1({x})",
         name="special_modified_bessel_i1",
     ),
     modified_bessel_k0=OverridesData(
@@ -1398,11 +1394,13 @@ class Kernel(CodeGen):
 
     def scan(
         self,
-        dtype: torch.dtype,
-        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-        value: CSEVariable,
-        init: int,
-    ) -> CSEVariable:
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
+        values: Tuple[CSEVariable, ...],
+        inits: Tuple[int, ...],
+    ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError()
 
     def bucketize(
@@ -1562,12 +1560,15 @@ class Kernel(CodeGen):
 
             @staticmethod
             def scan(
-                dtype: torch.dtype,
-                combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-                value: CSEVariable,
-                init: int,
-            ) -> CSEVariable:
-                return self.scan(dtype, combine_fn, value, init)
+                dtypes: Tuple[torch.dtype, ...],
+                combine_fn: Callable[
+                    [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]],
+                    Tuple[CSEVariable, ...],
+                ],
+                values: Tuple[CSEVariable, ...],
+                inits: Tuple[int, ...],
+            ) -> Tuple[CSEVariable, ...]:
+                return self.scan(dtypes, combine_fn, values, inits)
 
             @staticmethod
             def bucketize(
@@ -1667,38 +1668,6 @@ def jinja2_env():
         return None
 
 
-class ChoiceCaller:
-    """
-    Represents a possible choice used in autotune_process.py.
-    During autotuning, self.benchmark() is first called to get benchmark result,
-    and if this choice is selected, self.output_node() is called to get the output_node.
-
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
-    """
-
-    def __init__(self, name, input_nodes, layout):
-        super().__init__()
-        self.name = name
-        self.layout = layout
-        self.input_nodes = input_nodes
-
-    def benchmark(self, *args, out) -> float:
-        algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
-
-    def call_name(self) -> str:
-        raise NotImplementedError()
-
-    def to_callable(self):
-        raise NotImplementedError()
-
-    def hash_key(self) -> str:
-        raise NotImplementedError()
-
-    def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
-
-
 class KernelTemplate:
     """
     Base class for defining kernel templates.
@@ -1740,7 +1709,7 @@ class KernelTemplate:
         except NotImplementedError:
             pass
 
-    def generate(self, **kwargs) -> ChoiceCaller:
+    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

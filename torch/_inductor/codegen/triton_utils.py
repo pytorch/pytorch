@@ -63,7 +63,11 @@ def signature_to_meta(
     }
 
 
-def config_of(args: List[KernelArgType], *, indices: Optional[List[int]] = None) -> Any:
+def config_of(
+    args: List[KernelArgType],
+    *,
+    indices: Optional[List[int]] = None,
+) -> Any:
     if indices is None:
         indices = list(range(len(args)))
 
@@ -109,4 +113,18 @@ def config_of(args: List[KernelArgType], *, indices: Optional[List[int]] = None)
         for i, arg in zip(indices, args)
         if is_aligned(arg, alignment=8, include_tensor=False)
     )
-    return instance_descriptor(divisible_by_16, (), (), divisible_by_8)
+
+    equal_to_1 = tuple(
+        i
+        for i, arg in zip(indices, args)
+        if isinstance(arg, SizeArg)
+        and arg.expr is not None
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+    )
+    # ids_of_folded_args is set from equal_to_1
+    # and None args by the Triton compiler
+    ids_of_folded_args = tuple(equal_to_1)
+
+    return instance_descriptor(
+        divisible_by_16, equal_to_1, ids_of_folded_args, divisible_by_8
+    )
