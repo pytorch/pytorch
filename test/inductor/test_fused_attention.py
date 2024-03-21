@@ -744,8 +744,14 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             key = key.permute([0, 2, 1, 3])
             value = value.permute([0, 2, 1, 3])
             attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
-            attn_weights = attn_weights.div(math.sqrt(value.size(-1)))
-            attn_weights = torch.where(causal_mask, attn_weights, float("-inf"))
+            inv_scale = torch.full(
+                (), math.sqrt(value.size(-1)), dtype=query.dtype, device=query.device
+            )
+            attn_weights = attn_weights.div(inv_scale)
+            causal_mask_value = torch.full(
+                (), torch.finfo(query.dtype).min, dtype=query.dtype, device=query.device
+            )
+            attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
             return (
                 (
                     torch.nn.functional.dropout(

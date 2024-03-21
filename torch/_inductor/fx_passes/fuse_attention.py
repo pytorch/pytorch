@@ -454,13 +454,19 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_18(query, key, value, inv_scale, causal_mask, dropout_p):
+def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
     # for hf_GPT2 with dropout (introduces clone node) for inference
     # it also returns permuted key & value
     query = query.permute([0, 2, 1, 3])
     key = key.permute([0, 2, 1, 3])
     value = value.permute([0, 2, 1, 3])
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+    inv_scale = torch.full(
+        [],
+        value.size(-1) ** 0.5,
+        dtype=attn_weights.dtype,
+        device=attn_weights.device,
+    )
     attn_weights = attn_weights.div(inv_scale)
     causal_mask_value = torch.full(
         (), torch.finfo(query.dtype).min, dtype=query.dtype, device=query.device
@@ -477,7 +483,7 @@ def _sfdp_pattern_18(query, key, value, inv_scale, causal_mask, dropout_p):
     )
 
 
-def _sfdp_replacement_18(query, key, value, inv_scale, causal_mask, dropout_p):
+def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     permuted_key = key.transpose(1, 2)
     permuted_value = value.transpose(1, 2)
@@ -753,7 +759,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
-                [g(), g(), g(), c(), m_bool()],
+                [g(), g(), g(), m_bool()],
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 _sfdp_extra_check(disable_cuda=True),
@@ -761,7 +767,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
-                [g_bs1(), g_bs1(), g_bs1(), c(), m_bs1_bool()],
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 _sfdp_extra_check(disable_cuda=True),
