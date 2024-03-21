@@ -59,9 +59,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "view_as_real",
     "_conj",
     "_neg_view",
-    "_nested_get_values",
     "_nested_view_from_buffer",
-    "_nested_view_from_jagged",
 ]
 
 VIEW_FUNCTIONS = {
@@ -365,7 +363,6 @@ def emit_view_func(
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
         ConstRefCType(BaseCType(tensorT)),
-        ConstRefCType(OptionalCType(BaseCType(tensorT))),
     ]
     for binding in bindings:
         arg, arg_type = binding.name, binding.nctype.type
@@ -395,9 +392,7 @@ def emit_view_func(
                 arg=arg, val=arg_value, default="0"
             )
             updated_args.append(arg_value)
-        elif arg_type == ConstRefCType(BaseCType(tensorT)) or arg_type == ConstRefCType(
-            OptionalCType(BaseCType(tensorT))
-        ):
+        elif arg_type == ConstRefCType(BaseCType(tensorT)):
             # NB: Closing over a tensor. If a user modifies this tensor, this will be silently
             # incorrect. The proper thing to do is to store the version counter and copy on write.
             updated_args.append(arg)
