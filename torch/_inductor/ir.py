@@ -7026,7 +7026,7 @@ class Subgraph(IRNode):
 
 @dataclasses.dataclass
 class Conditional(ExternKernel):
-    predicate: Optional[DynamicScalar] = None
+    predicate: Optional[IRNode] = None
     operands: Optional[List[TensorBox]] = None
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
@@ -7034,7 +7034,7 @@ class Conditional(ExternKernel):
 
     def __init__(
         self,
-        predicate: DynamicScalar,
+        predicate: IRNode,
         operands: List[TensorBox],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
@@ -7045,10 +7045,15 @@ class Conditional(ExternKernel):
         self.true_subgraph = true_subgraph
         self.false_subgraph = false_subgraph
 
+        inputs = []
+        if not isinstance(predicate, ShapeAsConstantBuffer):
+            inputs.append(predicate)
+        inputs.extend(operands)
+
         super().__init__(
             name=None,
             layout=layout,  # type: ignore[arg-type]
-            inputs=[predicate, *operands],  # type: ignore[list-item]
+            inputs=inputs,  # type: ignore[list-item]
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7105,13 +7110,22 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
+        if not isinstance(predicate, ShapeAsConstantBuffer):
+            # use predicate device for consistent codegen-ing
+            device = predicate.get_device()
+        else:
+            # predicate is not a Tensor: use first operand's device
+            assert (
+                len(operands) > 0
+            ), "When predicate is not a Tensor, there must be at least one operand in torch.cond."
+            device = operands[0].get_device()
+
         conditional = Conditional(
             predicate=predicate,
             operands=operands,
             true_subgraph=true_fn,
             false_subgraph=false_fn,
-            # use predicate device for consistent codegen-ing
-            layout=MultiOutputLayout(predicate.get_device()),
+            layout=MultiOutputLayout(device),
         )
 
         outputs = [
