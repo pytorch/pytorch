@@ -14,6 +14,8 @@ import torch._inductor
 import torch._inductor.cudagraph_trees
 from torch._inductor import config
 
+from torch._inductor.test_case import TestCase
+
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -39,8 +41,6 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-
-from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -80,12 +80,8 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
-    RAdam: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
-    Adamax: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
+    RAdam: KernelCounts(multitensor=2, singletensor=8),
+    Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
 
 
@@ -109,15 +105,6 @@ def build_opt_kwarg_db():
                         name += "_" + key
 
                 name += f"_{device}"
-
-                # Eager for-loop impl doesn't support capturable ASGD
-                if name in [
-                    "test_asgd_capturable_cuda",
-                    "test_asgd_maximize_capturable_cuda",
-                    "test_asgd_weight_decay_capturable_cuda",
-                    "test_asgd_weight_decay_maximize_capturable_cuda",
-                ]:
-                    continue
 
                 kwargs["device"] = device
                 if name in KERNEL_COUNT_OVERRIDES:
@@ -344,13 +331,6 @@ class CompiledOptimizerParityTests(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            # RAdam #117836 and Adamax #118230 and ASGD #116052
-            # Single tensor eager needs to be refactored to enable tracing
-            if optim_info.only_supports_capturable_on_foreach and not kwargs.get(
-                "foreach", False
-            ):
-                kwargs["foreach"] = True
-
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
             input = torch.ones([10, 10], device=device)
@@ -482,6 +462,39 @@ class CompiledOptimizerTests(TestCase):
         self.assertTrue(p_ref() is None)
         gc.enable()
 
+    def test_guard_on_none_grads(self):
+        def training_loop():
+            input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]).reshape(3, 2)
+
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 3),
+                torch.nn.Sigmoid(),
+                torch.nn.Linear(3, 1),
+                torch.nn.Sigmoid(),
+            )
+
+            params = list(model.parameters())
+            optimizer = torch.optim.Adam(params)
+            step_list = []
+
+            for i in range(6):
+                optimizer.zero_grad()
+                # Test that step behaves as expected (a no-op) when grads are set to None
+                if i != 3:
+                    output = model(input)
+                    loss = output.sum()
+                    loss.backward()
+
+                optimizer.step()
+                step_list.append(optimizer.state[params[0]]["step"])
+
+            return step_list
+
+        compiled_training_loop = torch._dynamo.optimize("eager")(training_loop)
+        actual_steps = compiled_training_loop()
+        expected_steps = training_loop()
+        self.assertEqual(actual_steps, expected_steps)
+
     # Basic shampoo test to verify we support compiling the various ops without error
     @requires_cuda
     def test_basic_shampoo(self):
@@ -552,6 +565,32 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
 
+    @requires_cuda
+    def test_closure_graph_break(self):
+        param = torch.rand(2, 3, dtype=torch.float32, device="cuda", requires_grad=True)
+        param_c = param.clone().detach().requires_grad_(True)
+
+        def closure():
+            param.grad = torch.ones_like(param) * 2
+            return param.grad
+
+        def closure_c():
+            param_c.grad = torch.ones_like(param_c) * 2
+            return param_c.grad
+
+        optimizer = torch.optim.AdamW([param])
+        optimizer_c = torch.optim.AdamW([param_c])
+
+        def loop(opt, c):
+            opt.step(c)
+
+        compiled_loop = torch._dynamo.optimize("eager")(loop)
+
+        compiled_loop(optimizer, closure)
+        loop(optimizer_c, closure_c)
+
+        self.assertEqual(param, param_c)
+
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
@@ -559,7 +598,7 @@ for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
 instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

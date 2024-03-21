@@ -23,8 +23,6 @@ from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
 
-import torch._functorch.config as functorch_config
-
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import (
@@ -43,6 +41,7 @@ from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -75,21 +74,6 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
-
-
-@dataclasses.dataclass
-class BoxedBool:
-    value: bool
-
-    def __bool__(self):
-        return self.value
-
-    @staticmethod
-    def disable(obj):
-        if isinstance(obj, BoxedBool):
-            obj.value = False
-            return obj
-        return False
 
 
 @dataclasses.dataclass
@@ -207,6 +191,38 @@ def _unlift_graph(mod, gm, graph_signature):
     return unlifted_gm
 
 
+def _get_subgraph_names(gm):
+    for node in gm.graph.nodes:
+        if node.target == torch.ops.higher_order.cond:
+            true_subgraph_name = node.args[1].name
+            false_subgraph_name = node.args[2].name
+            yield true_subgraph_name
+            yield false_subgraph_name
+
+
+def _recursive_pre_grad_passes(gm, example_inputs):
+    for subgraph_name in _get_subgraph_names(gm):
+        subgraph = getattr(gm, subgraph_name)
+        # as we don't have recursive example inputs, passing None here
+        new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
+        setattr(gm, subgraph_name, new_subgraph)
+    return pre_grad_passes(gm, example_inputs)
+
+
+def _recursive_joint_graph_passes(gm):
+    for subgraph_name in _get_subgraph_names(gm):
+        subgraph = getattr(gm, subgraph_name)
+        _recursive_joint_graph_passes(subgraph)
+    joint_graph_passes(gm)
+
+
+def _recursive_post_grad_passes(gm, is_inference: bool = False):
+    for subgraph_name in _get_subgraph_names(gm):
+        subgraph = getattr(gm, subgraph_name)
+        _recursive_post_grad_passes(subgraph, is_inference)
+    post_grad_passes(gm, is_inference)
+
+
 def split_const_gm(
     gm: torch.fx.GraphModule,
 ) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
@@ -295,7 +311,7 @@ def count_bytes_inner(
     fake_mode = fake_tensor_prop(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
-        post_grad_passes(gm, False)
+        _recursive_post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
@@ -501,7 +517,7 @@ def compile_fx_inner(
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
             compiled_graph.current_callable = cudagraphify(
-                compiled_graph.get_current_callable(),
+                compiled_graph.current_callable,
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(compiled_graph.device_idxs)),
@@ -519,7 +535,7 @@ def compile_fx_inner(
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index is not None
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_callable = compiled_graph.get_current_callable()
+                compiled_graph_callable = compiled_graph.current_callable
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -546,9 +562,9 @@ def compile_fx_inner(
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
         new_callable = align_inputs(
-            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+            compiled_graph.current_callable, example_inputs, range(num_fixed)
         )
-        if new_callable is not compiled_graph.get_current_callable():
+        if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
 
     _step_logger()(
@@ -628,7 +644,7 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
-        post_grad_passes(gm, is_inference=is_inference)
+        _recursive_post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
         trace_structured(
@@ -703,6 +719,7 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
+            metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
 
             if V.aot_compilation is True:
@@ -718,7 +735,11 @@ def fx_codegen_and_compile(
                 )
 
             compiled_graph = CompiledFxGraph(
-                compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
+                compiled_fn,
+                graph,
+                output_strides,
+                V.graph.disable_cudagraphs_reason,
+                metrics_helper.get_deltas(),
             )
 
     return compiled_graph
@@ -959,30 +980,6 @@ def cudagraphify_impl(
     return align_inputs_from_check_idxs(run, check_input_idxs)
 
 
-def count_tangents(fx_g: torch.fx.GraphModule):
-    """
-    Infers which inputs are static for a backwards graph
-    """
-
-    def is_saved_tensor(x):
-        return (
-            "tangents" not in x.name
-            and "bwd_seed" not in x.name
-            and "bwd_base_offset" not in x.name
-        )
-
-    arg_count = 0
-    static_arg_idxs = []
-    for n in fx_g.graph.nodes:
-        if n.op == "placeholder":
-            if is_saved_tensor(n):
-                static_arg_idxs.append(arg_count)
-            arg_count += 1
-
-    assert static_arg_idxs == list(range(len(static_arg_idxs)))
-    return len(static_arg_idxs)
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1037,7 +1034,7 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    joint_graph_passes(aot_autograd_model)
+    _recursive_joint_graph_passes(aot_autograd_model)
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1174,7 +1171,7 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        model_ = pre_grad_passes(model_, example_inputs_)
+        model_ = _recursive_pre_grad_passes(model_, example_inputs_)
         optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
         signpost_event(
             "optimus",
@@ -1208,10 +1205,11 @@ def compile_fx(
     ):
         if is_inference:
             # partition_fn won't be called
-            joint_graph_passes(model)
+            _recursive_joint_graph_passes(model)
 
-        num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
-        fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
+        fixed = torch._inductor.utils.num_fw_fixed_arguments(
+            num_example_inputs, len(example_inputs)
+        )
         user_visible_outputs = set()
 
         if config.keep_output_stride:
@@ -1292,7 +1290,7 @@ def compile_fx(
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     def partition_fn(graph, joint_inputs, **kwargs):
-        joint_graph_passes(graph)
+        _recursive_joint_graph_passes(graph)
         return min_cut_rematerialization_partition(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )

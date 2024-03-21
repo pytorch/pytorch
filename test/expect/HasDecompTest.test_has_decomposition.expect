@@ -30,6 +30,8 @@ aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
 aten::_assert_async.msg
+aten::_batch_norm_no_update.out
+aten::_batch_norm_with_update.out
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -387,6 +389,7 @@ aten::_linalg_det
 aten::_linalg_det.result
 aten::_linalg_eigh
 aten::_linalg_eigh.eigenvalues
+aten::_linalg_eigvals
 aten::_linalg_slogdet
 aten::_linalg_slogdet.sign
 aten::_linalg_solve_ex
@@ -430,10 +433,18 @@ aten::_native_multi_head_attention.out
 aten::_neg_view
 aten::_neg_view_copy
 aten::_neg_view_copy.out
+aten::_nested_compute_contiguous_strides_offsets
 aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_get_jagged_dummy
+aten::_nested_get_lengths
+aten::_nested_get_offsets
+aten::_nested_get_ragged_idx
+aten::_nested_get_values
+aten::_nested_get_values_copy
+aten::_nested_get_values_copy.out
 aten::_nested_select_backward
 aten::_nested_sum_backward
 aten::_nested_tensor_from_mask
@@ -451,6 +462,9 @@ aten::_nested_tensor_strides.out
 aten::_nested_view_from_buffer
 aten::_nested_view_from_buffer_copy
 aten::_nested_view_from_buffer_copy.out
+aten::_nested_view_from_jagged
+aten::_nested_view_from_jagged_copy
+aten::_nested_view_from_jagged_copy.out
 aten::_new_zeros_with_same_feature_meta
 aten::_new_zeros_with_same_feature_meta.out
 aten::_nnpack_spatial_convolution
@@ -605,6 +619,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out
@@ -844,6 +859,7 @@ aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
 aten::linalg_eig.out
+aten::linalg_eigvals.out
 aten::linalg_householder_product
 aten::linalg_householder_product.out
 aten::linalg_inv_ex

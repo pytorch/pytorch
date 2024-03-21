@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
 from torch.utils._pytree import tree_any, tree_all_only
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential, get_device_states, _infer_device_type
 from torch.utils._device import set_device
 from torch.utils._traceback import report_compile_source_on_error, format_traceback_short, CapturedTraceback
 import torch.utils.cpp_extension
@@ -459,6 +459,22 @@ class TestCheckpoint(TestCase):
 
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_get_device_states_recursive(self):
+        inp = {'foo' : torch.rand(10, device="cuda:0"), 'bar': [torch.rand(10, device="cuda:1")]}
+        device_ids, device_states = get_device_states(inp)
+        self.assertEqual(2, len(device_ids))
+        self.assertEqual(2, len(device_states))
+        self.assertEqual(0, device_ids[0])
+        self.assertEqual(1, device_ids[1])
+        self.assertTrue(isinstance(device_states[0], torch.Tensor))
+        self.assertTrue(isinstance(device_states[1], torch.Tensor))
+
+    def test_infer_device_state_recursive(self):
+        inp = {'foo' : torch.rand(10, device="meta")}
+        device_type = _infer_device_type(inp)
+        self.assertEqual("meta", device_type)
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
@@ -1017,22 +1033,6 @@ class TestDeviceUtils(TestCase):
                 tree_all_only(torch.Tensor, lambda x: x.device.type == 'meta', r)
             )
 
-    def test_int16_device_index(self):
-        # Test if index does not wrap around when larger than int8
-        large_index = 500
-        x = torch.device('meta', large_index)
-        self.assertEqual(x.index, large_index)
-
-    def test_raise_on_device_index_out_of_bounds(self):
-        # Tests if an error is raised when the device index is out of bounds
-        index_larger_than_max = 100000
-        error_msg_regex = "^Device index must be.*"
-        # Explicit index
-        with self.assertRaisesRegex(RuntimeError, error_msg_regex):
-            x = torch.device('meta', index=index_larger_than_max)
-        # Index in device string
-        with self.assertRaisesRegex(RuntimeError, error_msg_regex):
-            x = torch.device(f'meta:{index_larger_than_max}')
 
 instantiate_device_type_tests(TestDeviceUtils, globals())
 

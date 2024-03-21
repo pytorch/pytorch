@@ -30,6 +30,7 @@ from ..exc import (
 from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
+from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
@@ -349,9 +350,8 @@ def speculate_subgraph(
         unimplemented("Use `set_subgraph_inputs=automatic` when passing `sub_kwargs`.")
 
     try:
-        f, sub_args, sub_kwargs = VariableTracker.apply(
-            # ensure guards on args get installed in parent subgraph
-            lambda x: x.realize(),
+        # ensure guards on args get installed in parent subgraph
+        f, sub_args, sub_kwargs = LazyVariableTracker.realize_all(
             (f, sub_args, sub_kwargs),
         )
 
@@ -554,7 +554,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
 
-        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
@@ -751,7 +751,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
 
-        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
@@ -802,8 +802,20 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
-            tx, args[0], operands, {}, "while_loop", source_target=self.value
+            tx,
+            args[0],
+            operands,
+            {},
+            "while_loop",
+            source_target=self.value,
+            set_subgraph_inputs="manual",
         )
+        if len(cond_lifted_freevars) > 0:
+            unimplemented(
+                f"while_loop's cond_fn doesn't support capturing free variables yet."
+                f" All used inputs must be passed in as arguments explicitly."
+                f" Proxies for the lifted vars:{cond_lifted_freevars}."
+            )
         cond_nn_modules = dict(tx.output.nn_modules)
         if not isinstance(cond_r, TensorVariable):
             unimplemented(
@@ -831,28 +843,17 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "while_loop",
             source_target=self.value,
+            set_subgraph_inputs="manual",
             should_flatten_outputs=True,
         )
         body_nn_modules = dict(tx.output.nn_modules)
 
-        (
-            cond_graph,
-            body_graph,
-            cond_shared,
-            body_shared,
-            cond_unique,
-            body_unique,
-        ) = _merge_graph_inputs(
-            cond_graph,
-            cond_lifted_freevars,
-            "cond_fn",
-            body_graph,
-            body_lifted_freevars,
-            "body_fn",
-        )
-        # We pick cond_shared but it shouldn't matter
-        merged_input = tuple(cond_shared + cond_unique + body_unique)
-
+        if len(body_lifted_freevars) > 0:
+            unimplemented(
+                f"while_loop's body_fn doesn't support capturing free variables yet."
+                f" All used inputs must be passed in as arguments explicitly."
+                f" Proxies for the lifted vars:{body_lifted_freevars}."
+            )
         cond_name = add_subgraph(
             tx,
             self.source,
@@ -872,7 +873,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            merged_input,
+            tuple([operand.as_proxy() for operand in operands]),
         )
 
         return _call_function_and_unflatten_output(
@@ -1180,13 +1181,16 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
+class FunctorchHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
+            name = self.get_name()
+            assert name in ("grad_impl", "vmap_impl")
+            fn = name.split("_")[0]
             unimplemented(
-                "torch.func.vmap capture is disabled, "
+                f"torch.func.{fn} capture is disabled, "
                 "it can be turned on by setting "
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
@@ -1440,18 +1444,19 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    """
+    Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
+    by unwrapping the higher order op and inlining through it.  This op
+    is created by dynamo to survive through AotAutograd, then unwrapped
+    here in the call to dynamo from compiled autograd.
+    """
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import TensorVariable
-
-        assert "fn" in kwargs
-        fn = kwargs["fn"]
-        assert len(args) == 1
-        grad = args[0]
-        assert isinstance(grad, TensorVariable)
-
-        return fn.call_function(tx, args, {})
+        kwargs = dict(kwargs)
+        fn = kwargs.pop("fn")
+        return fn.call_function(tx, args, kwargs)
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
@@ -1611,7 +1616,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_graph.output(new_fwd_graph_outputs)
 
         # Store fwd_body
-        fwd_nn_modules = tx.copy_graphstate().output.nn_modules
+
+        fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = add_subgraph(
             tx,
             fwd_src,
@@ -1622,7 +1628,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_node = make_attr(tx, fwd_name)
 
         # Store bwd_body
-        bwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         bwd_name = add_subgraph(
             tx,
             bwd_src,
