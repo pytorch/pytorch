@@ -227,29 +227,10 @@ def generate_pattern_with_unary(computation_call, unary_post_op):
                 CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
                 KeywordArg("max_value"),
             )
-        if unary_post_op == aten.hardswish.default:
-            return CallFunction(
-                aten.div,
-                CallFunction(
-                    aten.mul,
-                    computation_call,
-                    CallFunction(
-                        aten.clamp_max,
-                        CallFunction(
-                            aten.clamp_min,
-                            CallFunction(aten.add, computation_call, 3),
-                            0,
-                        ),
-                        6,
-                    ),
-                ),
-                6,
-            )
-        else:
-            return CallFunction(
-                unary_post_op,
-                computation_call,
-            )
+        return CallFunction(
+            unary_post_op,
+            computation_call,
+        )
     return computation_call
 
 
@@ -620,6 +601,7 @@ def _register_quantization_unary_fusion():
     from .mkldnn_fusion import (
         _gelu_fusion_1 as _gelu_fusion_erf,
         _gelu_fusion_2 as _gelu_fusion_tanh,
+        _hardswish_fusion,
         _silu_fusion,
     )
 
@@ -653,10 +635,13 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(
-                    get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
+                _unary_fusion_pattern(
+                    _hardswish_fusion,
+                    get_dequantize_qconv_pt2e_pattern(1 if is_bf16 else 2),
+                    2,
+                    is_bf16,
                 ),
-                dtype=original_pattern_output_dtype,
+                dtype=torch.float32,
             ),
             UnaryAttr("swish", [], ""): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
@@ -688,8 +673,11 @@ def _register_quantization_unary_fusion():
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
                 get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
             ),
-            UnaryAttr("hardswish", [], ""): generate_pattern_with_unary(
-                get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
+            UnaryAttr("hardswish", [], ""): _unary_fusion_pattern(
+                _hardswish_fusion,
+                get_dequantize_qconv_pt2e_pattern(1 if is_bf16 else 2),
+                2,
+                is_bf16,
             ),
             UnaryAttr("swish", [], ""): _unary_fusion_pattern(
                 _silu_fusion,
