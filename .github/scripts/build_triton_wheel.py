@@ -104,6 +104,10 @@ def build_triton(
             check_call(
                 ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
             )
+            if build_rocm:
+                check_call(
+                    ["git", "checkout", f"release/2.2.x"], cwd=triton_basedir
+                )
         else:
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
