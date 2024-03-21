@@ -439,7 +439,15 @@ auto build_graph_and_tensors_backward(
                  std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
              .set_stride(std::vector<int64_t>(
                  params.v_stride.begin(), params.v_stride.end())));
-
+     DQ->set_output(true).set_dim(std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end())).set_stride(std::vector<int64_t>(params.q_stride.begin(), params.q_stride.end()));
+     DK->set_output(true).set_dim(std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end())).set_stride(std::vector<int64_t>(params.k_stride.begin(), params.k_stride.end()));
+     DV->set_output(true).set_dim(std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end())).set_stride(std::vector<int64_t>(params.v_stride.begin(), params.v_stride.end()));
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
+     AT_CUDNN_FRONTEND_CHECK(
+       mha_graph->create_execution_plans({fe::HeurMode_t::A}));
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
 }
 
 
