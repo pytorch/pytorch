@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -21,6 +21,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
+
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -876,7 +877,23 @@ class GraphLowering(torch.fx.Interpreter):
             )
             for x in result
         ), result
-        self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+
+        fx_node_args = list(V.graph.current_node.args[0])  # type: ignore[arg-type]
+        result = [ir.ExternKernel.realize_input(x) for x in result]
+        result_correct_strides = []
+
+        assert len(fx_node_args) == len(result)
+        for r, fx_node in zip(result, fx_node_args):
+            if not isinstance(r, (ir.TensorBox, ir.BaseView)):
+                result_correct_strides.append(r)
+            else:
+                # AOT Autograd tries to detect stride divergence of inductor from output metadata.
+                # Here, we try to avoid spurious divergence by matching insignificant strides such as
+                result_correct_strides.append(
+                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                )
+
+        self.graph_outputs = result_correct_strides
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(
@@ -919,6 +936,54 @@ class GraphLowering(torch.fx.Interpreter):
             yield
         finally:
             self.current_node = old
+
+    def match_insignificant_strides(
+        self,
+        tensor,
+        meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
+    ) -> ir.TensorBox:
+        # should have already been realized
+        assert torch._inductor.ir.is_storage_and_layout(tensor)
+
+        meta_strides = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides_inp
+        ]
+
+        if all(
+            self.sizevars.statically_known_equals(s1, s2)
+            for s1, s2 in zip(meta_strides, tensor.get_stride())
+        ):
+            return tensor
+
+        def significant_strides_equal(shape, meta_strides, tensor_strides):
+            for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                    continue
+
+                if not self.sizevars.statically_known_equals(s1, s2):
+                    return False
+
+            return True
+
+        if not significant_strides_equal(
+            tensor.get_size(), meta_strides, tensor.get_stride()
+        ):
+            return tensor
+
+        storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
+        new_stride = list(old_layout.stride)
+        for i, s in enumerate(tensor.get_size()):
+            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+                new_stride[i] = meta_strides[i]
+
+        new_layout = torch._inductor.ir.FixedLayout(
+            old_layout.device,
+            old_layout.dtype,
+            old_layout.size,
+            new_stride,
+            old_layout.offset,
+        )
+        return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
 
     def run_node(self, n: torch.fx.Node):
         def debug(msg):

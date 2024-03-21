@@ -672,9 +672,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
+            # TODO figure out the correct way to apply torch.autograd.skip_grad_layout_contract()
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
                 args.compiled_autograd
-            ):
+            ), torch.autograd.skip_grad_layout_contract():
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,

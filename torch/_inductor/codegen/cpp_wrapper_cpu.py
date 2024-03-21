@@ -1530,19 +1530,27 @@ class CppWrapperCpu(WrapperCodeGen):
                 # hence pre-declare output variables directly and separately
                 self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
                 outer_outputs.append(out.get_name())
-            predicate = f"{conditional.predicate.get_name()}_scalar"
-            self.writeline(f"bool {predicate};")
-            # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the unrelying scalar bool Tensor
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({conditional.predicate.codegen_reference()}, &{predicate}));"
-            )
+
+            if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
+                predicate = f"{conditional.predicate.get_name()}_scalar"
+                self.writeline(f"bool {predicate};")
+                # in ABI-compatible mode, we need to use the ABI shim function
+                # to extract a C++ bool from the unrelying scalar bool Tensor
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({conditional.predicate.codegen_reference()}, &{predicate}));"
+                )
+            else:
+                # the predicate is not a Tensor: SymBool or Python bool
+                predicate = conditional.predicate.codegen_reference()
         else:
             # in non-ABI-compatible mode, we can codegen the conditional outputs
             # as array of at::Tensor instances, as the ir.MultiOutput is codegened
             outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
             self.writeline(f"at::Tensor {name}[{len(conditional.outputs)}];")
-            predicate = f"{conditional.predicate.codegen_reference()}.item<bool>()"
+            predicate = f"{conditional.predicate.codegen_reference()}"
+            if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
+                # move the Tensor predicate to host
+                predicate = f"{predicate}.item<bool>()"
 
         self.writeline(f"if ({predicate}) {{")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))

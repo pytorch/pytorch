@@ -63,6 +63,9 @@ inline at::Tensor clone_obey_contract(
     // (1)
     // Does this dicey-looking sequence attach the result to new_grad's
     // history if GradMode::is_enabled()?  Yes, and @alband says it should.
+    // XXX added for debugging. Will remove before land.
+    RECORD_FUNCTION(
+        "clone_obey_contract true branch", c10::ArrayRef<const c10::IValue>());
     return std::move(new_grad
                          .new_empty_strided_symint(
                              variable.sym_sizes(),
