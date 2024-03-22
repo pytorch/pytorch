@@ -1047,7 +1047,7 @@ def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
 
-    source_codes = []
+    source_codes: List[str] = []
 
     def patched_compile_to_module(self: GraphLowering):
         class DummyModule:
