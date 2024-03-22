@@ -198,7 +198,7 @@ def validate_args_and_maybe_create_graph_inputs(
             # If `a` cannot be put into a graph
             else:
                 # HOPs work much better if they use speculate_subgraph(set_subgraph_inputs="automatic").
-                raise unimplemented(
+                unimplemented(
                     f"{description} with body that accepts non-Tensors as input. "
                     f"Got: {a.python_type()}"
                 )
