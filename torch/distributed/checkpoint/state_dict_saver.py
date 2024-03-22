@@ -256,7 +256,7 @@ def _save_state_dict(
     assert planner is not None
 
     global_metatadata = None
-    checkpoint_id = {"checkpoint_id": getattr("checkpoint_id", storage_writer, None)}
+    checkpoint_id = {"checkpoint_id": getattr(storage_writer, "checkpoint_id", None)}
 
     @_dcp_method_logger(**checkpoint_id)
     def local_step():

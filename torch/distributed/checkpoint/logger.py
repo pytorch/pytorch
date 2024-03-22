@@ -8,6 +8,7 @@ from typing_extensions import ParamSpec
 import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
 
+__all__: List[str] = []
 
 global _dcp_logger
 _dcp_logger = c10d_logger._get_or_create_logger(DCP_LOGGER_NAME)
@@ -51,12 +52,14 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
 def _dcp_method_logger(
     log_exceptions: bool = False, **wrapper_kwargs: _P.kwargs
 ) -> Callable[_P, _T]:
-    """This method decorator logs the start, end, and exception of wrapped events.
-    """
+    """This method decorator logs the start, end, and exception of wrapped events."""
+
     def decorator(func: Callable[_P, _T]):
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            msg_dict = _get_msg_dict(func.__name__, *args, **{**wrapper_kwargs, **kwargs})
+            msg_dict = _get_msg_dict(
+                func.__name__, *args, **{**wrapper_kwargs, **kwargs}
+            )
 
             # log start event
             msg_dict["event"] = "start"
@@ -83,5 +86,7 @@ def _dcp_method_logger(
             _dcp_logger.debug(msg_dict)
 
             return result
+
         return wrapper
+
     return decorator

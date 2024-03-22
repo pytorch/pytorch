@@ -190,7 +190,7 @@ def _load_state_dict(
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultLoadPlanner()
-    checkpoint_id = {"checkpoint_id": getattr("checkpoint_id", storage_reader, None)}
+    checkpoint_id = {"checkpoint_id": getattr(storage_reader, "checkpoint_id", None)}
 
     @_dcp_method_logger(**checkpoint_id)
     def local_step():
