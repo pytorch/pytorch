@@ -7579,19 +7579,13 @@ class Wait(ExternKernelAlloc):
         return False
 
     def codegen(self, wrapper):
-        from .codegen.wrapper import ReuseLine
-
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
         (input_collective,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
-
         # wait op still needs to produce a 'buffer' that represents the tensor output.
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
-        # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
-        # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
+        wrapper.writeline(f"{self.get_name()} = _wait_tensor({input_collective})")
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
