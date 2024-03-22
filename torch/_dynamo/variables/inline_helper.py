@@ -55,7 +55,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     return functional_call
 
 
-function_key_to_fx = {}
+code_to_Fx = {}
 
 
 def vt_to_fake_helper(vt, tx):
@@ -88,46 +88,49 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
     from .dicts import ConstDictVariable
     from .lists import BaseListVariable
 
-    if function_key is None or function_key not in function_key_to_fx:
-        # convert he arguments from VariableTracker to fake tensors + constants again
-        fake_value_args = []
-        for arg in args:
-            fake_value_args.append(vt_to_fake_helper(arg, tx))
+    # convert he arguments from VariableTracker to fake tensors + constants again
+    fake_value_args = []
+    for arg in args:
+        fake_value_args.append(vt_to_fake_helper(arg, tx))
 
-        fake_value_kwargs = {}
-        for key, value in kwargs.items():
-            if type(value.as_proxy()) is torch.fx.proxy.Proxy:
-                fake_value_kwargs[key] = get_fake_value(value.as_proxy().node, tx)
-            else:
-                # mostly handle tuple and scalar
-                fake_value_kwargs[key] = value.as_proxy()
+    fake_value_kwargs = {}
+    for key, value in kwargs.items():
+        if type(value.as_proxy()) is torch.fx.proxy.Proxy:
+            fake_value_kwargs[key] = get_fake_value(value.as_proxy().node, tx)
+        else:
+            # mostly handle tuple and scalar
+            fake_value_kwargs[key] = value.as_proxy()
 
-        # Wrap the function before calling make_fx to avoid make_fx modify the kwargs's key.
-        def wrapper_fn(fn):
-            def inner(arg, kwargs):
-                return fn(*arg, **kwargs)
+    # Wrap the function before calling make_fx to avoid make_fx modify the kwargs's key.
+    def wrapper_fn(fn):
+        def inner(arg, kwargs):
+            return fn(*arg, **kwargs)
 
-            return inner
+        return inner
 
-        wrapped_fn = wrapper_fn(fn)
-        fake_mode = detect_fake_mode(fake_value_args)
+    wrapped_fn = wrapper_fn(fn)
+    fake_mode = detect_fake_mode(fake_value_args)
 
-        with fake_mode:
-            with enable_python_dispatcher():
-                fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
-                    fake_value_args, fake_value_kwargs
-                )
-
-        if function_key is not None:
-            function_key_to_fx[function_key] = fx_g
-    else:
-        fx_g = function_key_to_fx[function_key]
+    with fake_mode:
+        with enable_python_dispatcher():
+            fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
+                fake_value_args, fake_value_kwargs
+            )
 
     # print("\nfx code")
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
     # in case this is `_lazy_graph_module`. This will aovid us trying to inline the
     # `_LazyGraphModule._lazy_forward`(in the skip list) below.
-    temp = fx_g.code
+    code = fx_g.code
+
+    # make_fx on the same nn_module we will create function with different names.
+    # SpeculationLog will replay the dynamo tracing upon graph break and it expects
+    # to see the same functon name. It is safer to rerun the `make_Fx` and use the
+    # cached fx only if code is the same.
+    if code in code_to_Fx:
+        fx_g = code_to_Fx[code]
+    else:
+        code_to_Fx[code] = fx_g
     # print(fx_g.code)
 
     # now inline this fx graph and return the output

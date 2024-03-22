@@ -445,7 +445,8 @@ class NNModuleVariable(VariableTracker):
                     functional_call,
                     complete_tensor_variable_args,
                     kwargs,
-                    function_key=self.module.__hash__,
+                    # function_key=self.module.__hash__,
+                    function_key=None,
                 )
 
                 num_nodes_need_update_metadata = (
