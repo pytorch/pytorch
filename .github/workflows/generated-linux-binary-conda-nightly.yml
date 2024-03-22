@@ -478,7 +478,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.3
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda11_8
