@@ -217,7 +217,7 @@ def async_save(
     cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
 
     executor = ThreadPoolExecutor(max_workers=1)
-    f = executor.submit(
+    f: Future = executor.submit(
         save,
         cpu_state_dict,
         checkpoint_id=checkpoint_id,
@@ -256,9 +256,12 @@ def _save_state_dict(
     assert planner is not None
 
     global_metatadata = None
-    checkpoint_id = {"checkpoint_id": getattr(storage_writer, "checkpoint_id", None)}
 
-    @_dcp_method_logger(**checkpoint_id)
+    ckpt_kwargs = {}
+    if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
+        ckpt_kwargs["checkpoint_id"] = ckpt_id
+
+    @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
         planner.set_up_planner(state_dict, distW.is_coordinator)
@@ -267,7 +270,7 @@ def _save_state_dict(
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan
 
-    @_dcp_method_logger(**checkpoint_id)
+    @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
         nonlocal global_metatadata
 
@@ -278,7 +281,7 @@ def _save_state_dict(
 
     central_plan = distW.reduce_scatter("plan", local_step, global_step)
 
-    @_dcp_method_logger(**checkpoint_id)
+    @_dcp_method_logger(**ckpt_kwargs)
     def write_data():
         assert planner is not None
         final_local_plan = planner.finish_plan(central_plan)
@@ -287,7 +290,7 @@ def _save_state_dict(
         all_writes.wait()
         return all_writes.value()
 
-    @_dcp_method_logger(**checkpoint_id)
+    @_dcp_method_logger(**ckpt_kwargs)
     def finish_checkpoint(all_results):
         assert global_metatadata is not None
         storage_writer.finish(metadata=global_metatadata, results=all_results)
