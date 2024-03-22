@@ -55,6 +55,7 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     initialize_temp_directories,
     cleanup_temp_dir,
+    exit_if_lt_x_gpu,
     simple_sparse_reduce_tests,
     skip_if_rocm,
     skip_if_small_worldsize,
@@ -571,10 +572,8 @@ class TestDistBackend(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
 
-        if torch.cuda.is_available() and torch.cuda.device_count() < int(
-            self.world_size
-        ):
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if torch.cuda.is_available():
+            exit_if_lt_x_gpu(int(self.world_size))
         try:
             pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(test_name, default_pg_timeout)
             timeout = timedelta(seconds=pg_timeout_seconds)

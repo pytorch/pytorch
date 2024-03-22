@@ -3,7 +3,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
-import sys
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
@@ -25,9 +24,9 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
+    exit_if_lt_x_gpu,
     skip_if_lt_x_gpu,
     run_subtests,
-    TEST_SKIPS,
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
@@ -310,8 +309,8 @@ class DTensorTestBase(MultiProcessTestCase):
         return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
 
     def init_pg(self) -> None:
-        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if "nccl" in self.backend:
+            exit_if_lt_x_gpu(self.world_size)
 
         if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")

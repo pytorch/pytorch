@@ -13,7 +13,7 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    TEST_SKIPS
+    exit_if_lt_x_gpu
 )
 
 from torch.testing._internal.common_utils import (
@@ -36,8 +36,8 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if BACKEND == dist.Backend.NCCL:
+            exit_if_lt_x_gpu(self.world_size)
         self.dist_init()
         func(self)
         self.destroy_comms()

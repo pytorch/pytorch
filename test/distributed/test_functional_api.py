@@ -16,6 +16,7 @@ import torch.distributed.distributed_c10d as c10d
 from functorch import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.common_distributed import exit_if_lt_x_gpu
 from torch.utils._triton import has_triton
 
 if not dist.is_available():
@@ -25,7 +26,6 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
     requires_nccl,
     run_with_both_funcol_impls,
     run_with_both_funcol_impls_with_arg,
@@ -444,11 +444,6 @@ BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = 2
 
 
-def exit_if_lt_x_gpu(x):
-    if torch.cuda.device_count() < x:
-        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
-
-
 def with_comms(func=None):
     if func is None:
         return partial(
@@ -457,8 +452,8 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if BACKEND == dist.Backend.NCCL:
+            exit_if_lt_x_gpu(self.world_size)
         self.dist_init()
         func(self)
         self.destroy_comms()
