@@ -256,8 +256,9 @@ def _save_state_dict(
     assert planner is not None
 
     global_metatadata = None
+    checkpoint_id = {"checkpoint_id": getattr("checkpoint_id", storage_writer, None)}
 
-    @_dcp_method_logger(checkpoint_id=storage_writer.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def local_step():
         assert planner is not None
         planner.set_up_planner(state_dict, distW.is_coordinator)
@@ -266,7 +267,7 @@ def _save_state_dict(
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan
 
-    @_dcp_method_logger(checkpoint_id=storage_writer.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def global_step(all_local_plans):
         nonlocal global_metatadata
 
@@ -277,7 +278,7 @@ def _save_state_dict(
 
     central_plan = distW.reduce_scatter("plan", local_step, global_step)
 
-    @_dcp_method_logger(checkpoint_id=storage_writer.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def write_data():
         assert planner is not None
         final_local_plan = planner.finish_plan(central_plan)
@@ -286,7 +287,7 @@ def _save_state_dict(
         all_writes.wait()
         return all_writes.value()
 
-    @_dcp_method_logger(checkpoint_id=storage_writer.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def finish_checkpoint(all_results):
         assert global_metatadata is not None
         storage_writer.finish(metadata=global_metatadata, results=all_results)

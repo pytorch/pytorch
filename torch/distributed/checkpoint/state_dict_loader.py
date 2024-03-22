@@ -190,8 +190,9 @@ def _load_state_dict(
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultLoadPlanner()
+    checkpoint_id = {"checkpoint_id": getattr("checkpoint_id", storage_reader, None)}
 
-    @_dcp_method_logger(checkpoint_id=storage_reader.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def local_step():
         assert planner is not None
         metadata = storage_reader.read_metadata()
@@ -202,7 +203,7 @@ def _load_state_dict(
         local_plan = storage_reader.prepare_local_plan(local_plan)
         return local_plan
 
-    @_dcp_method_logger(checkpoint_id=storage_reader.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def global_step(all_local_plans):
         assert planner is not None
         all_local_plans = planner.create_global_plan(all_local_plans)
@@ -211,7 +212,7 @@ def _load_state_dict(
 
     central_plan = distW.reduce_scatter("plan", local_step, global_step)
 
-    @_dcp_method_logger(checkpoint_id=storage_reader.checkpoint_id)
+    @_dcp_method_logger(**checkpoint_id)
     def read_data():
         assert planner is not None
         final_local_plan = planner.finish_plan(central_plan)
