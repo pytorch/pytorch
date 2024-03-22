@@ -2721,7 +2721,11 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
+<<<<<<< HEAD
+    """Shares the same storage as another tensor"""
+=======
     """Uses the same storage as another tensor"""
+>>>>>>> d1bdf7866b5 (Cleanup AliasedLayout + fix issues with buffer reuse with recursive)
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
