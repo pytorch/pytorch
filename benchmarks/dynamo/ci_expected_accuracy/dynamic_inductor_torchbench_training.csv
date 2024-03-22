@@ -283,3 +283,7 @@ vision_maskrcnn,pass,33
 
 
 yolov3,pass,9
+
+
+
+torchrec_dlrm,fail_to_run,3

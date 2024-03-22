@@ -935,11 +935,10 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1):
+def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1319,7 +1318,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
-def split(x, sizes, dim=0):
+def split(x, sizes, dim=0, clamp=True):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
@@ -1332,14 +1331,14 @@ def split(x, sizes, dim=0):
     start = 0
     for size in sizes:
         end = start + size
-        result.append(slice_(x, dim, start, end))
+        result.append(slice_(x, dim, start, end, clamp=clamp))
         start = end
     return result
 
 
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
-    return split(x, sizes, dim)
+    return split(x, sizes, dim, clamp=False)
 
 
 @register_lowering(aten.unbind, type_promotion_kind=None)
@@ -2205,13 +2204,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        if not meta_val.is_cuda:
-            return arg
 
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if not meta_val.is_cuda:
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
@@ -3259,7 +3259,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(self),
+        ir.MutationLayoutSHOULDREMOVE(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
@@ -3469,7 +3469,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         )
         buffer = ir.ComputedBuffer(
             None,
-            ir.MutationLayout(self),
+            ir.MutationLayoutSHOULDREMOVE(self),
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
@@ -3487,7 +3487,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(self),
+        ir.MutationLayoutSHOULDREMOVE(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
@@ -5286,7 +5286,9 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayout.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
+    ir.MutationLayoutSHOULDREMOVE.realize_into(
+        val, changed_data, unsafe_alias=unsafe_alias
+    )
     return changed
 
 
@@ -5994,6 +5996,18 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.while_loop)
+def while_loop(cond_fn, body_fn, operands):
+    if any(map(is_triton, operands)):
+        msg = "control flow operator: torch.while_loop."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.WhileLoop.create(cond_fn, body_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
 try:
     import torch.distributed._functional_collectives
 
@@ -6182,3 +6196,4 @@ import_submodule(kernel)
 from . import quantized_lowerings
 
 quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
