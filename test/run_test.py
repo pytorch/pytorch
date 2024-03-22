@@ -1288,7 +1288,6 @@ def must_serial(file: Union[str, ShardedTest]) -> bool:
         or DISTRIBUTED_TEST_PREFIX in file
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
-        or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
@@ -1610,11 +1609,32 @@ def run_tests(
                     "your PR and rerun your jobs."
                 )
 
+        for test in selected_tests_parallel:
+            options_clone = copy.deepcopy(options)
+            if can_run_in_pytest(test):
+                options_clone.pytest = True
+            options_clone.additional_unittest_args.extend(["-m", "serial"])
+            failure = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                raise RuntimeError(
+                    failure.message
+                    + "\n\nTip: You can keep running tests even on failure by "
+                    "passing --keep-going to run_test.py.\n"
+                    "If running on CI, add the 'keep-going' label to "
+                    "your PR and rerun your jobs."
+                )
+
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.additional_unittest_args.extend(["-m", "not serial"])
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
