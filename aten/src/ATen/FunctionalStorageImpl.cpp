@@ -103,6 +103,17 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
 
 void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& metas) {
   TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
+
+  if (metas.size() > 1) {
+    for (size_t i = 1; i < metas.size(); ++i) {
+      TORCH_CHECK(!metas[i].is_as_strided,
+"During torch.compile, encountered a mutation on a view chain of length ", metas.size(), ", where view ", i,
+" was an as_strided() call. as_strided() is non-compositional, and therefore is not possible to functionalize properly today,"
+"so this behavior is banned in compile. As a workaround, you can either remove the mutation from the model code, or you "
+"can insert a graph break right before the mutation with torch._dynamo.graph_break(). If you would like this behavior to "
+"work properly, please comment on https://github.com/pytorch/pytorch/issues/104505.");
+    }
+  }
   updates_.push_back({updated_val, metas});
   generation_++;
 }
