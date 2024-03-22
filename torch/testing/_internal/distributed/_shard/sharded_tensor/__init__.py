@@ -7,8 +7,10 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.testing._internal.common_distributed import (
+    exit_if_lt_x_accelerators,
+    exit_if_lt_x_cuda_devs,
     MultiProcessTestCase,
-    TEST_SKIPS,
+    require_n_gpus_for_nccl_backend,
     tp_transports,
 )
 
@@ -110,11 +112,7 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
         # Avoid shadowing the outer backend parameter used by legacy callers.
         backend_name = self.backend(device_type) if device_type is not None else backend
         if backend_name != dist.Backend.GLOO:
-            if (
-                not torch.accelerator.is_available()
-                or torch.accelerator.device_count() < self.world_size
-            ):
-                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+            exit_if_lt_x_accelerators(self.world_size)
         self.init_comms(init_rpc=init_rpc, backend=backend_name)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)

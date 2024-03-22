@@ -28,7 +28,7 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
+    skip_if_no_gpu,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -497,11 +497,8 @@ def with_comms(func=None):
     def wrapper(self, *args, **kwargs):
         # The injected device can carry an index, such as "cuda:0". Use the type.
         device = torch.device(kwargs["device"]).type
-        if (
-            self.backend(device) != dist.Backend.GLOO
-            and torch.accelerator.device_count() < self.world_size
-        ):
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+        if self.backend(device) != dist.Backend.GLOO:
+            exit_if_lt_x_accelerators(self.world_size)
 
         kwargs["device"] = device
         self.pg = self.create_pg(device=device)
@@ -516,9 +513,9 @@ def with_comms(func=None):
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skip_if_no_gpu
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         tensors = [
             torch.ones([4], device=device),
             torch.ones([4], device=device) + 1,
@@ -597,9 +594,8 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         "Inductor+gpu needs triton and recent GPU arch",
         device_type=("cuda", "xpu"),
     )
+    @skip_if_no_gpu
     def test_tracing_with_fakepg(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
-
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
@@ -645,9 +641,9 @@ class TestDistributedBackendCollectivesWithWorldSize4(
     def world_size(self):
         return 4
 
+    @skip_if_no_gpu
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
