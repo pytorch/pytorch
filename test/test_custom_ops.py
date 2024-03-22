@@ -21,7 +21,7 @@ from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
 from torch.library import def_blackbox
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.custom_op_db import custom_op_db, numpy_nonzero
 from typing import *  # noqa: F403
 import numpy as np
 
@@ -802,13 +802,11 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
 
-    @skipIfTorchDynamo("dynamo module stack is different")
     def test_blackbox_namespace_inference(self):
-        @def_blackbox(mutated_args=())
-        def f(x: Tensor) -> Tensor:
-            return x.view(-1)
-
-        self.assertExpectedInline(f._namespace, """mangled2__test_custom_ops""")
+        self.assertExpectedInline(
+            numpy_nonzero._namespace,
+            """mangled2__torch__testing___internal__custom_op_db""",
+        )
 
     def _generate_examples(self, typ):
         if typ is int:

@@ -19,6 +19,7 @@ from torch import Tensor
 from torch.types import Number
 from typing import *  # noqa: F403
 import torch._custom_ops as custom_ops
+from torch.library import def_blackbox
 
 # Note: [custom op db]
 #
@@ -148,20 +149,16 @@ def numpy_take_backward(ctx, saved, grad_out):
         'ind_inv': None,
     }
 
-@custom_ops.custom_op('_torch_testing::numpy_nonzero')
+@def_blackbox(mutated_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
-    raise NotImplementedError()
-
-@custom_ops.impl('_torch_testing::numpy_nonzero')
-def numpy_nonzero_impl(x):
     x_np = to_numpy(x)
     res = np.stack(np.nonzero(x_np), axis=1)
     if res.shape[0] <= 1:
         raise RuntimeError("not supported")
     return torch.tensor(res, device=x.device)
 
-@custom_ops.impl_abstract('_torch_testing::numpy_nonzero')
-def numpy_nonzero_abstract(x):
+@numpy_nonzero.impl_abstract
+def _(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
     shape = [i0, x.dim()]
@@ -400,7 +397,7 @@ custom_op_db = [
     ),
     OpInfo(
         'NumpyNonzeroCustomOp',
-        op=torch.ops._torch_testing.numpy_nonzero,
+        op=numpy_nonzero._opoverload,
         sample_inputs_func=sample_inputs_numpy_nonzero,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=False,
