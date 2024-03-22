@@ -407,7 +407,7 @@ class CompiledNodeArgs {
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
     for (const auto& h : _node_call.tensor_pre_hooks) {
-      collect_size(h.second); // index
+      collect_size(static_cast<size_t>(h.second));
     }
   }
 
@@ -427,29 +427,33 @@ class CompiledNodeArgs {
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.tensor_pre_hooks.emplace_back(std::make_pair(fn_id, index));
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.pre_hooks.emplace_back(fn_id);
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.post_hooks.emplace_back(fn_id);
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
-    collect_size(fn_id);
+    collect_size(static_cast<size_t>(fn_id));
     _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
-  void collect_size(size_t s) {
+  // Need to template the size_t to silence internal 32-bit build errors due to
+  // a mix of -Werror, -Wtautological-type-limit-compare and
+  // -Wunknown-pragmas
+  template <typename T>
+  std::enable_if_t<std::is_unsigned_v<T>, void> collect_size(T s) {
     // we expect sizes to be small, so try to cram them into a single byte
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;

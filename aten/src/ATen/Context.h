@@ -319,6 +319,8 @@ class TORCH_API Context {
 
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
+  bool allowFP16ReductionCPU() const;
+  void setAllowFP16ReductionCPU(bool);
 
  private:
   void initCUDAIfNeeded(c10::DeviceType p) {
@@ -377,6 +379,7 @@ class TORCH_API Context {
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
+  bool allow_fp16_reduction_cpu = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };

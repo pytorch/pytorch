@@ -530,12 +530,14 @@ static PyObject* _custom_eval_frame(
     return NULL;
   }
 
+  PyObject* backend = get_backend(callback);
+
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = lookup(extra, frame->f_locals);
+    PyObject* maybe_cached_code = lookup(extra, frame->f_locals, backend);
     _pytorch_record_function_exit(rf);
 
     if (maybe_cached_code == NULL) {
@@ -560,7 +562,7 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = lookup(extra, frame->f_locals);
+  PyObject* maybe_cached_code = lookup(extra, frame->f_locals, backend);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
@@ -594,7 +596,7 @@ static PyObject* _custom_eval_frame(
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
-    CacheEntry* new_cache_entry = create_cache_entry(extra, result);
+    CacheEntry* new_cache_entry = create_cache_entry(extra, result, backend);
     Py_DECREF(result);
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry

@@ -10,6 +10,7 @@ from typing import Dict, List
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
 from ..external_utils import call_hook_from_backward_state
 
 try:
@@ -52,10 +53,11 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+# Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
     ">": operator.gt,
     "<": operator.lt,
@@ -64,12 +66,23 @@ supported_tensor_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+# Ops that allow tensor <op> None
 supported_const_comparison_ops = {
     "is": operator.is_,
     "is not": operator.is_not,
     "==": operator.eq,
     "!=": operator.ne,
 }
+supported_comparison_ops = {
+    **supported_tensor_comparison_ops,
+    **supported_const_comparison_ops,
+}
+supported_tensor_comparison_op_values = dict.fromkeys(
+    supported_tensor_comparison_ops.values()
+)
+supported_const_comparison_op_values = dict.fromkeys(
+    supported_const_comparison_ops.values()
+)
 
 
 class TensorVariable(VariableTracker):
@@ -116,6 +129,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
+        _is_name_set=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -131,6 +145,10 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        if _is_name_set is None:
+            # no need to rename inputs
+            _is_name_set = self.proxy.node.op == "placeholder"
+        self._is_name_set: bool = _is_name_set
 
     def as_proxy(self):
         return self.proxy
@@ -204,7 +222,7 @@ class TensorVariable(VariableTracker):
             elif not callable(example_value):
                 from .builder import SourcelessBuilder
 
-                return SourcelessBuilder()(tx, example_value)
+                return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
@@ -654,7 +672,7 @@ class TensorVariable(VariableTracker):
 
         tensor = self.as_proxy().node.meta["example_value"]
         out = tolist(tensor, self.as_proxy())
-        return SourcelessBuilder()(tx, out)
+        return SourcelessBuilder.create(tx, out)
 
     def method_backward(self, *args, **kwargs):
         unimplemented("Tensor.backward")
@@ -882,9 +900,13 @@ class TensorVariable(VariableTracker):
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
-    def rename(self, tx, name):
-        self.proxy.node._rename(name)
-        return super().rename(tx, name)
+    def set_name_hint(self, name: str):
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if not self._is_name_set and _is_top_level_scope(current_scope_id()):
+            self.proxy.node._rename(name)
+            self._is_name_set = True
 
 
 class SymNodeVariable(VariableTracker):

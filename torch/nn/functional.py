@@ -1545,6 +1545,8 @@ def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: 
     """
     if has_torch_function_unary(input):
         return handle_torch_function(hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace)
+    if min_val > max_val:
+        raise ValueError("min_val cannot be greater than max_val")
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:

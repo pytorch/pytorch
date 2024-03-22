@@ -15,14 +15,13 @@ class LazyCache:
         self.source = source
         self.vt: Optional[VariableTracker] = None
 
-    def realize(self, parents_tracker):
+    def realize(self):
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
         from .builder import VariableBuilder
 
         tx = InstructionTranslator.current_tx()
         self.vt = VariableBuilder(tx, self.source)(self.value)
-        self.vt.parents_tracker.add(parents_tracker)
         del self.value
         del self.source
 
@@ -55,7 +54,7 @@ class LazyVariableTracker(VariableTracker):
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
-            self._cache.realize(self.parents_tracker)
+            self._cache.realize()
         return self._cache.vt
 
     def unwrap(self):
@@ -83,8 +82,6 @@ class LazyVariableTracker(VariableTracker):
 
     # most methods are auto-generated below, these are the ones we want to exclude
     apply = VariableTracker.apply
-    copy = VariableTracker.copy
-    __post_init__ = VariableTracker.__post_init__
     __repr__ = VariableTracker.__repr__
 
 

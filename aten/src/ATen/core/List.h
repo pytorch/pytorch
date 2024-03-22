@@ -68,8 +68,8 @@ template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator std::conditional_t<
-      std::is_reference<typename c10::detail::
-                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      std::is_reference_v<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>,
       const T&,
       T>() const;
 

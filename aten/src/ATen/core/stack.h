@@ -8,8 +8,8 @@
 
 // TODO move this to c10 namespace
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 using c10::IValue;
 using Stack = std::vector<IValue>;
@@ -28,7 +28,7 @@ class Operation {
 
   template <typename F,
             std::enable_if_t<accepts<F, Stack&>::value &&
-                !std::is_same<std::decay_t<F>, Operation>::value, int> = 0>
+                !std::is_same_v<std::decay_t<F>, Operation>, int> = 0>
   Operation(F&& op): op_(std::forward<F>(op)) {}
 
   Operation(std::nullptr_t) noexcept {}
@@ -196,5 +196,4 @@ inline void pack(Stack& stack, std::tuple<Args...>&& t) {
   TuplePacker<sizeof...(Args), Args...>::execute(stack, std::move(t));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

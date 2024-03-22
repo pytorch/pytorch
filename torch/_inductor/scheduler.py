@@ -748,6 +748,9 @@ class SchedulerNode(BaseSchedulerNode):
     def is_template(self):
         return isinstance(self.node, ir.TemplateBuffer)
 
+    def get_template_node(self):
+        return self.node if self.is_template() else None
+
     def run(self, *index_vars):
         self.decide_inplace_update()
         self.mark_run()
@@ -1712,7 +1715,12 @@ class Scheduler:
         if not config.benchmark_fusion:
             return True
 
-        if node1.is_template() or node1.is_foreach() or node2.is_foreach():
+        if (
+            node1.is_template()
+            and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+            or node1.is_foreach()
+            or node2.is_foreach()
+        ):
             # TODO support benchmarking epilogue fusion
             return True
 

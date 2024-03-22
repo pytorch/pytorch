@@ -334,7 +334,7 @@ class BackwardHookVariable(VariableTracker):
                 ),
             )
 
-        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module)
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
         user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
         user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
         proxy = tx.output.create_proxy(

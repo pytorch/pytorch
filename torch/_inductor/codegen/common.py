@@ -1398,11 +1398,13 @@ class Kernel(CodeGen):
 
     def scan(
         self,
-        dtype: torch.dtype,
-        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-        value: CSEVariable,
-        init: int,
-    ) -> CSEVariable:
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
+        values: Tuple[CSEVariable, ...],
+        inits: Tuple[int, ...],
+    ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError()
 
     def bucketize(
@@ -1562,12 +1564,15 @@ class Kernel(CodeGen):
 
             @staticmethod
             def scan(
-                dtype: torch.dtype,
-                combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-                value: CSEVariable,
-                init: int,
-            ) -> CSEVariable:
-                return self.scan(dtype, combine_fn, value, init)
+                dtypes: Tuple[torch.dtype, ...],
+                combine_fn: Callable[
+                    [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]],
+                    Tuple[CSEVariable, ...],
+                ],
+                values: Tuple[CSEVariable, ...],
+                inits: Tuple[int, ...],
+            ) -> Tuple[CSEVariable, ...]:
+                return self.scan(dtypes, combine_fn, values, inits)
 
             @staticmethod
             def bucketize(

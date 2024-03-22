@@ -52,7 +52,7 @@ constexpr int64_t operator"" _TiB(unsigned long long n) {
 uint8_t getAlignment(const Tensor& t) {
   // alignment are in bytes
   uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
+  uintptr_t address = reinterpret_cast<uintptr_t>(t.const_data_ptr());
   for (; alignment < 32; alignment *= 2) {
     if (address % (alignment * 2)) {
       return alignment;
@@ -363,7 +363,10 @@ void run_conv_plan(
   auto workspace_size = plan.getWorkspaceSize();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  void* data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
+  void* data_ptrs[] = {
+      const_cast<void*>(x.const_data_ptr()),
+      const_cast<void*>(y.const_data_ptr()),
+      const_cast<void*>(w.const_data_ptr())};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack =
       cudnn_frontend::VariantPackBuilder()

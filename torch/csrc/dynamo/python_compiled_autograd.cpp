@@ -296,21 +296,15 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
-variable_list compiled_autograd(
+// Only call this function while holding GIL
+CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
-    const edge_list& output_edges) {
-  TORCH_CHECK(
-      output_edges.empty() || !accumulate_grad,
-      "specifying inputs= with .backward() not yet implemented for compiled autograd")
-  TORCH_CHECK(
-      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
-      "TorchDispatchMode not yet implemented for compiled autograd")
-  static std::mutex lock;
-  std::lock_guard<std::mutex> lock_guard(lock);
-  pybind11::gil_scoped_acquire gil;
-  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
+    const edge_list& output_edges,
+    THPObjectPtr* graph_arg_inputs,
+    THPObjectPtr* graph_arg_sizes,
+    THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
@@ -472,9 +466,40 @@ variable_list compiled_autograd(
     }
   }
 
-  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
-  THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
-  THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
+  *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
+  *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
+  *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
+  return cache;
+}
+
+variable_list compiled_autograd(
+    const std::shared_ptr<Node>& graph_root,
+    GraphTask& graph_task,
+    bool accumulate_grad,
+    const edge_list& output_edges) {
+  TORCH_CHECK(
+      output_edges.empty() || !accumulate_grad,
+      "specifying inputs= with .backward() not yet implemented for compiled autograd")
+  TORCH_CHECK(
+      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
+      "TorchDispatchMode not yet implemented for compiled autograd")
+  static std::mutex lock;
+  std::lock_guard<std::mutex> lock_guard(lock);
+  pybind11::gil_scoped_acquire gil;
+  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
+
+  THPObjectPtr inputs;
+  THPObjectPtr sizes;
+  THPObjectPtr hooks;
+  CacheNode* cache = _compiled_autograd_impl(
+      graph_root,
+      graph_task,
+      accumulate_grad,
+      output_edges,
+      &inputs,
+      &sizes,
+      &hooks);
+
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
