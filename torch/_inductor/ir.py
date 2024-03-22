@@ -2362,7 +2362,7 @@ class SliceView(View):
         return start, end
 
     @classmethod
-    def create(cls, x, dim, start, end, step=1):
+    def create(cls, x, dim, start, end, step=1, clamp=True):
         step = sympy.expand(step)
         assert step > 0
         try:
@@ -2374,7 +2374,11 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
-        start, end = cls.normalize_start_end(x, dim, start, end)
+        # NB: Ordinarily we default to clamping.
+        # We only don't clamp for split_with_sizes. For split_with_sizes, sizes should be already valid
+        # failing in this situation is ok, since invalid sizes could trigger silent errors.
+        if clamp:
+            start, end = cls.normalize_start_end(x, dim, start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
