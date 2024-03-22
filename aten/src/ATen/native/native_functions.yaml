@@ -2619,6 +2619,8 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_check: NoCheck
   device_guard: False
+  dispatch:
+      CompositeExplicitAutograd: expand_as
 
 # decomposes to eye.m
 - func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -14394,6 +14396,13 @@
     CompositeExplicitAutogradNonFunctional: expand_copy_symint
   tags: view_copy
   autogen: expand_copy.out
+
+- func: expand_as_copy(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: expand_as_copy
+  tags: view_copy
+  autogen: expand_as_copy.out
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
   variants: function
