@@ -236,6 +236,21 @@
   - Lint
   - pull
 
+- name: XPU ATen
+  patterns:
+  - third_party/xpu.txt
+  approved_by:
+  - EikanWang
+  - jgong5
+  - gujinghui
+  - alband
+  - malfet
+  - atalman
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Distributions
   patterns:
   - torch/distributions/**
