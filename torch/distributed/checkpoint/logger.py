@@ -17,7 +17,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-def _parse_dcp_method_args(*args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+def _parse_dcp_method_args(*args, **kwargs) -> Tuple[Tuple[Any], Dict[str, Any]]:
     """
     Parse method arguments into positional and keyword arguments.
     """
@@ -51,7 +51,7 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
 
 def _dcp_method_logger(
     log_exceptions: bool = False, **wrapper_kwargs: _P.kwargs
-) -> Callable[_P, _T]:
+) -> Callable[[Callable[_P, _T]], Any]:
     """This method decorator logs the start, end, and exception of wrapped events."""
 
     def decorator(func: Callable[_P, _T]):
