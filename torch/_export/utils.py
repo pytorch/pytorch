@@ -467,6 +467,24 @@ def run_placeholder_naming_pass(
     fake_kwargs,
     fake_params_buffers,
 ) -> None:
+    """
+    At the end of _export_non_strict(), run this pass to assign better placeholder node names.
+    The default names are arg0_1, arg1_1, ..., which are not very informative.
+    The names assigned by this pass are:
+        - User inputs:
+            These follow the signature of mod.forward(), e.g. forward(x, y) gets you x, y nodes.
+            If the tensors are nested in dictionaries/lists/tuples,
+            the names are a concatenation of the path to the tensor.
+                e.g. x = {
+                    'a': torch.randn(),
+                    'b': [torch.randn(), torch.randn()]
+                }
+            gets you nodes x_a, x_b_0, x_b_1.
+        - Parameters/buffers/constants/custom objects:
+            These follow the FQN of the object, prefixed by "p", "b", "c", "o" respectively.
+                e.g. self.bar.l0.weight gets you "p_bar_l0_weight".
+    """
+
     def prettify_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
