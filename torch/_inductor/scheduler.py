@@ -96,7 +96,7 @@ class OutputNode:
     def is_reduction(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return ()
 
     def get_name(self):
@@ -225,7 +225,7 @@ class BaseSchedulerNode:
         self.last_usage = used_buffers - future_used_buffers
 
     def get_aliases(self):
-        return self.node.get_alias_names()
+        return self.node.get_inputs_that_alias_output()
 
     def get_mutations(self):
         return self.node.get_mutation_names()
@@ -323,7 +323,7 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_alias_names() or self.node.get_mutation_names()
+            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
         ):
             return
 
@@ -374,7 +374,7 @@ class BaseSchedulerNode:
                             isinstance(
                                 input_node.node, (ir.FallbackKernel, ir.MultiOutput)
                             )
-                            and len(input_node.node.get_alias_names()) > 0
+                            and len(input_node.node.get_inputs_that_alias_output()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -407,7 +407,7 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_alias_names() or self.node.get_mutation_names()
+            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
