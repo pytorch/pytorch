@@ -157,7 +157,7 @@ def save_model_with_external_data(
 
     initializers_to_be_deleted = {}  # Using dict because it is **ordered**
     existing_initializers = {
-        idx: k.name for idx, k in enumerate(onnx_model.graph.initializer)
+        k.name: idx for idx, k in enumerate(onnx_model.graph.initializer)
     }
     onnx_input_names = {input.name for input in onnx_model.graph.input}
     for el in torch_state_dicts:
@@ -225,7 +225,6 @@ def save_model_with_external_data(
             # Mark for deletion - a replacement will be appended next
             if name in existing_initializers:
                 initializers_to_be_deleted[existing_initializers[name]] = name
-
             tensor_proto = _create_tensor_proto_with_external_data(
                 tensor,
                 name,
@@ -237,11 +236,9 @@ def save_model_with_external_data(
             onnx_model.graph.initializer.append(tensor_proto)
     # Remove old duplicated initializers, if any. delete in desc order to not invalidate deletion indices
     initializers_to_be_deleted = dict(
-        sorted(
-            initializers_to_be_deleted.items(), key=lambda item: item[1], reverse=True
-        )
+        sorted(initializers_to_be_deleted.items(), reverse=True)
     )
-    for idx in initializers_to_be_deleted.values():
+    for idx in initializers_to_be_deleted.keys():
         del onnx_model.graph.initializer[idx]
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
