@@ -6,7 +6,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import sys
 import threading
 import types
 import unittest
@@ -53,12 +52,12 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import (
     ACCELERATOR_DIST_BACKENDS,
+    exit_if_lt_x_accelerators,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
     skip_if_lt_x_gpu,
-    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     TEST_CUDA,
@@ -706,10 +705,8 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
         # each rank is bound to the correct GPU. However, if world_size > device_count,
         # we skip the test.
         if torch.accelerator.is_available():
-            if world_size > torch.accelerator.device_count():
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-            else:
-                torch.accelerator.set_device_index(rank)
+            exit_if_lt_x_accelerators(world_size)
+            torch.accelerator.set_device_index(rank)
 
         # Call parent's _init_pg to do the actual process group initialization
         super()._init_pg(rank, world_size, rdvz_file)
@@ -801,8 +798,8 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         requires_gpu = any(
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
         )
-        if requires_gpu and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if requires_gpu:
+            exit_if_lt_x_accelerators(self.world_size)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
