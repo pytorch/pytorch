@@ -123,6 +123,12 @@ def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
 
+def exit_if_lt_x_cuda_devs(x):
+    """Exit process unless at least the given number of CUDA devices are available"""
+    if torch.cuda.device_count() < x:
+        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+
+
 # allows you to check for multiple accelerator irrespective of device type
 # to add new device types to this check simply follow the same format
 # and append an elif with the conditional and appropriate device count function for your new device
@@ -137,8 +143,6 @@ def skip_if_no_gpu(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
@@ -149,7 +153,9 @@ def skip_if_no_gpu(func):
 
         return func(*args, **kwargs)
 
-    return wrapper
+    return unittest.skipUnless(
+        TEST_CUDA or TEST_HPU or TEST_XPU, TEST_SKIPS["no_cuda"].message
+    )(wrapper)
 
 
 # TODO (kwen2501): what is the purpose of this decorator?  Tests with this
@@ -181,23 +187,19 @@ def skip_if_odd_worldsize(func):
 
 
 def require_n_gpus_for_nccl_backend(n, backend):
-    return skip_if_lt_x_gpu(n) if backend == "nccl" else unittest.skipIf(False, None)
+    return unittest.skipUnless(
+        backend != "nccl" or torch.cuda.device_count() >= n,
+        TEST_SKIPS[f"multi-gpu-{n}"].message,
+    )
 
 
 def import_transformers_or_skip():
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                from transformers import AutoModelForMaskedLM, BertConfig  # noqa: F401
+    try:
+        from transformers import AutoModelForMaskedLM, BertConfig  # noqa: F401
 
-                return func(*args, **kwargs)
-            except ImportError:
-                sys.exit(TEST_SKIPS["importerror"].exit_code)
-
-        return wrapper
-
-    return decorator
+        return unittest.skipIf(False, "Dummy")
+    except ImportError:
+        return unittest.skip(TEST_SKIPS["importerror"].message)
 
 
 def at_least_x_gpu(x):
