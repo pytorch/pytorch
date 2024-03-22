@@ -574,7 +574,7 @@ def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
                 for mkey, meta_ in sorted(get_meta(
                         'bsr_dense_addmm',
                         (*key[:2], '*', *key[3:]),
-                        device_name, version=(0, dtype, 0.5))):
+                        device_name, version=(0, dtype, 0.5)) or {}):
                     if N % meta_['SPLIT_N'] == 0 and mkey[2] <= N:
                         meta = meta_
         if meta is not None:
