@@ -220,7 +220,6 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureRetraceability
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
@@ -944,7 +943,7 @@ class TestExport(TestCase):
         ):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
-    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceability  # TODO (task)
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -1586,6 +1585,7 @@ class TestExport(TestCase):
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
     @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
+    @testing.expectedFailurePreDispatchRunDecomp  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -1957,6 +1957,7 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp # assert name is still referring to item
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -2013,6 +2014,7 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp # Assert message is still using the old node name, so it shoudl fail
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2492,6 +2494,7 @@ def forward(self, arg_0):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
+    @testing.expectedFailurePreDispatchRunDecomp
     @testing.expectedFailureRetraceability
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
@@ -2526,7 +2529,7 @@ def forward(self, arg_0):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceability  # TODO (task)
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -2635,7 +2638,6 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
-    @testing.expectedFailureRetraceability
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3180,7 +3182,6 @@ def forward(self, arg_0):
 
     @testing.expectedFailureSerDer  # symfloat nyi
     @testing.expectedFailureSerDerPreDispatch  # symfloat nyi
-    @testing.expectedFailureRetraceability
     def test_sym_sqrt(self):
         import math
 

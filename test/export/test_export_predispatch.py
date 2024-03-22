@@ -6,30 +6,28 @@ except ImportError:
     import test_export
     import testing
 from torch.export import export
+from torch.export._trace import _export
 
 test_classes = {}
 
 
-def mocked_retraceability_export(*args, **kwargs):
-    ep = export(*args, **kwargs)
-    if "dynamic_shapes" in kwargs:
-        kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
-
-    ep = export(ep.module(), *(args[1:]), **kwargs)
-    return ep
+def mocked_predispatch_export(*args, **kwargs):
+    # If user already specified strict, don't make it non-strict
+    ep = _export(*args, **kwargs, pre_dispatch=True)
+    return ep.run_decompositions()
 
 
 def make_dynamic_cls(cls):
-    suffix = "_retraceability"
+    suffix = "_pre_dispatch"
 
-    cls_prefix = "RetraceExport"
+    cls_prefix = "PreDispatchExport"
 
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
         suffix,
-        mocked_retraceability_export,
-        xfail_prop="_expected_failure_retrace",
+        mocked_predispatch_export,
+        xfail_prop="_expected_failure_pre_dispatch",
     )
 
     test_classes[test_class.__name__] = test_class
