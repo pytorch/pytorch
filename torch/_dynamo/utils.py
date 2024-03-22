@@ -100,6 +100,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
 from torch.utils._triton import has_triton, has_triton_package
 
+
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = (
@@ -656,6 +657,8 @@ class CompilationMetrics:
     fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+    restart_reasons: Set[str]
+    dynamo_time_before_restart_s: float
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -979,6 +982,7 @@ common_constant_types = {
     torch.memory_format,
     torch.layout,
 }
+
 if has_triton_package():
     import triton
 
@@ -1027,16 +1031,20 @@ def check_unspec_python_args(args, kwargs):
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
+        elif not isinstance(x, ConstantVariable):
             return False
-        else:
-            pass
-
     return unspec_count > 0
 
 
 def check_unspec_or_constant_args(args, kwargs):
-    return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    # A fused version of:
+    # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
+    from .variables.tensor import UnspecializedPythonVariable
+
+    for x in itertools.chain(args, kwargs.values()):
+        if not (x.is_python_constant() or isinstance(x, UnspecializedPythonVariable)):
+            return False
+    return True
 
 
 def check_numpy_ndarray_args(args, kwargs):
@@ -2567,3 +2575,18 @@ def invalid_removeable_handle():
         pass
 
     return RemovableHandle(Invalid())
+
+
+# Returns a "proxy" (new object with the same class and dict) for (non-GraphModule) nn.Module's.
+# Attribute changes to the original object/proxy will be reflected in the other.
+# This is useful for cases where we want a keep-alive reference to a module without increasing
+# its reference count.
+def nn_module_proxy(mod):
+    if not isinstance(mod, torch.nn.Module):
+        return mod
+    if isinstance(mod, torch.fx.GraphModule):
+        # Dynamo-generated GM's shouldn't contain user-created GM's
+        return mod
+    proxy = mod.__class__.__new__(mod.__class__)
+    proxy.__dict__ = mod.__dict__
+    return proxy
