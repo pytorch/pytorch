@@ -22,29 +22,21 @@ enum class AllReduceAlgo { NONE = 0, ONE_SHOT = 1, TWO_SHOT = 2, HCM = 3 };
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
-      Topology topology,
-      std::array<void*, kMaxDevices> p2pStates,
-      std::array<void*, kMaxDevices> buffers,
-      void* p2pStatesDev,
-      void* buffersDev,
-      void* topoInfo,
+      c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      size_t bufferSize = kDefaultBufferSize);
+      c10::optional<size_t> bufferSize = c10::nullopt);
 
   ~IntraNodeComm();
 
+  static bool isEnabled();
+
   /**
-   * Rendezvous via a c10d::Store.
-   * This function may return nullptr if intra-node comm is not applicable.
-   * It guarantees all participants either succeeds or abort.
+   * Performs rendezvous.
+   * If rendezvous fails, the IntraNodeComm object will be in an invalid
+   * state and it is the caller's responsibility to dispose it.
    */
-  static c10::intrusive_ptr<IntraNodeComm> rendezvous(
-      c10::intrusive_ptr<c10d::Store> store,
-      const std::string& prefix,
-      size_t rank,
-      size_t worldSize,
-      size_t bufferSize = kDefaultBufferSize);
+  bool rendezvous();
 
   /**
    * Selects a AllReduceAlgo that we think will outperform nccl.
@@ -67,15 +59,21 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       const at::Tensor& input,
       at::cuda::CUDAStream& stream);
 
-  Topology topology_;
+  c10::intrusive_ptr<Store> store_;
+  size_t rank_;
+  size_t worldSize_;
+  size_t bufferSize_;
+
+  /**
+   * Members initialized after rendezvous
+   */
+  bool isInitialized_ = false;
+  Topology topology_ = Topology::UNKNOWN;
   std::array<void*, kMaxDevices> p2pStates_;
   std::array<void*, kMaxDevices> buffers_;
   void* p2pStatesDev_;
   void* buffersDev_;
   void* topoInfo_;
-  size_t rank_;
-  size_t worldSize_;
-  size_t bufferSize_;
 };
 
 /**

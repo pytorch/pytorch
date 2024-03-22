@@ -66,6 +66,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    do_bench,
     get_kernel_metadata,
     is_dynamic,
     pad_listlike,
@@ -3474,6 +3475,99 @@ class TemplateBuffer(Buffer):
 
 class TritonTemplateBuffer(TemplateBuffer):
     pass
+
+
+PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
+
+
+class ChoiceCaller:
+    """
+    Represents a possible choice used in autotune_process.py.
+    During autotuning, self.benchmark() is first called to get benchmark result,
+    and if this choice is selected, self.output_node() is called to get the output_node.
+
+    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    """
+
+    def __init__(self, name, input_nodes, layout):
+        super().__init__()
+        self.name = name
+        self.layout = layout
+        self.input_nodes = input_nodes
+
+    def benchmark(self, *args, out) -> float:
+        algo = self.to_callable()
+        return do_bench(lambda: algo(*args, out=out))
+
+    def call_name(self) -> str:
+        raise NotImplementedError()
+
+    def to_callable(self):
+        raise NotImplementedError()
+
+    def hash_key(self) -> str:
+        raise NotImplementedError()
+
+    def output_node(self) -> "TensorBox":
+        raise NotImplementedError()
+
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        return {}
+
+
+class TritonTemplateCallerBase(ChoiceCaller):
+    def get_make_kernel_render(self) -> Any:
+        raise NotImplementedError()
+
+
+class MultiTemplateBuffer(TritonTemplateBuffer):
+    """
+    Represents a Buffer with multiple backing implementation choices.
+
+    Choices can be TritonTemplates or ExternKernels. During scheduling if there is a potential
+    epilogue we will benchmark each of the choices with the epilogue to determine an implementation.
+    Otherwise, the fastest base choice will be chosen.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: List[IRNode],
+        choice_timings: Callable[[], Dict[ChoiceCaller, float]],
+    ):
+        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        self._choice_timings_fn = choice_timings
+        self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
+        self.original_inputs = inputs
+
+    @property
+    def choice_timings(self) -> Dict[ChoiceCaller, float]:
+        if self._choice_timings is None:
+            self._choice_timings = self._choice_timings_fn()
+        return self._choice_timings
+
+    @contextlib.contextmanager
+    def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):
+        assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        assert self.layout == caller.layout
+
+        render = self.make_kernel_render
+        self.make_kernel_render = caller.get_make_kernel_render()
+        try:
+            yield
+        finally:
+            self.make_kernel_render = render
+
+    def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase):
+        assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        assert self.layout.size == caller.layout.size
+        assert self.layout.stride == caller.layout.stride
+        self.make_kernel_render = caller.get_make_kernel_render()
+
+    def get_min_choice(self) -> Tuple[ChoiceCaller, float]:
+        min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
+        return (min_choice, self.choice_timings[min_choice])
 
 
 class CUDATemplateBuffer(TemplateBuffer):
@@ -6932,7 +7026,7 @@ class Subgraph(IRNode):
 
 @dataclasses.dataclass
 class Conditional(ExternKernel):
-    predicate: Optional[DynamicScalar] = None
+    predicate: Optional[IRNode] = None
     operands: Optional[List[TensorBox]] = None
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
@@ -6940,7 +7034,7 @@ class Conditional(ExternKernel):
 
     def __init__(
         self,
-        predicate: DynamicScalar,
+        predicate: IRNode,
         operands: List[TensorBox],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
@@ -6951,10 +7045,15 @@ class Conditional(ExternKernel):
         self.true_subgraph = true_subgraph
         self.false_subgraph = false_subgraph
 
+        inputs = []
+        if not isinstance(predicate, ShapeAsConstantBuffer):
+            inputs.append(predicate)
+        inputs.extend(operands)
+
         super().__init__(
             name=None,
             layout=layout,  # type: ignore[arg-type]
-            inputs=[predicate, *operands],  # type: ignore[list-item]
+            inputs=inputs,  # type: ignore[list-item]
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7011,13 +7110,22 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
+        if not isinstance(predicate, ShapeAsConstantBuffer):
+            # use predicate device for consistent codegen-ing
+            device = predicate.get_device()
+        else:
+            # predicate is not a Tensor: use first operand's device
+            assert (
+                len(operands) > 0
+            ), "When predicate is not a Tensor, there must be at least one operand in torch.cond."
+            device = operands[0].get_device()
+
         conditional = Conditional(
             predicate=predicate,
             operands=operands,
             true_subgraph=true_fn,
             false_subgraph=false_fn,
-            # use predicate device for consistent codegen-ing
-            layout=MultiOutputLayout(predicate.get_device()),
+            layout=MultiOutputLayout(device),
         )
 
         outputs = [
