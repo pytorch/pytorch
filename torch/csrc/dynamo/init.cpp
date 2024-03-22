@@ -13,7 +13,10 @@
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
+PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>);
+
 namespace torch::dynamo {
+
 #if IS_PYTHON_3_11_PLUS
 
 std::vector<uint8_t> _PyOpcode_Caches_vec(
@@ -25,8 +28,6 @@ std::vector<uint8_t> _PyOpcode_Caches_vec(
 std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 #endif
-
-PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>);
 
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
