@@ -70,6 +70,21 @@ class RAdam(Optimizer):
                     p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable']
                                        else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
+
+    def init_state_per_param(self, param, param_group):
+        state = self.state[param]
+        if len(state) == 0:
+            state['step'] = (
+                torch.zeros((), dtype=_get_scalar_dtype(), device=param.device)
+                if param_group['capturable']
+                else torch.tensor(0.0, dtype=_get_scalar_dtype())
+            )
+            # Exponential moving average of gradient values
+            state["exp_avg"] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            # Exponential moving average of squared gradient values
+            state["exp_avg_sq"] = torch.zeros_like(param, memory_format=torch.preserve_format)
+
+
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps):
         has_complex = False
         for p in group["params"]:
@@ -80,23 +95,10 @@ class RAdam(Optimizer):
                     raise RuntimeError("RAdam does not support sparse gradients")
                 grads.append(p.grad)
 
-                state = self.state[p]
                 # Lazy state initialization
-                if len(state) == 0:
-                    state['step'] = (
-                        torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                        if group['capturable']
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
-                    )
-                    # Exponential moving average of gradient values
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                    # Exponential moving average of squared gradient values
-                    state["exp_avg_sq"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
+                self.init_state_per_param(p, group)
 
+                state = self.state[p]
                 exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
                 state_steps.append(state["step"])

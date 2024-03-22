@@ -50,6 +50,26 @@ class NAdam(Optimizer):
                                                  if group['capturable'] else torch.tensor(mu_prod_val, dtype=_get_scalar_dtype()))
 
 
+    def init_state_per_param(self, param, param_group):
+        state = self.state[param]
+        if len(state) == 0:
+            # note(crcrpar): [special device hosting for step]
+            # Deliberately host `step` and `mu_product` on CPU if capturable is False.
+            # This is because kernel launches are costly on CUDA and XLA.
+            state['step'] = (
+                torch.zeros((), dtype=_get_scalar_dtype(), device=param.device)
+                if param_group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype())
+            )
+            state['mu_product'] = (
+                torch.ones((), dtype=_get_scalar_dtype(), device=param.device)
+                if param_group['capturable'] else torch.tensor(1.0, dtype=_get_scalar_dtype())
+            )
+            # Exponential moving average of gradient values
+            state['exp_avg'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            # Exponential moving average of squared gradient values
+            state['exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+
+
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
         has_complex = False
         for p in group['params']:
@@ -60,25 +80,10 @@ class NAdam(Optimizer):
                     raise RuntimeError('NAdam does not support sparse gradients')
                 grads.append(p.grad)
 
-                state = self.state[p]
-                # Lazy state initialization
-                if len(state) == 0:
-                    # note(crcrpar): [special device hosting for step]
-                    # Deliberately host `step` and `mu_product` on CPU if capturable is False.
-                    # This is because kernel launches are costly on CUDA and XLA.
-                    state['step'] = (
-                        torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                        if group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype())
-                    )
-                    state['mu_product'] = (
-                        torch.ones((), dtype=_get_scalar_dtype(), device=p.device)
-                        if group['capturable'] else torch.tensor(1.0, dtype=_get_scalar_dtype())
-                    )
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                # Lazy init
+                self.init_state_per_param(p, group)
 
+                state = self.state[p]
                 exp_avgs.append(state['exp_avg'])
                 exp_avg_sqs.append(state['exp_avg_sq'])
                 mu_products.append(state['mu_product'])

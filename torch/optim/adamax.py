@@ -60,6 +60,16 @@ class Adamax(Optimizer):
                     p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable']
                                        else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
+
+    def init_state_per_param(self, param, param_group):
+        state = self.state[param]
+        if len(state) == 0:
+            state['step'] = (torch.zeros((), dtype=_get_scalar_dtype(), device=param.device)
+                             if param_group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype()))
+            state["exp_avg"] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            state["exp_inf"] = torch.zeros_like(param, memory_format=torch.preserve_format)
+
+
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         has_complex = False
         for p in group["params"]:
@@ -71,19 +81,10 @@ class Adamax(Optimizer):
                 raise RuntimeError("Adamax does not support sparse gradients")
             grads.append(p.grad)
 
-            state = self.state[p]
-
             # State initialization
-            if len(state) == 0:
-                state['step'] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                                 if group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype()))
-                state["exp_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
-                )
-                state["exp_inf"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
-                )
+            self.init_state_per_param(p, group)
 
+            state = self.state[p]
             exp_avgs.append(state["exp_avg"])
             exp_infs.append(state["exp_inf"])
             state_steps.append(state["step"])

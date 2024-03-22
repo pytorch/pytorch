@@ -1228,6 +1228,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1300,6 +1301,11 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("param_groups not found, see #117165"),
+                "TestOptimRenewed",
+                "test_init_state_per_param",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cpu fails due to #115607"),
@@ -1528,6 +1534,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_nadam,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1606,6 +1613,11 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo("param_groups not found, see #117165"),
+                "TestOptimRenewed",
+                "test_init_state_per_param",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1613,6 +1625,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1655,6 +1668,11 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("param_groups not found, see #117165"),
+                "TestOptimRenewed",
+                "test_init_state_per_param",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
