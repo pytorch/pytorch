@@ -892,9 +892,8 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            cache_outs = remote_cache.get([remote_cache_key])
-            cache_out = cache_outs.get(remote_cache_key, None)
-            best_config = json.loads(cache_out) if cache_out else None
+            cache_out = remote_cache.get(remote_cache_key)
+            best_config = json.loads(cache_out) if cache_out is not None else None
 
         best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
@@ -914,7 +913,7 @@ def cached_autotune(
                 with open(cache_filename, "w") as fd:
                     fd.write(data)
             if remote_cache is not None and remote_cache_key is not None:
-                remote_cache.put(remote_cache_key, data)
+                remote_cache.put(remote_cache_key, data.encode("utf-8"))
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
