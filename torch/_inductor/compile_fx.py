@@ -46,7 +46,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
-from torch.autograd import skip_grad_layout_contract
+# from torch.autograd import skip_grad_layout_contract
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -387,7 +387,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
-@skip_grad_layout_contract()
+# @skip_grad_layout_contract()
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -1120,7 +1120,7 @@ def fw_compiler_freezing(
 
 
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
-@skip_grad_layout_contract()
+# @skip_grad_layout_contract()
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1129,6 +1129,7 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+    torch._C._autograd._set_skip_grad_layout_contract(True)
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(

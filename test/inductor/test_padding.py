@@ -231,15 +231,15 @@ class PaddingTest(TestCase):
 
     def test_nvidia_deeprecommender(self):
         # SELU
-        use_variant = False
-        layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951]  # 9.955 v.s. 9.697
+        use_variant = True
+        # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951]  # 9.955 v.s. 9.697
         # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197951] # 8.446 v.s. 8.924
         # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197952] # 7.201 v.s. 7.216
         # XXX also check this since the loss is even larger than ReLU
         # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197952] # 8.713 v.s. 7.997
 
         # ReLU
-        # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951] # 9.956 v.s. 9.939
+        layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951] # 9.956 v.s. 9.939
         # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197951] # 8.369 v.s. 8.882
         # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197952] # 7.156 v.s. 7.171
         # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197952] # 8.766 v.s. 8.228
