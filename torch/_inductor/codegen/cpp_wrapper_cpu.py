@@ -1,4 +1,5 @@
 import functools
+import math
 import os
 import sys
 from itertools import count
@@ -253,6 +254,105 @@ class CppWrapperCpu(WrapperCodeGen):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
+    def generate_input_output_runtime_checks(self):
+        from .cpp import DTYPE_TO_ATEN
+
+        # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
+        # real input/output tensor match ones provided at compile time via sample
+        # input/output.
+        def gen_check(handle_kind, idx, name, tensor):
+            self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
+            self.codegen_tensor_dtype_var_decl(self.prefix, name)
+            expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
+            dtype_str = str(tensor.dtype).split(".")[-1]
+            self.prefix.splice(
+                f"""
+                    int32_t {name}_expected_dtype = aoti_torch_dtype_{dtype_str}();
+                    if ({name}_expected_dtype != {name}_dtype) {{
+                        std::stringstream ss;
+                        ss << "{handle_kind}[{idx}]: unmatched dtype, "
+                           << "expected: {name}_expected_dtype ({expected_dtype_name=}, "
+                           << "but got: " << {name}_dtype << "\\n";
+                        throw std::runtime_error(ss.str());
+                    }}
+                """
+            )
+            self.codegen_input_size_var_decl(self.prefix, name)
+            for dim_idx, d in enumerate(tensor.get_size()):
+                if isinstance(d, (int, sympy.Integer)):
+                    self.prefix.splice(
+                        f"""
+                            if ({d} != {name}_size[{dim_idx}]) {{
+                                std::stringstream ss;
+                                ss << "{handle_kind}[{idx}]: unmatched dim value at {dim_idx}, "
+                                   << "expected: {d}, " << "but got: " << {name}_size[{dim_idx}]
+                                   << "\\n";
+                                throw std::runtime_error(ss.str());
+                            }}
+                        """
+                    )
+                else:
+                    assert isinstance(
+                        d, sympy.Symbol
+                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
+                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
+                    if sym_range is None:
+                        continue
+                    if not math.isinf(sym_range.lower):
+                        self.prefix.splice(
+                            f"""
+                                if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
+                                    std::stringstream ss;
+                                    ss << "{handle_kind}[{idx}]: dim value is too small at {dim_idx}, "
+                                       << "expected it to be >= {sym_range.lower}, " << "but got: "
+                                       << {name}_size[{dim_idx}] << "\\n";
+                                    throw std::runtime_error(ss.str());
+                                }}
+                            """
+                        )
+                    if not math.isinf(sym_range.upper):
+                        self.prefix.splice(
+                            f"""
+                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                    std::stringstream ss;
+                                    ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
+                                       << "expected to be <= {sym_range.upper}, " << "but got: "
+                                       << {name}_size[{dim_idx}] << "\\n";
+                                    throw std::runtime_error(ss.str());
+                                }}
+                            """
+                        )
+
+            self.codegen_input_stride_var_decl(self.prefix, name)
+            for stride_idx, s in enumerate(tensor.get_stride()):
+                if not isinstance(s, (int, sympy.Integer)):
+                    continue
+                self.prefix.splice(
+                    f"""
+                        if ({s} != {name}_stride[{stride_idx}]) {{
+                            std::stringstream ss;
+                            ss << "{handle_kind}[{idx}]: unmatched stride value at {stride_idx}, "
+                               << "expected: {s}, " << "but got: " << {name}_stride[{stride_idx}]
+                               << "\\n";
+                            throw std::runtime_error(ss.str());
+                        }}
+                    """
+                )
+
+        # force noinline to avoid any potential compilation slowdown due to aggressive
+        # inline done by the host compiler
+        self.prefix.splice(
+            """
+            AOTI_NOINLINE static void __check_inputs_outputs(
+                AtenTensorHandle* input_handles,
+                AtenTensorHandle* output_handles) {
+            """
+        )
+        with self.prefix.indent():
+            for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
+                gen_check("input_handles", idx, name, tensor)
+        self.prefix.writeline("}")
+
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
@@ -317,6 +417,13 @@ class CppWrapperCpu(WrapperCodeGen):
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
+                    """
+                # Since we are removing non-abi-compatible mode, let's generate
+                # runtime checks only for abi_compatible mode to avoid extra branches.
+                if config.aot_inductor.debug_compile and config.abi_compatible:
+                    self.generate_input_output_runtime_checks()
+                    run_impl_proto += """
+                        __check_inputs_outputs(input_handles, output_handles);
                     """
                 if config.use_minimal_arrayref_interface:
                     self.prefix.splice(
@@ -483,6 +590,19 @@ class CppWrapperCpu(WrapperCodeGen):
                 continue
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
+
+    def codegen_tensor_dtype_var_decl(self, code: IndentedBuffer, name):
+        if config.abi_compatible:
+            code.writeline(f"int32_t {name}_dtype;")
+            code.writeline(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype"
+                f"({name}, &{name}_dtype));"
+            )
+        else:
+            # Note that we don't have a corresponding class method from
+            # the WrapperCodeGen since this method is used for asserting AOTI
+            # cpp wrapper code.
+            code.writeline(f"auto {name}_dtype = {name}.dtype();")
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.abi_compatible:
