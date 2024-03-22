@@ -155,7 +155,7 @@ export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
 
 # TODO: We don't need this anymore IIUC
 export TORCH_PACKAGE_NAME='torch'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-test'
+export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 export ANACONDA_USER='pytorch'
 
 export USE_FBGEMM=1
