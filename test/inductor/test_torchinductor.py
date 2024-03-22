@@ -9261,7 +9261,7 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
+if HAS_CPU and RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -9385,7 +9385,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 return x.sin() + x.cos()
 
             for offset in (0, 1, 2):
-                base = torch.randn(64*64 + 64, device=GPU_TYPE)
+                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
                 inps = torch.as_strided(base, (64, 64), (64, 1), offset)
                 torch._dynamo.reset()
                 kernels = self.get_kernels(fn, [inps])
