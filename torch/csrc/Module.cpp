@@ -1475,10 +1475,6 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_isEnabledTorchFunction,
      METH_NOARGS,
      nullptr},
-    {"_is_torch_function_infra_subclasses_enabled",
-     THPModule_isEnabledTorchFunctionInfraSubclasses,
-     METH_NOARGS,
-     nullptr},
     {"_disabled_torch_function_impl",
      THPModule_disable_torch_function,
      METH_VARARGS,
@@ -2183,10 +2179,6 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr(
       "DisableTorchFunctionSubclass",
       (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
-      /* incref= */ false));
-  ASSERT_TRUE(set_module_attr(
-      "_DisableTorchFunctionNonInfraSubclass",
-      (PyObject*)THPModule__DisableTorchFunctionNonInfraSubclassType(),
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
       "DisableTorchFunction",
