@@ -256,7 +256,7 @@ class BaseSchedulerNode:
                 layout = V.graph.name_to_buffer[dep.name].get_layout()
                 # needed to avoid deallocating aliased buffer
                 # if there are still uses of aliases ahead
-                if isinstance(layout, ir.AliasedLayout):
+                if isinstance(layout, ir.AliasedLayoutSHOULDREMOVE):
                     used_names.add(layout.view.data.get_name())
         return used_names
 
@@ -366,8 +366,8 @@ class BaseSchedulerNode:
                             input_node.node.get_layout(),
                             (
                                 ir.MultiOutputLayout,
-                                ir.MutationLayout,
-                                ir.AliasedLayout,
+                                ir.MutationLayoutSHOULDREMOVE,
+                                ir.AliasedLayoutSHOULDREMOVE,
                             ),
                         )
                         and not (
@@ -2367,7 +2367,7 @@ class Scheduler:
             return False
         node = self.name_to_node[buf_name]
         layout = node.node.get_layout()
-        if isinstance(layout, ir.AliasedLayout):
+        if isinstance(layout, ir.AliasedLayoutSHOULDREMOVE):
             return not layout.maybe_guard_aligned()
         else:
             return False

@@ -496,7 +496,7 @@ if torch._C._has_mkldnn:
             return not (
                 isinstance(_other.data, ir.ReinterpretView)
                 or isinstance(
-                    _other.get_layout(), (ir.MutationLayout, ir.AliasedLayout)
+                    _other.get_layout(), (ir.MutationLayoutSHOULDREMOVE, ir.AliasedLayoutSHOULDREMOVE)
                 )
             )
 
