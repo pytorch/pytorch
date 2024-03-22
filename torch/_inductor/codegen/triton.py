@@ -3892,15 +3892,7 @@ class TritonScheduling(BaseScheduling):
             template_node = nodes[0]
             epilogue_nodes = nodes[1:]
 
-            # TODO - handle epilogue inputs as well
-            non_out_arg_indices = list(
-                range(
-                    len(unique([inp.get_name() for inp in template_node.node.inputs]))
-                )
-            )
-
             handler_fn = V.set_kernel_handler
-
             rec_kernel = None
 
             def record_kernel(kernel):
