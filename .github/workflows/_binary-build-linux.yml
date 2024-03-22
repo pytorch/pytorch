@@ -212,7 +212,7 @@ jobs:
 
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.3
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
