@@ -284,6 +284,10 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
+benchmark_multi_templates = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+)
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -698,6 +702,9 @@ class cuda:
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
+
+    # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
+    cutlass_backend_min_gemm_size: int = 1
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
