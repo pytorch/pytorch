@@ -11,9 +11,7 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/native/Resize.h>
 
-#ifdef USE_CUDA
 #include <ATen/native/cuda/Resize.h>
-#endif
 
 namespace torch {
 namespace inductor {

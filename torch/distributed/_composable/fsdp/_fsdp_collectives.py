@@ -183,17 +183,10 @@ def foreach_reduce(
         foreach_reduce_scatter_copy_in(
             unsharded_grads, reduce_scatter_input, world_size
         )
-<<<<<<< HEAD
-        _div_if_needed(reduce_scatter_input, predivide_factor)
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             # Only after the copy-in finishes can we free the gradients, which were
             # computed in the default stream
             current_stream.wait_stream(reduce_scatter_stream)
-=======
-        # Only after the copy-in finishes can we free the gradients, which were
-        # computed in the default stream
-        current_stream.wait_stream(reduce_scatter_stream)
->>>>>>> 5e0440edb467b79c3779454eeb5d5d24bbec9c17
         unsharded_grads.clear()
         post_reduce_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
@@ -233,14 +226,10 @@ def foreach_reduce(
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-<<<<<<< HEAD
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            reduce_scatter_view_out_event = reduce_scatter_stream.record_event()
+            post_reduce_view_out_event = view_out_stream.record_event()
         else:
-            reduce_scatter_view_out_event = None
-=======
-        post_reduce_view_out_event = view_out_stream.record_event()
->>>>>>> 5e0440edb467b79c3779454eeb5d5d24bbec9c17
+            post_reduce_view_out_event = None
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
