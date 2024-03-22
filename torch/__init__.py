@@ -800,6 +800,18 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+class DtypeContext:
+    def __init__(self, dtype):
+        self.dytpe = dtype
+
+    def __enter__(self):
+        self.old_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(self.dytpe)
+        return self.dytpe
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        torch.set_default_dtype(self.old_dtype)
+
 def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.bool = False) -> None:
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
