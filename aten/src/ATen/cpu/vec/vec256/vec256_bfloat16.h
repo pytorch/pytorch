@@ -7,8 +7,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(CPU_CAPABILITY_AVX2)
-#define SLEEF_STATIC_LIBS
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -19,7 +18,7 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
@@ -32,6 +31,26 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   cvtbf16_fp32(lo, o1);
   cvtbf16_fp32(hi, o2);
 }
+
+static inline __m128i cvtfp32_bf16(const __m256& src) {
+  __m256i value = _mm256_castps_si256(src);
+  __m256i nan = _mm256_set1_epi32(0xffff);
+  __m256i mask = _mm256_castps_si256(_mm256_cmp_ps(src, src, _CMP_ORD_Q));
+  __m256i ones = _mm256_set1_epi32(0x1);
+  __m256i vec_bias = _mm256_set1_epi32(0x7fff);
+  // uint32_t lsb = (input >> 16) & 1;
+  auto t_value = _mm256_and_si256(_mm256_srli_epi32(value, 16), ones);
+  // uint32_t rounding_bias = 0x7fff + lsb;
+  t_value = _mm256_add_epi32(t_value, vec_bias);
+  // input += rounding_bias;
+  t_value = _mm256_add_epi32(t_value, value);
+  // input = input >> 16;
+  t_value = _mm256_srli_epi32(t_value, 16);
+  // Check NaN before converting back to bf16
+  t_value = _mm256_blendv_epi8(nan, t_value, mask);
+  return _mm256_cvtusepi32_epi16(t_value);
+}
+
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
@@ -79,6 +98,11 @@ static inline void cvtfp16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i hi = _mm256_extractf128_si256(a, 1);
   cvtfp16_fp32(lo, o1);
   cvtfp16_fp32(hi, o2);
+}
+
+static inline __m128i cvtfp32_fp16(const __m256& src) {
+  return _mm256_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 static inline __m256i cvtfp32_fp16(const __m256& a, const __m256& b) {
@@ -266,8 +290,7 @@ public:
     }
     return b;
   }
-
-  Vectorized<T> map(SLEEF_CONST __m256 (*vop)(__m256)) const {
+  Vectorized<T> map(const __m256 (*const vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
@@ -1028,7 +1051,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_VECTORIZED_INIT(Half, half);
 
-#else // defined(CPU_CAPABILITY_AVX2)
+#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
@@ -1053,9 +1076,9 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 
-#endif // defined(CPU_CAPABILITY_AVX2)
+#endif // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data)); \
@@ -1074,7 +1097,7 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
 LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_VECTORIZED_INIT(Half, fp16);
 
-#else // defined(CPU_CAPABILITY_AVX2)
+#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   __at_align__ float values[Vectorized<float>::size()]; \
