@@ -1272,14 +1272,14 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler.codegen()
         ret = self.wrapper_code.generate(self.is_inference)
-        # TODO(yf225): mega hack to work aroud this issue, but the numerical result is incorrect:
-        # need to figure out why `RBLOCK`` and `rnumel` are missing and what's the right fix for it
-        # Current error is: https://gist.github.com/yf225/ecae56c0b5b3acfebce8622644e5263b
-        ret = (ret[0].replace(
-            "def triton_for_fused_5(in_out_ptr0, in_ptr0):\n    xpid = tl.program_id(0)\n    XBLOCK: tl.constexpr = 1024\n",
-            "def triton_for_fused_5(in_out_ptr0, in_ptr0):\n    xpid = tl.program_id(0)\n    XBLOCK: tl.constexpr = 1024\n    RBLOCK: tl.constexpr = 1\n    rnumel = 1\n",
-        ), *ret[1:])
-        print(f"ret: {ret}")
+        # # TODO(yf225): mega hack to work aroud this issue, but the numerical result is incorrect:
+        # # need to figure out why `RBLOCK`` and `rnumel` are missing and what's the right fix for it
+        # # Current error is: https://gist.github.com/yf225/ecae56c0b5b3acfebce8622644e5263b
+        # ret = (ret[0].replace(
+        #     "def triton_for_fused_5(in_out_ptr0, in_ptr0):\n    xpid = tl.program_id(0)\n    XBLOCK: tl.constexpr = 1024\n",
+        #     "def triton_for_fused_5(in_out_ptr0, in_ptr0):\n    xpid = tl.program_id(0)\n    XBLOCK: tl.constexpr = 1024\n    RBLOCK: tl.constexpr = 1\n    rnumel = 1\n",
+        # ), *ret[1:])
+        # print(f"ret: {ret}")
         return ret
 
     def codegen_subgraph(self, parent_graph):
