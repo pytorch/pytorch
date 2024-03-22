@@ -935,11 +935,10 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1):
+def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1319,7 +1318,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
-def split(x, sizes, dim=0):
+def split(x, sizes, dim=0, clamp=True):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
@@ -1332,14 +1331,14 @@ def split(x, sizes, dim=0):
     start = 0
     for size in sizes:
         end = start + size
-        result.append(slice_(x, dim, start, end))
+        result.append(slice_(x, dim, start, end, clamp=clamp))
         start = end
     return result
 
 
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
-    return split(x, sizes, dim)
+    return split(x, sizes, dim, clamp=False)
 
 
 @register_lowering(aten.unbind, type_promotion_kind=None)
