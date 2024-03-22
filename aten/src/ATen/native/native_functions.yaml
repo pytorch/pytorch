@@ -1750,6 +1750,7 @@
 - func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
   variants: function
   dispatch:
+    Meta: copy_meta
     CompositeExplicitAutogradNonFunctional: copy
   tags: core
 
@@ -11327,7 +11328,13 @@
   dispatch:
     CPU: foreach_tensor_copy_list_kernel_slow_
     CUDA: foreach_tensor_copy_list_kernel_cuda_
-  autogen: _foreach_copy, _foreach_copy.out
+  autogen: _foreach_copy.out
+
+- func: _foreach_copy(Tensor[] self, Tensor[] src, bool non_blocking=False) -> Tensor[] self_out
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _foreach_copy
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:

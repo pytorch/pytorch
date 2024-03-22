@@ -303,13 +303,34 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   return self;
 }
 
+Tensor copy_meta(const Tensor& self, const Tensor& src, bool non_blocking) {
+  // Must directly use self(), so we can dispatch properly is self is a subclass
+  auto r = clone_preserve_strides(self);
+  r.copy_(src, non_blocking);
+  return r;
+}
+
 Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
   // (1) It isn't exposed to the frontend (no python bindings)
   // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
-  auto r = clone_preserve_strides(self);
-  r.copy_(src, non_blocking);
-  return r;
+  // Importantly, the cpu/cuda kernel (run by the aot_eager backend of compile) does not read from the data of self at all
+  auto out = src.to(self.options());
+  if (self.sizes() != src.sizes()) {
+    out = out.expand(self.sizes());
+  }
+  return out.clone();
+}
+
+::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
+  std::vector<at::Tensor> outs;
+  outs.reserve(self.size());
+  for (const auto i : c10::irange(src.size())) {
+    auto curr_src = src[i];
+    auto curr_self = self[i];
+    outs.push_back(at::native::copy(curr_self, curr_src, non_blocking));
+  }
+  return outs;
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {

@@ -159,6 +159,10 @@ class MetaConverter:
             self_ref.storage_memo.pop(storage_ref_key, None)
 
         weakref.finalize(s, del_storage)
+        # If we are fakeifying a tensor that has a secretly-zero-sized storage,
+        # Need to make sure to resize the meta storage too.
+        if s.size() == 0:
+            v.resize_(0)
         self.storage_memo[storage_ref_key] = v
 
     # NB: doesn't actually return a storage, because meta storage is

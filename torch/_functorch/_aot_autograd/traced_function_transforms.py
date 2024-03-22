@@ -436,6 +436,22 @@ def create_functionalized_fn(
                     f_inpt
                 ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
+            # TODO: to support graph breaks in ppFSDP eventually, we'll need to handle the case where a param
+            # e.g. starts with a valid storage on graph entry, and needs to have its storage resized to zero
+            # on graph exit. This will require putting the resize_() op directly in the graph.
+            for i, (inpt_old, inpt_f) in enumerate(
+                zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
+            ):
+                if not isinstance(inpt_f, torch.Tensor):
+                    continue
+                assert is_fun(inpt_f)
+                inpt_new = from_fun(inpt_f)
+                if meta.input_info[i].mutation_inductor_storage_resize:
+                    assert (
+                        inpt_old.untyped_storage().nbytes()
+                        == inpt_new.untyped_storage().nbytes()
+                    ), "storage resizes that do not no-op in the graph are not yet supported"
+
         if aot_config.keep_inference_input_mutations:
             # Note: This is a bit annoying. There's a layering issue here, where:
             # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
@@ -469,6 +485,13 @@ def create_functionalized_fn(
                 assert is_fun(inpt_f)
                 inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
+                    # Optimization: if the copy_() is a no-op then don't include it in the graph.
+                    # In theory inductor could optimize this away, however in fsdp, we end up with
+                    # param.copy_(param), where param is a zero-storage-size tensor,
+                    # and running this op in eager mode (using the aot_eager backend) will result in a segfault.
+                    # So we may as well optimize it away here.
+                    if inpt_old is inpt_new:
+                        continue
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
