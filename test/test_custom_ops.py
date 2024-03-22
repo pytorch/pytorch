@@ -333,7 +333,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
             if op.op in (
-                torch.ops._torch_testing.numpy_nonzero,
+                numpy_nonzero._opoverload,
                 torch.ops._torch_testing.numpy_nms,
             ):
                 ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
@@ -1582,7 +1582,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
         with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
-            torch.ops._torch_testing.numpy_nonzero(x)
+            numpy_nonzero(x)
 
     def test_basic_make_fx(self):
         # More serious tests are in our CustomOp opinfo db,
@@ -1624,31 +1624,16 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(NotImplementedError, "no Tensor inputs"):
             op((1, 2, 3))
 
-    def test_abstract_registration_location(self):
-        custom_op = torch._custom_op.impl._find_custom_op(
-            "_torch_testing::numpy_nonzero"
-        )
-        source = torch._library.simple_registry.singleton.find(
-            "_torch_testing::numpy_nonzero"
-        ).abstract_impl.kernel.source
-        self.assertRegex(source, r".*custom_op_db.py:\d+")
-
     def test_data_dependent_basic(self):
-        def f(x):
-            return torch.ops._torch_testing.numpy_nonzero(x)
-
         x = torch.randn(5, 5)
-        gm = make_fx(f, tracing_mode="symbolic")(x)
+        gm = make_fx(numpy_nonzero, tracing_mode="symbolic")(x)
         self.assertTrue("nonzero" in gm.code)
 
     def test_data_dependent_fake_tracing(self):
-        def f(x):
-            return torch.ops._torch_testing.numpy_nonzero(x)
-
         x = torch.randn(5, 5)
         # We've updated to attempt to use unbacked symints even for fake
         # tracing
-        make_fx(f, tracing_mode="fake")(x)
+        make_fx(numpy_nonzero, tracing_mode="fake")(x)
 
     def test_symints(self):
         def f(x):
@@ -1682,15 +1667,17 @@ def forward(self, x_1):
 
         @torch.compile(backend=cnt)
         def f(x):
-            return torch.ops._torch_testing.numpy_nonzero(x.clone()).clone()
+            return numpy_nonzero(x.clone()).clone()
 
         f(torch.randn(10))
 
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {
-                "dynamic shape operator: _torch_testing.numpy_nonzero.default; to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True": 1  # noqa: B950
-            },
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(next(iter(counters["graph_break"].values())), 1)
+        self.assertExpectedInline(
+            next(iter(counters["graph_break"].keys())).replace(";", "\n"),
+            """\
+dynamic shape operator: mangled2__torch__testing___internal__custom_op_db.numpy_nonzero.default
+ to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True""",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
