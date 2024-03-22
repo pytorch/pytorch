@@ -304,19 +304,14 @@ def _register_lowering(
     core_aten_ops = core_aten_decompositions()
 
     for fn in aten_fn:
-        if isinstance(
-            fn, (torch._ops.HigherOrderOperator, torch._ops.OpOverloadPacket)
-        ) or callable(fn):
+        if not isinstance(fn, torch._ops.OpOverload):
             continue
 
-        assert isinstance(fn, torch._ops.OpOverload), (type(fn), fn, aten_fn)
-
         if torch._C.DispatchKey.Autograd in fn.py_kernels:
-            has_decomp = len(get_decompositions([fn])) > 0
-            assert has_decomp, (
-                fn,
-                fn.py_kernels,
-            )  # op with python Autograd key should have a decomposition
+            if len(get_decompositions([fn])) < 1:
+                raise RuntimeError(
+                    "Function with Autograd dispatch key in python kernels should have a decomposition"
+                )
             if fn not in core_aten_ops.keys():
                 raise RuntimeError(
                     f"Trying to register a lowering for {str(fn)}, which has a "
