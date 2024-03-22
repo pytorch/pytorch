@@ -403,7 +403,7 @@ def unpad_sequence(
     padded_sequences: Tensor,
     lengths: Tensor,
     batch_first: bool = False,
-    inplace: bool = False,
+    inplace: bool = True,
 ) -> List[Tensor]:
     r"""Unpad padded Tensor into a list of variable length Tensors.
 
@@ -437,7 +437,7 @@ def unpad_sequence(
         lengths (Tensor): length of original (unpadded) sequences.
         batch_first (bool, optional): whether batch dimension first or not. Default: False.
         inplace (bool, optional): If ``True``, ``padded_sequences`` will be transposed
-            into ``B x T x *`` format in-place when ``batch_first`` is ``False``. Default: ``False``.
+            into ``B x T x *`` format in-place when ``batch_first`` is ``False``. Default: ``True``.
 
     Returns:
         a list of :class:`Tensor` objects
