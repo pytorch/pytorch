@@ -1407,7 +1407,7 @@ class WrapperCodeGen(CodeGen):
         layout = buffer.get_layout()
         if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
             return
-        if isinstance(layout, ir.AliasedLayoutSHOULDREMOVE):
+        if isinstance(layout, ir.NonOwningLayout):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"

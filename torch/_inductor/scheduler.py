@@ -250,7 +250,10 @@ class BaseSchedulerNode:
     def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
 
-        deps = [dep.name for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)]
+        deps = [
+            dep.name
+            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+        ]
         while len(deps) > 0:
             dep = deps.pop()
             used_names.add(dep)
@@ -2363,7 +2366,7 @@ class Scheduler:
             return False
         node = self.name_to_node[buf_name]
         layout = node.node.get_layout()
-        if isinstance(layout, ir.AliasedLayoutSHOULDREMOVE):
+        if isinstance(layout, ir.NonOwningLayout):
             return not layout.maybe_guard_aligned()
         else:
             return False
