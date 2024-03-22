@@ -9,7 +9,7 @@ from typing import Dict, Tuple
 
 import torch
 import torch._inductor
-from torch._dynamo.testing import same
+from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
@@ -19,7 +19,7 @@ from torch._inductor.utils import cache_dir
 from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -1947,6 +1947,229 @@ class AOTInductorTestsTemplate:
             )
             self.check_model(Model(), example_inputs)
 
+    def test_runtime_checks(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
+                return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+
+        inputs = []
+        for dtype in (
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ):
+            inputs.append(torch.ones(4, 8, 10, dtype=dtype, device=self.device))
+        dim0 = Dim("s0", min=2, max=1024)
+        dim1 = Dim("s1", min=2, max=512)
+        dim2 = Dim("s2", min=2, max=128)
+        dynamic_shapes = {
+            "x0": {0: dim0},
+            "x1": {0: dim0},
+            "x2": {0: dim0},
+            "x3": {1: dim1},
+            "x4": {1: dim1},
+            "x5": {1: dim1},
+            "x6": {},
+            "x7": {2: dim2},
+            "x8": {2: dim2},
+            "x9": {2: dim2},
+        }
+        m = Model()
+        inputs = tuple(inputs)
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+                "aot_inductor.debug_compile": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.compile(m, inputs, dynamic_shapes=dynamic_shapes)
+        with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            FileCheck().check_count(
+                "unmatched dtype",
+                10,
+                exactly=True,
+            ).run(src_code)
+            FileCheck().check_count(
+                "unmatched dim value at",
+                21,  # we have 9 dynamic dims for which we generate different checks
+                exactly=True,
+            ).run(src_code)
+            FileCheck().check_count(
+                "dim value is too",
+                18,  # we have 9 dynamic dims for which we generate two checks
+                exactly=True,
+            ).run(src_code)
+            FileCheck().check_count(
+                "unmatched stride value at",
+                21,  # we have 9 symbolic strides for which we don't generate checks
+                exactly=True,
+            ).run(src_code)
+        optimized = AOTIRunnerUtil.load(self.device, so_path)
+        actual = optimized(*inputs)
+        expected = m(*inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    def test_runtime_checks_fp8(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x0, x1, x2, x3, x4):
+                t = (
+                    x0.to(torch.float)
+                    + x1.to(torch.float)
+                    + x2.to(torch.float)
+                    + x3.to(torch.float)
+                )
+                return t
+
+        inputs = []
+        for dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ):
+            inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
+        dim0 = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "x0": {0: dim0},
+            "x1": {0: dim0},
+            "x2": {0: dim0},
+            "x3": {0: dim0},
+        }
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+                "aot_inductor.debug_compile": True,
+            }
+        ):
+            self.check_model(
+                Model(),
+                tuple(inputs),
+                dynamic_shapes=dynamic_shapes,
+            )
+
+    def test_runtime_checks_complex(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x0, x1, x2):
+                return (x0, x1, x2)
+
+        inputs = []
+        x0 = torch.tensor([1, -1], dtype=torch.complex32, device=self.device)
+        x1 = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+            dtype=torch.complex64,
+            device=self.device,
+        )
+        x2 = torch.tensor(128, dtype=torch.complex128, device=self.device)
+        inputs.append(x0)
+        inputs.append(x1)
+        inputs.append(x2)
+        dim0 = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "x0": {0: dim0},
+            "x1": {},
+            "x2": {},
+        }
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+                "aot_inductor.debug_compile": True,
+            }
+        ):
+            self.check_model(
+                Model(),
+                tuple(inputs),
+                dynamic_shapes=dynamic_shapes,
+            )
+
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    def test_runtime_checks_dtype_failed(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.type(torch.float)
+                return y
+
+        x = torch.randn(1, 4, dtype=torch.float16, device=self.device)
+        model = Model()
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+                "aot_inductor.debug_compile": True,
+            }
+        ):
+            so_path: str = AOTIRunnerUtil.compile(
+                model,
+                (x,),
+            )
+        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
+        x_casted = x.float()
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(x_casted)
+
+    def test_runtime_checks_shape_failed(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        x = torch.randn(4, 4, 4, dtype=torch.float16, device=self.device)
+        y0 = torch.randn(8, 4, 4, dtype=torch.float16, device=self.device)
+        y1 = torch.randn(4, 8, 4, dtype=torch.float16, device=self.device)
+        y2 = rand_strided(
+            (4, 4, 4), (16, 1, 4), dtype=torch.float16, device=self.device
+        )
+        # batch size is outside of the range
+        y3 = torch.randn(2048, 3, 4, dtype=torch.float16, device=self.device)
+        y4 = torch.randn(2048, 4, 4, dtype=torch.float16, device=self.device)
+        dim0 = Dim("s0", min=4, max=1024)
+        dynamic_shapes = {
+            "x": {0: dim0},
+        }
+        model = Model()
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+                "aot_inductor.debug_compile": True,
+            }
+        ):
+            so_path: str = AOTIRunnerUtil.compile(
+                model, (x,), dynamic_shapes=dynamic_shapes
+            )
+        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
+        # dynamic dim works fine
+        _ = aot_inductor_module(y0)
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(y1)
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(y2)
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(y3)
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(y4)
+
     def test_add_complex(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
@@ -2035,6 +2258,13 @@ def fail_abi_compatible_cuda(is_skip=False):
     )
 
 
+def fail_non_abi_compatible_cuda(is_skip=False):
+    return TestFailure(
+        ("non_abi_compatible_cuda",),
+        is_skip=is_skip,
+    )
+
+
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
@@ -2057,6 +2287,8 @@ CPU_TEST_FAILURES = {
     "test_model_modified_weights": fail_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
+    # FIXME: failed with compilation error
+    "test_runtime_checks": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
@@ -2084,6 +2316,8 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    "test_runtime_checks_complex": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_runtime_checks_fp8": fail_with_and_without_stack_allocation(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
@@ -2094,6 +2328,12 @@ CUDA_TEST_FAILURES = {
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
     # no ABI shim fn for torch.sort; remove this when adding one
     "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
+    # no runtime checks for non_abi_compatible mode
+    "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -2249,6 +2489,14 @@ copy_tests(
         # TODO: test_freezing_non_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
+        # no runtime checks for non_abi_compatible mode
+        "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
+        "test_runtime_checks_dtype_failed": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
+        "test_runtime_checks_shape_failed": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
     },
 )
 
