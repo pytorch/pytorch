@@ -898,7 +898,7 @@ class X86InductorQuantizer(Quantizer):
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     return
                 self._annotate_cat(node, quantization_config)
-            if node.target is torch.ops.aten.embedding_bag.padding_idx:
+            elif node.target is torch.ops.aten.embedding_bag.padding_idx:
                 self._annotate_embeddingbag(node, quantization_config)
             else:
                 input_node = node.all_input_nodes[0]

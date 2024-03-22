@@ -305,11 +305,11 @@ class TestHelperModules:
             return weighted
 
     class EmbeddingBagList(torch.nn.Module):
-        def __init__(self, ntables=3, embedding_dim=128, num_embedings=1000) -> None:
+        def __init__(self, ntables=3, embedding_dim=128, num_embeddings=1000) -> None:
             super().__init__()
             self.embs = nn.ModuleDict()
             for i in range(ntables):
-                self.embs[str(i)] = nn.EmbeddingBag(num_embeddings=num_embedings, embedding_dim=embedding_dim, mode='sum')
+                self.embs[str(i)] = nn.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim, mode='sum')
 
         def forward(self, indices, offsets):
             out = []
