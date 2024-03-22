@@ -278,12 +278,8 @@ class TestGroupBatchFusion(TestCase):
             res = traced(*input)
             self.compare_pred(module, traced, input)
             self.assertEqual(
-                counters["inductor"]["group_fusion"],
+                counters["inductor"]["group_linear"],
                 2,
-            )
-            self.assertEqual(
-                counters["inductor"]["batch_fusion"],
-                0,
             )
             self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
             ref.sum().backward()
@@ -291,11 +287,11 @@ class TestGroupBatchFusion(TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
             self.assertEqual(
-                counters["inductor"]["group_fusion"],
+                counters["inductor"]["group_linear"],
                 4,
             )
             self.assertEqual(
-                counters["inductor"]["batch_fusion"],
+                counters["inductor"]["batch_aten_add"],
                 3,
             )
             self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
@@ -311,7 +307,7 @@ class TestGroupBatchFusion(TestCase):
         res = traced(*input)
         self.compare_pred(module, traced, input)
         self.assertEqual(
-            counters["inductor"]["group_fusion"],
+            counters["inductor"]["group_linear"],
             1,
         )
         self.assertEqual(
@@ -323,11 +319,11 @@ class TestGroupBatchFusion(TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
         self.assertEqual(
-            counters["inductor"]["group_fusion"],
+            counters["inductor"]["group_linear"],
             2,
         )
         self.assertEqual(
-            counters["inductor"]["batch_fusion"],
+            counters["inductor"]["batch_aten_mul"],
             1,
         )
         counters.clear()
@@ -342,19 +338,7 @@ class TestGroupBatchFusion(TestCase):
                 ref = module(*input)
                 res = traced(*input)
                 self.compare_pred(module, traced, input)
-                self.assertEqual(
-                    counters["inductor"]["group_fusion"],
-                    0,
-                )
-                self.assertEqual(counters["inductor"]["batch_fusion"], 2)
-                self.assertEqual(
-                    counters["inductor"]["scmerge_split_removed"],
-                    3,
-                )
-                self.assertEqual(
-                    counters["inductor"]["scmerge_cat_removed"],
-                    3,
-                )
+                self.assertEqual(counters["inductor"]["batch_layernorm"], 2)
                 ref.sum().backward()
                 res.sum().backward()
                 self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -371,15 +355,7 @@ class TestGroupBatchFusion(TestCase):
             ref = module(*input)
             res = traced(*input)
             self.compare_pred(module, traced, input)
-            self.assertEqual(counters["inductor"]["batch_fusion"], 2)
-            self.assertEqual(
-                counters["inductor"]["scmerge_split_removed"],
-                1,
-            )
-            self.assertEqual(
-                counters["inductor"]["scmerge_cat_removed"],
-                1,
-            )
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 2)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -395,16 +371,7 @@ class TestGroupBatchFusion(TestCase):
             ref = module(*input)
             res = traced(*input)
             self.compare_pred(module, traced, input)
-            self.assertEqual(counters["inductor"]["batch_fusion"], 1)
-            self.assertEqual(counters["inductor"]["group_fusion"], 0)
-            self.assertEqual(
-                counters["inductor"]["scmerge_split_removed"],
-                2,
-            )
-            self.assertEqual(
-                counters["inductor"]["scmerge_cat_removed"],
-                2,
-            )
+            self.assertEqual(counters["inductor"]["batch_linear"], 1)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -419,15 +386,13 @@ class TestGroupBatchFusion(TestCase):
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_fusion"], 7)
-        self.assertEqual(
-            counters["inductor"]["scmerge_split_removed"],
-            0,
-        )
-        self.assertEqual(
-            counters["inductor"]["scmerge_cat_removed"],
-            0,
-        )
+        self.assertEqual(counters["inductor"]["batch_tanh"], 1)
+        self.assertEqual(counters["inductor"]["batch_relu"], 1)
+        self.assertEqual(counters["inductor"]["batch_sigmoid"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_sub"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_div"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -467,7 +432,7 @@ class TestPostGradBatchLinearFusion(TestCase):
         pt2_output = pt2_module(inputs)
         self.assertTrue(torch.allclose(eager_output, pt2_output))
         self.assertEqual(
-            counters["inductor"]["batch_fusion"],
+            counters["inductor"]["batch_linear_post_grad"],
             2,
         )
         self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
