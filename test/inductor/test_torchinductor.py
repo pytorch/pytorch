@@ -6743,8 +6743,24 @@ class CommonTemplate:
             return out, torch.view_as_real(z + 1)
 
         self.common(f, (torch.zeros((4, 2)),))
-        # code = run_and_get_triton_code(f, (torch.zeros((4,2)),))
-        # breakpoint()
+
+
+        code = run_and_get_triton_code(torch.compile(f), torch.zeros((4,2)))
+        # Make sure that we haven't added complex support and made this test
+        # invalid. If we've added complex support please update the test to use
+        # a different set of view ops we don't lower
+        self.assertTrue("aten.view_as_real" in code)
+
+        def f2(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            z = torch.view_as_real(z)
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
 
 
 

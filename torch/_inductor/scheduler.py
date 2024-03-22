@@ -96,7 +96,7 @@ class OutputNode:
     def is_reduction(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return ()
 
     def get_name(self):
@@ -225,7 +225,7 @@ class BaseSchedulerNode:
         self.last_usage = used_buffers - future_used_buffers
 
     def get_aliases(self):
-        return self.node.get_alias_names()
+        return self.node.get_inputs_that_alias_output()
 
     def get_mutations(self):
         return self.node.get_mutation_names()
@@ -250,14 +250,14 @@ class BaseSchedulerNode:
     def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
 
-        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
-            used_names.add(dep.name)
-            if V.graph.name_to_buffer.get(dep.name):
-                layout = V.graph.name_to_buffer[dep.name].get_layout()
-                # needed to avoid deallocating aliased buffer
-                # if there are still uses of aliases ahead
-                if isinstance(layout, ir.AliasedLayoutSHOULDREMOVE):
-                    used_names.add(layout.view.data.get_name())
+        deps = [dep.name for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)]
+        while len(deps) > 0:
+            dep = deps.pop()
+            used_names.add(dep)
+            if V.graph.name_to_buffer.get(dep):
+                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
+                    if alias not in used_names:
+                        deps.append(alias)
         return used_names
 
     def prune_deps(self):
@@ -323,7 +323,7 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_alias_names() or self.node.get_mutation_names()
+            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
         ):
             return
 
@@ -367,14 +367,10 @@ class BaseSchedulerNode:
                             (
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
-                                ir.AliasedLayoutSHOULDREMOVE,
                             ),
                         )
                         and not (
-                            isinstance(
-                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
-                            )
-                            and len(input_node.node.get_alias_names()) > 0
+                            len(input_node.node.get_inputs_that_alias_output()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -407,7 +403,7 @@ class BaseSchedulerNode:
             return
 
         if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_alias_names() or self.node.get_mutation_names()
+            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
