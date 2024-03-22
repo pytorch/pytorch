@@ -13736,10 +13736,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           decorators=[
-               # Unknown builtin op: aten::finfo.
-               DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
-           ],
            sample_inputs_func=sample_inputs_rms_norm,
            error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
