@@ -100,6 +100,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
 from torch.utils._triton import has_triton, has_triton_package
 
+
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = (
@@ -981,6 +982,7 @@ common_constant_types = {
     torch.memory_format,
     torch.layout,
 }
+
 if has_triton_package():
     import triton
 

@@ -8036,6 +8036,18 @@ class CommonTemplate:
             "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         )
 
+    def test_insignificant_strides(self):
+        def f(x):
+            tmp = x + 1
+            return tmp.view(-1, 1, 2)
+
+        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(out.stride(), compiled_out.stride())
+        self.assertEqual(out, compiled_out)
+
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
@@ -9366,6 +9378,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @config.patch(assume_aligned_inputs=False)
+        def test_config_option_dont_assume_alignment(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin() + x.cos()
+
+            for offset in (0, 1, 2):
+                base = torch.randn(64*64 + 64, device=GPU_TYPE)
+                inps = torch.as_strided(base, (64, 64), (64, 1), offset)
+                torch._dynamo.reset()
+                kernels = self.get_kernels(fn, [inps])
+                arguments_that_are_divisible_by_16 = (
+                    kernels[0].triton_meta["configs"][0].divisible_by_16
+                )
+
+                #             NO_ALIGN ALIGN     ALIGN
+                # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
+
+                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

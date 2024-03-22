@@ -18,6 +18,7 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/Normalization.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -91,8 +92,15 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
+
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/BatchNorm.h>
+#else
+#include <ATen/native/cudnn/BatchNorm.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -2121,6 +2129,44 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
+
+  py_module.def(
+      "_get_cudnn_batch_norm_reserve_space_size",
+      [](const at::Tensor& input, bool training) {
+#ifdef USE_CUDA
+        return at::native::_get_cudnn_batch_norm_reserve_space_size(
+            input, training);
+#else
+        TORCH_CHECK(false, "PyTorch was not built with cuda");
+#endif
+      },
+      py::arg("input"),
+      py::arg("training"));
+
+  py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
+      .value("Native", at::native::BatchNormBackend::Native)
+      .value("Cudnn", at::native::BatchNormBackend::Cudnn)
+      .value("Miopen", at::native::BatchNormBackend::Miopen);
+
+  py_module.def(
+      "_select_batch_norm_backend",
+      [](const at::Tensor& input,
+         const at::Tensor& weight,
+         const at::Tensor& bias,
+         const at::Tensor& running_mean,
+         const at::Tensor& running_var,
+         bool training,
+         double eps) {
+        return at::native::_select_batch_norm_backend(
+            input, weight, bias, running_mean, running_var, training, eps);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("running_mean"),
+      py::arg("running_var"),
+      py::arg("training"),
+      py::arg("eps"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
