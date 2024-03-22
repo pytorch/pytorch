@@ -7,19 +7,28 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
 
 
-def prepend_predicates(inputs, num_predicates=1):
+def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
     result = []
     device = inputs[0].device
     # iterate over the cartesian product of predicate values
-    for p_values in itertools.product(*([[False, True]] * num_predicates)):
-        predicates = [torch.tensor(v, device=device) for v in p_values]
-        result.append((*predicates, *inputs))
+    for values in itertools.product(*([possible_values] * num_to_prepend)):
+        prepended = [torch.tensor(v, device=device) for v in values]
+        result.append((*prepended, *inputs))
     return result
+
+
+def prepend_predicates(inputs, num_predicates=1):
+    return _prepend_product_of_values(inputs, [False, True], num_predicates)
+
+
+def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
+    return _prepend_product_of_values(inputs, counter_values, num_counters)
 
 
 class CondModels:
@@ -190,14 +199,14 @@ class CondTests(TestCase):
             for inputs_with_predicates in prepend_predicates(inputs, num_predicates):
                 result = model(*inputs_with_predicates)
                 result_compiled = compiled_model(*inputs_with_predicates)
-                self.assertEqual(result, result_compiled)
+                torch.testing.assert_close(result, result_compiled)
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_simple_control_flow(self, device, dynamic):
+    def test_cond_simple_control_flow(self, device, dynamic):
         # cond control flow without nesting
         self._run_test(
             model=CondModels.Simple(),
@@ -212,7 +221,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_nested_control_flow(self, device, dynamic):
+    def test_cond_nested_control_flow(self, device, dynamic):
         # cond control flow with nesting
         self._run_test(
             model=CondModels.Nested(),
@@ -229,7 +238,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_outer_code_before_after(self, device, dynamic):
+    def test_cond_outer_code_before_after(self, device, dynamic):
         # some code before and after the conditional
         self._run_test(
             model=CondModels.OuterCode(),
@@ -244,7 +253,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_multiple_outputs(self, device, dynamic):
+    def test_cond_multiple_outputs(self, device, dynamic):
         # multiple outputs with different shapes
         self._run_test(
             model=CondModels.MultipleOutputs(),
@@ -259,7 +268,7 @@ class CondTests(TestCase):
 
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
-    def test_advanced_dynamic_shapes(self, device):
+    def test_cond_advanced_dynamic_shapes(self, device):
         # subgraphs input shapes include symbolic expressions
         class Model(torch.nn.Module):
             def forward(self, p, a, b):
@@ -286,7 +295,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_use_buffers_from_outer_scope(self):
+    def test_cond_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         self._run_test(
             model=CondModels.OuterBuffers(),
@@ -300,7 +309,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_reintepret_view_inputs_outputs(self):
+    def test_cond_reintepret_view_inputs_outputs(self):
         # ReinterpretView in inputs and outputs of the subgraphs
         self._run_test(
             model=CondModels.ReinterpretView(),
@@ -312,10 +321,11 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
+    @skipIfRocm
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_subgraphs_with_parameters(self, device, dynamic):
+    def test_cond_subgraphs_with_parameters(self, device, dynamic):
         # nested Modules with parameters
         self._run_test(
             model=CondModels.Parameters(device),
@@ -327,7 +337,7 @@ class CondTests(TestCase):
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
-    def test_non_tensor_predicates(self, device, dynamic):
+    def test_cond_non_tensor_predicates(self, device, dynamic):
         # model with a boolean predicate
         for b_size_0 in [5, 15]:
             torch._dynamo.reset()
@@ -343,7 +353,7 @@ class CondTests(TestCase):
             )
 
     @requires_cuda
-    def test_aliasing_outputs(self):
+    def test_cond_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
             def forward(self, p, a, b):
@@ -414,7 +424,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_inductor_fx_passes_recursively_applied(self):
+    def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
         def pre_grad_pass_counter(gm):
@@ -447,7 +457,176 @@ class CondTests(TestCase):
         self.assertEqual(counters["post_grad"], 11)
 
 
+class WhileLoopModels:
+    class Simple(torch.nn.Module):
+        def forward(self, ci, a, b):
+            def cond_fn(i, x, y):
+                return i > 0
+
+            def body_fn(i, x, y):
+                return i - 1, x + y, y - x
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [ci, a, b])
+
+    class Nested(torch.nn.Module):
+        def forward(self, ci, cj, a, b):
+            def cond_fn(i1, j1, x1, y1):
+                return i1 > 0
+
+            def body_fn(i1, j1, x1, y1):
+                def cond_fn_nested(i2, j2, x2, y2):
+                    return j2 > 0
+
+                def body_fn_nested(i2, j2, x2, y2):
+                    return i2.clone(), j2 - 1, x2 + 3.14, y2 - 2.71
+
+                i1, j1, x1, y1 = torch._higher_order_ops.while_loop(
+                    cond_fn_nested, body_fn_nested, [i1, j1, x1, y1]
+                )
+
+                return i1 - 1, j1.clone(), x1 * 2, y1 / 2
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (ci, cj, a, b))
+
+    # TODO(aakhundov): add while_loop test with parametrs
+    # once dynamo / export allows while_loop closure capture
+    class Parameters(torch.nn.Module):
+        class InnerModel(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(20, 30, device=device)
+                self.layer2 = torch.nn.Linear(30, 20, device=device)
+
+            def forward(self, c, x):
+                return c - 1, self.layer2(self.layer1(x - 2)) * 3.14
+
+        def __init__(self, device):
+            super().__init__()
+            self.body_fn = self.InnerModel(device)
+            self.cond_fn = lambda c, x: c > 0
+
+        def forward(self, c, a):
+            return torch._higher_order_ops.while_loop(
+                self.cond_fn, self.body_fn, [c, a]
+            )
+
+    class OuterCode(torch.nn.Module):
+        def forward(self, c, a, b):
+            d = a * b + 3.14
+            e = a / b - 2.71
+
+            def cond_fn(c, x, y):
+                return c > 0
+
+            def body_fn(c, x, y):
+                return c - 1, y - x, x + y
+
+            _, f, g = torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, d, e])
+
+            return f * g / 1.41
+
+    # TODO(aakhundov): add while_loop test with outer buffers
+    # once dynamo / export allows while_loop closure capture
+    class OuterBuffers(torch.nn.Module):
+        def forward(self, c, a, b):
+            d = a * 2
+            e = b / 2
+
+            def cond_fn(c, x, y):
+                return c > 0
+
+            def body_fn(c, x, y):
+                return c - 1, x + d, y - e
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, a, b])
+
+
+class WhileLoopTests(TestCase):
+    def _run_test(
+        self,
+        model,
+        inputs,
+        device,
+        dynamic=False,
+        num_counters=1,
+    ):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+
+        inputs = [inp.to(device=device) for inp in inputs]
+        input_sets = [inputs]
+        if dynamic:
+            larger_inputs = []
+            for inp in inputs:
+                # tile every first dim 5x
+                tiling = [5] + [1] * (inp.ndim - 1)
+                larger_inputs.append(torch.tile(inp, tiling))
+            input_sets.append(larger_inputs)
+            for inputs in input_sets:
+                for inp in inputs:
+                    # mark every first dim as dynamic
+                    if inp.ndim:
+                        torch._dynamo.mark_dynamic(inp, 0)
+
+        for inputs in input_sets:
+            for inputs_with_counters in prepend_counters(inputs, num_counters):
+                result = model(*inputs_with_counters)
+                result_compiled = compiled_model(*inputs_with_counters)
+                torch.testing.assert_close(
+                    result, result_compiled, atol=1e-4, rtol=1e-4
+                )
+
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_while_loop_simple_control_flow(self, device, dynamic):
+        # while_loop control flow without nesting
+        self._run_test(
+            model=WhileLoopModels.Simple(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_while_loop_nested_control_flow(self, device, dynamic):
+        # while_loop control flow without nesting
+        self._run_test(
+            model=WhileLoopModels.Nested(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+            num_counters=2,
+        )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_while_loop_with_outer_code(self, device, dynamic):
+        # while_loop control flow without nesting
+        self._run_test(
+            model=WhileLoopModels.OuterCode(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+
 instantiate_parametrized_tests(CondTests)
+instantiate_parametrized_tests(WhileLoopTests)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
+import unittest
 
 from typing import Callable, List, Optional
 
@@ -22,7 +23,7 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -519,6 +520,24 @@ class TestMaxAutotune(TestCase):
         if N <= 8:
             print(f"ref\n{ref}\nact\n{act}")
         torch.testing.assert_close(ref, act, atol=1e-1, rtol=1e-1)
+
+    @config.patch(
+        max_autotune_gemm=True,
+    )
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2, "Need at least 2 devices for this test"
+    )
+    def test_autotune_device_guard(self):
+        x = torch.randn(1024, 1024, device="cuda:1")
+        y = torch.randn(1024, 1024, device="cuda:1")
+
+        def f(x, y):
+            return x @ y
+
+        with fresh_inductor_cache():
+            act = torch.compile(f)(x, y)
+        ref = f(x, y)
+        self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
