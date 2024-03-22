@@ -86,7 +86,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
     size_bytes_ = 0;
     size_bytes_is_heap_allocated_ = false;
-    has_data_ptr_check_ = false;
   }
 
   // Destructor doesn't call release_resources because it's
@@ -133,6 +132,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
+    refresh_has_data_ptr_check();
   }
 
   const void* data() const;
@@ -215,7 +215,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void set_throw_on_mutable_data_ptr() {
     throw_on_mutable_data_ptr_ = true;
-    has_data_ptr_check_ = true;
+    refresh_has_data_ptr_check();
   }
 
  protected:
@@ -227,11 +227,15 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   at::DataPtr set_data_ptr_no_materialize_cow(at::DataPtr&& data_ptr) {
     at::DataPtr old_data_ptr(std::move(data_ptr_));
     data_ptr_ = std::move(data_ptr);
-    has_data_ptr_check_ = data_ptr_.get_deleter() == impl::cow::cow_deleter;
+    refresh_has_data_ptr_check();
     return old_data_ptr;
   }
 
  private:
+  void refresh_has_data_ptr_check() {
+    has_data_ptr_check_ = data_ptr_.get_deleter() == impl::cow::cow_deleter ||
+        throw_on_mutable_data_ptr_;
+  }
   // Triggers a copy if this is a copy-on-write tensor.
   void maybe_materialize_cow() {
     if (data_ptr_.get_deleter() == impl::cow::cow_deleter) {
