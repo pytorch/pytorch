@@ -308,8 +308,9 @@ if :func:`destroy_process_group` is not called by all ranks in a pg within the t
 especially when there are multiple process-groups in the application e.g. for N-D parallelism,
 hangs on exit are possible.  This is because the destructor for ProcessGroupNCCL calls ncclCommAbort,
 which must be called collectively, but the order of calling ProcessGroupNCCL's destructor if called
-by python's GC is not deterministic. Calling :func:`destroy_process_group` helps by ensuring a
-consistent order for shutdown, and avoids calling ncclCommAbort during ProcessGroupNCCL's destructor.
+by python's GC is not deterministic. Calling :func:`destroy_process_group` helps by ensuring
+ncclCommAbort is called in a consistent order across ranks, and avoids calling ncclCommAbort
+during ProcessGroupNCCL's destructor.
 
 Reinitialization
 ^^^^^^^^^^^^^^^^
