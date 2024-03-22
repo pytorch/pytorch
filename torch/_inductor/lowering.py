@@ -3259,7 +3259,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(self),
+        ir.MutationLayoutSHOULDREMOVE(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
@@ -3469,7 +3469,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         )
         buffer = ir.ComputedBuffer(
             None,
-            ir.MutationLayout(self),
+            ir.MutationLayoutSHOULDREMOVE(self),
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
@@ -3487,7 +3487,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(self),
+        ir.MutationLayoutSHOULDREMOVE(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
@@ -5286,7 +5286,9 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayout.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
+    ir.MutationLayoutSHOULDREMOVE.realize_into(
+        val, changed_data, unsafe_alias=unsafe_alias
+    )
     return changed
 
 
