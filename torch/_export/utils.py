@@ -429,20 +429,16 @@ def propagate_placeholder_names_for_cond(gm: torch.fx.GraphModule) -> None:
         ):
             true_graph = getattr(gm, node._args[1].name)
             false_graph = getattr(gm, node._args[2].name)
+            # propagate names to both subgraphs
             cond_args = node._args[3]
-            for subgraph in [
-                true_graph,
-                false_graph,
-            ]:  # propagate names to both subgraphs
-                for i, _node in enumerate(
-                    subgraph.graph.nodes
-                ):  # placeholder nodes come first
+            for subgraph in [true_graph, false_graph]:
+                for i, _node in enumerate(subgraph.graph.nodes):
+                    # placeholder nodes come first
                     if i >= len(cond_args):
                         break
                     cond_arg = cond_args[i]
-                    if (
-                        cond_arg.op == "call_function"
-                    ):  # handle duplicate names on ops with nn_module_stack
+                    # handle duplicate names on ops with nn_module_stack
+                    if cond_arg.op == "call_function":
                         modules = ["_root"]
                         for j, (val, _) in enumerate(
                             cond_arg.meta.get("nn_module_stack").values()
