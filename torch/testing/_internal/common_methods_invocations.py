@@ -13052,8 +13052,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
            skips=(
@@ -13638,6 +13636,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # TODO: Avoid COW materialize
            supports_cow_input_no_materialize=False,
+           allow_cow_input_materialize=['running_mean', 'running_var'],
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
@@ -13657,8 +13656,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
@@ -13707,8 +13704,6 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
@@ -13724,8 +13719,6 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
@@ -13741,8 +13734,6 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate_negative',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_pad_replicate_negative,
@@ -13994,8 +13985,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
         reference_inputs_func=reference_inputs_multi_margin_loss,
         error_inputs_func=error_inputs_multi_margin_loss,
@@ -14013,8 +14002,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
         reference_inputs_func=reference_inputs_multilabel_margin_loss,
         error_inputs_func=error_inputs_multilabel_margin_loss,
@@ -14087,8 +14074,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            test_neg_view=False,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
            decorators=(
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
@@ -14103,8 +14088,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            op=lambda input, *args, **kwargs:
                wrapper_set_seed(torch.nn.functional.fractional_max_pool3d, input, *args, **kwargs),
            # vmap does not support random operations
@@ -14315,8 +14298,6 @@ op_db: List[OpInfo] = [
            aten_name='linear',
            supports_autograd=True,
            supports_gradgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_linear,
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -14404,8 +14385,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         # test_reference_numerics only tests the case when the weight tensor is a scalar
         sample_kwargs=sample_kwargs_prelu_scalar_weight,
         error_inputs_func=error_inputs_prelu,
@@ -14454,8 +14433,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         sample_kwargs=lambda device, dtype, input:
             (dict(lower=0., upper=1., training=True), dict(lower=0., upper=1., training=True)),
         sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs=dict(lower=0., upper=1., training=True)),
@@ -14535,8 +14512,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         decorators=[DecorateInfo(toleranceOverride(
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(
@@ -14657,8 +14632,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         decorators=[skipCUDAIf(TEST_WITH_ROCM, "ROCm doesn't support efficient attention")],
         skips=(
             # Device mismatch due to philox seed and offset
@@ -14879,8 +14852,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
                                                     {'threshold': float.fromhex('0x1.3ap-3'),
@@ -14978,6 +14949,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            # TODO: Avoid COW materialize
            supports_cow_input_no_materialize=False,
+           allow_cow_input_materialize=[1, 2],
            sample_inputs_func=sample_inputs_batch_norm,
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
@@ -15002,6 +14974,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # TODO: Avoid COW materialize
            supports_cow_input_no_materialize=False,
+           allow_cow_input_materialize=[1, 2],
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
@@ -15019,8 +14992,6 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(
@@ -15187,8 +15158,6 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
            autodiff_nonfusible_nodes=["aten::gelu"],
            skips=(
                # AssertionError: Tensor-likes are not close!
