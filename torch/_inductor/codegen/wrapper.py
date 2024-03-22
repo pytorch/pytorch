@@ -356,7 +356,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        if isinstance(self.node.layout, (ir.AliasedLayoutSHOULDREMOVE, ir.MultiOutputLayout)):
+        if len(self.node.get_inputs_that_alias_output()) > 0:
+            return self
+        if isinstance(self.node.layout, ir.MultiOutputLayout):
             return self
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
