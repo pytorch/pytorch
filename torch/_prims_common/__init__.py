@@ -242,7 +242,7 @@ def is_contiguous(a: TensorLikeType) -> bool:
         if guard_size_oblivious(x == 1):
             continue
 
-        if y != expected_stride:
+        if guard_size_oblivious(y != expected_stride):
             return False
         expected_stride = expected_stride * x
 

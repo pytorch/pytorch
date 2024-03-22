@@ -26,7 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable
+from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
