@@ -276,8 +276,12 @@ def save_graph_repro(
     fd.write(
         f"    with torch.no_grad():\n"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
-        ")\n"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}\n"
+        f")\n"
+        f"        # To run it separately, do "
+        f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"        # mod(*args)"
     )
 
 
@@ -682,6 +686,11 @@ def repro_analyze(options, mod, load_args):
     assert not args
 
 
+def repro_get_args(options, mod, load_args):
+    mod, args = repro_common(options, mod, load_args)
+    return mod, args
+
+
 def repro_run(options, mod, load_args):
     from torch._inductor.compile_fx import compile_fx_inner
 
@@ -839,6 +848,8 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minify", help="run the minifier on the repro"
     )
     common_flags(parser_minify)
+    parser_get_args = subparsers.add_parser("get_args", help="get the args")
+    common_flags(parser_get_args)
     parser_minify_isolate = parser_minify.add_mutually_exclusive_group()
     parser_minify_isolate.add_argument(
         "--isolate",
@@ -928,5 +939,6 @@ divergences--you just might not end up with a useful repro in the end.""",
         "analyze": repro_analyze,
         "minifier-query": repro_minifier_query,
         "run": repro_run,
+        "get_repro": repro_get_args,
     }
     return COMMAND_FNS[options.command](options, mod, load_args)
