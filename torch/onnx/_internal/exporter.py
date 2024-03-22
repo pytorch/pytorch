@@ -478,7 +478,7 @@ def enable_fake_mode():
         >>> # Saving model WITHOUT initializers
         >>> onnx_program.save("my_model_without_initializers.onnx")
         >>> # Saving model WITH initializers
-        >>> onnx_program.save("my_model_with_initializers.onnx", model_state_dict=MyModel().state_dict())
+        >>> onnx_program.save("my_model_with_initializers.onnx", model_state=MyModel().state_dict())
 
     .. warning::
         This API is experimental and is *NOT* backward-compatible.
@@ -964,19 +964,20 @@ class ONNXProgram:
         self,
         destination: Union[str, io.BufferedIOBase],
         *,
-        model_state_dict: Optional[Union[Dict[str, Any], str]] = None,
+        model_state: Optional[Union[Dict[str, Any], str]] = None,
         serializer: Optional[ONNXProgramSerializer] = None,
     ) -> None:
         """Saves the in-memory ONNX model to ``destination`` using specified ``serializer``.
 
         Args:
             destination: The destination to save the ONNX model. It can be either a string or a file-like object.
-                When used with ``model_state_dict``, it must be a string with a full path to the destination.
+                When used with ``model_state``, it must be a string with a full path to the destination.
                 If `destination` is a string, besides saving the ONNX model into a file, model weights are also stored
                 in separate files in the same directory as the ONNX model. E.g. for `destination="/path/model.onnx"`,
                 the initializers are saved in "/path/" folder along with "onnx.model".
-            model_state_dict: The state_dict of the PyTorch model containing all weights on it.
+            model_state: The state_dict of the PyTorch model containing all weights on it.
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
+                The supported file formats are the same as those supported by `torch.load` and `safetensors.safe_open`.
                 Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
             serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
         """
@@ -987,27 +988,27 @@ class ONNXProgram:
                 serializer = ProtobufONNXProgramSerializer()
 
         # Add initializers when symbolic tracing is enabled
-        _model_state_dict_files: List[Union[str, io.BytesIO, Dict[str, Any]]] = []
-        if model_state_dict is not None:
+        _model_state_files: List[Union[str, io.BytesIO, Dict[str, Any]]] = []
+        if model_state is not None:
             assert isinstance(
-                model_state_dict, (dict, str)
-            ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
+                model_state, (dict, str)
+            ), "model_state must be a path to the model's state_dict or the actual state_dict"
             # NOTE: For dict, there can be performance penalty or high memory usage that might lead to OOM
             #       if the dict wasn't loaded with torch.load(..., mmap=True, map_location="cpu")
-            _model_state_dict_files.append(model_state_dict)
+            _model_state_files.append(model_state)
         elif self._fake_context and self._fake_context.state_dict_paths:
             # Load state from previous model.load_state_dict() call within enable_fake_mode() context
             for path in self._fake_context.state_dict_paths:
-                if path in _model_state_dict_files:
+                if path in _model_state_files:
                     # ignore duplicate
                     continue
                 if os.path.exists(path):  # type: ignore[arg-type]
-                    _model_state_dict_files.append(path)
+                    _model_state_files.append(path)
 
-        if _model_state_dict_files:
+        if _model_state_files:
             if not isinstance(destination, str):
                 raise RuntimeError(
-                    "`destination` must be a string with a path when `model_state_dict` is specified."
+                    "`destination` must be a string with a path when `model_state` is specified."
                 )
             destination_path, destination_filename = os.path.split(destination)
             destination_path = destination_path or os.getcwd()
@@ -1018,7 +1019,7 @@ class ONNXProgram:
                 destination_path,
                 onnx_model_location,
                 "",  # When initializers >2GB, must be in the same folder as the model
-                tuple(_model_state_dict_files),
+                tuple(_model_state_files),
                 self.model_proto,
             )
         else:

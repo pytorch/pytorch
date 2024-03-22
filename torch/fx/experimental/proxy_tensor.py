@@ -196,13 +196,17 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(
+            tracer.create_proxy('call_function', torch.ops.aten.sym_size.int, (proxy, i), {}), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(
+            tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
-    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(
+        tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(
+        tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
@@ -530,6 +534,39 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e)
         else:
             return e
+
+
+@contextmanager
+def _temp_remove_pre_dispatch_torch_function_mode():
+    from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
+    temp_elements = []
+    pre_dispatch_mode = None
+
+    while _len_torch_function_stack() > 0:
+        mode = _pop_mode()
+        if isinstance(mode, PreDispatchTorchFunctionMode):
+            pre_dispatch_mode = mode
+            break
+        else:
+            temp_elements.append(mode)
+
+    for mode in reversed(temp_elements):
+        _push_mode(mode)
+
+    try:
+        yield
+
+    finally:
+        if pre_dispatch_mode is not None:
+            count = len(temp_elements)
+            while count > 0:
+                mode = _pop_mode()
+                count -= 1
+
+            temp_elements.append(pre_dispatch_mode)
+
+            for mode in reversed(temp_elements):
+                _push_mode(mode)
 
 
 @torch._disable_dynamo
@@ -953,6 +990,16 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def is_leaf_module(self, m, module_qualified_name):
         return False
+
+    def create_node(self, *args, **kwargs):
+        '''
+        Add nn_module_stack metadata here instead of TracerBase,
+        since calls to make_fx() might not want to record module stack metadata
+        '''
+        node = super().create_node(*args, **kwargs)
+        if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
+            node.meta["nn_module_stack"] = self.module_stack
+        return node
 
 
 def make_fx(f,

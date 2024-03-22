@@ -30,6 +30,7 @@ import sympy
 
 import torch
 import torch._logging
+import torch.utils._pytree as pytree
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
@@ -51,6 +52,7 @@ from ..utils import (
     get_dtype_size,
     get_fused_kernel_name,
     get_kernel_metadata,
+    get_max_y_grid,
     green_text,
     is_welford_reduction,
     next_power_of_2,
@@ -1117,6 +1119,14 @@ class IterationRangesRoot(IterationRanges):
     def get_pid(self):
         assert self.grid_dim is not None
         key = f"tl.program_id({self.grid_dim})"
+        # y_grid has a limit, so express it in terms of y and z in case of overflow.
+        # z grid is only exercised when max_tiles == 3 (off by default).
+        if (
+            self.grid_dim == 1
+            and config.triton.max_tiles <= 2
+            and not (isinstance(self.numel, int) and self.numel <= get_max_y_grid())
+        ):
+            key = f"{key} * (tl.program_id({self.grid_dim + 1}) + 1)"
         pid = self.pid_cache.get(key, key)
         if self.kernel.index_dtype != "tl.int32":
             return f"{pid}.to({self.kernel.index_dtype})"
@@ -2345,11 +2355,12 @@ class TritonKernel(Kernel):
             )
 
     def _lift_helper(self, fn, num_args) -> str:
-        # Lift IR function into a triton function in the global namespace
+        # Lift IR function for scan operations into a triton function
+        # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        args = [f"arg{n}" for n in range(num_args)]
-        signature = ", ".join(args)
+        args = [tuple(f"arg{i}_{n}" for n in range(num_args)) for i in range(2)]
+        signature = ", ".join(itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
         cse = CSE(prefix="", suffix="")
@@ -2367,17 +2378,20 @@ class TritonKernel(Kernel):
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
+            outputs = ", ".join(str(output) for output in outputs)
             helper.writeline(f"return {outputs}")
 
         return self.helper_functions.add(helper.getvalue())
 
     def scan(
         self,
-        dtype: torch.dtype,
-        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-        value: CSEVariable,
-        init: int,
-    ) -> CSEVariable:
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
+        values: Tuple[CSEVariable, ...],
+        inits: Tuple[int, ...],
+    ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2386,63 +2400,109 @@ class TritonKernel(Kernel):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
 
-        value = self.cse.generate(
-            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
-        )
+        masked_values = []
+        broadcasted_values = []
+        accumulators = []
 
-        default = triton_constant(init)
+        combine_helper_fn = self._lift_helper(combine_fn, len(values))
         dim = self.triton_tensor_ndim() - 1
-        acc_type = triton_acc_type(dtype)
-        cond = " & ".join(masks)
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2)
+        for value, init, dtype in zip(values, inits, dtypes):
+            default = triton_constant(init)
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
-        def where_cond(value):
-            if not cond:
-                return value
+            def where_cond(value):
+                if not cond:
+                    return value
+                default_tensor = self.cse.generate(
+                    self.body,
+                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
+                )
+                return self.cse.generate(
+                    self.compute, f"tl.where({cond}, {value}, {default_tensor})"
+                )
+
+            value_dtype = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_compute_type(dtype)})",
+            )
+            value = self.cse.generate(
+                self.compute,
+                f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
+            )
+            broadcasted_values.append(value)
+
+            default = triton_constant(init)
             default_tensor = self.cse.generate(
                 self.body,
                 f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
             )
-            return self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
-        if self.persistent_reduction:
-            masked_value = where_cond(value)
-            result_var = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-        else:
-            accumulator = self.cse.newvar()
-            reduced_size = self.dense_size_list()
-            reduced_size[-1] = "1"
-            reduced_size = f"[{', '.join(reduced_size)}]"
+            if self.persistent_reduction:
+                masked_value = where_cond(value)
+                masked_values.append(masked_value)
+            else:
+                accumulator = self.cse.newvar()
+                reduced_size = self.dense_size_list()
+                reduced_size[-1] = "1"
+                reduced_size = f"[{', '.join(reduced_size)}]"
 
-            self.body.writeline(
-                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
-            )
+                self.body.writeline(
+                    f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+                )
 
-            masked_value = where_cond(value)
-            partial_reduce = self.cse.generate(
-                self.compute,
-                self.reduction_resize(
-                    f"tl.reduce({value}, {dim}, {combine_helper_fn})"
+                masked_value = where_cond(value)
+
+                masked_values.append(masked_value)
+                accumulators.append(accumulator)
+
+        def csv(values):
+            return " ".join(f"{value}," for value in values)
+
+        def cse_multiple(line, n, masks):
+            cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
+            if all(cache_key in self.cse.cache for cache_key in cache_keys):
+                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            result_vars = [self.cse.newvar() for _ in range(n)]
+            self.compute.writeline(
+                f"{csv(result_vars)} = {line}",
+            )
+            for result_var, cache_key in zip(result_vars, cache_keys):
+                if masks:
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                self.cse.cache[cache_key] = result_var
+            return tuple(result_vars)
+
+        result_vars = cse_multiple(
+            f"tl.associative_scan(({csv(masked_values)}), {dim}, {combine_helper_fn})",
+            len(values),
+            masks,
+        )
+
+        if not self.persistent_reduction:
+            partial_reduce = pytree.tree_map(
+                self.reduction_resize,
+                cse_multiple(
+                    f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
+                    len(values),
+                    None,
                 ),
             )
-            acc_next = combine_fn(accumulator, partial_reduce)
-            partial_scan = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-            result_var = self.cse.generate(
-                self.compute, combine_fn(accumulator, partial_scan)
-            )
-            self.compute.writeline(f"{accumulator} = {acc_next}")
+            accs_next = combine_fn(tuple(accumulators), partial_reduce)
+            new_result_vars = combine_fn(tuple(accumulators), result_vars)
+            result_vars = [
+                self.cse.generate(self.compute, var) for var in new_result_vars
+            ]
+            for acc_next, accumulator in zip(accs_next, accumulators):
+                self.compute.writeline(f"{accumulator} = {acc_next}")
 
-        result_var.mask_vars = masks  # type: ignore[attr-defined]
-        return result_var
+        for result_var in result_vars:
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
+
+        return tuple(result_vars)
 
     def codegen_body(self):
         """
@@ -3549,16 +3609,21 @@ class TritonScheduling(BaseScheduling):
 
         return kernel_name
 
-    def codegen_template(self, template_node, epilogue_nodes):
+    def codegen_template(
+        self, template_node, epilogue_nodes, only_gen_src_code=False
+    ) -> Optional[str]:
         """
         Codegen a triton template
+
+        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
-                node.mark_run()
+            if not only_gen_src_code:
+                for node in [template_node, *epilogue_nodes]:
+                    node.mark_run()
             partial_code = render()
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
@@ -3584,12 +3649,17 @@ class TritonScheduling(BaseScheduling):
                     f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
                 )
 
+            if only_gen_src_code:
+                return src_code
+
             kernel_name = self.define_kernel(src_code, node_schedule)
+
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
+        return None
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
@@ -3779,27 +3849,37 @@ class TritonScheduling(BaseScheduling):
         return False
 
     def benchmark_fused_nodes(self, nodes):
-        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
-        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-        tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
-        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
-            node_schedule, numel, rnumel
-        )
-
-        kernel = TritonKernel(
-            *tiled_groups,
-            reduction_hint=reduction_hint_val,
-            mutations=mutations,
-            index_dtype=index_dtype,
-        )
-
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = set()
 
-        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
+        if not nodes[0].is_template():
+            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+            node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+
+            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+            reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+                node_schedule, numel, rnumel
+            )
+
+            kernel = TritonKernel(
+                *tiled_groups,
+                reduction_hint=reduction_hint_val,
+                mutations=mutations,
+                index_dtype=index_dtype,
+            )
+
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+            with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+                src_code = kernel.codegen_kernel()
+        else:
+            template_node = nodes[0]
+            epilogue_nodes = nodes[1:]
+
+            with config.patch("benchmark_kernel", True):
+                src_code = self.codegen_template(
+                    template_node, epilogue_nodes, only_gen_src_code=True
+                )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         mod = PyCodeCache.load(src_code)

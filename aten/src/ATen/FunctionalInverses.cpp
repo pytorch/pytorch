@@ -174,8 +174,8 @@ Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& muta
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      return at::sum_to(
-          mutated_view,
+      return base + at::sum_to(
+          mutated_view - base,
           base.sym_sizes(),
           /*always_return_non_view=*/inverse_return_mode == InverseReturnMode::NeverView
       );

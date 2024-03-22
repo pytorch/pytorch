@@ -5620,10 +5620,12 @@
 - func: _chunk_cat(Tensor[] tensors, int dim, int num_chunks) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _chunk_cat
+    CUDA: _chunk_cat_cuda
 
 - func: _chunk_cat.out(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: _chunk_cat_out
+    CUDA: _chunk_cat_out_cuda
 
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:

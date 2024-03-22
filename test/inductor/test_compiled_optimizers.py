@@ -14,6 +14,8 @@ import torch._inductor
 import torch._inductor.cudagraph_trees
 from torch._inductor import config
 
+from torch._inductor.test_case import TestCase
+
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -39,8 +41,6 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-
-from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -565,6 +565,32 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
 
+    @requires_cuda
+    def test_closure_graph_break(self):
+        param = torch.rand(2, 3, dtype=torch.float32, device="cuda", requires_grad=True)
+        param_c = param.clone().detach().requires_grad_(True)
+
+        def closure():
+            param.grad = torch.ones_like(param) * 2
+            return param.grad
+
+        def closure_c():
+            param_c.grad = torch.ones_like(param_c) * 2
+            return param_c.grad
+
+        optimizer = torch.optim.AdamW([param])
+        optimizer_c = torch.optim.AdamW([param_c])
+
+        def loop(opt, c):
+            opt.step(c)
+
+        compiled_loop = torch._dynamo.optimize("eager")(loop)
+
+        compiled_loop(optimizer, closure)
+        loop(optimizer_c, closure_c)
+
+        self.assertEqual(param, param_c)
+
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
@@ -572,7 +598,7 @@ for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
 instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

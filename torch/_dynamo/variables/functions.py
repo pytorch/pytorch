@@ -30,7 +30,7 @@ def wrap_bound_arg(tx, val, source=None):
     elif not source:
         from torch._dynamo.variables.builder import SourcelessBuilder
 
-        return SourcelessBuilder()(tx, val)
+        return SourcelessBuilder.create(tx, val)
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
@@ -267,7 +267,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 else:
                     from .builder import SourcelessBuilder
 
-                    result[name] = SourcelessBuilder()(tx, cell.cell_contents)
+                    result[name] = SourcelessBuilder.create(tx, cell.cell_contents)
 
         return result, closure_cells
 

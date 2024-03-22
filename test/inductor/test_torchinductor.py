@@ -13,7 +13,6 @@ import random
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import typing
@@ -38,6 +37,7 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -130,9 +129,6 @@ ids = set()
 f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
-
-# Test the FX graph code cache:
-config.fx_graph_cache = True
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
@@ -196,28 +192,7 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCaseBase(TorchTestCase):
-    def setUp(self):
-        super().setUp()
-
-        # For all tests, mock the tmp directory populated by the inductor
-        # FxGraphCache, both for test isolation and to avoid filling disk.
-        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
-        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
-            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
-        )
-        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
-        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
-
-    def tearDown(self):
-        super().tearDown()
-
-        # Clean up the FxGraphCache tmp dir.
-        self._inductor_cache_get_tmp_dir_patch.stop()
-        self._inductor_cache_tmp_dir.cleanup()
-
-
-class TestCase(TestCaseBase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -4553,6 +4528,14 @@ class CommonTemplate:
             ),
         )
 
+    def test_remove_noop_clone(self):
+        def fn(x):
+            y = x.clone().reshape(-1, 4)
+            y[:, [2, 0]] = y[:, [0, 2]]
+            return y + x
+
+        self.common(fn, (torch.randn(2, 4),))
+
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
             def __init__(
@@ -7819,6 +7802,13 @@ class CommonTemplate:
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
 
+    def test_diagonal_copy(self):
+        def fn(x):
+            return torch.diagonal_copy(x)
+
+        for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
+            self.common(fn, (x,))
+
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
@@ -9200,6 +9190,24 @@ class CommonTemplate:
 
         self.common(fn, args, check_lowp=check_lowp)
 
+    # codegen test fails with no dynamic for loop in dynamic shape tests
+    @expectedFailureCodegenDynamic
+    def test_view_uint8_through_differing_bitwidths(self):
+        # https://github.com/pytorch/pytorch/issues/120998
+        def fn(x, view_dtype):
+            return x.view(view_dtype).view(torch.uint8)
+
+        view_dtypes = [torch.int16, torch.int32, torch.int64]
+        for dtype in view_dtypes:
+            x = torch.randint(0, 2**4, [4096, 4096], dtype=torch.uint8)
+            self.common(
+                fn,
+                (
+                    x,
+                    dtype,
+                ),
+            )
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -10035,7 +10043,7 @@ if HAS_CPU and RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

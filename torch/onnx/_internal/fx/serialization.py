@@ -83,6 +83,18 @@ def _create_tensor_proto_with_external_data(
     return tensor_proto
 
 
+def _convert_safetensors_to_torch_format(safetensors_file):
+    # It this function is called, safetensors is guaranteed to exist
+    # because the HF model with safetensors was already loaded and exported to ONNX
+    from safetensors import safe_open  # type: ignore[import-not-found]
+
+    tensors = {}
+    with safe_open(safetensors_file, framework="pt", device="cpu") as f:  # type: ignore[attr-defined]
+        for k in f.keys():
+            tensors[k] = f.get_tensor(k).cpu()
+    return tensors
+
+
 # TODO: generalize to allow more checkpoints formats (torch or gguf)
 @_beartype.beartype
 def save_model_with_external_data(
@@ -135,23 +147,26 @@ def save_model_with_external_data(
             # Using torch.save wouldn't leverage mmap, leading to higher memory usage
             state_dict = el
         else:
-            try:
-                # Loads checkpoint using memory-map on CPU to support really large models
-                # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
-                state_dict = torch.load(el, map_location="cpu", mmap=True)
-            except (RuntimeError, ValueError) as e:
-                if "mmap can only be used with files saved with" in str(
-                    e
-                ) or isinstance(el, io.BytesIO):
-                    log.warning(
-                        "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
-                        "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
-                    )
-                    if isinstance(el, io.BytesIO):
-                        el.seek(0)  # torch.load from `try:` has read the file.
-                    state_dict = torch.load(el, map_location="cpu")
-                else:
-                    raise e
+            if isinstance(el, str) and el.endswith(".safetensors"):
+                state_dict = _convert_safetensors_to_torch_format(el)
+            else:
+                try:
+                    # Loads checkpoint using memory-map on CPU to support really large models
+                    # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
+                    state_dict = torch.load(el, map_location="cpu", mmap=True)
+                except (RuntimeError, ValueError) as e:
+                    if "mmap can only be used with files saved with" in str(
+                        e
+                    ) or isinstance(el, io.BytesIO):
+                        log.warning(
+                            "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
+                            "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
+                        )
+                        if isinstance(el, io.BytesIO):
+                            el.seek(0)  # torch.load from `try:` has read the file.
+                        state_dict = torch.load(el, map_location="cpu")
+                    else:
+                        raise e
         for name, tensor in state_dict.items():
             if rename_initializer:
                 # Basically, "transformer.attention.self.query.weight" is mapped
