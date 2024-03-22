@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, serialTest)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -3081,6 +3081,7 @@ else:
     @largeTensorTest('25GB', device='cpu')
     @largeTensorTest('4GB', device='cuda')
     @unittest.skipIf(IS_JETSON, "psutil issue for largeTensorTest. Too large for Jetson.")
+    @serialTest()
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)

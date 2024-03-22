@@ -32,7 +32,7 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps, \
-    IS_PPC, \
+    IS_PPC, serialTest, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -11384,6 +11384,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("20GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
+    @serialTest(TEST_CUDA)
     def test_cross_entropy_64bit(self, device, reduction):
         labels = torch.zeros(190, 50, dtype=torch.long, device=device)
         logits = torch.ones(190, 229000, 50, dtype=torch.float, device=device)

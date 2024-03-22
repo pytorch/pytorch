@@ -28,7 +28,8 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64, \
+    serialTest
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -171,6 +172,7 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    @serialTest()
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
@@ -850,6 +852,7 @@ except RuntimeError as e:
                 z = x + y
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
+    @serialTest()
     def test_cuda_kernel_loop_overflow(self):
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
         # the kernel loop with a negative index, causing a RuntimeError (invalid write):
