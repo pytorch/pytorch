@@ -14,11 +14,10 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
-    ChoiceCaller,
     TritonTemplateCaller,
 )
 from torch._inductor.test_case import run_tests, TestCase

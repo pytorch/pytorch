@@ -2383,9 +2383,9 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be equal to(.*\n)*.*"
-            "The values of.*must always be related to the values of.*"
-            "by dim0 = 2\\*dim1",
+            "Constraints violated .*!(.*\n)*.*"
+            "by dim0 = 2\\*dim1(.*\n)*.*"
+            "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
@@ -4214,8 +4214,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    x = torch.cos(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    x = torch.cos(l_x_);  l_x_ = None
     x_1 = torch.sin(x);  x = None
     x_2 = torch.abs(x_1);  x_1 = None
     return pytree.tree_unflatten([x_2], self._out_spec)""",
@@ -4249,8 +4249,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
         self.assertExpectedInline(
@@ -4258,8 +4258,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
@@ -4281,8 +4281,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    l_x__1 = torch.cos(l_x_);  l_x_ = None
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    x = torch.cos(l_x_);  l_x_ = None
+    sin = torch.sin(x);  x = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
@@ -4308,8 +4308,8 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            "x = torch.sin(l_x__1)",
-            "cos = torch.cos(x_1)",
+            "x = torch.sin(l_x_)",
+            "cos = torch.cos(l_stack0_)",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):

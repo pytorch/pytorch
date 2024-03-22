@@ -13,7 +13,7 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.test_case import run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -192,6 +191,7 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+    "_batch_norm_with_update": {f16, f32, f64},
 }
 
 if not SM80OrLater:
