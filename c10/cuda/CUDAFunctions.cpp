@@ -136,7 +136,7 @@ void set_device(DeviceIndex device) {
 void device_synchronize() {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_device_synchronization();
+    (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
