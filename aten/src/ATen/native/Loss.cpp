@@ -269,8 +269,8 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
 
     auto iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {

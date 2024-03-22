@@ -131,15 +131,15 @@ struct AttentionKernel {
 
   struct Params {
     // Input tensors
-    scalar_t* query_ptr = nullptr; // [num_queries, num_heads, head_dim]
-    scalar_t* key_ptr = nullptr; // [num_keys, num_heads, head_dim]
-    scalar_t* value_ptr = nullptr; // [num_keys, num_heads, head_dim_value]
-    scalar_t* attn_bias_ptr = nullptr; // [num_heads, num_queries, num_keys]
-    int32_t* seqstart_q_ptr = nullptr;
-    int32_t* seqstart_k_ptr = nullptr;
+    const scalar_t* query_ptr = nullptr; // [num_queries, num_heads, head_dim]
+    const scalar_t* key_ptr = nullptr; // [num_keys, num_heads, head_dim]
+    const scalar_t* value_ptr = nullptr; // [num_keys, num_heads, head_dim_value]
+    const scalar_t* attn_bias_ptr = nullptr; // [num_heads, num_queries, num_keys]
+    const int32_t* seqstart_q_ptr = nullptr;
+    const int32_t* seqstart_k_ptr = nullptr;
 
-    int32_t* causal_diagonal_ptr = nullptr;
-    int32_t* seqlen_k_ptr = nullptr;
+    const int32_t* causal_diagonal_ptr = nullptr;
+    const int32_t* seqlen_k_ptr = nullptr;
     uint32_t causal_diagonal_offset = 0;
 
     // Output tensors
@@ -710,7 +710,7 @@ struct AttentionKernel {
       auto prologueV = [&](int blockN) {
         typename MM1::Mma::IteratorB iterator_V(
             typename MM1::IteratorB::Params{MM1::LayoutB(p.v_strideM)},
-            p.value_ptr + iter_key_start * p.v_strideM,
+            const_cast<scalar_t*>(p.value_ptr + iter_key_start * p.v_strideM),
             {problem_size_1_k, problem_size_1_n},
             thread_id(),
             cutlass::MatrixCoord{0, blockN * MM1::Mma::Shape::kN});
@@ -746,7 +746,7 @@ struct AttentionKernel {
       typename MM0::IteratorA iterator_A(
           typename MM0::IteratorA::Params(
               typename MM0::MmaCore::LayoutA(p.q_strideM)),
-          p.query_ptr,
+          const_cast<scalar_t*>(p.query_ptr),
           {problem_size_0_m, problem_size_0_k},
           thread_id(),
           tb_offset_A);
@@ -754,7 +754,7 @@ struct AttentionKernel {
       typename MM0::IteratorB iterator_B(
           typename MM0::IteratorB::Params(
               typename MM0::MmaCore::LayoutB(p.k_strideM)),
-          p.key_ptr + iter_key_start * p.k_strideM,
+          const_cast<scalar_t*>(p.key_ptr + iter_key_start * p.k_strideM),
           {problem_size_0_k, problem_size_0_n},
           thread_id(),
           tb_offset_B);
@@ -801,7 +801,7 @@ struct AttentionKernel {
             {cutlass::layout::RowMajor(p.bias_strideM)},
             // attn_bias_pointer points to matrix of size (n_queries, n_keys)
             // for the relevant batch_id and head_id
-            p.attn_bias_ptr + query_start * p.bias_strideM + iter_key_start,
+            const_cast<scalar_t*>(p.attn_bias_ptr + query_start * p.bias_strideM + iter_key_start),
             {problem_size_0_m, problem_size_0_n},
             thread_id());
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
@@ -970,7 +970,7 @@ struct AttentionKernel {
 
         typename MM1::Mma::IteratorB iterator_V(
             typename MM1::IteratorB::Params{MM1::LayoutB(p.v_strideM)},
-            p.value_ptr + iter_key_start * p.v_strideM,
+            const_cast<scalar_t*>(p.value_ptr + iter_key_start * p.v_strideM),
             {problem_size_1_k, problem_size_1_n},
             thread_id(),
             cutlass::MatrixCoord{0, blockN * MM1::Mma::Shape::kN});

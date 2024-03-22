@@ -217,14 +217,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         nullptr, // z descriptor for BN-Add-Relu
         nullptr, // z for BN-Add-ReLU
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
         exponential_average_factor,
         at::maybe_data_ptr(running_mean),
         at::maybe_data_ptr(running_var),
@@ -247,14 +247,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
-        running_mean->data_ptr(),
-        running_var->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
+        running_mean->const_data_ptr(),
+        running_var->const_data_ptr(),
         epsilon));
   }
 
