@@ -773,11 +773,7 @@ def min_cut_rematerialization_partition(
             return node.meta["recompute"] == 0
         elif config.aggressive_recomputation:
             ignored_ops = random_ops + compute_intensive_ops
-            # if get_aten_target(node) in ignored_ops:
-            #     is_banned = str(node) in {"addmm", "addmm_1", "addmm_2"}
-            #     if is_banned:
-            #         print(node, node.target, node.meta['val'])
-            #     return is_banned
+
             return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
             if node.op != 'call_function':
@@ -836,7 +832,10 @@ def min_cut_rematerialization_partition(
     banned_nodes = set()
     def ban_recomputation(node):
         banned_nodes.add(node)
-        # A node will only ever be recomputed if
+        # A node will only ever be recomputed if there is a path from an
+        # ancestor of this node to the backwards path through this node that
+        # doesn't go through any saved value. If this node is saved, then that
+        # condition is not possible.
         nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
     for node in joint_graph.nodes:
@@ -882,7 +881,13 @@ def min_cut_rematerialization_partition(
         for user in node.users:
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
-    # This heuristic is fairly straightforward.
+    import heapq
+
+    # This heuristic is fairly straightforward. The idea is that although it is
+    # cheap to recompute pointwise ops, we don't want to end up in a situation
+    # where we have a long chain of pointwise ops from the beginning to the end
+    # of the model (like say, residual connections)
+
     # visited = set()
     # for start_node in joint_graph.nodes:
     #     if start_node not in required_fw_nodes:
