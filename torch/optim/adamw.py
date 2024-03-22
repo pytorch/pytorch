@@ -88,12 +88,37 @@ class AdamW(Optimizer):
                                        if group['capturable'] or group['fused']
                                        else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
+
+    def init_state_per_param(self, param, param_group) -> None:
+        state = self.state[param]
+        if len(state) == 0:
+            # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+            # This is because kernel launches are costly on CUDA and XLA.
+            state["step"] = (
+                torch.zeros((), dtype=_get_scalar_dtype(is_fused=param_group["fused"]), device=param.device)
+                if param_group["capturable"] or param_group["fused"]
+                else torch.tensor(0.0, dtype=_get_scalar_dtype())
+            )
+            # Exponential moving average of gradient values
+            state["exp_avg"] = torch.zeros_like(
+                param, memory_format=torch.preserve_format
+            )
+            # Exponential moving average of squared gradient values
+            state["exp_avg_sq"] = torch.zeros_like(
+                param, memory_format=torch.preserve_format
+            )
+            if param_group['amsgrad']:
+                # Maintains max of all exp. moving avg. of sq. grad. values
+                state["max_exp_avg_sq"] = torch.zeros_like(
+                    param, memory_format=torch.preserve_format
+                )
+
+
     def _init_group(
         self,
         group,
         params_with_grad,
         grads,
-        amsgrad,
         exp_avgs,
         exp_avg_sqs,
         max_exp_avg_sqs,
@@ -112,27 +137,7 @@ class AdamW(Optimizer):
             state = self.state[p]
 
             # State initialization
-            if len(state) == 0:
-                # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
-                # This is because kernel launches are costly on CUDA and XLA.
-                state["step"] = (
-                    torch.zeros((), dtype=_get_scalar_dtype(is_fused=group["fused"]), device=p.device)
-                    if group["capturable"] or group["fused"]
-                    else torch.tensor(0.0, dtype=_get_scalar_dtype())
-                )
-                # Exponential moving average of gradient values
-                state["exp_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
-                )
-                # Exponential moving average of squared gradient values
-                state["exp_avg_sq"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
-                )
-                if amsgrad:
-                    # Maintains max of all exp. moving avg. of sq. grad. values
-                    state["max_exp_avg_sq"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
+            self.init_state_per_param(p, group)
 
             exp_avgs.append(state["exp_avg"])
             exp_avg_sqs.append(state["exp_avg_sq"])
@@ -178,7 +183,6 @@ class AdamW(Optimizer):
                 group,
                 params_with_grad,
                 grads,
-                amsgrad,
                 exp_avgs,
                 exp_avg_sqs,
                 max_exp_avg_sqs,

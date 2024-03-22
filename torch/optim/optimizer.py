@@ -790,6 +790,24 @@ class Optimizer:
             post_hook(self)
 
 
+    def init_state_per_param(self, param: torch.Tensor, param_group: Dict[str, Any]) -> None:
+        r"""Initializes the optimizer state corresponding to the input parameter.
+
+        This method will update the optimizer state in place and will initialize optimizer
+        state if it is not already initialized. The default behavior in many optimizers is
+        for the optimizer state to follow suit according to the shape and dtype of the input
+        parameter. One can override this method to adopt differing behavior, for example to
+        detangle this relationship and allow the optimizer state to have differing dtype/shape
+        from the parameter.
+
+        Args:
+            param (Tensor): A parameter that will be updated by the optimizer.
+            param_group (Dict): The parameter group that the given ``param`` belongs to which
+                specifies optimizer-specific hyperparameters, such as lr and foreach.
+        """
+        raise NotImplementedError
+
+
     @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True) -> None:
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.

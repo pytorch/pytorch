@@ -1292,6 +1292,30 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(type(res1), type(res2))
 
 
+    @optims([optim for optim in optim_db if optim.supports_init_state_per_param], dtypes=[torch.float32])
+    def test_init_state_per_param(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        class MyOptimizer(optim_cls):
+            def __init__(self, params, **kwargs):
+                super().__init__(params, **kwargs)
+
+            # Override init_state_per_param to add a new state my_special_state per parameter
+            def init_state_per_param(self, param, param_group):
+                super().init_state_per_param(param, param_group)
+                state = self.state[param]
+                state["my_special_state"] = True
+
+        params = [torch.randn(3, 2, device=device, dtype=dtype), torch.randn(3, device=device, dtype=dtype)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        optimizer = MyOptimizer(params)
+        optimizer.step()
+
+        self.assertTrue(all(state["my_special_state"] for state in optimizer.state.values()))
+
+
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
 
