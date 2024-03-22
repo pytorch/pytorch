@@ -478,7 +478,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 assert (
                     len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
                 ), "Initializers must be present after loading it from model_state_dict"
-                # Let's make sure consecutive `save` does not create dupes
+                # Let's make sure consecutive `save` calls don't create dupes
                 onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
                 assert (
                     len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
@@ -499,7 +499,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 assert (
                     len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
                 ), "Initializers must be present after loading it from model_state_dict"
-                # Let's make sure consecutive `save` does not create dupes
+                # Let's make sure consecutive `save` calls don't create dupes
                 onnx_program.save(
                     tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
                 )
