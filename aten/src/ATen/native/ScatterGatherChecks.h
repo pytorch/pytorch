@@ -3,6 +3,7 @@
 #include <vector>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/TypeProperties.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -11,7 +12,7 @@ namespace {
 
 // checks whether index.dtype == int64
 // and self.dtype == src.dtype if src is a Tensor
-static void scatter_gather_dtype_check(
+static at::ScalarType scatter_gather_dtype_check(
   const std::string& method_name,
   const Tensor& self,
   const Tensor& index,
@@ -24,14 +25,28 @@ static void scatter_gather_dtype_check(
     );
   }
 
-  if (src_opt.has_value()) {
-    const auto& src = src_opt.value();
-    TORCH_CHECK(
-      self.scalar_type() == src.scalar_type(),
-      method_name, "(): Expected self.dtype to be equal to src.dtype"
-    );
+  //from compute_common_dtype()
+  at::ScalarType common_dtype = self.scalar_type();
+
+  if (src_opt.has_value()){
+    at::native::ResultTypeState state = {};
+    state = at::native::update_result_type_state(self, state);
+    state = at::native::update_result_type_state(src_opt.value(), state);
+    common_dtype = at::native::result_type(state);
   }
+
+  TORCH_INTERNAL_ASSERT(common_dtype != ScalarType::Undefined);
+
+  return common_dtype;
+  // if (src_opt.has_value()) {
+  //   const auto& src = src_opt.value();
+  //   TORCH_CHECK(
+  //     self.scalar_type() == src.scalar_type(),
+  //     method_name, "(): Expected self.dtype to be equal to src.dtype"
+  //   );
+  // }
 }
+
 
 // Used for `gather`-like methods
 // Note: self means the input tensor here

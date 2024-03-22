@@ -275,6 +275,30 @@ class TestScatterGather(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
+    def test_scatter_type_promotion(self, device):
+        dtypes = (torch.float32, torch.float64, torch.bfloat16, torch.float16)
+        for dtype1 in dtypes:
+            for dtype2 in dtypes:
+                x = torch.randn(64, 50, dtype=torch.float64) #TODO device
+                src = torch.randn(64, 50, dtype=torch.float16)
+                index = torch.randint(x.size(1), size=x.size())
+                common_dtype = x.add(src).dtype
+
+                #TODO除了scatter_add，其他共用scatter_meta_impl的也要实现并测试
+                out = x.scatter_add( dim=1,index=index, src=src)
+
+                expected = x.to(common_dtype).scatter_add(dim=1,index=index, src=src)
+                
+                #TODO 这样可以吗
+                # 有python函数可以做类似的类型promote吗？
+                self.assertEqual(expected, out, exact_dtype=True)
+
+
+
+
+        
+
+
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_scatter_expanded_index(self, device, dtype):
