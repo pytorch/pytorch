@@ -23,6 +23,7 @@ from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,
     is_sparse_any,
+    is_sparse_compressed,
     MetaConverter,
 )
 from torch._utils import render_call
@@ -34,9 +35,9 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count
+from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
 if TYPE_CHECKING:
@@ -498,11 +499,8 @@ class FakeTensor(torch.Tensor):
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
-
         if FakeTensorConfig.debug:
-            import traceback
-
-            self._debug_trace = traceback.extract_stack()  # type: ignore[attr-defined]
+            self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
         return self
 
     # In some circumstances, a conventional torch.Tensor constructor
@@ -668,8 +666,6 @@ class FakeTensor(torch.Tensor):
             torch._constrain_as_size(s, min=2)
             out.append(s)
         return out
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
 
 @dataclass(frozen=True)
@@ -1057,6 +1053,8 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
                     raise _BypassDispatchCache("sparse tensor")
+                if is_sparse_compressed(arg):
+                    raise _BypassDispatchCache("sparse compressed tensor")
                 result.append(extract_tensor_metadata(arg))
             elif isinstance(arg, torch.Tensor):
                 raise _BypassDispatchCache("non-fake tensor")
@@ -1098,6 +1096,9 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO: support caching sparse outputs?
         if output.is_sparse:
             raise _BypassDispatchCache("sparse output")
+
+        if is_sparse_compressed(output):
+            raise _BypassDispatchCache("sparse compressed output")
 
         # Can an in-place op really reference a kwarg? If so, then we need
         # to extend the implementation to handle it.
@@ -1213,7 +1214,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        log.debug("%s %s %s", func, args, kwargs)
+        with no_dispatch():
+            log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)

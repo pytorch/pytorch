@@ -12,6 +12,7 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
+from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -369,6 +370,33 @@ class CPUReproTests(TestCase):
                     mod,
                     (v,),
                 )
+
+    @config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_conv_in_channel_1_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(in_channel, out_channel, 3)
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                return res
+
+        # test the case where the channels dim of the input is 1
+        # Reproducer from the maml_omniglot model in Torchbench
+        in_channel = 1
+        out_channel = 3
+        mod = M(in_channel, out_channel).eval()
+        v = torch.randn(5, in_channel, 15, 15)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
 
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -1232,6 +1260,53 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
+    def test_per_channel_fake_quant_module_uint8(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scales = torch.ones((3,)).to(torch.float64)
+                self.zero_points = torch.zeros((3,)).to(torch.int64)
+                self.axis = 1
+                self.quant_min = 0
+                self.quant_max = 255
+                self.dtype = torch.uint8
+
+            def forward(self, input):
+                input = torch.ops.quantized_decomposed.quantize_per_channel(
+                    input,
+                    self.scales,
+                    self.zero_points,
+                    self.axis,
+                    self.quant_min,
+                    self.quant_max,
+                    self.dtype,
+                )
+                input = torch.ops.quantized_decomposed.dequantize_per_channel(
+                    input,
+                    self.scales,
+                    self.zero_points,
+                    self.axis,
+                    self.quant_min,
+                    self.quant_max,
+                    self.dtype,
+                )
+                return input
+
+        m = Mod().eval()
+        x = torch.clamp(
+            torch.randn((1, 3, 224, 224), dtype=torch.float32) * 100,
+            0,
+            255,
+        )
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(m, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
     def test_per_channel_fake_quant_int8(self):
         self._test_per_channel_fake_quant_helper(torch.int8)
 
@@ -1527,25 +1602,19 @@ class CPUReproTests(TestCase):
     def test_auto_simd(self):
         vec_avx512 = codecache.supported_vec_isa_list[0]
         vec_avx2 = codecache.supported_vec_isa_list[1]
-        vec_neon = codecache.supported_vec_isa_list[2]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
-        self.assertTrue(vec_neon.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
         self.assertTrue(vec_avx2.nelements() == 8)
-        self.assertTrue(vec_neon.nelements() == 8)
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
-        self.assertTrue(vec_neon.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
-            elif vec_avx2 in codecache.valid_vec_isa_list():
-                self.assertTrue(isa == vec_avx2)
             else:
-                self.assertTrue(isa == vec_neon)
+                self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
@@ -1575,9 +1644,6 @@ class CPUReproTests(TestCase):
             if vec_avx2 in isa_list:
                 isa = codecache.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
-            elif vec_neon in isa_list:
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1729,6 +1795,72 @@ class CPUReproTests(TestCase):
             ref_grad = test_args_for_ref["input"].grad
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
+
+    def test_decomposed_fake_quant_per_channel(self):
+        def fq(input, scales, zero_points, axis, quant_min, quant_max):
+            res = torch.fake_quantize_per_channel_affine(
+                input, scales, zero_points, axis, quant_min, quant_max
+            )
+            return res
+
+        def qdq(input, scales, zero_points, axis, quant_min, quant_max):
+            res = torch.ops.quantized_decomposed.fake_quant_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max
+            )
+            return res
+
+        def run_eager_aten_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            res = fq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        def run_eager_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            res = qdq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        def run_compile_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            compiled_qdq = torch.compile(qdq)
+            res = compiled_qdq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        input = torch.randn(2, 3, 224, 224)
+        input[1, 2, 3, 4] = 257
+        input.requires_grad_()
+        scales = torch.ones((3,))
+        zero_points = torch.zeros((3,))
+        axis = 1
+        quant_min = -128
+        quant_max = 127
+
+        aten_input = copy.deepcopy(input)
+        compiler_input = copy.deepcopy(input)
+
+        res_aten_eager, input_grad_aten_eager = run_eager_aten_fake_quant(
+            aten_input, scales, zero_points, axis, quant_min, quant_max
+        )
+        res_decomp_eager, input_grad_decomp_eager = run_eager_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        )
+        res, input_grad = run_compile_decomposed_fake_quant(
+            compiler_input, scales, zero_points, axis, quant_min, quant_max
+        )
+
+        self.assertEqual(res_aten_eager, res)
+        self.assertEqual(res_decomp_eager, res)
+        self.assertEqual(input_grad_aten_eager, input_grad)
+        self.assertEqual(input_grad_decomp_eager, input_grad)
+        self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
@@ -2878,6 +3010,35 @@ class CPUReproTests(TestCase):
         self.assertRaises(RuntimeError, lambda: func(example_inputs))
         self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
 
+    def test_nn_param_assign(self):
+        # https://github.com/pytorch/pytorch/issues/99569
+        class Model2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
+                self.batchnorm = nn.BatchNorm2d(num_features=5)
+                self.conv_weight = torch.randn(5, 3, 3, 3)
+                self.conv_bias = torch.randn(5)
+
+            def forward(self, x):
+                self.conv.weight = nn.Parameter(self.conv_weight)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
+                self.conv.eval()
+                x = self.conv(x)
+                x = self.batchnorm(x)
+                x = F.relu(x)
+                return x
+
+        input_tensor = torch.randn(1, 3, 10, 10)
+        func = Model2().to("cpu")
+
+        with torch.no_grad():
+            func.train(False)
+            v1 = func(input_tensor)
+            jit_func = torch.compile(func, fullgraph=True)
+            v2 = jit_func(input_tensor)
+            self.assertEqual(v1, v2)
+
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
@@ -3420,9 +3581,70 @@ class CPUReproTests(TestCase):
         # TODO: support vectorized int64 masked load
         assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @config.patch({"cpp.dynamic_threads": True})
+    def test_reduction_with_dynamic_threads(self):
+        def fn(a, b):
+            return a.sum(), b.sum()
+
+        self.common(
+            fn,
+            (torch.randn(1000), torch.rand(1000)),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_float64(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.weight2 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.bias = torch.nn.Parameter(torch.randn(10, dtype=torch.float64))
+
+            def forward(self, x1):
+                v1 = torch.mm(x1, self.weight1)
+                v2 = torch.addmm(self.bias, x1, self.weight2)
+                return (v1, v2)
+
+        mod = M().eval()
+        v = torch.randn(10, 10, dtype=torch.float64)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
+    def test_fused_attention_conv(self):
+        # https://github.com/pytorch/pytorch/issues/121174.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_conv = torch.nn.Conv2d(4, 4, 1)
+                self.k_conv = torch.nn.Conv2d(4, 4, 1)
+                self.v_conv = torch.nn.Conv2d(4, 4, 1)
+
+            def forward(self, x):
+                q = self.q_conv(x)
+                k = self.k_conv(x)
+                v = self.v_conv(x)
+                q = q.permute(0, 2, 1, 3)
+                k = k.permute(0, 2, 1, 3)
+                v = v.permute(0, 2, 1, 3)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, dropout_p=0.0, is_causal=False
+                )
+
+        fn = Model()
+        x = torch.randn(1, 4, 2, 2)
+        self.common(fn, (x,))
+
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
     if HAS_CPU and not IS_MACOS:

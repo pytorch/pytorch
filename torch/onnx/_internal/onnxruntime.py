@@ -182,7 +182,7 @@ class OrtOperatorSupport(OperatorSupport):
             return False
         # This is the and the only place to decide if aten op is supported.
         if node.op == "call_function" and node.target in self._onnx_support_dict:
-            logger.warning(
+            logger.info(
                 "support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -192,7 +192,7 @@ class OrtOperatorSupport(OperatorSupport):
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
         if super().is_node_supported(submodules, node):
-            logger.warning(
+            logger.info(
                 "extra_support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -302,10 +302,6 @@ def _get_onnx_devices(
         ...,
     ]
 ) -> Tuple["ORTC.OrtDevice", ...]:
-    devices = tuple(value.device for value in values if isinstance(value, torch.Tensor))
-    if len(devices) == 0:
-        devices = (torch.device("cpu"),)
-
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
 
@@ -313,13 +309,12 @@ def _get_onnx_devices(
         value: Union[
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
-        device: torch.device,
     ) -> int:
         if isinstance(value, torch.Tensor):
             return ORTC.OrtDevice(
-                _get_ort_device_type(device.type),
+                _get_ort_device_type(value.device.type),
                 ORTC.OrtDevice.default_memory(),
-                _device_id_or_zero(device.index),
+                _device_id_or_zero(value.device.index),
             )
         elif isinstance(
             value, (torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool)
@@ -330,10 +325,11 @@ def _get_onnx_devices(
         else:
             raise ValueError("Unsupported value type: " + str(type(value)))
 
-    ort_devices = tuple(
-        _map_tensor_or_sym_to_device(value, devices[0]) for value in values
-    )
-    return ort_devices
+    if len(values) > 0:
+        ort_devices = tuple(_map_tensor_or_sym_to_device(value) for value in values)
+        return ort_devices
+    else:
+        return (_map_tensor_or_sym_to_device(1),)
 
 
 def _get_ortvalues_from_torch_tensors(

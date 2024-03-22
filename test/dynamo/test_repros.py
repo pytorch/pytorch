@@ -4095,6 +4095,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, x)
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_arange_in_bounds(self):
+        # see https://github.com/pytorch/pytorch/issues/113002
+        class PaddingNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, lengths):
+                max_seq_len = lengths.max().item()
+                row_vector = torch.arange(0, max_seq_len, 1)
+                matrix = torch.unsqueeze(lengths, dim=-1)
+                mask = row_vector < matrix
+                mask = mask.type(torch.float32)
+                mask_3d_btd = mask[:, :, None]
+                return mask_3d_btd
+
+        model = PaddingNet()
+        lengths = torch.tensor([5, 4, 4, 4], dtype=torch.int32)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(model)
+        opt_fn(lengths)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_user_ctor_ctx_manager_custom_init(self):
         class UserCtxManager:
             def __init__(self, x):
@@ -4281,6 +4305,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # We graph-break here, so the failure should be eager
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
+
+    def test_super_in_staticmethod(self):
+        class A:
+            @staticmethod
+            def foo():
+                return super().__init__()
+
+        def fn(obj):
+            return obj.foo()
+
+        obj = A()
+
+        try:
+            fn(obj)
+        except Exception as e:
+            orig_str = str(e)
+        self.assertIn("no arguments", orig_str)
+
+        try:
+            torch.compile(backend="eager")(fn)(obj)
+        except Exception as e:
+            compiled_str = str(e)
+        self.assertEqual(orig_str, compiled_str)
 
 
 if __name__ == "__main__":

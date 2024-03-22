@@ -1,6 +1,6 @@
 from copy import copy
 from functools import total_ordering
-from typing import FrozenSet, Iterable, List, Optional, Union
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Union
 
 
 class TestRun:
@@ -210,6 +210,24 @@ class TestRun:
 
         return (self | other) - (self - other) - (other - self)
 
+    def to_json(self) -> Dict[str, Any]:
+        r: Dict[str, Any] = {
+            "test_file": self.test_file,
+        }
+        if self._included:
+            r["included"] = list(self._included)
+        if self._excluded:
+            r["excluded"] = list(self._excluded)
+        return r
+
+    @staticmethod
+    def from_json(json: Dict[str, Any]) -> "TestRun":
+        return TestRun(
+            json["test_file"],
+            included=json.get("included", []),
+            excluded=json.get("excluded", []),
+        )
+
 
 @total_ordering
 class ShardedTest:
@@ -275,8 +293,8 @@ class ShardedTest:
     def __str__(self) -> str:
         return f"{self.test} {self.shard}/{self.num_shards}"
 
-    def get_time(self) -> float:
-        return self.time or 0
+    def get_time(self, default: float = 0) -> float:
+        return self.time if self.time is not None else default
 
     def get_pytest_args(self) -> List[str]:
         filter = self.test.get_pytest_filter()

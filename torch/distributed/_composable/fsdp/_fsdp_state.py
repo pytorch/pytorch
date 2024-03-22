@@ -186,8 +186,6 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
-            if state._fsdp_param_group:
-                state._fsdp_param_group.lazy_init()
         if self._fsdp_param_group and not self._reshard_after_forward_root:
             # For the root, if `self._reshard_after_forward_root` is not set,
             # do not reshard after forward since for training,
@@ -195,6 +193,11 @@ class FSDPState(_State):
             self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
+        # Run parameter group lazy inits after initializing FQNs for improved
+        # error messages
+        for state in self._state_ctx.all_states:
+            if state._fsdp_param_group:
+                state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
         self._comm_ctx.init()

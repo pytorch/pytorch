@@ -2262,7 +2262,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             storage_offset_ == 0); // because we just reallocated
         return storage_.mutable_data();
       }
-      const Allocator* allocator = storage_.allocator();
+      Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
       // an external memory segment has been wrapped with Tensor and we don't
       // know how to reallocate it. However, in order to preserve legacy C2

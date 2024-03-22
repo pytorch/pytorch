@@ -243,22 +243,22 @@ inline std::string plainDimName(Layout layout) {
   }
 }
 
-inline int rowDimension(Layout layout, IntArrayRef size) {
+inline size_t rowDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int columnDimension(Layout layout, IntArrayRef size) {
+inline size_t columnDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedColumn(layout) ? 2 : 1);
 }
 
-inline int compressedDimension(
+inline size_t compressedDimension(
     Layout layout,
     IntArrayRef size,
     size_t dense_ndim = 0) {
   return size.size() - dense_ndim - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int plainDimension(
+inline size_t plainDimension(
     Layout layout,
     IntArrayRef size,
     size_t dense_ndim = 0) {
