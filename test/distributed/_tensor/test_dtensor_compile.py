@@ -370,6 +370,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             return out.view(-1)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.ones(4, 4)
+        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        ref = fn(x_dt)
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
 
