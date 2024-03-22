@@ -173,7 +173,6 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
     auto dv = at::empty_like(value);
-    auto dO = at::empty_like(out);
     run_cudnn_SDP_bprop(batch_size /*int64_t b*/,
                         num_heads /*int64_t h*/,
                         max_seqlen_batch_q /*int64_t s_q*/,
@@ -186,7 +185,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         key /*const Tensor& k*/,
                         value /*const Tensor& v*/,
                         out /*const Tensor& o*/,
-                        dO/*const Tensor& dO*/,
+                        grad_out/*const Tensor& dO*/,
                         logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
                         dq/*Tensor& dQ*/,
                         dk/*Tensor& dK*/,

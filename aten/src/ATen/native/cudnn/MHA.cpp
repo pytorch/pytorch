@@ -426,7 +426,8 @@ auto build_graph_and_tensors_backward(
             .set_dim(
                 std::vector<int64_t>(softmaxstats.sizes().begin(), softmaxstats.sizes().end()))
             .set_stride(std::vector<int64_t>(
-                softmaxstats.strides().begin(), softmaxstats.strides().end())));
+                softmaxstats.strides().begin(), softmaxstats.strides().end()))
+	    .set_data_type(fe::DataType_t::FLOAT));
      auto DO = mha_graph->tensor(
         fe::graph::Tensor_attributes()
             .set_name("dO")
@@ -561,7 +562,6 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
-   TORCH_WARN("run_cudnn_SDP_bprop");
    cudnnHandle_t handle = getCudnnHandle();
    auto key = MHACacheKeyWrapper(
        b,
@@ -618,7 +618,6 @@ void run_cudnn_SDP_bprop(
    {Dv, dV.data_ptr()},
    // pass by value
    {attn_scale, &scaling_factor}};
-   TORCH_WARN(q.data_ptr(), k.data_ptr(), v.data_ptr(), o.data_ptr(), dO.data_ptr(), softmaxstats.data_ptr(), dQ.data_ptr(), dK.data_ptr(), dV.data_ptr());
    if (dropout_probability != 0.0f) {
        variant_pack[Seed]   = dropoutseed.data_ptr();
        variant_pack[Offset] = dropoutoffset.data_ptr();
