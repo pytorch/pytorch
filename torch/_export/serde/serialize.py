@@ -42,6 +42,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BufferMutationSpec,
+    ConstantArgument,
     CustomObjArgument,
     Device,
     ExportedProgram,
@@ -372,6 +373,7 @@ class GraphState:
     tensor_values: Dict[str, TensorMeta] = field(default_factory=dict)
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
+    constant_values: Dict[str, Union[int, bool, str, float, type(None)]] = field(default_factory=dict)
     is_single_tensor_return: bool = False
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
@@ -406,7 +408,8 @@ class GraphModuleSerializer:
         elif isinstance(node.meta["val"], torch.SymInt):
             raise AssertionError("SymInt graph input is not implemented yet.")
         elif isinstance(node.meta["val"], (int, bool, str, float, type(None))):
-            graph_input = self.serialize_input(node.meta["val"])
+            graph_input = Argument.create(as_constant=ConstantArgument(name=node.name))
+            self.graph_state.constant_values[node.name] = self.serialize_input(node.meta["val"])
         elif isinstance(node.meta["val"], ep.CustomObjArgument):
             class_fqn = node.meta["val"].class_fqn
             graph_input = Argument.create(
@@ -1210,6 +1213,7 @@ class GraphModuleSerializer:
             sym_int_values=self.graph_state.sym_int_values,
             sym_bool_values=self.graph_state.sym_bool_values,
             custom_obj_values=self.graph_state.custom_obj_values,
+            constant_values=self.graph_state.constant_values,
             outputs=self.graph_state.outputs,
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
@@ -1462,22 +1466,18 @@ class GraphModuleDeserializer:
                 script_obj_meta
             )
 
+        for name, constant_obj in serialized_graph.constant_values.items():
+            self.serialized_name_to_meta[name] = self.deserialize_input(constant_obj)
+
         # Inputs: convert to placeholder nodes in FX.
         for i, input_ in enumerate(serialized_graph.inputs):
-            if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
+            if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj", "as_constant"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                # we will overwrite it
+                placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
-            elif input_.type in (
-                "as_int",
-                "as_float",
-                "as_bool",
-                "as_none",
-                "as_string",
-            ):
-                node_name = f"arg{i}"
-                placeholder_node = self.graph.placeholder(node_name)
-                placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:
                 raise SerializeError(f"Invalid input type {input_}")
 
@@ -2282,6 +2282,8 @@ def _canonicalize_graph(
             return a.as_optional_tensors
         elif a.type == "as_custom_obj":
             return None
+        elif a.type == "as_constant":
+            return a.as_constant
         elif a.type == "as_operator":
             return None
         else:
@@ -2324,6 +2326,8 @@ def _canonicalize_graph(
                     return None
                 else:
                     raise AssertionError(f"Unknown optional tensor type: {a}")
+            elif isinstance(a, ConstantArgument):
+                return a.name
             else:
                 raise AssertionError(f"Unknown argument type: {a}")
 
@@ -2431,6 +2435,8 @@ def _canonicalize_graph(
         elif isinstance(a, SymBoolArgument):
             if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_bool_values)
+        elif isinstance(a, ConstantArgument):
+            a.name = _rename(a.name, graph.constant_values)
         else:
             raise AssertionError(f"Unknown argument type: {a}")
 
@@ -2477,6 +2483,9 @@ def _canonicalize_graph(
     sorted_sym_bool_values = dict(
         sorted(graph.sym_bool_values.items(), key=lambda x: x[0])
     )
+    sorted_constant_values = dict(
+        sorted(graph.constant_values.items(), key=lambda x: x[0])
+    )
 
     # Stage 5: Recurse in subgraphs.
     counter = 0
@@ -2497,6 +2506,7 @@ def _canonicalize_graph(
         tensor_values=sorted_tensor_values,
         sym_int_values=sorted_sym_int_values,
         sym_bool_values=sorted_sym_bool_values,
+        constant_values=sorted_constant_values,
         is_single_tensor_return=graph.is_single_tensor_return,
     )
     return graph, name_table
