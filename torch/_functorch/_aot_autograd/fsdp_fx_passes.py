@@ -4,18 +4,40 @@ import copy
 
 def if_tensor_is_resized_to_full_then_resize_it_to_0_at_end_of_graph(mod):
     # FSDP graph has this invariant that if a tensor needs to be resized to full during execution of the graph, it *will* be resized to 0 again before exit of graph.
+    return_op = None
+    for n in mod.graph.nodes:
+        if n.op == "output":
+            return_op = n
+            break
     tensors_resized = set()
     for n in mod.graph.nodes:
         if n.target is torch.ops.inductor.resize_storage_bytes_.default and n.args[1] > 0:
             tensors_resized.add(n.args[0])
     for tensor in list(tensors_resized):
-        return_op = None
-        for n in mod.graph.nodes:
-            if n.op == "output":
-                return_op = n
-                break
         with mod.graph.inserting_before(return_op):
             tensor_resized_to_0 = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (tensor, 0), {})
+        mod.graph.lint()
+        mod.recompile()
+
+
+def move_resize_to_full_to_beginning_of_graph(mod):
+    # This pass is always a good idea to do so to avoid any use-before-resize issues.
+    # We don't need to worry about peak memory usage because after all FX passes, all the storage resize ops will be removed.
+    primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
+    last_placeholder_op = None
+    for n in mod.graph.nodes:
+        if n.op == "placeholder":
+            last_placeholder_op = n
+        else:
+            break
+    resize_to_full_nodes = set()
+    for n in mod.graph.nodes:
+        if n.target is torch.ops.inductor.resize_storage_bytes_.default and n.args[0] in primal_inputs_tensor_only and n.args[1] > 0:
+            resize_to_full_nodes.add(n)
+    for resize_to_full_node in list(resize_to_full_nodes):
+        with mod.graph.inserting_after(last_placeholder_op):
+            tensor_resized_to_full = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (resize_to_full_node.args[0], resize_to_full_node.args[1]), {})
+        mod.graph.erase_node(resize_to_full_node)
         mod.graph.lint()
         mod.recompile()
 
@@ -80,7 +102,28 @@ def input_is_used_in_other_ops(ops, inp_n, allowlist_callback=lambda n: False):
     return False
 
 
-def reinplace_foreach_copy_if_input_has_no_other_use_in_graph(mod):
+def input_is_used_in_alias_ops(ops, inp_n):
+    for n in ops:
+        if inp_n in flatten_arg_list(n.args) and inp_n.target in [
+            # TODO(yf225): list all possible view ops here
+            torch.ops.aten.select.Dimname,
+            torch.ops.aten.select.int,
+            torch.ops.aten.permute.default,
+            torch.ops.aten._unsafe_view.default,
+            torch.ops.aten.view.default,
+            torch.ops.aten.expand.default,
+            torch.ops.aten.slice.Tensor,
+            torch.ops.aten.reshape.default,
+            torch.ops.aten.broadcast_tensors.default,
+            torch.ops.aten.t.default,
+            torch.ops.aten.as_strided.default,
+        ]:
+            return True
+    return False
+
+
+
+def reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(mod):
     """
     _foreach_copy_1 = torch.ops.aten._foreach_copy.default([primal_1, primal_2, primal_3, primal_4], [getitem_28, getitem_33, getitem_38, getitem_43]);  view_1 = view_2 = view_3 = view_4 = getitem_28 = getitem_33 = getitem_38 = getitem_43 = None
     getitem_44: "f32[2, 76137800]" = _foreach_copy_1[0]
@@ -102,14 +145,9 @@ def reinplace_foreach_copy_if_input_has_no_other_use_in_graph(mod):
     for i, n in enumerate(node_list):
         if n.target is torch.ops.aten._foreach_copy.default:
             _foreach_copy_outplace_node = n
-            if all(not input_is_used_in_other_ops(
+            if all(not input_is_used_in_alias_ops(
                 node_list,
                 inp_n,
-                allowlist_callback=lambda n_: (
-                    n_ == _foreach_copy_outplace_node \
-                    or (n_.target is torch.ops.inductor.resize_storage_bytes_.default) \
-                    or (n_.target is torch.ops.aten.copy_.default and n_.args[0] == inp_n and n_.args[1].target is operator.getitem and n_.args[1].args[0] == _foreach_copy_outplace_node and n_.args[1].args[1] == inp_ind)
-                )  # ignore 1) this op, 2) resize_storage_bytes_ ops, 3) copy_ op that just copies the getitem back into the foreach_copy input
             ) for inp_ind, inp_n in enumerate(_foreach_copy_outplace_node.args[0])):
                 with mod.graph.inserting_before(_foreach_copy_outplace_node):
                     for i, arg in enumerate(_foreach_copy_outplace_node.args[0]):

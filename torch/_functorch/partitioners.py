@@ -687,7 +687,7 @@ def min_cut_rematerialization_partition(
         fsdp_fx_passes.if_tensor_is_resized_to_0_immediately_after_inplace_copy_then_delete_the_copy(joint_module)
         fsdp_fx_passes.replace_primal_clone_at_beginning_of_graph_with_primal(joint_module)
         fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(joint_module)
-        fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(joint_module)
+        fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(joint_module)
         fsdp_fx_passes.replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this_op(joint_module)
 
     # print(lazy_format_graph_code("Joint graph after FSDP-specific passes", joint_module))

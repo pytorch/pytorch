@@ -111,6 +111,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     if functorch_config.enable_fsdp_fx_passes:
+        fsdp_fx_passes.move_resize_to_full_to_beginning_of_graph(gm)
         fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
         fsdp_fx_passes.remove_clone_if_input_has_no_other_use_in_graph(gm)
         fsdp_fx_passes.remove_inplace_copy_into_the_same_buffer(gm)
