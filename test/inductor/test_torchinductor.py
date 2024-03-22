@@ -6744,8 +6744,7 @@ class CommonTemplate:
 
         self.common(f, (torch.zeros((4, 2)),))
 
-
-        code = run_and_get_triton_code(torch.compile(f), torch.zeros((4,2)))
+        code = run_and_get_triton_code(torch.compile(f), torch.zeros((4, 2)))
         # Make sure that we haven't added complex support and made this test
         # invalid. If we've added complex support please update the test to use
         # a different set of view ops we don't lower
@@ -6761,8 +6760,6 @@ class CommonTemplate:
             return out, torch.view_as_real(z + 1)
 
         self.common(f, (torch.zeros((4, 2)),))
-
-
 
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):

@@ -116,6 +116,7 @@ TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
 """
 
+
 def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
@@ -2719,8 +2720,8 @@ class FlexibleLayout(Layout):
         super().__init__(device, dtype, size, strides)
 
 
-class AliasedLayoutSHOULDREMOVE(Layout):
-    """Shares the same storage as another tensor"""
+class NonOwningLayout(Layout):
+    """Uses the same storage as another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -2795,7 +2796,9 @@ class MutationLayoutSHOULDREMOVE(Layout):
             return target
 
         result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), "MutationLayoutSHOULDREMOVE must refer to a buffer"
+        assert isinstance(
+            result, Buffer
+        ), "MutationLayoutSHOULDREMOVE must refer to a buffer"
         return result
 
     def real_layout(self):
@@ -2893,7 +2896,7 @@ class Buffer(IRNode):
         return False
 
     def freeze_layout(self):
-        if not isinstance(self.layout, (MultiOutputLayout, AliasedLayoutSHOULDREMOVE)):
+        if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
     def freeze_layout_with_stride_order(self, order):
@@ -2932,7 +2935,7 @@ class Buffer(IRNode):
         pass
 
     def get_inputs_that_alias_output(self):
-        if isinstance(self.layout, AliasedLayoutSHOULDREMOVE):
+        if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
 
@@ -3664,7 +3667,7 @@ class ConcatKernel(NopKernel):
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src):
-                src.data.layout = AliasedLayoutSHOULDREMOVE(dst)
+                src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
         pw = Pointwise.create(
@@ -3954,7 +3957,7 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), AliasedLayoutSHOULDREMOVE):
+            while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
@@ -5352,7 +5355,8 @@ class MultiOutput(ExternKernel):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel) and len(inp.get_inputs_that_alias_output()) > 0
+            if isinstance(inp, FallbackKernel)
+            and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
 
@@ -7371,7 +7375,7 @@ class Wait(ExternKernelAlloc):
         # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
         collective_op.decide_layout()
         return Wait(
-            layout=AliasedLayoutSHOULDREMOVE(collective_op),
+            layout=NonOwningLayout(collective_op),
             inputs=[collective_op],
         )
 
