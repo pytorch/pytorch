@@ -637,6 +637,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_hardtanh_int8_mixed_bf16_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->Hardtanh pattern.
+        Match.nodes:
+            [qconv2d_pointwise_default_1, convert_element_type_5, clamp_min_1, clamp_max_1, mul_2, round_2, add_1, clamp_min_2,
+             clamp_max_1, mul_2, round_2, add_1, clamp_min_2, clamp_max_2, convert_element_type_8
+            [qconv2d_pointwise_default, convert_element_type_13, clamp_min_3, clamp_max_3]
+        """
+        self._qconv2d_unary_cpu_test_helper(
+            unary_op=torch.nn.Hardtanh(),
+            int8_mixed_bf16=True,
+            qconv2d_unary_matcher_nodes=14,
+        )
+
+    @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_hardswish_cpu(self):
