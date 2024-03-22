@@ -2086,7 +2086,6 @@ class ExportedProgramDeserializer:
             example_inputs=None,
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
-            from_export=True
         )
         return upgrader.upgrade(exported_program)
 
