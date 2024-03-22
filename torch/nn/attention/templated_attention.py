@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
@@ -19,10 +21,12 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 
-sdpa = HigherOrderOperator("sdpa")
+sdpa = HigherOrderOperator("templated_attention")
+
+# maybe remove kwargs
 
 
-def math_attention(q, k, v, score_mod, *other_buffers):
+def math_attention(q, k, v, score_mod: Callable, *other_buffers):
     scores = q @ k.transpose(-2, -1)
 
     from functorch.dim import dims
@@ -100,9 +104,9 @@ def sdpa_fake_tensor_mode(*args, **kwargs):
     return sdpa_dense(*args, **kwargs)
 
 
-sdpa.fallthrough(DispatchKey.PythonDispatcher)
-sdpa.fallthrough(DispatchKey.PythonTLSSnapshot)
-sdpa.fallthrough(DispatchKey.ADInplaceOrView)
-sdpa.fallthrough(DispatchKey.BackendSelect)
-sdpa.fallthrough(DispatchKey.AutocastCPU)
-sdpa.fallthrough(DispatchKey.AutocastCPU)
+# sdpa.fallthrough(DispatchKey.PythonDispatcher)
+# sdpa.fallthrough(DispatchKey.PythonTLSSnapshot)
+# sdpa.fallthrough(DispatchKey.ADInplaceOrView)
+# sdpa.fallthrough(DispatchKey.BackendSelect)
+# sdpa.fallthrough(DispatchKey.AutocastCPU)
+# sdpa.fallthrough(DispatchKey.AutocastCPU)

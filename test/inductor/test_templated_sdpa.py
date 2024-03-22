@@ -14,12 +14,14 @@ def create_attention(score_mod):
 
 class TestTemplatedSDPA(TestCase):
     def run_test(self, score_mod):
-        sdpa = create_attention(score_mod)
-        compiled_sdpa = torch.compile(sdpa)
+        sdpa_partial = create_attention(score_mod)
+        compiled_sdpa = torch.compile(sdpa_partial)
         q = torch.randn((4, 8, 2048, 64), dtype=torch.float16, device="cuda")
         k = torch.randn((4, 8, 2048, 64), dtype=torch.float16, device="cuda")
         v = torch.randn((4, 8, 2048, 64), dtype=torch.float16, device="cuda")
-        ref_out = sdpa(q.to(torch.float64), k.to(torch.float64), v.to(torch.float64))
+        ref_out = sdpa_partial(
+            q.to(torch.float64), k.to(torch.float64), v.to(torch.float64)
+        )
         compiled_out = compiled_sdpa(q, k, v)
         torch.testing.assert_close(ref_out.to(dtype=torch.float32), compiled_out)
 

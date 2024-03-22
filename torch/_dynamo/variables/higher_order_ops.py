@@ -512,8 +512,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "sdpa":
-            return SdpaHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "templated_attention":
+            return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1302,58 +1302,60 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         return fn.call_function(tx, args, kwargs)
 
 
-class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def create_wrapped_node(self, tx, args, kwargs):
+class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @staticmethod
+    def normalize_to_kwargs(args, kwargs):
+        if len(args) == 3:
+            return args, kwargs
+        elif len(args) > 3:
+            args = args[:3], {"score_mod": args[3]}
+        else:
+            raise NotImplementedError(
+                f"Expected 3 or 4 arguments but got {len(args)}.\n"
+            )
+
+    def create_wrapped_node(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
         # See NOTE [HigherOrderOperator tracing design] for more details
-        checkpoint = tx.copy_graphstate()
-        graph_checkpoint = tx.output.graph
+        # checkpoint = tx.copy_graphstate()
+        from torch._dynamo.symbolic_convert import InstructionTranslator
 
-        example_vals = [torch.zeros((), dtype=args[0].dtype)] + [
-            torch.zeros((), dtype=torch.int) for _ in range(4)
-        ]
-        with tx.output.new_subtracer() as tracer:
+        tx: InstructionTranslator = tx
+        # Create score tensor with the right size
+        score = args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
 
-            def create_dynamo_inp(example_value, name):
-                new_proxy = tracer.create_graph_input(name)
-                from torch._dynamo.source import ConstantSource
-                from .builder import wrap_fx_proxy
+        def create_scalar():
+            return args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
 
-                new_arg = wrap_fx_proxy(
-                    tx=tx,
-                    proxy=new_proxy,
-                    example_value=example_value,
-                    source=ConstantSource("foo"),
-                )
-                return new_arg
-
-            example_vals = [
-                create_dynamo_inp(example_val, f"inp_{i}")
-                for i, example_val in enumerate(example_vals)
-            ]
+        bhmn = [create_scalar() for _ in range(4)]
+        new_args = [score, *bhmn]
+        function = kwargs["score_mod"]
         (
-            body_r,
+            (body_output, body_treespec),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[3],  # function
-            example_vals,
-            {},
-            graph_checkpoint,
-            checkpoint,
-            manually_set_subgraph_inputs=True,
+            function,
+            new_args,
+            {},  # expect only args no kwargs for now
+            description="templated_attention",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
         )
 
         body_name = add_subgraph(
             tx,
             self.source,
-            "sdpa",
+            "templated_attention",
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+            # torch.fx.GraphModule({}, body_graph)
         )
 
         body_node = make_attr(tx, body_name)
 
-        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
+        # TODO UPDATE THISSince, we call `speculate_subgraph`
         # all the arguments are lifted.
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
@@ -1361,7 +1363,7 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
+            body_output.as_proxy(),
         )
 
         return proxy_args, {}, example_value
@@ -1371,10 +1373,15 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, args, kwargs)
+        norm_args, norm_kwargs = self.normalize_to_kwargs(args, kwargs)
+        p_args, p_kwargs, example_value = self.create_wrapped_node(
+            tx, norm_args, norm_kwargs
+        )
 
         # Store the invocation as a call
-        inp_args, _ = proxy_args_kwargs(args[:-1], kwargs)
+        # Norm_kwargs contains the score_function and we dont want to proxy this because
+        # Proxying user defined functions is not supported.
+        inp_args, _ = proxy_args_kwargs(norm_args, {})
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
