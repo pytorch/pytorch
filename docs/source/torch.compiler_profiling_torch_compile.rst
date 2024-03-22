@@ -208,7 +208,7 @@ When an operator is launched, we expect to see a few events:
     :alt: Visualization in the chrome://trace viewer, showing the three types of events: CPU-side event, kernel launch, and GPU-side event
 
 **Inductor-generated Triton kernels:**
-1. The **CPU-side event** should appear as an event prefixed with "triton_". The events currently have minimal information - the kernel name and a launch, but less information than typical aten kernel launches (which contain input shapes, types, etc.).
+1. The **CPU-side event** should appear as an event prefixed with "triton\_". The events currently have minimal information - the kernel name and a launch, but less information than typical aten kernel launches (which contain input shapes, types, etc.).
 2. The **kernel launch** should appear as cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
 3. The **GPU-side event** should appear, and how descriptive the name will be depends on the inductor config for unique_kernel_names
 
