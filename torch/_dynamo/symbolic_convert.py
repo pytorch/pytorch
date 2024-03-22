@@ -1857,6 +1857,9 @@ class InstructionTranslatorBase(
         self.push(SliceVariable(items))
         self.STORE_SUBSCR(inst)
 
+    def END_FOR(self, inst):
+        self.popn(2)
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
