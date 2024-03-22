@@ -2720,11 +2720,17 @@ class ShapeEnv:
                 config.extended_debug_create_symbol is not None and
                 str(sympy_expr) in config.extended_debug_create_symbol.split(',')
             )
+            maybe_more_info = ""
+            if not is_debug:
+                maybe_more_info = (
+                    ", for more info run with "
+                    f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{sympy_expr}\""
+                )
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
-                "create_symbol %s = %s for %s %s%s (%s)%s",
+                "create_symbol %s = %s for %s %s%s (%s)%s%s",
                 sympy_expr, val, source.name(), range_str,
-                maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
+                maybe_user_loc, format_frame(fsummary), maybe_more_info, maybe_extra_debug, stack_info=is_debug
             )
 
             self.counter["create_symbol"] += 1
@@ -4024,6 +4030,11 @@ class ShapeEnv:
         if is_debug and config.extended_debug_cpp:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
+        else:
+            maybe_extra_debug += (
+                "\nFor C++ stack trace, run with "
+                "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
+            )
 
         return fsummary, maybe_user_loc, maybe_extra_debug
 
@@ -4032,12 +4043,19 @@ class ShapeEnv:
             str_g = str(g)
             is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            maybe_more_info = ""
+            if not is_debug:
+                maybe_more_info = (
+                    ", for more info run with "
+                    f"TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED=\"{str_g}\""
+                )
             self.log.info(
-                "%s %s [guard added]%s (%s)%s",
+                "%s %s [guard added]%s (%s)%s%s",
                 prefix if not forcing_spec else f"{prefix} (forcing_spec)",
                 str_g,
                 maybe_user_loc,
                 format_frame(fsummary),
+                maybe_more_info,
                 maybe_extra_debug,
                 stack_info=is_debug,
             )
