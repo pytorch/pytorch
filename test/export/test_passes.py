@@ -34,19 +34,25 @@ from torch._export.utils import (
     sequential_split,
 )
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
+from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import impl, _scoped_library
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
+    find_library_location,
     run_tests,
-    skipIfTorchDynamo,
     TestCase,
+    skipIfTorchDynamo,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
 )
 from torch.utils import _pytree as pytree
 
@@ -193,6 +199,18 @@ class TestPasses(TestCase):
         super().setUp()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
+
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            if IS_WINDOWS:
+                lib_file_path = find_library_location('torchbind_test.dll')
+            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
@@ -353,6 +371,34 @@ class TestPasses(TestCase):
             op_overload = getattr(getattr(torch.ops.aten, name), overload)
             if torch.Tag.core in op_overload.tags and is_view_op(op_overload._schema):
                 self.assertIsNotNone(get_view_copy_of_view_op(op_overload._schema))
+
+    def test_custom_obj_tuple_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        inp = torch.randn(2, 3)
+        orig_res = m(inp)
+        ep_res = ep.module()(inp)
+
+        without_token_ep = _remove_effect_tokens(ep)
+        without_token_ep.verifier().check(without_token_ep)
+        without_token_res = without_token_ep.module()(inp)
+
+        self.assertTrue(torch.allclose(orig_res, ep_res))
+        self.assertTrue(torch.allclose(orig_res, without_token_res))
 
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):
