@@ -25,7 +25,6 @@
   - torch/onnx/**
   - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
-  - caffe2/python/onnx/**
   approved_by:
   - BowenBao
   - abock
@@ -297,8 +296,6 @@
 - name: IDEEP
   patterns:
   - third_party/ideep
-  - caffe2/ideep/**
-  - caffe2/python/ideep/**
   - cmake/Modules/FindMKLDNN.cmake
   - third_party/mkl-dnn.BUILD
   approved_by:

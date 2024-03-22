@@ -49,8 +49,6 @@
 
 "module: mkldnn":
 - third_party/ideep
-- caffe2/ideep/**
-- caffe2/python/ideep/**
 - cmake/Modules/FindMKLDNN.cmake
 - third_party/mkl-dnn.BUILD
 - torch/csrc/jit/codegen/onednn/**

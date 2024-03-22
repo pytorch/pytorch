@@ -261,54 +261,6 @@ if __name__ == "__main__":
 That's it. You just added a new operator to the benchmark suite!
 
 
-### Add a New Caffe2 Operator
-The steps to add a new Caffe2 operator is the same as that for a PyTorch operator. The code below shows how to add Caffe2 `Add` operator:
-```python
-import operator_benchmark as op_bench
-from caffe2.python import core
-
-add_long_configs = op_bench.cross_product_configs(
-    M=[8, 64, 128],
-    N=range(2, 10, 3),
-    K=[2 ** x for x in range(0, 3)],
-    tags=["long"]
-)
-
-add_short_configs = op_bench.config_list(
-    attrs=[
-        [8, 16, 32],
-        [16, 16, 64],
-        [64, 64, 128],
-    ],
-    attr_names=["M", "N", "K"],
-    tags=["short"],
-)
-
-class AddBenchmark(op_bench.Caffe2BenchmarkBase):
-
-    def init(self, M, N, K):
-        self.input_one = self.tensor(M, N, K)
-        self.input_two = self.tensor(M, N, K)
-        self.output = self.tensor(M, N, K)
-        self.set_module_name("add")
-
-    def forward(self):
-        op = core.CreateOperator(
-            "Add", [self.input_one, self.input_two], self.output, **self.args
-        )
-
-        return op
-
-op_bench.generate_c2_test(add_long_configs + add_short_configs, AddBenchmark)
-
-if __name__ == "__main__":
-    op_bench.benchmark_runner.main()
-```
-There are two things worth mentioning in this code:
-* `self.tensor` is a helper function which takes shapes and returns a Caffe2 blob. It is designed to make the tensor creation step easier compared to the standard Caffe2 way.
-* `generate_c2_test` is used to register Caffe2 tests with the benchmark.
-
-
 ### Add a List of Operators
 In the previous sections, we introduced the steps required to add a single operator to the benchmark suite. There are scenarios where you want to extend the benchmark suite with a list of operators which can share the same inputs. For example, to benchmark `abs` and `acos` operators, you can use the same set of inputs for both.
 
@@ -416,37 +368,3 @@ The example below shows the relevant code for that:
 self.input_one = torch.rand(M, N, K, requires_grad=True)
 generate_pt_gradient_test(long_configs + short_configs, TorchAddBenchmark)
 ```
-#### For Caffe2 Gradient Ops
-To add Caffe2 gradient ops, we need to implement a new backward method in the benchmark class:
-```python
-class AddBenchmark(op_bench.Caffe2BenchmarkBase):
-
-    def init(self, M, N, K):
-        self.input_one = self.tensor(M, N, K)
-        self.input_two = self.tensor(M, N, K)
-        self.input_one_grad = self.tensor(M, N, K)
-        self.input_two_grad = self.tensor(M, N, K)
-        self.output = self.tensor(M, N, K)
-        self.set_module_name("add")
-
-    def forward(self):
-        op = core.CreateOperator(
-            "Add", [self.input_one, self.input_two], self.output, **self.args
-        )
-
-        return op
-
-    def backward(self):
-        grad_op = core.CreateOperator(
-            "AddGradient",
-            [self.output, self.input_one, self.input_two],
-            [self.input_one_grad, self.input_two_grad], **self.args
-        )
-
-        return grad_op
-
-op_bench.generate_c2_gradient_test(long_configs + short_configs,AddBenchmark)
-```
-After the class is implemented, we need to register the tests with `generate_c2_gradient_test` function.
-
-This concludes the overview of the operator benchmark suite.

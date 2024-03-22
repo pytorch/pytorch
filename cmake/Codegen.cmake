@@ -35,22 +35,12 @@ endfunction()
 
 ################################################################################
 
-# ---[ Write the macros file
-configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/../caffe2/core/macros.h.in
-    ${CMAKE_BINARY_DIR}/caffe2/core/macros.h)
-
 # ---[ Installing the header files
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
-        DESTINATION include
-        FILES_MATCHING PATTERN "*.h")
 if(NOT INTERN_BUILD_ATEN_OPS)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
           DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
 endif()
-install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
-        DESTINATION include/caffe2/core)
 
 # ---[ ATen specific
 if(INTERN_BUILD_ATEN_OPS)

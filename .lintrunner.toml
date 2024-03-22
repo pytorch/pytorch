@@ -5,8 +5,6 @@ exclude_patterns = [
     '.git/**',
     'build_test_custom_build/**',
     'build/**',
-    'caffe2/**',
-    'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
     'fb/**',
@@ -105,8 +103,6 @@ code = 'MYPY'
 include_patterns = [
     'torch/**/*.py',
     'torch/**/*.pyi',
-    'caffe2/**/*.py',
-    'caffe2/**/*.pyi',
     'test/test_bundled_images.py',
     'test/test_bundled_inputs.py',
     'test/test_complex.py',
@@ -298,7 +294,6 @@ command = [
 code = 'NOQA'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
-    'caffe2/**',
     'fb/**',
     '**/fb/**'
     ]
@@ -468,7 +463,6 @@ include_patterns = [
 exclude_patterns = [
     'torch/csrc/utils/pybind.h',
     'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
-    'caffe2/**/*',
 ]
 command = [
     'python3',
@@ -703,7 +697,6 @@ exclude_patterns = [
     'torch/distributed/run.py',
     'functorch/benchmarks/**',
     # Grandfathered in
-    'caffe2/**',
     'fb/**',
     '**/fb/**',
 ]
@@ -997,10 +990,6 @@ command = [
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
     'torch/__init__.py',  # Skip this file to format because it's part of the public API
-    # We don't care too much about files in this directory, don't enforce
-    # formatting on them
-    'caffe2/**/*.py',
-    'caffe2/**/*.pyi',
     'fb/**',
     '**/fb/**',
     'third_party/**/*.py',
@@ -2633,7 +2622,6 @@ command = [
 code = 'RUFF'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
-    'caffe2/**',
     'functorch/docs/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
