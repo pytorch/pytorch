@@ -29,6 +29,8 @@ static void addc_mul_div_out_mps(const Tensor& self,
     return;
   }
 
+  TORCH_CHECK(self.is_contiguous(), "self must be contiguous");
+
   MPSStream* mpsStream = getCurrentMPSStream();
 
   struct CachedGraph : public MPSCachedGraph {
