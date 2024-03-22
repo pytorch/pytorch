@@ -436,8 +436,9 @@ def create_functionalized_fn(
                     f_inpt
                 ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
-            # TODO: to support graph breaks in ppFSDP eventually, we'll need to handle the case where a param e.g. starts with a valid storage on graph entry,
-            # and needs to have its storage resized to zero on graph exit. This will require putting the resize_() op directly in the graph.
+            # TODO: to support graph breaks in ppFSDP eventually, we'll need to handle the case where a param
+            # e.g. starts with a valid storage on graph entry, and needs to have its storage resized to zero
+            # on graph exit. This will require putting the resize_() op directly in the graph.
             for i, (inpt_old, inpt_f) in enumerate(
                 zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
             ):
