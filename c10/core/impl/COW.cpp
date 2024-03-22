@@ -101,12 +101,13 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
 
-  return make_intrusive<StorageImpl>(
+  return make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
       *std::move(new_data_ptr),
       storage.allocator(),
-      storage.resizable());
+      storage.resizable(),
+      storage.device_type());
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
