@@ -234,6 +234,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             original_mm.replace_all_uses_with(new_mm_cont)
             new_mm_cont.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+        counters["inductor"]["batch_linear_post_grad"] += 1
 
 
 @register_fusion("group_linear", pre_grad=False)
@@ -315,6 +316,7 @@ class GroupLinearFusion(GroupFusion):
             original_mm.replace_all_uses_with(new_mm)
             new_mm.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+        counters["inductor"]["group_linear"] += 1
 
 
 class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
@@ -351,7 +353,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             input, other = node.args
             shape = list(input.meta["tensor_meta"].shape)  # type: ignore[union-attr]
             group_key = (
-                "batch_" + self.op.__name__.lower() + "_post_grad",
+                "batch_" + self.op.__name__.lower().split(".")[0] + "_post_grad",
                 str(shape),
                 str(input.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
                 str(other.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
@@ -388,6 +390,9 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 original_add.replace_all_uses_with(new_add)
                 new_add.meta.update(original_add.meta)
                 graph.erase_node(original_add)
+        counters["inductor"][
+            "batch_aten_" + self.op.__name__.lower().split(".")[0]
+        ] += 1
 
 
 @register_fusion("batch_linear_lhs")
@@ -464,6 +469,7 @@ class BatchLinearLHSFusion(BatchFusion):
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)
+        counters["inductor"]["batch_linear_lhs"] += 1
 
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]):
@@ -576,6 +582,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                 linear.replace_all_uses_with(getitem)
                 getitem.meta.update(linear.meta)
                 graph.erase_node(linear)
+        counters["inductor"]["batch_linear"] += 1
 
 
 @register_fusion("batch_layernorm")
@@ -740,6 +747,7 @@ class BatchLayernormFusion(BatchFusion):
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)
+        counters["inductor"]["batch_layernorm"] += 1
 
 
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
@@ -757,7 +765,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
             # for relu op, we also use the inplace to construct the key
             group_key = (
-                "batch_" + self.op.__name__.lower() + "_pre_grad",
+                "batch_" + self.op.__name__.lower().split(".")[0] + "_pre_grad",
                 str(input.meta["example_value"].shape),
                 str(node.kwargs.get("inplace", False)),
             )
@@ -801,6 +809,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)
+        counters["inductor"]["batch_" + self.op.__name__.lower().split(".")[0]] += 1
 
 
 @register_fusion("batch_tanh")
@@ -1006,13 +1015,6 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             ):
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
-                if isinstance(rule, GroupFusion):
-                    counters["inductor"]["group_fusion"] += 1
-                elif isinstance(rule, BatchFusion):
-                    counters["inductor"]["batch_fusion"] += 1
-                else:
-                    counters["inductor"]["unknown_group_batch_fusion"] += 1
-
                 log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
