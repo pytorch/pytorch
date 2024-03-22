@@ -979,7 +979,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+            x.get_name(): input_gen_fns.get(
+                i, functools.partial(cls.benchmark_example_value, written_to=False)
+            )(x)
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
@@ -1138,7 +1140,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     @staticmethod
-    def benchmark_example_value(node, written_to=False):
+    def benchmark_example_value(node, written_to=True):
         """
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
