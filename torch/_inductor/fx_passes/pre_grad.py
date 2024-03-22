@@ -131,21 +131,25 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             pass_execution_and_save(
                 normalization_pass_aten.apply,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
             )
             pass_execution_and_save(
                 group_batch_fusion_passes,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
             )
             pass_execution_and_save(
                 fuse_chunk_squeeze_cat_pass.apply,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
             )
             pass_execution_and_save(
                 fuse_split_linear_add_pass.apply,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_split_linear_add_pass",
             )
 
@@ -159,21 +163,25 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 pass_execution_and_save(
                     pattern_matcher_pass_aten.apply,
                     gm,
+                    example_inputs,
                     f"[Pre grad(predispatch IR)]Apply split_cat, index: {ind}",
                 )
             pass_execution_and_save(
                 remove_reshape_pass.apply,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply remove_reshape_pass",
             )
             pass_execution_and_save(
                 fuse_parallel_linear_pass,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_parallel_linear_pass",
             )
             pass_execution_and_save(
                 lambda graph: remove_split_ops(graph.owning_module, shape_prop),
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply remove_split_ops",
             )
             shape_prop(gm)
