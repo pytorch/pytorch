@@ -7028,6 +7028,15 @@ class Subgraph(IRNode):
     graph: Optional["GraphLowering"] = None
 
 
+def _has_aliased_buffers(buffers):
+    buffers = [
+        buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
+        for buffer in buffers
+    ]
+    # assuming the same buffer is represented by the same IRNode object
+    return len({id(buffer) for buffer in buffers}) < len(buffers)
+
+
 @dataclasses.dataclass
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
@@ -7090,16 +7099,8 @@ class Conditional(ExternKernel):
         true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
         false_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
 
-        def _aliased_buffers(outputs):
-            buffers = [
-                output.unwrap_view() if isinstance(output, ReinterpretView) else output
-                for output in outputs
-            ]
-            # assuming the same buffer is represented by the same IRNode object
-            return len({id(buffer) for buffer in buffers}) < len(outputs)
-
         for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
-            if _aliased_buffers(true_outputs):
+            if _has_aliased_buffers(true_outputs):
                 raise AssertionError(
                     "Output aliasing is currently not supported in compiled torch.cond. "
                     f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
@@ -7154,6 +7155,116 @@ class Conditional(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_conditional(self)
+
+
+@dataclasses.dataclass
+class WhileLoop(ExternKernel):
+    operands: Optional[List[TensorBox]] = None
+    cond_subgraph: Optional[Subgraph] = None
+    body_subgraph: Optional[Subgraph] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self,
+        operands: List[TensorBox],
+        cond_subgraph: Subgraph,
+        body_subgraph: Subgraph,
+        layout: MultiOutputLayout,
+    ):
+        self.operands = operands
+        self.cond_subgraph = cond_subgraph
+        self.body_subgraph = body_subgraph
+
+        super().__init__(
+            name=None,
+            layout=layout,  # type: ignore[arg-type]
+            inputs=operands,  # type: ignore[list-item]
+        )
+
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(
+        cls,
+        cond_fn: Subgraph,
+        body_fn: Subgraph,
+        operands: List[TensorBox],
+    ):
+        operands = [cls.realize_input(x) for x in operands]
+
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
+
+        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
+        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
+
+        if _has_aliased_buffers(body_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.while_loop. "
+                f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
+            )
+
+        # make sure cond_fn returns a boolean scalar Tensor
+        assert len(cond_outputs) == 1, cond_outputs
+        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
+        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+
+        assert (
+            len(operands) > 0
+        ), "torch.while_loop is assumed to have at least one operand."
+
+        device = operands[0].get_device()
+
+        # make sure operands and body outputs are structurally equivalent
+        assert len(operands) == len(body_outputs), (operands, body_outputs)
+        for i, (op, bo) in enumerate(zip(operands, body_outputs)):
+            assert op.get_size() == bo.get_size(), (i, op, bo)
+            assert op.get_stride() == bo.get_stride(), (i, op, bo)
+            # assume all operands and outputs are on the same device
+            # as the MultiOutputLayout below requires single device
+            assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
+            assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
+            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+
+        while_loop = WhileLoop(
+            operands=operands,
+            cond_subgraph=cond_fn,
+            body_subgraph=body_fn,
+            # asserted above that there is at least one operand
+            layout=MultiOutputLayout(device),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                while_loop,
+                [(list, i)],
+            )
+            for i, output in enumerate(body_outputs)
+        ]
+
+        while_loop.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_while_loop(self)
 
 
 class InterpreterShim(torch.fx.Interpreter):

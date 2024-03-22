@@ -31,6 +31,7 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
+    free_symbol_startswith,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
@@ -240,18 +241,13 @@ def reduction_project(reduction_type, acc):
 
 
 def is_to_lowp_dtype(expr):
-    to_exprs = ["cvt_fp32_to_lowp_fp", "c10::convert"]
-    if any(to_expr in expr for to_expr in to_exprs):
-        if "half" in expr:
-            return torch.half
-        if "bfloat16" in expr:
-            return torch.bfloat16
-    return None
+    to_exprs = ["convert<half>", "convert<bfloat16>"]
+    return any(to_expr in expr for to_expr in to_exprs)
 
 
-def get_lowp_to_fp32_expr(lowp_var, src_dtype, kernel):
+def get_lowp_to_fp32_expr(lowp_var, kernel):
     if isinstance(kernel, CppVecKernel):
-        return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[src_dtype]}>({lowp_var})"
+        return f"at::vec::convert<float>({lowp_var})"
     else:
         assert isinstance(kernel, CppKernel)
         return f"c10::convert<float>({lowp_var})"
@@ -1647,11 +1643,9 @@ class CppKernel(Kernel):
         def find_fp32_var(var, cache):
             fp32_cse_var = None
             fp32_cse_var_name = None
-            lowp_dtype = None
             for expr, cse_var in cache.items():
                 if cse_var == var:
-                    lowp_dtype = is_to_lowp_dtype(expr)
-                    if lowp_dtype:
+                    if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
                         assert m
                         fp32_cse_var_name = m.group()
@@ -1661,13 +1655,11 @@ class CppKernel(Kernel):
                         fp32_cse_var = cse_var
                         break
                 assert fp32_cse_var is not None
-            return fp32_cse_var, lowp_dtype
+            return fp32_cse_var
 
-        fp32_var, lowp_dtype = find_fp32_var(var_to_store, self.cse.cache)
+        fp32_var = find_fp32_var(var_to_store, self.cse.cache)
         if fp32_var:
-            self.cse.cache[
-                get_lowp_to_fp32_expr(var_to_store, lowp_dtype, self)
-            ] = fp32_var
+            self.cse.cache[get_lowp_to_fp32_expr(var_to_store, self)] = fp32_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -2714,7 +2706,10 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes:
+            if load_dtype not in self.load_supported_dtypes and (
+                index.has(self.itervars[self.tiling_idx])
+                or free_symbol_startswith(index, "tmp")
+            ):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -2947,7 +2942,6 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
                 if dtype not in [
-                    torch.float64,
                     torch.float,
                     torch.bfloat16,
                     torch.float16,
