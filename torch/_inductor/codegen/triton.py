@@ -3885,7 +3885,8 @@ class TritonScheduling(BaseScheduling):
             with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
 
-            argument_names, _, _ = kernel.args.python_argdefs()
+            kernel_args = kernel.args
+            _, call_args, _ = kernel_args.python_argdefs()
 
         else:
             template_node = nodes[0]
@@ -3918,16 +3919,15 @@ class TritonScheduling(BaseScheduling):
                 V.set_kernel_handler = handler_fn
 
             assert rec_kernel is not None
-            argument_names, _, _ = rec_kernel.args.python_argdefs()
+            kernel_args = rec_kernel.args
+            _, call_args, _ = kernel_args.python_argdefs()
 
         non_out_arg_indices = []
-        for i, arg in enumerate(argument_names):
+        for i, arg in enumerate(call_args):
             # in_out arguments get cloned before kernel invocation,
-            # as part of our benchmarkingm safe to take from params
-            if "in_out" in arg or "in_" in arg:
+            # as part of our benchmarking so any input is safe to use from params
+            if arg in kernel_args.input_buffers:
                 non_out_arg_indices.append(i)
-            else:
-                assert "out" in arg
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         mod = PyCodeCache.load(src_code)
