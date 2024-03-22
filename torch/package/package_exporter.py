@@ -480,15 +480,6 @@ class PackageExporter:
             )
             return
 
-        # Exporting triton is not always possible, work around it
-        if module_name == "triton":
-            self.dependency_graph.add_node(
-                module_name,
-                action=_ModuleProviderAction.SKIP,
-                provided=True,
-            )
-            return
-
         if module_name == "_mock":
             self.dependency_graph.add_node(
                 module_name,
