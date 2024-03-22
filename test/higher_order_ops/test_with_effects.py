@@ -1,5 +1,8 @@
 # Owner(s): ["module: functorch"]
 import unittest
+from collections import deque
+from functools import partial
+from typing import List
 
 import torch
 import torch._dynamo
@@ -19,6 +22,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.utils.hooks import RemovableHandle
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -198,6 +202,130 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
         res.sum().backward()
+
+    def test_register_effectful_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch._dynamo.config.capture_scalar_outputs = True
+            torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+            torch.library.define(
+                "mylib::record_scalar_tensor",
+                "(Tensor x, str prefix) -> ()",
+                lib=lib,
+            )
+
+            # global variable to store the recorded tensor and prefix.
+            recorded_dict = {}
+
+            # Pytorch custorm op implementation
+            @torch.library.impl(
+                "mylib::record_scalar_tensor",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def record_scalar_tensor(x, prefix):
+                recorded_dict[prefix] = x.clone()
+                return
+
+            # Meta function of the custom op
+            @torch.library.impl_abstract(
+                "mylib::record_scalar_tensor",
+                lib=lib,
+            )
+            def record_scalar_tensor_meta(x, prefix):
+                return
+
+            from torch._higher_order_ops.effects import (
+                _EffectType,
+                _register_effectful_op,
+            )
+
+            _register_effectful_op(
+                torch.ops.mylib.record_scalar_tensor.default, _EffectType.ORDERED
+            )
+
+            my_config = {}
+            my_config["MockModule"] = "mean"
+            my_config["MockModule.linear"] = "mean"
+            my_config["MockModule.relu"] = "mean"
+
+            class MyLinear(torch.nn.Module):
+                def __init__(self, in_features, out_features):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(
+                        torch.randn(out_features, in_features), requires_grad=True
+                    )
+                    self.bias = torch.nn.Parameter(
+                        torch.randn(out_features), requires_grad=True
+                    )
+
+                def forward(self, x):
+                    return torch.nn.functional.linear(x, self.weight, self.bias)
+
+            class MockModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = MyLinear(10, 10)
+                    self.register_buffer(
+                        "buf0", torch.randn(10, 10, requires_grad=True)
+                    )
+
+                def forward(self, x):
+                    return torch.nn.functional.relu(self.linear(x) + self.buf0)
+
+            def forward_hook(
+                module: torch.nn.Module,
+                inputs: torch.Tensor,
+                output: torch.Tensor,
+                prefix: str,
+                aggregate_method: str,
+            ) -> torch.Tensor:
+                if aggregate_method == "mean":
+                    torch.ops.mylib.record_scalar_tensor(output.mean(), prefix)
+                elif aggregate_method == "max":
+                    torch.ops.mylib.record_scalar_tensor(output.max(), prefix)
+                else:
+                    # demo purpose, using "min"
+                    torch.ops.mylib.record_scalar_tensor(output.sum(), prefix)
+                return output
+
+            def add_hooks(module, config):
+                handles: List[RemovableHandle] = []
+                q = deque([(module.__class__.__name__, module)])
+                while q:
+                    name, m = q.pop()
+                    children = [(name + "." + n, y) for (n, y) in m.named_children()]
+                    q.extend(children)
+                    aggregate_method = config.get(name, "mean")
+                    prefix = name + ":" + aggregate_method
+                    handle = m.register_forward_hook(
+                        partial(
+                            forward_hook,
+                            prefix=prefix,
+                            aggregate_method=aggregate_method,
+                        )
+                    )
+                    if handle:
+                        handles.append(handle)
+                return handles
+
+            x = torch.randn(10, 10, device="cuda")
+            mod = MockModule().to("cuda")
+
+            add_hooks(mod, my_config)
+
+            opt_mod = torch.compile(backend="inductor")(mod)
+            y = opt_mod(x)
+
+            self.assertTrue(torch.allclose(y, mod(x)))
+            # Ensure it works well with backward
+            y.sum().backward()
+            # Ensure the grad is existing
+            self.assertTrue(isinstance(opt_mod.linear.weight.grad, torch.Tensor))
+
+            self.assertEqual(len(recorded_dict), 2)
+            self.assertTrue("MockModule.linear:mean" in recorded_dict)
+            self.assertTrue("MockModule:mean" in recorded_dict)
 
 
 if __name__ == "__main__":
