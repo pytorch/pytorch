@@ -182,6 +182,21 @@ Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& muta
     }
 }
 
+Tensor FunctionalInverses::expand_as_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& other) {
+    if (inverse_return_mode == InverseReturnMode::AlwaysView) {
+      // NB: assumes mutated_view is an expanded view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      return at::sum_to(
+          mutated_view,
+          base.sym_sizes(),
+          /*always_return_non_view=*/inverse_return_mode == InverseReturnMode::NeverView
+      );
+    }
+}
+
 Tensor FunctionalInverses::permute_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::IntArrayRef dims) {
     return at::functionalization::permute_inverse(mutated_view, dims, inverse_return_mode);
 }
