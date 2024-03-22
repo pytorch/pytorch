@@ -214,13 +214,13 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
 
     def test_register_effectful_custom_op(self):
+        lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
         try:
-            lib = torch.library.Library("intermediate", "FRAGMENT")  # noqa: TOR901
             torch._dynamo.config.capture_scalar_outputs = True
             torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
             torch.library.define(
-                "intermediate::record_scalar_tensor",
+                "mylib::record_scalar_tensor",
                 "(Tensor x, str prefix) -> ()",
                 lib=lib,
             )
@@ -230,14 +230,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             # Pytorch custorm op implementation
             @torch.library.impl(
-                "intermediate::record_scalar_tensor", "CompositeExplicitAutograd"
+                "mylib::record_scalar_tensor", "CompositeExplicitAutograd"
             )
             def record_scalar_tensor(x, prefix):
                 recorded_dict[prefix] = x.clone()
                 return
 
             # Meta function of the custom op
-            @torch.library.impl_abstract("intermediate::record_scalar_tensor")
+            @torch.library.impl_abstract("mylib::record_scalar_tensor")
             def record_scalar_tensor_meta(x, prefix):
                 return
 
@@ -247,7 +247,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
 
             _register_effectful_op(
-                torch.ops.intermediate.record_scalar_tensor.default, _EffectType.ORDERED
+                torch.ops.mylib.record_scalar_tensor.default, _EffectType.ORDERED
             )
 
             my_config = {}
@@ -287,12 +287,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 aggregate_method: str,
             ) -> torch.Tensor:
                 if aggregate_method == "mean":
-                    torch.ops.intermediate.record_scalar_tensor(output.mean(), prefix)
+                    torch.ops.mylib.record_scalar_tensor(output.mean(), prefix)
                 elif aggregate_method == "max":
-                    torch.ops.intermediate.record_scalar_tensor(output.max(), prefix)
+                    torch.ops.mylib.record_scalar_tensor(output.max(), prefix)
                 else:
                     # demo purpose, using "min"
-                    torch.ops.intermediate.record_scalar_tensor(output.sum(), prefix)
+                    torch.ops.mylib.record_scalar_tensor(output.sum(), prefix)
                 return output
 
             def add_hooks(module, config):
@@ -334,7 +334,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertTrue("MockModule:mean" in recorded_dict)
 
         finally:
-            cleanup_op("intermediate::record_scalar_tensor")
+            cleanup_op("mylib::record_scalar_tensor")
             del lib
 
 
