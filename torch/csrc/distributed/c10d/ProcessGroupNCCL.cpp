@@ -1171,6 +1171,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
+              << writer.getWriterTarget();
     writer.write(ncclTrace);
     return true;
   }
