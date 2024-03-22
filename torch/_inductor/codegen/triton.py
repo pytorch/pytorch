@@ -872,10 +872,6 @@ class TritonOverrides(OpOverrides):
     def ceil(x):
         return f"libdevice.ceil({x})"
 
-    @staticmethod
-    def fma(a, b, c):
-        return f"libdevice.fma({a}, {b}, {c})"
-
 
 TritonOverrides._initialize_pointwise_overrides("triton")
 
