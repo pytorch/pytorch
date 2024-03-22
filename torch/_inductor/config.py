@@ -533,7 +533,7 @@ class triton:
 
     # Should we skip cudagraphing graphs with dynamic shape inputs
     # If False, we will re-record a graph for each unique set of shape inputs
-    cudagraph_skip_dynamic_graphs = True
+    cudagraph_skip_dynamic_graphs = False
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
