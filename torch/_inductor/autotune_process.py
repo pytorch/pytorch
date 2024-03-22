@@ -488,6 +488,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
 class TritonBenchmarkRequest(BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
@@ -530,8 +531,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
-        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
-
         if torch.version.hip and self.matrix_instr_nonkdim != 0:
             return functools.partial(
                 run_method,
@@ -540,7 +539,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                stream=get_raw_stream(self.output_tensor_meta.device.index),
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
                 matrix_instr_nonkdim=self.matrix_instr_nonkdim,
             )
         else:
@@ -551,12 +551,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                stream=get_raw_stream(self.output_tensor_meta.device.index),
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
             )
-
-    def precompile(self):
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        getattr(mod, self.kernel_name).precompile()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
