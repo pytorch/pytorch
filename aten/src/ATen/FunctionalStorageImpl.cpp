@@ -103,6 +103,7 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
 
 void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& metas) {
   TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
+
   if (metas.size() > 1) {
     for (size_t i = 1; i < metas.size(); ++i) {
       TORCH_CHECK(!metas[i].is_as_strided,

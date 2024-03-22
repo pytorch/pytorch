@@ -37,7 +37,8 @@ struct ViewMeta {
       : forward_fn(std::move(forward)),
         reverse_fn(std::move(reverse)),
         out_index(out_idx),
-        is_multi_output(is_multi_output) {}
+        is_multi_output(is_multi_output),
+        is_as_strided(is_as_strided) {}
 
   std::function<Tensor(const Tensor&, int64_t)> forward_fn;
   std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
