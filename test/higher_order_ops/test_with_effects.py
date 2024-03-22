@@ -25,16 +25,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils.hooks import RemovableHandle
 
 
-def cleanup_op(opname):
-    ns, name = opname.split("::")
-    if not hasattr(torch.ops, ns):
-        return
-    actual_ns = getattr(torch.ops, ns)
-    if not hasattr(actual_ns, name):
-        return
-    delattr(actual_ns, name)
-
-
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
     def setUp(self):
@@ -214,8 +204,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
 
     def test_register_effectful_custom_op(self):
-        lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
-        try:
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch._dynamo.config.capture_scalar_outputs = True
             torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
@@ -230,14 +219,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             # Pytorch custorm op implementation
             @torch.library.impl(
-                "mylib::record_scalar_tensor", "CompositeExplicitAutograd"
+                "mylib::record_scalar_tensor",
+                "CompositeExplicitAutograd",
+                lib=lib,
             )
             def record_scalar_tensor(x, prefix):
                 recorded_dict[prefix] = x.clone()
                 return
 
             # Meta function of the custom op
-            @torch.library.impl_abstract("mylib::record_scalar_tensor")
+            @torch.library.impl_abstract(
+                "mylib::record_scalar_tensor",
+                lib=lib,
+            )
             def record_scalar_tensor_meta(x, prefix):
                 return
 
@@ -332,10 +326,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertEqual(len(recorded_dict), 2)
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
-
-        finally:
-            cleanup_op("mylib::record_scalar_tensor")
-            del lib
 
 
 if __name__ == "__main__":
