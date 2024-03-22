@@ -1729,14 +1729,10 @@ class InstructionTranslatorBase(
         else:
             assert not self.accept_prefix_inst
 
-    def BINARY_OP(self, inst):
-        if sys.version_info >= (3, 11):
-            opname = dis._nb_ops[inst.arg][0][3:]  # type: ignore[attr-defined]
-            if opname.startswith("INPLACE"):
-                return getattr(self, "INPLACE_" + opname[8:])(inst)
-            return getattr(self, "BINARY_" + opname)(inst)
-        else:
-            unimplemented("BINARY_OP requires Python 3.11+")
+    if sys.version_info >= (3, 11):
+
+        def BINARY_OP(self, inst):
+            return _binary_op_lookup[inst.arg](self, inst)
 
     def PRECALL(self, inst):
         pass
@@ -2233,6 +2229,16 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
         raise ReturnValueOp()
+
+
+if sys.version_info >= (3, 11):
+    _binary_op_lookup = [
+        getattr(
+            InstructionTranslator,
+            opname[3:] if "INPLACE" in opname else f"BINARY_{opname[3:]}",
+        )
+        for opname, _ in dis._nb_ops  # type: ignore[attr-defined]
+    ]
 
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
