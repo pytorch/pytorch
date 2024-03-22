@@ -934,6 +934,20 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @config.patch({"is_predispatch": True})
+    def test_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+
+            def forward(self, x):
+                t = torch.tensor(x.size(-1), device=self.device, dtype=torch.float)
+                t = torch.sqrt(t * 3)
+                return x * t
+
+        self.check_model(M(self.device), (torch.randn(5, 5, device=self.device),))
+
     def test_zero_grid_with_backed_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -2298,6 +2312,7 @@ CPU_TEST_FAILURES = {
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
+    "test_constant": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
     "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
