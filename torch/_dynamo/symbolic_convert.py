@@ -722,8 +722,9 @@ class InstructionTranslatorBase(
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
 
-        if inst.starts_line:
-            self.starts_line(inst.starts_line)
+        # skip tracking current line number for stack traces
+        # if inst.starts_line:
+        #     self.starts_line(inst.starts_line)
 
         if (
             not self.stack

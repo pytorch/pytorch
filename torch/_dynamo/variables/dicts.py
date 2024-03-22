@@ -185,6 +185,7 @@ class ConstDictVariable(VariableTracker):
             codegen.append_output(create_instruction("BUILD_MAP", arg=len(self.items)))
 
     def getitem_const(self, arg: VariableTracker):
+        return self.items[0]
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             raise KeyError(arg.value)

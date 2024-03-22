@@ -673,6 +673,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
+        # Hack to skip creating a new FX node, just return a copy of args[0]
+        if isinstance(args[0], TensorVariable):
+            value = args[0]
+            return TensorVariable(
+                value.proxy,
+                dtype=value.dtype,
+                device=value.device,
+                layout=value.layout,
+                ndim=value.ndim,
+                requires_grad=value.requires_grad,
+                is_quantized=value.is_quantized,
+                is_sparse=value.is_sparse,
+                class_type=value,
+            )
+
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):

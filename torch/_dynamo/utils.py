@@ -1650,6 +1650,10 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
+    # Hack to bypass output shape/dtype/device computation.
+    # Assume everything returns the same shape as its first input.
+    return node.args[0].meta["example_value"]
+
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
