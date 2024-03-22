@@ -3198,7 +3198,16 @@ class ShapeEnv:
                 is_trivial = False
                 if any(is_dim(source) for s in expr.free_symbols for source in symbol_to_source[s]):
                     is_trivial = self.dim_constraints.add(expr)
-                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
+                try:
+                    guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
+                except AssertionError as e:
+                    # Workaround missing symbol error
+                    # TODO(jansel): figure out why this is needed and remove this case
+                    for var in expr.free_symbols:
+                        if not symbol_to_source[var]:
+                            symbol_to_source[var].extend(self.var_to_sources[var])
+                    # try again:
+                    guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
@@ -3226,10 +3235,6 @@ class ShapeEnv:
             except Exception:
                 self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
-
-        for var, sources in self.var_to_sources.items():
-            if not symbol_to_source[var]:
-                symbol_to_source[var].extend(sources)
 
         # First, issue all the non-trivial guards.
         for guard in self.guards:
