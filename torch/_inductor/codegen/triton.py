@@ -3866,8 +3866,6 @@ class TritonScheduling(BaseScheduling):
         for n in nodes:
             n.last_usage = set()
 
-        non_out_arg_indices: List[int] = []
-
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -3887,33 +3885,49 @@ class TritonScheduling(BaseScheduling):
             with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
 
-            argument_names, test, test2 = kernel.args.python_argdefs()
-            for i, arg in enumerate(argument_names):
-                # in_out arguments get cloned before kernel invocation,
-                # safe to take from params
-                if "in_out" in arg or "in_" in arg:
-                    non_out_arg_indices.append(i)
-                else:
-                    assert "out" in arg
+            argument_names, _, _ = kernel.args.python_argdefs()
 
         else:
             template_node = nodes[0]
             epilogue_nodes = nodes[1:]
-            # TODO - better way to figure out inputs here
 
-            input_names = []
-            unique_inputs = []
-            for inp in template_node.node.inputs:
-                if inp.get_name() not in input_names:
-                    unique_inputs.append(inp)
-                    input_names.append(inp.get_name())
-
-            non_out_arg_indices.extend(range(len(unique_inputs)))
-
-            with config.patch("benchmark_kernel", True):
-                src_code = self.codegen_template(
-                    template_node, epilogue_nodes, only_gen_src_code=True
+            # TODO - handle epilogue inputs as well
+            non_out_arg_indices = list(
+                range(
+                    len(unique([inp.get_name() for inp in template_node.node.inputs]))
                 )
+            )
+
+            handler_fn = V.set_kernel_handler
+
+            rec_kernel = None
+
+            def record_kernel(kernel):
+                nonlocal rec_kernel
+                rec_kernel = kernel
+
+                return handler_fn(kernel)
+
+            try:
+                V.set_kernel_handler = record_kernel
+                with config.patch("benchmark_kernel", True):
+                    src_code = self.codegen_template(
+                        template_node, epilogue_nodes, only_gen_src_code=True
+                    )
+            finally:
+                V.set_kernel_handler = handler_fn
+
+            assert rec_kernel is not None
+            argument_names, _, _ = rec_kernel.args.python_argdefs()
+
+        non_out_arg_indices = []
+        for i, arg in enumerate(argument_names):
+            # in_out arguments get cloned before kernel invocation,
+            # as part of our benchmarkingm safe to take from params
+            if "in_out" in arg or "in_" in arg:
+                non_out_arg_indices.append(i)
+            else:
+                assert "out" in arg
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         mod = PyCodeCache.load(src_code)
