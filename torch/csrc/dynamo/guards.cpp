@@ -604,7 +604,7 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
 
 #else
 
-  return ((PyDictObject*)dict)->ma_version_tag);
+  return ((PyDictObject*)dict)->ma_version_tag;
 
 #endif
 }
