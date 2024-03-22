@@ -224,7 +224,6 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
