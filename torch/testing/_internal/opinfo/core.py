@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from torchgen.utils import dataclass_repr
 
@@ -776,6 +776,10 @@ class OpInfo:
 
     # Whether the operation avoids materializing COW tensor inputs
     supports_cow_input_no_materialize: bool = True
+
+    # If `supports_cow_input_no_materialize == True`, this list contains the arg
+    # indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize: List[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)

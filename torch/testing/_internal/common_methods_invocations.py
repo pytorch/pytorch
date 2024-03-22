@@ -19546,6 +19546,8 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
+        # TODO: Avoid COW materialize
+        supports_cow_input_no_materialize=False,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
