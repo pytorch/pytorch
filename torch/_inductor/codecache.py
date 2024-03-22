@@ -2100,7 +2100,11 @@ class PyCodeCache:
                 mod = ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key  # type: ignore[attr-defined]
-                exec(code, mod.__dict__, mod.__dict__)
+                try:
+                    exec(code, mod.__dict__, mod.__dict__)
+                except Exception as e:
+                    log.debug(f"problematic file path: {path}")
+                    raise
                 sys.modules[mod.__name__] = mod
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)

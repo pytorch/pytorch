@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import unittest
+import logging
 from typing import Iterable, List, Tuple, Union
 
 import torch
@@ -40,6 +41,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
+from torch._dynamo import compiled_autograd
+from torch.testing._internal.common_distributed import _dynamo_dist_per_rank_init
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -193,30 +196,66 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
+                "test_compile": [True, True]  # [True, False],
             },
             self._test_train_parity_single_group,
         )
 
-    def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]]):
-        torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
-        )
-        ref_model = copy.deepcopy(model).cuda()
-        replicate(ref_model, device_ids=[self.rank])
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fully_shard(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.manual_seed(42 + self.rank + 1)
-        inp = (torch.randn((4, lin_shapes[0][0]), device="cuda"),)
-        for iter_idx in range(10):
-            losses: List[torch.Tensor] = []
-            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(*inp).sum())
-                losses[-1].backward()
-                _optim.step()
-            self.assertEqual(losses[0], losses[1])
+    def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]], test_compile=False):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=test_compile):
+            torch.manual_seed(42)
+            # model = nn.Sequential(
+            #     nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+            # )
+            # model = nn.Sequential(nn.Linear(*lin_shapes[0]))
+            model = nn.Linear(*lin_shapes[0])
+            ref_model = copy.deepcopy(model).cuda()
+            replicate(ref_model, device_ids=[self.rank])
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+            model_for_eager = copy.deepcopy(model).cuda()
+            fully_shard(model_for_eager)
+            optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
+
+            torch.manual_seed(42 + self.rank + 1)
+            inp = (torch.randn((4, lin_shapes[0][0]), device="cuda"),)
+
+            if test_compile:
+                def compiler_fn(gm):
+                    return torch.compile(gm, backend="inductor", fullgraph=True)
+                torch._dynamo.config.trace_distributed = True
+                torch._inductor.config.triton.unique_kernel_names = True
+                model_to_be_compiled = copy.deepcopy(model).cuda()
+                fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
+                optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
+
+            def get_compiled_model_and_optim(iter_idx):
+                if not test_compile:
+                    return None, None, False
+                if iter_idx > 0:
+                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                    return compiled_model, optim_for_compile, True
+                else:
+                    return model_to_be_compiled, optim_for_compile, False
+
+            for iter_idx in range(10):
+                losses: List[float] = []
+                for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
+                    if _model is None:
+                        continue
+                    # NOTE(yf225): under compile, if we switch `set_to_none` back and forth, there will be recompile which is not nice.
+                    _optim.zero_grad(iter_idx % 2 == 0)
+                    if _is_compile:
+                        ctx = compiled_autograd.enable(compiler_fn)
+                    else:
+                        ctx = contextlib.nullcontext()
+                    with ctx:
+                        loss = _model(*inp).sum()
+                        losses.append(loss.item())
+                        loss.backward()
+                    _optim.step()
+                losses_tensors = [torch.tensor(x) for x in losses]
+                self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
 
     @skip_if_lt_x_gpu(2)
     def test_train_parity_multi_group_eager(self):
@@ -252,6 +291,23 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_multi_group_compile_trace_through_fsdp(self):
+        # TODO(yf225): rename this test and `test_train_parity_multi_group_compile`
+        # to differentiate between "trace_through_fsdp" and "graph-break fsdp".
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True],
+                "device_type": ["cuda"],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False],
+                "delay_before_reduce_scatter": [False],
+                "delay_before_optim": [False, True],
+                "trace_through_fsdp": [True],
+            },
+            self._test_train_parity_multi_group,
+        )
+
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: Union[bool, int],
@@ -260,6 +316,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
         delay_before_optim: bool,
+        trace_through_fsdp: bool=False,
     ):
         # Only test individual delays or all four delays to save test time
         if (
@@ -270,60 +327,89 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        assert device_type in ("cuda", "cpu"), f"{device_type}"
-        torch.manual_seed(42)
-        lin_dim = 32
-        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model)
-        if device_type == "cuda":
-            replicate(ref_model.cuda(), device_ids=[self.rank])
-        else:
-            gloo_pg = dist.new_group(backend="gloo")
-            replicate(ref_model, process_group=gloo_pg)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        mesh = init_device_mesh(device_type, (self.world_size,))
-        for mlp in model:
-            fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=trace_through_fsdp):
+            assert device_type in ("cuda", "cpu"), f"{device_type}"
+            torch.manual_seed(42)
+            lin_dim = 32
+            model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+            ref_model = copy.deepcopy(model)
+            if device_type == "cuda":
+                replicate(ref_model.cuda(), device_ids=[self.rank])
+            else:
+                gloo_pg = dist.new_group(backend="gloo")
+                replicate(ref_model, process_group=gloo_pg)
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+            mesh = init_device_mesh(device_type, (self.world_size,))
+            model_for_eager = copy.deepcopy(model)
+            for mlp in model_for_eager:
+                fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward, _reshard_after_forward_root=reshard_after_forward if trace_through_fsdp else False)
+            fully_shard(model_for_eager, mesh=mesh, reshard_after_forward=reshard_after_forward, _reshard_after_forward_root=reshard_after_forward if trace_through_fsdp else False)
+            optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
 
-        delay_in_ms = 100
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+            if trace_through_fsdp:
+                def compiler_fn(gm):
+                    return torch.compile(gm, backend="inductor", fullgraph=True)
+                torch._dynamo.config.trace_distributed = True
+                torch._inductor.config.triton.unique_kernel_names = True
+                model_to_be_compiled = copy.deepcopy(model).cuda()
+                fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
+                optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
-        def delayed_all_gather(*args, **kwargs):
-            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
-            return orig_all_gather(*args, **kwargs)
+            def get_compiled_model_and_optim(iter_idx):
+                if not trace_through_fsdp:
+                    return None, None, False
+                if iter_idx > 0:
+                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                    return compiled_model, optim_for_compile, True
+                else:
+                    return model_to_be_compiled, optim_for_compile, False
 
-        def delayed_reduce_scatter(*args, **kwargs):
-            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
-            return orig_reduce_scatter(*args, **kwargs)
+            delay_in_ms = 100
+            orig_all_gather = dist.all_gather_into_tensor
+            orig_reduce_scatter = dist.reduce_scatter_tensor
 
-        torch.manual_seed(42 + self.rank + 1)
-        patch_all_gather_ctx = (
-            patch_all_gather(delayed_all_gather)
-            if delay_before_all_gather
-            else contextlib.nullcontext()
-        )
-        patch_reduce_scatter_ctx = (
-            patch_reduce_scatter(delayed_reduce_scatter)
-            if delay_before_reduce_scatter
-            else contextlib.nullcontext()
-        )
-        with patch_all_gather_ctx, patch_reduce_scatter_ctx:
-            for iter_idx in range(10):
-                inp = torch.randn((8, lin_dim), device=torch.device(device_type))
-                losses: List[torch.Tensor] = []
-                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                    losses.append(_model(inp).sum())
-                    if _model is model and delay_after_forward:
-                        torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
-                    losses[-1].backward()
-                    if _model is model and delay_before_optim:
-                        torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
-                    _optim.step()
-                self.assertEqual(losses[0], losses[1])
+            def delayed_all_gather(*args, **kwargs):
+                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+                return orig_all_gather(*args, **kwargs)
+
+            def delayed_reduce_scatter(*args, **kwargs):
+                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+                return orig_reduce_scatter(*args, **kwargs)
+
+            torch.manual_seed(42 + self.rank + 1)
+            patch_all_gather_ctx = (
+                patch_all_gather(delayed_all_gather)
+                if delay_before_all_gather
+                else contextlib.nullcontext()
+            )
+            patch_reduce_scatter_ctx = (
+                patch_reduce_scatter(delayed_reduce_scatter)
+                if delay_before_reduce_scatter
+                else contextlib.nullcontext()
+            )
+            with patch_all_gather_ctx, patch_reduce_scatter_ctx:
+                for iter_idx in range(10):
+                    inp = torch.randn((8, lin_dim), device=torch.device(device_type))
+                    losses: List[float] = []
+                    for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
+                        if _model is None:
+                            continue
+                        _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                        if _is_compile:
+                            ctx = compiled_autograd.enable(compiler_fn)
+                        else:
+                            ctx = contextlib.nullcontext()
+                        with ctx:
+                            loss = _model(inp).sum()
+                            losses.append(loss.item())
+                            if _model is model_for_eager and delay_after_forward:
+                                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+                            loss.backward()
+                        if _model is model_for_eager and delay_before_optim:
+                            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+                        _optim.step()
+                    losses_tensors = [torch.tensor(x) for x in losses]
+                    self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
 
     @skip_if_lt_x_gpu(2)
     @test_compiled_fsdp()
@@ -380,11 +466,16 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         times in forward.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {
+                # "reshard_after_forward": [True, False, 2],
+                # "test_compile": [True, False, False],
+                "reshard_after_forward": [True],
+                "test_compile": [True],
+            },
             self._test_multi_forward_module,
         )
 
-    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int]):
+    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int], test_compile: bool):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):
                 super().__init__()
@@ -396,25 +487,55 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 j = self.inner(x)
                 return self.outer(i + j)
 
-        torch.manual_seed(42)
-        model = MultiForwardModule(device="cuda")
-        ref_model = copy.deepcopy(model)
-        replicate(ref_model, device_ids=[self.rank])
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fully_shard(model.inner)
-        fully_shard(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=test_compile):
+            torch.manual_seed(42)
+            model = MultiForwardModule(device="cuda")
+            ref_model = copy.deepcopy(model)
+            replicate(ref_model, device_ids=[self.rank])
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+            model_for_eager = copy.deepcopy(model)
+            fully_shard(model_for_eager.inner)
+            fully_shard(model_for_eager)
+            optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
 
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randn((32, 4), device="cuda")
-        for iter_idx in range(10):
-            losses: List[torch.Tensor] = []
-            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(inp).sum())
-                losses[-1].backward()
-                _optim.step()
-            self.assertEqual(losses[0], losses[1])
+            if test_compile:
+                def compiler_fn(gm):
+                    return torch.compile(gm, backend="inductor", fullgraph=True)
+                torch._dynamo.config.trace_distributed = True
+                torch._inductor.config.triton.unique_kernel_names = True
+                model_to_be_compiled = copy.deepcopy(model).cuda()
+                fully_shard(model_to_be_compiled.inner, reshard_after_forward=True, _reshard_after_forward_root=True)
+                fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
+                optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
+
+            def get_compiled_model_and_optim(iter_idx):
+                if not test_compile:
+                    return None, None, False
+                if iter_idx > 0:
+                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                    return compiled_model, optim_for_compile, True
+                else:
+                    return model_to_be_compiled, optim_for_compile, False
+
+            torch.manual_seed(42 + self.rank)
+            inp = torch.randn((32, 4), device="cuda")
+            for iter_idx in range(10):
+                losses: List[torch.Tensor] = []
+                for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
+                    if _model is None:
+                        continue
+                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                    if _is_compile:
+                        ctx = compiled_autograd.enable(compiler_fn)
+                    else:
+                        ctx = contextlib.nullcontext()
+                    with ctx:
+                        loss = _model(inp).sum()
+                        losses.append(loss.item())
+                        loss.backward()
+                    _optim.step()
+                losses_tensors = [torch.tensor(x) for x in losses]
+                self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
 
 
 class TestFullyShard1DTrainingCompose(FSDPTest):

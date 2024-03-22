@@ -142,6 +142,7 @@ class AutogradCompilerInstance:
     def tensor_pre_hook(self, inputs, hook_id, i: int):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        print(f"tensor_pre_hook: {hook}")
         proxy = self.proxy_call_hook(
             hook,
             inputs[i],
@@ -154,6 +155,7 @@ class AutogradCompilerInstance:
     def pre_hook(self, inputs, hook_id):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        print(f"pre_hook: {hook}")
         proxies = self.proxy_call_hook(
             hook,
             inputs,
@@ -166,6 +168,7 @@ class AutogradCompilerInstance:
     def post_hook(self, outputs, inputs, hook_id):
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        print(f"post_hook: {hook}")
         proxies = self.proxy_call_hook(
             hook,
             outputs,
@@ -180,6 +183,7 @@ class AutogradCompilerInstance:
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
+        print(f"post_acc_grad_hook: {hook}")
         proxies = self.proxy_call_hook(
             hook,
             input,
