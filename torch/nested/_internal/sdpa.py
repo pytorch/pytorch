@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Optional, Tuple
 
 import torch
@@ -604,8 +605,7 @@ def _pad_last_dim(
 
 # TODO: coalesce with torch/nn/utils/attention.py
 def _calculate_scale(query, scale):
-    # TODO: Investigate why math.sqrt() isn't properly handled by Dynamo?
-    softmax_scale = scale if scale is not None else torch.sym_sqrt(1.0 / query.size(-1))
+    softmax_scale = scale if scale is not None else math.sqrt(1.0 / query.size(-1))
     return softmax_scale
 
 
@@ -739,7 +739,7 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        return ViewNestedFromBuffer.apply(
+        return _jagged_from_buffer(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:

@@ -3871,6 +3871,11 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
             else [torch.float16, torch.float32]))
     def test_sdpa_compile(self, device, dtype):
+        # Only tests the flash (bf16, f16) and efficient (f32) paths. For the math path, graph
+        # breaks in the torch function region lead to the entire torch function to not be
+        # compiled! Math path is expected to graph break because we are splitting the NT to
+        # convert it into cpp NT. Not compiling is probably fine for now because we're likely
+        # not overhead bound anyway.
         batch_size = 1
         emb_dims = 1024
         n_heads = 8
