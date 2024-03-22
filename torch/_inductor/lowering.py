@@ -59,7 +59,6 @@ from .utils import (
     is_pointwise_use,
     pad_listlike,
     parallel_num_threads,
-    sympy_index_symbol,
     sympy_product,
 )
 from .virtualized import ops, V
@@ -5268,6 +5267,9 @@ def mul(a, b):
 
 def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
     """Try convert an arbitrary IR node into an ir.Constant value"""
+
+    # First try unwrapping the IRNode to see if it is already an ir.Constant
+    # Optional step, but avoids unnecessary inner_fn evaluation.
     if isinstance(x, ir.MutableBox):
         return get_constant_value(x.data)
     if isinstance(x, ir.BaseView):
@@ -5275,19 +5277,16 @@ def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
     if isinstance(x, ir.Constant):
         return x
 
-    loader = x.make_loader()
-    if hasattr(x, "inner_fn_args"):
-        inner_fn_args = x.inner_fn_args()
-    else:
-        size = x.get_size()
-        idx = [sympy_index_symbol(f"i{n}") for n in range(len(size))]
-        inner_fn_args = (idx,)
+    # If the unwrapped node is not an ir.Constant, try evaluating inner_fn
+    # to see if the returned value is from an `ops.constant` call
+    if not isinstance(x, ir.Loops):
+        return None
 
     handler = torch._inductor.ops_handler.ExtractConstantsHandler(x.get_device())
     with V.set_ops_handler(handler), patch.object(
         ir.FlexibleLayout, "allow_indexing", True
     ):
-        out = loader(*inner_fn_args)
+        out = x.inner_fn(*x.inner_fn_args())
 
     assert isinstance(out, torch._inductor.virtualized.OpsValue)
     if isinstance(out.value, ir.Constant):
