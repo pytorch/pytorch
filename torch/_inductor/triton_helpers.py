@@ -14,6 +14,7 @@ else:
 if hasattr(tl, "to_tensor"):
     promote_to_tensor = tl.to_tensor
 else:
+
     @triton.jit
     def promote_to_tensor(x):
         # Where promotes without effecting the value in any way
