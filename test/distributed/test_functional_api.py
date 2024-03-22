@@ -25,7 +25,7 @@ from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
     requires_accelerator_dist_backend,
-    TEST_SKIPS,
+    skip_if_no_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -486,10 +486,8 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if (
-            BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
-        ) and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if BACKEND in (dist.Backend.NCCL, dist.Backend.XCCL):
+            exit_if_lt_x_accelerators(self.world_size)
 
         kwargs["device"] = DEVICE
         self.pg = self.create_pg(device=DEVICE)
@@ -502,9 +500,9 @@ def with_comms(func=None):
 
 
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
+    @skip_if_no_gpu
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         tensors = [
             torch.ones([4], device=device),
             torch.ones([4], device=device) + 1,
@@ -576,9 +574,8 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_no_gpu
     def test_tracing_with_fakepg(self, device=DEVICE):
-        exit_if_lt_x_accelerators(self.world_size)
-
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
@@ -619,9 +616,9 @@ class TestDistributedBackendCollectivesWithWorldSize4(
     def world_size(self):
         return 4
 
+    @skip_if_no_gpu
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
