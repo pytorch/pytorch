@@ -672,32 +672,30 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled));
-  // TODO: switch to the new stack after the 2 week FC window
-  // if (training) {
-  //   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
-  //   if (backend == BatchNormBackend::Cudnn || backend == BatchNormBackend::Miopen) {
-  //     auto input_c = input;
-  //     if (backend == BatchNormBackend::Cudnn) {
-  //         input_c = input.contiguous(input.suggest_memory_format());
-  //     } else {
-  //         input_c = input.contiguous();
-  //     }
-  //     auto weight_c = weight.contiguous();
-  //     auto bias_c = bias.contiguous();
-  //     auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
-  //     auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
-  //     return std::get<0>(at::_batch_norm_with_update(input_c, weight_c, bias_c, const_cast<Tensor&>(rmean_c),
-  //                                                   const_cast<Tensor&>(rvar_c), momentum, eps));
-  //   } else {
-  //     return std::get<0>(at::_batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
-  //                                                   const_cast<Tensor&>(running_var), momentum, eps));
-  //   }
-  // } else {
-  //   return std::get<0>(at::_batch_norm_no_update(input, weight, bias, running_mean, running_var,
-  //                                               momentum, eps));
-  // }
+
+  if (training) {
+    BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
+    if (backend == BatchNormBackend::Cudnn || backend == BatchNormBackend::Miopen) {
+      auto input_c = input;
+      if (backend == BatchNormBackend::Cudnn) {
+          input_c = input.contiguous(input.suggest_memory_format());
+      } else {
+          input_c = input.contiguous();
+      }
+      auto weight_c = weight.contiguous();
+      auto bias_c = bias.contiguous();
+      auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
+      auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
+      return std::get<0>(at::_batch_norm_with_update(input_c, weight_c, bias_c, const_cast<Tensor&>(rmean_c),
+                                                    const_cast<Tensor&>(rvar_c), momentum, eps));
+    } else {
+      return std::get<0>(at::_batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
+                                                    const_cast<Tensor&>(running_var), momentum, eps));
+    }
+  } else {
+    return std::get<0>(at::_batch_norm_no_update(input, weight, bias, running_mean, running_var,
+                                                momentum, eps));
+  }
 }
 
 Tensor instance_norm(
