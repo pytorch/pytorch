@@ -139,9 +139,9 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   auto lpp  = log_probs.permute({1,0,2});
-  auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
+  auto log_probs_a_global = lpp.accessor<const scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
-  auto targets_data = targets.data_ptr<target_t>();
+  auto targets_data = targets.const_data_ptr<target_t>();
   auto neg_log_likelihood_a = neg_log_likelihood.accessor<scalar_t, 1>();
 
   // alpha calculation for the first row, the three equations for alpha_1 above eq (6)
@@ -423,8 +423,8 @@ std::tuple<Tensor, Tensor> ctc_loss_tensor(const Tensor& log_probs, const Tensor
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
 
   return at::_ctc_loss(log_probs, targets, il, tl, BLANK, zero_infinity);
 }
@@ -537,8 +537,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 

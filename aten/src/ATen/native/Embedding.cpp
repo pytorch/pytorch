@@ -189,7 +189,7 @@ Tensor & embedding_renorm_cpu_(
   auto num_indices = indices.numel();
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cpu_", [&]() {
-    auto data_ptr = indices_contig.data_ptr<index_t>();
+    auto data_ptr = indices_contig.const_data_ptr<index_t>();
     auto sorted_indices = std::vector<index_t>(data_ptr, data_ptr + num_indices);
     std::sort(sorted_indices.begin(), sorted_indices.end());
 

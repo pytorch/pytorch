@@ -18704,8 +18704,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
         check_batched_forward_grad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout,
         inplace_variant=lambda input, *args, **kwargs:
@@ -18851,11 +18849,10 @@ op_db: List[OpInfo] = [
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding(idx, weight, **kwargs),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_embedding,
+        allow_cow_input_materialize=[0],
         error_inputs_func=error_inputs_embedding,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -18891,8 +18888,7 @@ op_db: List[OpInfo] = [
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         supports_out=False,
         supports_gradgrad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
+        allow_cow_input_materialize=[0],
     ),
     OpInfo(
         "nn.functional.multi_head_attention_forward",
@@ -18932,8 +18928,6 @@ op_db: List[OpInfo] = [
         supports_gradgrad=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
     ),
@@ -18983,8 +18977,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         gradcheck_nondet_tol=1e-15),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -19350,8 +19342,6 @@ op_db: List[OpInfo] = [
         "nn.functional.ctc_loss",
         dtypes=floating_types(),
         supports_out=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         sample_inputs_func=sample_inputs_ctc_loss,
         skips=(
             # https://github.com/pytorch/pytorch/issues/67462
@@ -19399,8 +19389,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_jit_shape_analysis=True,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         skips=(
             # RuntimeError:
             # undefined value tensor:
@@ -19474,8 +19462,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         supports_out=False,
         supports_gradgrad=False,
-        # TODO: Avoid COW materialize
-        supports_cow_input_no_materialize=False,
         skips=(
             DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
         )
