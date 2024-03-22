@@ -89,9 +89,10 @@ if TEST_Z3:
     # unittest.expectedFailure(
     #     DynamicShapesMiscTests.test_custom_module_free_dynamic_shapes  # noqa: F821
     # )
-    unittest.expectedFailure(
-        DynamicShapesMiscTests.test_sequential_module_free_dynamic_shapes  # noqa: F821
-    )
+    # test_sequential_module_free test is disabled in this pr
+    # unittest.expectedFailure(
+    #     DynamicShapesMiscTests.test_sequential_module_free_dynamic_shapes  # noqa: F821
+    # )
 
 unittest.expectedFailure(
     # Test is only valid without dynamic shapes
