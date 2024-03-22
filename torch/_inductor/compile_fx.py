@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import functools
+import itertools
 import logging
 import os
 import sys
@@ -174,7 +175,7 @@ def _unlift_graph(mod, gm, graph_signature):
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
     for out in outputs:
-        if out in graph_signature.buffers_to_mutate:
+        if out.name in graph_signature.buffers_to_mutate:
             mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
         else:
             mutated_outputs.append(None)
@@ -192,13 +193,24 @@ def _unlift_graph(mod, gm, graph_signature):
 
 
 def _get_subgraph_names(gm):
-    for node in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.cond
+    for node in sorted(
+        itertools.chain(
+            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.while_loop
+            ),
+        )
     ):
-        true_subgraph_name = node.args[1].name
-        false_subgraph_name = node.args[2].name
-        yield true_subgraph_name
-        yield false_subgraph_name
+        if node.target == torch.ops.higher_order.cond:
+            true_subgraph_name = node.args[1].name
+            false_subgraph_name = node.args[2].name
+            yield true_subgraph_name
+            yield false_subgraph_name
+        elif node.target == torch.ops.higher_order.while_loop:
+            cond_subgraph_name = node.args[0].name
+            body_subgraph_name = node.args[1].name
+            yield cond_subgraph_name
+            yield body_subgraph_name
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
@@ -800,7 +812,10 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    if config.assume_aligned_inputs:
+        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    else:
+        inputs_to_check = []
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
