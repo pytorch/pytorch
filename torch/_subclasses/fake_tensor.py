@@ -470,6 +470,8 @@ class FakeTensor(torch.Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
+        if not fake_mode.allow_unsafe_data_ptr_access:
+            torch._C._set_throw_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -819,8 +821,10 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        allow_unsafe_data_ptr_access=True,
     ):
         log.debug("create_mode 0x%x", id(self))
+        self.allow_unsafe_data_ptr_access = allow_unsafe_data_ptr_access
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         if static_shapes is not None:

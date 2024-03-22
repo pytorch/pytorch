@@ -11,6 +11,44 @@ C10_API std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
 static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
     DeviceType::PrivateUse1};
 
+at::DataPtr& StorageImpl::mutable_data_ptr() {
+  if (C10_UNLIKELY(has_data_ptr_check_)) {
+    if (throw_on_mutable_data_ptr_) {
+      throwNullDataPtrError();
+    }
+    maybe_materialize_cow();
+  }
+  return data_ptr_;
+}
+
+const at::DataPtr& StorageImpl::data_ptr() const {
+  return data_ptr_;
+}
+
+const void* StorageImpl::data() const {
+  return data_ptr_.get();
+}
+
+void* StorageImpl::mutable_data() {
+  if (C10_UNLIKELY(has_data_ptr_check_)) {
+    if (throw_on_mutable_data_ptr_) {
+      throwNullDataPtrError();
+    }
+    maybe_materialize_cow();
+  }
+  return data_ptr_.mutable_get();
+}
+
+void throwNullDataPtrError() {
+  TORCH_CHECK(
+      false,
+      "Cannot access data pointer of Tensor (e.g. FakeTensor, FunctionalTensor). "
+      "If you're using torch.compile/export/fx, it is likely that we are erroneously "
+      "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
+      "an opaque custom op. Please see the following for details: "
+      "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ");
+}
+
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   // Allowlist verification.
   // Only if the devicetype is in the allowlist,

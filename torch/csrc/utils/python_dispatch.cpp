@@ -838,6 +838,13 @@ void initDispatchBindings(PyObject* module) {
     return a.sizes(); // NB: NOT sym_size
   });
 
+  m.def("_set_throw_on_mutable_data_ptr", [](const at::Tensor& t) {
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_throw_on_mutable_data_ptr();
+  });
+
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
