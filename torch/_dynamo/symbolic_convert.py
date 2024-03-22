@@ -1050,12 +1050,15 @@ class InstructionTranslatorBase(
             value = self.f_globals[recorded_name]
             source = GlobalSource(recorded_name)
         else:
-            value = __import__(
-                module_name,
-                fromlist=fromlist,
-                level=level,
-                globals=self.f_globals,
-            )
+            try:
+                value = __import__(
+                    module_name,
+                    fromlist=fromlist,
+                    level=level,
+                    globals=self.f_globals,
+                )
+            except ImportError:
+                unimplemented("import a module that does not exist")
 
             if level != 0:
                 pkg = self.calc_package()
@@ -2062,8 +2065,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
-                self.symbolic_locals = VariableTracker.apply(
-                    lambda x: x.realize(), self.symbolic_locals
+                self.symbolic_locals = variables.LazyVariableTracker.realize_all(
+                    self.symbolic_locals
                 )
 
             self._freevars_ids = dict()
