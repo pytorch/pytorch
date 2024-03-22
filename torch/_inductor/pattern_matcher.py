@@ -19,6 +19,7 @@ from typing import (
     NoReturn,
     Optional,
     Set,
+    Tuple,
     Union,
 )
 
@@ -583,6 +584,7 @@ class MultiOutputPattern(PatternExpr):
         super().__init__()
         assert all(isinstance(x, (PatternExpr, type(None))) for x in outputs), outputs
         self.outputs: List[Optional[PatternExpr]] = outputs
+        self.op = outputs[0].op
 
     @property
     def fns(self):
@@ -641,6 +643,7 @@ class RepeatedExpr(PatternExpr):
         super().__init__()
         assert hasattr(inner_pattern, "fns")
         self.inner_pattern = inner_pattern
+        self.op = inner_pattern.op  # type: ignore[attr-defined]
 
     @property
     def fns(self):
@@ -731,10 +734,11 @@ class PatternEntry:
             for fn in self.pattern.fns:
                 self.register(pass_dicts, fn, prepend=prepend)
         elif isinstance(pass_dicts, (dict, PatternMatcherPass)):
+            assert hasattr(self.pattern, "op")
             if prepend:
-                pass_dicts[target].insert(0, self)
+                pass_dicts[(self.pattern.op, target)].insert(0, self)
             else:
-                pass_dicts[target].append(self)
+                pass_dicts[(self.pattern.op, target)].append(self)
         else:
             for x in pass_dicts:
                 self.register(x, target, prepend=prepend)
@@ -1219,12 +1223,12 @@ class PatternMatcherPass:
     ):
         super().__init__()
         self.patterns: DefaultDict[
-            torch.fx.node.Target, List[PatternEntry]
+            Tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
         self.pass_name = pass_name
 
-    def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
+    def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, graph: torch.fx.GraphModule) -> int:
@@ -1239,12 +1243,12 @@ class PatternMatcherPass:
                 get_mutation_region_id, graph
             )
         count = 0
-        nodes = []
-        for op, target in itertools.product(
-            ["call_function", "call_method", "call_module"], self.patterns
+        for node in sorted(
+            itertools.chain.from_iterable(
+                (graph.find_nodes(op=op, target=target) for op, target in self.patterns)
+            ),
+            reverse=True,
         ):
-            nodes.extend(graph.find_nodes(op=op, target=target))
-        for node in sorted(nodes, reverse=True):
             target = extract_target(node)
             # conservatively not applying pattern for cpu input,
             # since some of the patterns induce codegen and split nodes.
@@ -1252,7 +1256,7 @@ class PatternMatcherPass:
             if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
                 continue
 
-            for entry in self.patterns[target]:
+            for entry in self.patterns[(node.op, target)]:
                 if node._erased:
                     break
                 m = entry.pattern.match(node)
