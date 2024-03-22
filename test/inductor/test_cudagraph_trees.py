@@ -269,7 +269,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 captured_output[0]
             )
 
-        @torch._inductor.config.patch("triton.skip_dynamic_graphs", True)
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
         def test_skip_symbolic(self):
             @torch.compile(dynamic=True)
             def foo(x, y):

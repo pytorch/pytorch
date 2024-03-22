@@ -729,7 +729,7 @@ def fx_codegen_and_compile(
 
             if (
                 cudagraphs
-                and config.triton.skip_dynamic_graphs
+                and config.triton.cudagraph_skip_dynamic_graphs
                 and not V.graph.disable_cudagraphs_reason
                 and torch._inductor.utils.any_is_symbolic(*example_inputs)
             ):
