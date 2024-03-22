@@ -31,6 +31,7 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
+    free_symbol_startswith,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
@@ -2743,7 +2744,10 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes:
+            if load_dtype not in self.load_supported_dtypes and (
+                index.has(self.itervars[self.tiling_idx])
+                or free_symbol_startswith(index, "tmp")
+            ):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -2976,7 +2980,6 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
                 if dtype not in [
-                    torch.float64,
                     torch.float,
                     torch.bfloat16,
                     torch.float16,
