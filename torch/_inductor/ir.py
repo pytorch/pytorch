@@ -2720,8 +2720,8 @@ class FlexibleLayout(Layout):
         super().__init__(device, dtype, size, strides)
 
 
-class AliasedLayoutSHOULDREMOVE(Layout):
-    """Shares the same storage as another tensor"""
+class NonOwningLayout(Layout):
+    """Uses the same storage as another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -2796,7 +2796,9 @@ class MutationLayoutSHOULDREMOVE(Layout):
             return target
 
         result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), "MutationLayoutSHOULDREMOVE must refer to a buffer"
+        assert isinstance(
+            result, Buffer
+        ), "MutationLayoutSHOULDREMOVE must refer to a buffer"
         return result
 
     def real_layout(self):
@@ -2894,7 +2896,7 @@ class Buffer(IRNode):
         return False
 
     def freeze_layout(self):
-        if not isinstance(self.layout, (MultiOutputLayout, AliasedLayoutSHOULDREMOVE)):
+        if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
     def freeze_layout_with_stride_order(self, order):
@@ -2932,8 +2934,8 @@ class Buffer(IRNode):
     def decide_layout(self):
         pass
 
-    def get_alias_names(self):
-        if isinstance(self.layout, AliasedLayoutSHOULDREMOVE):
+    def get_inputs_that_alias_output(self):
+        if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
 
@@ -3665,7 +3667,7 @@ class ConcatKernel(NopKernel):
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src):
-                src.data.layout = AliasedLayoutSHOULDREMOVE(dst)
+                src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
         pw = Pointwise.create(
@@ -3955,7 +3957,7 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), AliasedLayoutSHOULDREMOVE):
+            while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
@@ -4326,7 +4328,7 @@ class UserDefinedTritonKernel(ExternKernel):
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [i.get_name() for i in self.inputs]
 
 
@@ -4359,7 +4361,7 @@ class MutationOutput(ExternKernel):
     def has_side_effects(self):
         return True
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name()]
 
 
@@ -4509,7 +4511,7 @@ class BindNNParameter(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(self.get_name())
         mark_node_as_mutating(self, variable, placeholder)
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
     def get_mutation_names(self):
@@ -5040,7 +5042,7 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return self.alias_names
 
     def get_mutation_names(self):
@@ -5283,7 +5285,7 @@ class ComplexView(FallbackKernel):
     def should_allocate(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
@@ -5349,11 +5351,12 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel) and len(inp.get_alias_names()) > 0
+            if isinstance(inp, FallbackKernel)
+            and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
 
@@ -7372,17 +7375,17 @@ class Wait(ExternKernelAlloc):
         # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
         collective_op.decide_layout()
         return Wait(
-            layout=AliasedLayoutSHOULDREMOVE(collective_op),
+            layout=NonOwningLayout(collective_op),
             inputs=[collective_op],
         )
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
     def get_mutation_names(self):
         # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
 
 class CollectiveKernel(ExternKernel):
