@@ -5673,6 +5673,7 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+register_pointwise_numeric(inductor_prims.fma, name="fma")
 
 from .codegen.common import pointwise_overrides_data
 
