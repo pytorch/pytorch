@@ -2562,6 +2562,7 @@ exclude_patterns = [
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
     'torch/utils/weak.py',
+    'torch/xpu/_gpu_trace.py',
 ]
 init_command = [
     'python3',

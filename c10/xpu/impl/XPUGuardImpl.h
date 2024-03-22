@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
@@ -84,6 +85,13 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     const XPUStream xpu_stream{stream};
     *xpu_event = xpu_stream.queue().ext_oneapi_submit_barrier();
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          c10::kXPU,
+          reinterpret_cast<uintptr_t>(xpu_event),
+          reinterpret_cast<uintptr_t>(&xpu_stream.queue()));
+    }
   }
 
   void block(void* event, const Stream& stream) const override {
@@ -93,6 +101,13 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
     xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_wait(
+          c10::kXPU,
+          reinterpret_cast<uintptr_t>(xpu_event),
+          reinterpret_cast<uintptr_t>(&xpu_stream.queue()));
+    }
   }
 
   bool queryEvent(void* event) const override {

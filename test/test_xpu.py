@@ -4,6 +4,7 @@ import sys
 import unittest
 
 import torch
+import torch.xpu._gpu_trace as gpu_trace
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
@@ -229,6 +230,68 @@ if __name__ == "__main__":
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
+
+
+class TestXpuTrace(TestCase):
+    def setUp(self):
+        torch._C._activate_gpu_trace()
+        self.mock = unittest.mock.MagicMock()
+
+    def test_event_creation_callback(self):
+        gpu_trace.register_callback_for_event_creation(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        self.mock.assert_called_once_with(event._as_parameter_.value)
+
+    def test_event_deletion_callback(self):
+        gpu_trace.register_callback_for_event_deletion(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        event_id = event._as_parameter_.value
+        del event
+        self.mock.assert_called_once_with(event_id)
+
+    def test_event_record_callback(self):
+        gpu_trace.register_callback_for_event_record(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        self.mock.assert_called_once_with(
+            event._as_parameter_.value, torch.xpu.current_stream().sycl_queue
+        )
+
+    def test_event_wait_callback(self):
+        gpu_trace.register_callback_for_event_wait(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        event.wait()
+        self.mock.assert_called_once_with(
+            event._as_parameter_.value, torch.xpu.current_stream().sycl_queue
+        )
+
+    def test_device_synchronization_callback(self):
+        gpu_trace.register_callback_for_device_synchronization(self.mock)
+
+        torch.xpu.synchronize()
+        self.mock.assert_called()
+
+    def test_stream_synchronization_callback(self):
+        gpu_trace.register_callback_for_stream_synchronization(self.mock)
+
+        stream = torch.xpu.Stream()
+        stream.synchronize()
+        self.mock.assert_called_once_with(stream.sycl_queue)
+
+    def test_event_synchronization_callback(self):
+        gpu_trace.register_callback_for_event_synchronization(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        event.synchronize()
+        self.mock.assert_called_once_with(event._as_parameter_.value)
 
 
 if __name__ == "__main__":
