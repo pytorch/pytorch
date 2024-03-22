@@ -993,7 +993,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
                     stride_order = (
-                        list(range(len(strides)))
+                        list(reversed(range(len(strides))))
                         if n.meta["val"].is_contiguous()
                         else ir.get_stride_order(strides)
                     )
