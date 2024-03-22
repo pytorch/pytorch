@@ -25,6 +25,9 @@ inline namespace CPU_CAPABILITY {
 #elif defined(_MSC_VER)
 #define SLEEF_CONST
 #endif
+#define SLEEF_CONST_OLD SLEEF_CONST
+#else
+#define SLEEF_CONST_OLD
 #endif
 
 // bfloat16 conversion
@@ -372,7 +375,7 @@ public:
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wignored-qualifiers"
 
-  Vectorized<T> map(SLEEF_CONST __m512 (*vop)(__m512)) const {
+  Vectorized<T> map(SLEEF_CONST __m512 (*SLEEF_CONST_OLD vop)(__m512)) const {
     __m512 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
