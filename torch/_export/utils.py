@@ -427,28 +427,27 @@ def propagate_placeholder_names_for_cond(gm: torch.fx.GraphModule) -> None:
             and node.name.startswith("conditional")
             and isinstance(node.target, torch._ops.HigherOrderOperator)
         ):
-            true_graph = getattr(gm, node._args[1].name)
-            false_graph = getattr(gm, node._args[2].name)
+            _, true_getattr, false_getattr, cond_args = node.args
             # propagate names to both subgraphs
-            cond_args = node._args[3]
-            for subgraph in [true_graph, false_graph]:
+            for getattr_node in [true_getattr, false_getattr]:
+                subgraph = getattr(gm, getattr_node.name)
                 for i, _node in enumerate(subgraph.graph.nodes):
                     # placeholder nodes come first
                     if i >= len(cond_args):
                         break
-                    cond_arg = cond_args[i]
                     # handle duplicate names on ops with nn_module_stack
-                    if cond_arg.op == "call_function":
-                        modules = ["_root"]
-                        for j, (val, _) in enumerate(
-                            cond_arg.meta.get("nn_module_stack").values()
-                        ):
-                            if j >= 1:  # skip L__self___
-                                modules.append(val)
-                        modules.append(cond_arg.name)
-                        name = "_".join(modules)
+                    if cond_args[i].op == "call_function":
+                        module_stack = [
+                            x
+                            for x, _ in cond_args[i]
+                            .meta.get("nn_module_stack", {})
+                            .values()
+                        ]
+                        name = "_".join(
+                            ["_root"] + module_stack[1:] + [cond_args[i].name]
+                        )
                     else:  # keep same name
-                        name = cond_arg.name
+                        name = cond_args[i].name
                     _node.name = _node.target = name
                 propagate_placeholder_names_for_cond(subgraph)  # recurse
                 subgraph.recompile()
