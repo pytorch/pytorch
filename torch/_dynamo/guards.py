@@ -859,10 +859,16 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, [code])
 
+    def DUAL_LEVEL(self, guard: Guard):
+        # Invalidate dual level if current dual level is different than the one
+        # in the fx graph
+        dual_level = torch.autograd.forward_ad._current_level
+        code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
+        self._produce_guard_code(guard, code)
+
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        # if torch._C._functorch.peek_interpreter_stack() is not None:
         cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
