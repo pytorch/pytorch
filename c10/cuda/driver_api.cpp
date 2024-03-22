@@ -11,13 +11,11 @@ namespace c10::cuda {
 namespace {
 
 DriverAPI create_driver_api() {
-  #ifdef USE_ROCM
-    void* handle_0 = dlopen("libamdhip64.so", RTLD_LAZY | RTLD_NOLOAD);
-    TORCH_CHECK(handle_0, "Can't open libamdhip64.so: ", dlerror());
-  #else
-    void* handle_0 = dlopen("libcuda.so.1", RTLD_LAZY | RTLD_NOLOAD);
-    TORCH_CHECK(handle_0, "Can't open libcuda.so.1: ", dlerror());
+    c10::string_view libName = (USE_ROCM) ? "libamdhip64.so" : "libcuda.so.1";
+    void* handle_0 = dlopen(libName.data(), RTLD_LAZY | RTLD_NOLOAD);
+    TORCH_CHECK(handle_0, "Can't open libs", dlerror());
     void* handle_1 = DriverAPI::get_nvml_handle();
+    DriverAPI r{};
 
     #define LOOKUP_LIBCUDA_ENTRY(name)                       \
       r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
@@ -25,6 +23,7 @@ DriverAPI create_driver_api() {
       C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
     #undef LOOKUP_LIBCUDA_ENTRY
 
+    #ifndef USE_ROCM
       if (handle_1) {
     #define LOOKUP_NVML_ENTRY(name)                          \
       r.name##_ = ((decltype(&name))dlsym(handle_1, #name)); \
@@ -59,12 +58,10 @@ DriverAPI create_driver_api() {
 }
 } // namespace
 
-#ifndef USE_ROCM
 void* DriverAPI::get_nvml_handle() {
   static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-  return nvml_hanle;
+  return (USE_ROCM)?nullptr:nvml_hanle;
 }
-#endif
 
 C10_EXPORT DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();

@@ -87,7 +87,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ),
         ("CUipcMemHandle", ("hipIpcMemHandle", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
         ############################
-        ("CUmemGenericAllocationHandle", ("hipMemGenericAllocationHandle", CONV_TYPE, API_DRIVER)),
+        ("CUmemGenericAllocationHandle", ("ihipMemGenericAllocationHandle", CONV_TYPE, API_DRIVER)),
         ("CUmemAllocationProp", ("hipMemAllocationProp", CONV_TYPE, API_DRIVER)),
         ("CUmemAccessDesc", ("hipMemAccessDesc", CONV_TYPE, API_DRIVER)),
         ("CU_MEM_ALLOCATION_TYPE_PINNED", ("hipMemAllocationTypePinned", CONV_TYPE, API_DRIVER)),
