@@ -93,7 +93,9 @@ class DispatchKey(Enum):
     NestedTensor = auto()
     Dense = auto()
 
+    PythonTLSSnapshot = auto()
     PreDispatch = auto()
+    PythonDispatcher = auto()
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
@@ -106,6 +108,8 @@ class DispatchKey(Enum):
     AutogradNestedTensor = auto()
     Tracer = auto()
     Autocast = auto()
+    AutocastCPU = auto()
+    AutocastCUDA = auto()
     Batched = auto()
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
