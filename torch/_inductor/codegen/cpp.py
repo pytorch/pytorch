@@ -2520,7 +2520,7 @@ class CppVecKernel(CppKernel):
             assert upper
             cond = f"{var} < {upper}"
             cond_print = f"{var} < {upper_scalar}"
-        cond = f"at::vec::VecMask({cond}).all_masked()"
+        cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
