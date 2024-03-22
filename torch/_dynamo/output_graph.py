@@ -1094,9 +1094,6 @@ class OutputGraph:
         # free a bit of memory
         self.real_value_cache.clear()
 
-        if config.do_not_emit_runtime_asserts:
-            self.graph.eliminate_dead_code()
-
         gm = _make_graph_module(root, self.graph)
         for register_finalizer in self.register_finalizer_fns:
             register_finalizer(gm)

@@ -246,7 +246,6 @@ optimize_ddp: Union[bool, str] = True
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
 # Setting this to True keeps them hinting to symbolic shapes engine,
 # but not be emitted in the graph.
-# Also forces DCE pass on the graph to remove subgraphs used in asserts only.
 do_not_emit_runtime_asserts: bool = (
     os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1"
 )
