@@ -423,7 +423,7 @@ class NNModuleVariable(VariableTracker):
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
-                raise unimplemented(f"non-const NNModule method {name}")
+                unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
             assert_all_args_kwargs_const()
