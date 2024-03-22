@@ -2050,16 +2050,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
             reinterpret_cast<void*>(segmentInfo.address),
             segmentInfo.total_size);
       }
-
-      // Record the mapping between ncclComm and device index so that later
-      // register hook can register a newly allocated segment to communicators
-      // on the same device.
-      // NOTE: we need remove the communicator from this map when it is
-      // destroyed, otherwise may register onto an invalid communicator.
-      ncclCommDevIdxMapMutex.lock();
-      ncclCommDevIdxMap.emplace(ncclComm, device.index());
-      ncclCommDevIdxMapMutex.unlock();
     }
+    // Record the mapping between ncclComm and device index so that later
+    // register hook can register a newly allocated segment to communicators
+    // on the same device.
+    // NOTE: we need remove the communicator from this map when it is
+    // destroyed, otherwise may register onto an invalid communicator.
+    ncclCommDevIdxMapMutex.lock();
+    ncclCommDevIdxMap.emplace(ncclComm, device.index());
+    ncclCommDevIdxMapMutex.unlock();
   }
 
   it = devNCCLCommMap_.find(deviceKey);
