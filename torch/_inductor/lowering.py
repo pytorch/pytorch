@@ -935,11 +935,10 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1):
+def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1319,7 +1318,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
-def split(x, sizes, dim=0):
+def split(x, sizes, dim=0, clamp=True):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
@@ -1332,14 +1331,14 @@ def split(x, sizes, dim=0):
     start = 0
     for size in sizes:
         end = start + size
-        result.append(slice_(x, dim, start, end))
+        result.append(slice_(x, dim, start, end, clamp=clamp))
         start = end
     return result
 
 
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
-    return split(x, sizes, dim)
+    return split(x, sizes, dim, clamp=False)
 
 
 @register_lowering(aten.unbind, type_promotion_kind=None)
@@ -2205,13 +2204,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        if not meta_val.is_cuda:
-            return arg
 
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if not meta_val.is_cuda:
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
@@ -5937,13 +5937,22 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+    from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    ir.UserDefinedTritonKernel(
+        kernel_idx=kernel_idx,
+        grid=grid,
+        kernel_args={**kwargs, **constant_args},
+    )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
 @register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+def triton_kernel_wrap(
+    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+):
     new_kwargs = {}
     for name, value in kwargs.items():
         if isinstance(value, ir.TensorBox):
@@ -5965,7 +5974,12 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
                 value = clone_preserve_reinterpret_view(value)
         new_kwargs[name] = value
 
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
+    return triton_kernel_wrap_(
+        kernel_idx=kernel_idx,
+        constant_args_idx=constant_args_idx,
+        grid=grid,
+        kwargs=new_kwargs,
+    )
 
 
 @register_lowering(torch.ops.higher_order.cond)
@@ -5977,6 +5991,18 @@ def cond(pred, true_fn, false_fn, operands):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.while_loop)
+def while_loop(cond_fn, body_fn, operands):
+    if any(map(is_triton, operands)):
+        msg = "control flow operator: torch.while_loop."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.WhileLoop.create(cond_fn, body_fn, operands)
     return list(map(TensorBox.create, result))
 
 
@@ -6168,3 +6194,4 @@ import_submodule(kernel)
 from . import quantized_lowerings
 
 quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
