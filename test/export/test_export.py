@@ -77,6 +77,16 @@ torch.library.define(
     "(Tensor(a!) x, Tensor(b!) z) -> (Tensor, Tensor, Tensor)",
     tags=torch.Tag.pt2_compliant_tag,
 )
+torch.library.define(
+    "testlib::foo_mutated",
+    "(Tensor(a!) x) -> (Tensor, Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+torch.library.define(
+    "testlib::foo_functional",
+    "(Tensor x) -> (Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
 @torch.library.impl_abstract("testlib::returns_tensor_symint")
@@ -93,6 +103,16 @@ def foo_impl(x, z):
 @torch.library.impl_abstract("testlib::foo")
 def foo_abstract(x, z):
     return x, z, x + z
+
+@torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
+def foo_mutated(x):
+    a, b, c = torch.ops.testlib.foo(x, x.cos())
+    return a, a.cos()
+
+@torch.library.impl("testlib::foo_functional", "CompositeImplicitAutograd")
+def foo_functional(x):
+    a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
+    return a.cos()
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -729,6 +749,94 @@ class TestExport(TestCase):
             ).size()[0],
             6,
         )
+
+    def test_static_dim_constraints(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(6,4)
+            def forward(self, x, y, z):
+                x0 = self.l(x) + y[1:]
+                return x0, z * 2.0
+
+        foo = Foo()
+        inputs = (torch.randn(4, 6), torch.randn(5, 4), torch.randn(3, 3))
+        dx = Dim("dx", min=3, max=6)
+        dy = dx + 1
+        dz = Dim("dz", min=3, max=6)
+
+        # all of these should be fine
+        for dynamic_shapes in [
+            ({0: dx, 1: 6}, {0: dy, 1: 4}, {0: dz, 1: 3}),
+            ((dx, None), (dy, 4), (dz, 3)),
+            ((None, 6), (5, None), (None, None)),
+            ((4, 6), {0: None, 1: 4}, {0: None, 1: 3})
+        ]:
+            ep = export(foo, inputs, dynamic_shapes=dynamic_shapes)
+            self.assertEqual(foo(*inputs), ep.module()(*inputs))
+
+        # check range_constraints - static dims shouldn't be present
+        ep = export(foo, inputs, dynamic_shapes=((dx, None), (dy, 4), (dz, 3)))
+        self.assertEqual(len(ep.range_constraints), 3)
+        for vr in ep.range_constraints.values():
+            self.assertTrue(vr.lower < vr.upper)
+
+        # check raised errors
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError
+            ),
+            "Static shape constraint of 5 does not match input size of 4, for .*"
+        ):
+            _ = export(foo, inputs, dynamic_shapes=((5, None), None, None))
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError
+            ),
+            "Static shape constraint of 9 does not match input size of 6, for .*"
+        ):
+            _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
+
+    def test_dim_1_2(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes=({0: dx, 1: None}, )
+        )
+        ep.module()(torch.randn(1, 2))
+        ep.module()(torch.randn(2, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 2, but got 3"
+        ):
+            ep.module()(torch.randn(3, 2))
+        vr = list(ep.range_constraints.values())[0]
+        self.assertEquals(vr.lower, 1)
+        self.assertEquals(vr.upper, 2)
+
+    def test_derived_dim_1_2(self):
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Bar(),
+            (torch.randn(2, 2), torch.randn(3, 2)),
+            dynamic_shapes=({0: dx, 1: None}, {0: dx+1, 1: None})
+        )
+        ep.module()(torch.randn(1, 2), torch.randn(2, 2))
+        range_lower_bounds = sorted(vr.lower for vr in ep.range_constraints.values())
+        range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
+        self.assertEquals(range_lower_bounds, [1, 2])
+        self.assertEquals(range_upper_bounds, [2, 3])
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
@@ -1857,7 +1965,7 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775807\]"):
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]"):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -3641,6 +3749,61 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(x_new_eager, x_new_export))
         self.assertTrue(torch.allclose(z_new_eager, z_new_export))
         self.assertTrue(torch.allclose(legit_eager, legit_export))
+
+    def test_custom_op_auto_functionalize_pre_dispatch(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.testlib.foo_mutated(x)
+
+        inps = (torch.ones(5),)
+
+        ep = torch.export.export(M(), inps)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = arg0_1, z = cos);  arg0_1 = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_1 = torch.ops.aten.cos.default(getitem_3)
+    return (getitem_3, getitem_3, cos_1)""")
+
+        ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = arg0_1, z = cos);  arg0_1 = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_1 = torch.ops.aten.cos.default(getitem_3)
+    return (getitem_3, getitem_3, cos_1)""")
+
+
+    def test_custom_op_auto_warn_pre_dispatch(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.testlib.foo_functional(x)
+
+        inps = (torch.ones(5),)
+
+        ep = torch.export.export(M(), inps)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    cos_1 = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
+    return (cos_2,)""")
+
+        ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1):
+    foo_functional = torch.ops.testlib.foo_functional.default(arg0_1);  arg0_1 = None
+    return (foo_functional,)""")
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
