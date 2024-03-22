@@ -8036,6 +8036,18 @@ class CommonTemplate:
             "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         )
 
+    def test_insignificant_strides(self):
+        def f(x):
+            tmp = x + 1
+            return tmp.view(-1, 1, 2)
+
+        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(out.stride(), compiled_out.stride())
+        self.assertEqual(out, compiled_out)
+
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
@@ -9208,6 +9220,22 @@ class CommonTemplate:
                 ),
             )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_with_sizes_with_unbacked_symints(self):
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.aten.split_with_sizes.default(x, [s0, s1])
+            return torch.ops.aten.sort.default(r1)
+
+        N = 7312
+        S0 = 420
+        S1 = N - S0
+
+        result = f(torch.tensor([S0, S1]), torch.randn(N))
+
+        self.assertTrue(len(result) == 2)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -9249,7 +9277,7 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
+if HAS_CPU and RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
