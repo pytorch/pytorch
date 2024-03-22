@@ -5,15 +5,7 @@
 
 namespace at::impl {
 
-enum class TorchFunctionModeKey : int8_t { PROXY, NUM_MODE_KEYS };
-
-// We depend that this enum is ordered from least to most restrictive
-enum TorchFunctionDisabledState {
-  ENABLED,
-  NON_INFRA_SUBCLASSES_DISABLED,
-  SUBCLASSES_DISABLED,
-  ALL_DISABLED
-};
+enum TorchFunctionDisabledState { ENABLED, SUBCLASSES_DISABLED, ALL_DISABLED };
 
 struct TORCH_API PythonTorchFunctionTLS {
   static void set_disabled_state(TorchFunctionDisabledState disabled_state_);

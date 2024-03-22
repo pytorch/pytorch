@@ -81,6 +81,7 @@ from .utils import (
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
+    nn_module_proxy,
     same,
 )
 from .variables.base import VariableTracker
@@ -860,7 +861,16 @@ class OutputGraph:
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
-        root = FakeRootModule(self.nn_modules)
+        # Use nn.Module "proxies" in the constructed GraphModule so that
+        # the resulting GM does not hold additional strong references to the original modules.
+        # This prevents a strong ref cycle where Dynamo created code holds on to references
+        # to modules that also have Dynamo code cache invalidation checks.
+        # When cache invalidation runs, the generated GM will be invalidated, which also deletes
+        # the proxies.
+        nn_modules_proxies = {
+            name: nn_module_proxy(mod) for name, mod in self.nn_modules.items()
+        }
+        root = FakeRootModule(nn_modules_proxies)
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
@@ -1123,7 +1133,7 @@ class OutputGraph:
 
         # Disable user torch function subclasses while calling user compiler because
         # Dynamo is responsible for handling inlining through __torch_function__.
-        with self.restore_global_state(), torch._C._DisableTorchFunctionNonInfraSubclass():
+        with self.restore_global_state(), torch._C._DisableTorchFunctionSubclass():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -1451,7 +1461,7 @@ class OutputGraph:
                         fvs = free_symbols(ra.expr)
                         missing = fvs - symbol_to_proxy.keys()
                         if missing:
-                            i1 = sorted(missing)[0]
+                            i1 = sorted(missing, key=lambda x: str(x))[0]
                             # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
                             # assert self.shape_env.is_unbacked_symint(i1), i1
                             ras_by_symbol.setdefault(i1, []).append(ra)

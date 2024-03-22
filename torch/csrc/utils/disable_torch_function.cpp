@@ -15,11 +15,6 @@ bool torch_function_enabled() {
       at::impl::TorchFunctionDisabledState::ENABLED;
 }
 
-bool torch_function_infra_subclasses_enabled() {
-  return at::impl::PythonTorchFunctionTLS::get_disabled_state() <=
-      at::impl::TorchFunctionDisabledState::NON_INFRA_SUBCLASSES_DISABLED;
-}
-
 PyObject* disabled_torch_function_impl() {
   return disabled_torch_function;
 }
@@ -48,7 +43,7 @@ PyObject* DisableTorchFunctionSubclass__enter(
     PyObject* unused) {
   const auto old_state = at::impl::PythonTorchFunctionTLS::get_disabled_state();
   ((DisableTorchFunctionSubclass*)self)->old_state = old_state;
-  if (old_state < at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED) {
+  if (old_state == at::impl::TorchFunctionDisabledState::ENABLED) {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
   }
@@ -63,16 +58,6 @@ PyObject* DisableTorchFunctionSubclass__exit(PyObject* self, PyObject* unused) {
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused) {
   if (torch::torch_function_enabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
-PyObject* THPModule_isEnabledTorchFunctionInfraSubclasses(
-    PyObject* self,
-    PyObject* unused) {
-  if (torch::torch_function_infra_subclasses_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -132,94 +117,6 @@ PyObject* THPModule_DisableTorchFunctionSubclassType() {
   }
 
   return (PyObject*)(&DisableTorchFunctionSubclassType);
-}
-
-typedef struct {
-  PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
-} _DisableTorchFunctionNonInfraSubclass;
-
-PyObject* _DisableTorchFunctionNonInfraSubclass__enter(
-    PyObject* self,
-    PyObject* unused) {
-  const auto old_state = at::impl::PythonTorchFunctionTLS::get_disabled_state();
-  ((_DisableTorchFunctionNonInfraSubclass*)self)->old_state = old_state;
-  if (old_state <
-      at::impl::TorchFunctionDisabledState::NON_INFRA_SUBCLASSES_DISABLED) {
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(
-        at::impl::TorchFunctionDisabledState::NON_INFRA_SUBCLASSES_DISABLED);
-  }
-  Py_RETURN_NONE;
-}
-
-PyObject* _DisableTorchFunctionNonInfraSubclass__exit(
-    PyObject* self,
-    PyObject* unused) {
-  at::impl::PythonTorchFunctionTLS::set_disabled_state(
-      ((_DisableTorchFunctionNonInfraSubclass*)self)->old_state);
-  Py_RETURN_NONE;
-}
-
-static PyMethodDef _DisableTorchFunctionNonInfraSubclass_methods[] = { // NOLINT
-    {"__enter__",
-     _DisableTorchFunctionNonInfraSubclass__enter,
-     METH_NOARGS,
-     nullptr},
-    {"__exit__",
-     _DisableTorchFunctionNonInfraSubclass__exit,
-     METH_VARARGS,
-     nullptr},
-    {nullptr, nullptr, 0, nullptr}};
-
-PyTypeObject _DisableTorchFunctionNonInfraSubclassType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._DisableTorchFunctionNonInfraSubclass", /* tp_name */
-    sizeof(_DisableTorchFunctionNonInfraSubclass), /* tp_basicsize */
-    0, /* tp_itemsize */
-    nullptr, /* tp_dealloc */
-    0, /* tp_vectorcall_offset */
-    nullptr, /* tp_getattr */
-    nullptr, /* tp_setattr */
-    nullptr, /* tp_reserved */
-    nullptr, /* tp_repr */
-    nullptr, /* tp_as_number */
-    nullptr, /* tp_as_sequence */
-    nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
-    nullptr, /* tp_call */
-    nullptr, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
-    nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT, /* tp_flags */
-    nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
-    nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    nullptr, /* tp_iter */
-    nullptr, /* tp_iternext */
-    _DisableTorchFunctionNonInfraSubclass_methods, /* tp_methods */
-    nullptr, /* tp_members */
-    nullptr, /* tp_getset */
-    nullptr, /* tp_base */
-    nullptr, /* tp_dict */
-    nullptr, /* tp_descr_get */
-    nullptr, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    nullptr, /* tp_init */
-    PyType_GenericAlloc, /* tp_alloc */
-    PyType_GenericNew, /* tp_new */
-};
-
-PyObject* THPModule__DisableTorchFunctionNonInfraSubclassType() {
-  if (PyType_Ready(&_DisableTorchFunctionNonInfraSubclassType) < 0) {
-    return nullptr;
-  }
-
-  return (PyObject*)(&_DisableTorchFunctionNonInfraSubclassType);
 }
 
 typedef struct {
@@ -405,19 +302,6 @@ inline bool has_torch_function_attr(PyObject* obj) {
       attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_function);
 }
 
-inline bool is_infra_torch_function(PyObject* obj) {
-  auto attr = PyObject_FastGetAttrString(obj, "_mode_key");
-  if (attr.ptr() == nullptr ||
-      !py::isinstance<at::impl::TorchFunctionModeKey>(attr)) {
-    return false;
-  }
-  // The only valid mode key for infra classes today is PROXY
-  TORCH_INTERNAL_ASSERT(
-      attr.cast<at::impl::TorchFunctionModeKey>() ==
-      at::impl::TorchFunctionModeKey::PROXY);
-  return true;
-}
-
 namespace torch {
 auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
   if (!ignore_mode && at::impl::torch_function_mode_enabled())
@@ -425,9 +309,7 @@ auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
   PyTypeObject* tp = Py_TYPE(obj);
   return (
       !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
-      torch::torch_function_infra_subclasses_enabled() &&
-      (torch::torch_function_enabled() || is_infra_torch_function(obj)) &&
-      has_torch_function_attr(obj));
+      torch::torch_function_enabled() && has_torch_function_attr(obj));
 }
 } // namespace torch
 
