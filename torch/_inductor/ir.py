@@ -2932,7 +2932,7 @@ class Buffer(IRNode):
     def decide_layout(self):
         pass
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
@@ -4326,7 +4326,7 @@ class UserDefinedTritonKernel(ExternKernel):
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [i.get_name() for i in self.inputs]
 
 
@@ -4359,7 +4359,7 @@ class MutationOutput(ExternKernel):
     def has_side_effects(self):
         return True
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name()]
 
 
@@ -4509,7 +4509,7 @@ class BindNNParameter(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(self.get_name())
         mark_node_as_mutating(self, variable, placeholder)
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
     def get_mutation_names(self):
@@ -5040,7 +5040,7 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return self.alias_names
 
     def get_mutation_names(self):
@@ -5283,7 +5283,7 @@ class ComplexView(FallbackKernel):
     def should_allocate(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
@@ -5349,11 +5349,11 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel) and len(inp.get_alias_names()) > 0
+            if isinstance(inp, FallbackKernel) and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
 
@@ -7376,7 +7376,7 @@ class Wait(ExternKernelAlloc):
             inputs=[collective_op],
         )
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].codegen_reference()]
 
