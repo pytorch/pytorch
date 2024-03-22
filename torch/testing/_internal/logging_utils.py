@@ -130,9 +130,6 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
 
-    def hasRecord(self, records, m):
-        return any(m in r.getMessage() for r in records)
-
     def getRecord(self, records, m):
         record = None
         for r in records:
