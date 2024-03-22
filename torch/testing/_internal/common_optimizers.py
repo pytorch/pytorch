@@ -1986,6 +1986,7 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=(),
         only_supports_sparse_grads=True,
         supports_complex=False,  # Missing complex support, see #118153
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
@@ -2034,6 +2035,11 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("no param_groups, see #117165"),
+                "TestOptimRenewed",
+                "test_init_state_per_param",
             ),
         ),
     ),

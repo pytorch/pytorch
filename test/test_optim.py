@@ -1309,6 +1309,10 @@ class TestOptimRenewed(TestCase):
         params = [torch.randn(3, 2, device=device, dtype=dtype), torch.randn(3, device=device, dtype=dtype)]
         for p in params:
             p.grad = torch.rand_like(p)
+            if optim_info.only_supports_sparse_grads:
+                # For this test, we naively convert the Tensor layout, which we know does
+                # NOT represent the expected use case for optims like SparseAdam!
+                p.grad = p.grad.to_sparse()
 
         optimizer = MyOptimizer(params)
         optimizer.step()

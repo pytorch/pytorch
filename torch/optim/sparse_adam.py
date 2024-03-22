@@ -38,6 +38,16 @@ class SparseAdam(Optimizer):
             )
 
 
+    def init_state_per_param(self, param, param_group):
+        state = self.state[param]
+        if len(state) == 0:
+            state['step'] = 0
+            # Exponential moving average of gradient values
+            state['exp_avg'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            # Exponential moving average of squared gradient values
+            state['exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+
+
     @torch.no_grad()
     def step(self, closure=None):
         """Perform a single optimization step.
@@ -57,8 +67,6 @@ class SparseAdam(Optimizer):
             exp_avgs = []
             exp_avg_sqs = []
             state_steps = []
-            eps = group['eps']
-            lr = group['lr']
             beta1, beta2 = group['betas']
             maximize = group.get('maximize', False)
 
@@ -69,16 +77,10 @@ class SparseAdam(Optimizer):
                         raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
                     grads.append(p.grad)
 
+                    # lazy init
+                    self.init_state_per_param(p, group)
+
                     state = self.state[p]
-
-                    # State initialization
-                    if len(state) == 0:
-                        state['step'] = 0
-                        # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
 
