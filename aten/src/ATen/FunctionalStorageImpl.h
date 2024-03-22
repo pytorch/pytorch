@@ -32,6 +32,7 @@ struct ViewMeta {
       std::function<Tensor(const Tensor&, int64_t)> forward,
       std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
       bool is_multi_output = false,
+      bool is_as_strided = false,
       int64_t out_idx = 0)
       : forward_fn(std::move(forward)),
         reverse_fn(std::move(reverse)),
@@ -45,6 +46,8 @@ struct ViewMeta {
 
   // Tells us if this is a multi-output view
   bool is_multi_output;
+
+  bool is_as_strided;
 
   // Returns a copy of the current ViewMeta, if out_idx matches the current
   // out_index. Otherwise, returns a new ViewMeta with the same forward/reverse
