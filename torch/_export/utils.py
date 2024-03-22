@@ -437,12 +437,8 @@ def propagate_placeholder_names_for_cond(gm: torch.fx.GraphModule) -> None:
                         break
                     # handle duplicate names on ops with nn_module_stack
                     if cond_args[i].op == "call_function":
-                        module_stack = [
-                            x
-                            for x, _ in cond_args[i]
-                            .meta.get("nn_module_stack", {})
-                            .values()
-                        ]
+                        module_stack = cond_args[i].meta.get("nn_module_stack", {})
+                        module_stack = [x[0] for x in module_stack.values()]
                         name = "_".join(
                             ["_root"] + module_stack[1:] + [cond_args[i].name]
                         )
