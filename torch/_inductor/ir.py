@@ -2721,11 +2721,7 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-<<<<<<< HEAD
-    """Shares the same storage as another tensor"""
-=======
-    """Uses the same storage as another tensor"""
->>>>>>> d1bdf7866b5 (Cleanup AliasedLayout + fix issues with buffer reuse with recursive)
+    """Is a view into the storage of another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -5390,7 +5386,7 @@ def _prepare_convolution_fusion_create(
     ):
         assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
         dim = len(output_size)
-        assert dim > 2, "Expect input dim > 2"
+        assert dim  2, "Expect input dim > 2"
 
         BATCH_DIM = 0
         WEIGHT_INPUT_CHANNELS_DIM = 1

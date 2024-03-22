@@ -373,7 +373,10 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            len(input_node.node.get_inputs_that_alias_output()) > 0
+                            isinstance(
+                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
+                            )
+                            and len(input_node.node.get_inputs_that_alias_output()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
