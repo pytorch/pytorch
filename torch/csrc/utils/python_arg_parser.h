@@ -246,7 +246,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
-  inline c10::optional<at::Generator> generator(int i);
+  inline std::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::Storage storage(
       int i,
@@ -1069,7 +1069,7 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline c10::optional<at::Generator> PythonArgs::generator(int i) {
+inline std::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i])
     return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;

@@ -58,7 +58,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   }
 }
 
-static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, const std::optional<Generator>& gen) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto cur_level = maybe_layer->layerId();
@@ -94,11 +94,11 @@ static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor
     "If this is necessary for your usage, please file an issue with functorch.");
   if (randomness == RandomnessType::Same && self_bdim) {
     auto intermediate = empty(self.sizes(), self.options());
-    intermediate.bernoulli_(other_, std::move(gen));
+    intermediate.bernoulli_(other_, gen);
     self.copy_(intermediate); // batching should make this just work out...
     return self;
   } else {
-    self_.bernoulli_(other_, std::move(gen));
+    self_.bernoulli_(other_, gen);
     return self;
   }
 }
@@ -213,7 +213,7 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   return std::make_tuple(output, mask);
 }
 
-static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const c10::optional<Generator> generator) {
+static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const std::optional<Generator>& generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
