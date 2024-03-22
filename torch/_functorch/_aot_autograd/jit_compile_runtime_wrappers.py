@@ -23,6 +23,7 @@ from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
@@ -79,6 +80,34 @@ def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
                 continue
             out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
     return out
+
+
+# See Note [Tangents must be contiguous, Part 2]
+def coerce_runtime_tangent(x, metadata_tensor):
+    if not isinstance(x, torch.Tensor):
+        return x
+    if not is_traceable_wrapper_subclass(x):
+        return x
+    assert is_traceable_wrapper_subclass(metadata_tensor)
+    _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
+    _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
+    if runtime_tangent_metadata == expected_tangent_metadata:
+        return x
+    if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
+        raise RuntimeError(
+            f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+
+Expected metadata: {str(expected_tangent_metadata)}
+
+Runtime metadata: {str(runtime_tangent_metadata)}
+
+shape: {str(x.shape)}
+To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+"""
+        )
+    return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
 
 
 def aot_dispatch_base(
@@ -809,6 +838,17 @@ Got grad_output types: {str(grad_output_types)}"""
                         is_joint_structure=False,
                     )
                 )
+                all_args = [
+                    coerce_runtime_tangent(
+                        t,
+                        CompiledFunction.metadata.traced_tangents[
+                            i - tangents_start_idx
+                        ],
+                    )
+                    if tangents_start_idx <= i < tangents_end_idx
+                    else t
+                    for i, t in enumerate(all_args)
+                ]
                 all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
                 tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                 tangents_end_idx = tangents_start_idx + len_tangents
