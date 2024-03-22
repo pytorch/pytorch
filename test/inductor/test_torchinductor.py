@@ -9220,6 +9220,22 @@ class CommonTemplate:
                 ),
             )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_with_sizes_with_unbacked_symints(self):
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.aten.split_with_sizes.default(x, [s0, s1])
+            return torch.ops.aten.sort.default(r1)
+
+        N = 7312
+        S0 = 420
+        S1 = N - S0
+
+        result = f(torch.tensor([S0, S1]), torch.randn(N))
+
+        self.assertTrue(len(result) == 2)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -9378,6 +9394,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @config.patch(assume_aligned_inputs=False)
+        def test_config_option_dont_assume_alignment(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin() + x.cos()
+
+            for offset in (0, 1, 2):
+                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
+                inps = torch.as_strided(base, (64, 64), (64, 1), offset)
+                torch._dynamo.reset()
+                kernels = self.get_kernels(fn, [inps])
+                arguments_that_are_divisible_by_16 = (
+                    kernels[0].triton_meta["configs"][0].divisible_by_16
+                )
+
+                #             NO_ALIGN ALIGN     ALIGN
+                # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
+
+                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
