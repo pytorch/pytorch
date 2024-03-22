@@ -304,6 +304,20 @@ class TestHelperModules:
             weighted = torch.bmm(attention, v)
             return weighted
 
+    class EmbeddingBagList(torch.nn.Module):
+        def __init__(self, ntables=3, embedding_dim=128, num_embedings=1000) -> None:
+            super().__init__()
+            self.embs = nn.ModuleDict()
+            for i in range(ntables):
+                self.embs[str(i)] = nn.EmbeddingBag(num_embeddings=num_embedings, embedding_dim=embedding_dim, mode='sum')
+
+        def forward(self, indices, offsets):
+            out = []
+            for i, emb in enumerate(self.embs.values()):
+                res = emb(indices[i], offsets[i], per_sample_weights=None)
+                out.append(res)
+            return out
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -1050,6 +1064,52 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
+
+    @skipIfNoX86
+    def test_embeddingbag(self):
+        """
+        Test pattern of embeddingbag with X86InductorQuantizer.
+        """
+        BS = 16
+        NUM_TABLE = 3
+        EMB_DIM = 128
+        NUM_EMBS = 1000
+
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.EmbeddingBagList(NUM_TABLE, EMB_DIM, NUM_EMBS).eval()
+            indices = [
+                torch.randint(NUM_EMBS, (BS * (i + 1),)).to(torch.int32)
+                for i in range(NUM_TABLE)
+            ]
+            offsets = [
+                torch.arange(
+                    0, BS * i, (i + 1)
+                ).to(torch.int32)
+                for i in range(NUM_TABLE)
+            ]
+            example_inputs = (indices, offsets, )
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            node_occurrence = {
+                # indices, offsets do not need quantize
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: NUM_TABLE,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.embedding_bag.padding_idx,
+            ] * NUM_TABLE
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
 
     @skipIfTorchDynamo("very slow")
     @skipIfNoX86

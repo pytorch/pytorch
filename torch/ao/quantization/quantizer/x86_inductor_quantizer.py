@@ -68,10 +68,14 @@ int8_in_int8_out_ops_pt2e: Set = {
     torch.ops.aten.flatten.using_ints,
 }
 
-
+embedding_ops: Set = {
+    torch.ops.aten.embedding_bag.padding_idx,
+}
 # Operations support the int8 data type and exclude operations such as conv and linear.
 # A superset of int8_in_int8_out_ops_pt2e incorporating additional operators.
-quantizable_ops_pt2e = copy.deepcopy(int8_in_int8_out_ops_pt2e)
+quantizable_ops_pt2e = copy.deepcopy(int8_in_int8_out_ops_pt2e).union(
+    copy.deepcopy(embedding_ops)
+)
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
@@ -849,6 +853,22 @@ class X86InductorQuantizer(Quantizer):
             _is_output_of_quantized_pattern=True,
         )
 
+    def _annotate_embeddingbag(
+        self, node: Node, quantization_config: QuantizationConfig
+    ) -> None:
+        embeddingbag_node = node
+        assert isinstance(embeddingbag_node, Node)
+        weight_node = embeddingbag_node.args[0]
+        assert isinstance(weight_node, Node)
+        input_qspec_map = {}
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
+        embeddingbag_node.meta[
+            QUANT_ANNOTATION_KEY
+        ] = _X86InductorQuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True,
+        )
+
     def _annotation_propagation_quantizable_pattern(
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
@@ -878,6 +898,8 @@ class X86InductorQuantizer(Quantizer):
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     return
                 self._annotate_cat(node, quantization_config)
+            if node.target is torch.ops.aten.embedding_bag.padding_idx:
+                self._annotate_embeddingbag(node, quantization_config)
             else:
                 input_node = node.all_input_nodes[0]
                 if not is_all_inputs_connected_to_quantized_op(
