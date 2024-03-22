@@ -5286,13 +5286,9 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-<<<<<<< HEAD
-    ir.MutationLayoutSHOULDREMOVE.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
-=======
     ir.MutationLayoutSHOULDREMOVE.realize_into(
         val, changed_data, unsafe_alias=unsafe_alias
     )
->>>>>>> d1bdf7866b5 (Cleanup AliasedLayout + fix issues with buffer reuse with recursive)
     return changed
 
 
