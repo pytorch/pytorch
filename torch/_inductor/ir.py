@@ -5386,7 +5386,7 @@ def _prepare_convolution_fusion_create(
     ):
         assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
         dim = len(output_size)
-        assert dim  2, "Expect input dim > 2"
+        assert dim > 2, "Expect input dim > 2"
 
         BATCH_DIM = 0
         WEIGHT_INPUT_CHANNELS_DIM = 1
