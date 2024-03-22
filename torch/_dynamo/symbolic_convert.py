@@ -1865,6 +1865,9 @@ class InstructionTranslatorBase(
         self.push(SliceVariable(items))
         self.STORE_SUBSCR(inst)
 
+    POP_JUMP_IF_TRUE = generic_jump(operator.truth, False)
+    POP_JUMP_IF_FALSE = generic_jump(operator.not_, False)
+
     def END_FOR(self, inst):
         self.popn(2)
 

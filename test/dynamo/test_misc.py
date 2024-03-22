@@ -47,7 +47,6 @@ from torch._dynamo.testing import (
     expectedFailureDynamic,
     same,
     skipIfNotPy311,
-    skipIfPy312,
     unsupported,
     xfailIfPy311,
 )
@@ -6606,7 +6605,6 @@ def fn():
             for inst in insts:
                 self.assertNotIn("_NONE", inst.opname)
 
-    @skipIfPy312
     @skipIfNotPy311
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
