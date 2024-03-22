@@ -238,6 +238,7 @@ torch._dynamo.config.traceable_tensor_subclasses.add(NestedTensor)
 # TODO: Remove ViewBufferFromNested, ViewNestedFromBuffer, and buffer_from_jagged once the
 # internal BC period has passed.
 
+
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod

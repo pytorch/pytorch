@@ -620,11 +620,6 @@ def _post_process_flash_output(out: torch.Tensor, og_size):
     return out
 
 
-@torch._dynamo.allow_in_graph
-def _jagged_from_buffer(buffer, offsets):
-    return ViewNestedFromBuffer.apply(buffer, offsets)
-
-
 def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -754,13 +749,9 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-<<<<<<< HEAD
         from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
         return nested_view_from_values_offsets(
-=======
-        return _jagged_from_buffer(
->>>>>>> 5de5f98afdb (Actually inline NT torch function during dynamo)
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:

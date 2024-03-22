@@ -1133,7 +1133,7 @@ class OutputGraph:
 
         # Disable user torch function subclasses while calling user compiler because
         # Dynamo is responsible for handling inlining through __torch_function__.
-        with self.restore_global_state(), torch._C._DisableTorchFunctionSubclass():
+        with self.restore_global_state(), torch._C.DisableTorchFunctionSubclass():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
