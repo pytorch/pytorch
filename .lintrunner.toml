@@ -147,7 +147,7 @@ init_command = [
     'filelock==3.13.1',
     'junitparser==2.1.1',
     'rich==10.9.0',
-    'pyyaml==6.0',
+    'pyyaml==6.0.1',
     'optree==0.10.0',
 ]
 
@@ -186,11 +186,12 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'aten/src/ATen/core/*.cpp',
     # Enable coverage of headers in aten/src/ATen
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/core/*.h',
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/csrc/*.h',
@@ -977,7 +978,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'PyYAML==6.0',
+    'PyYAML==6.0.1',
 ]
 
 # Black + usort
