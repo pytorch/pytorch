@@ -1,10 +1,6 @@
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
-#ifdef USE_ROCM
-  #include <c10/hip/driver_api.h>
-#else
-  #include <c10/cuda/driver_api.h>
-#endif
+#include <c10/cuda/driver_api.h>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>

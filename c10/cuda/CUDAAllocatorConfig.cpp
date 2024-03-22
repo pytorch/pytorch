@@ -3,11 +3,7 @@
 #include <c10/util/llvmMathExtras.h>
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-#if defined(USE_ROCM)
-#include <c10/hip/driver_api.h>
-#else
 #include <c10/cuda/driver_api.h>
-#endif
 #endif
 
 namespace c10::cuda::CUDACachingAllocator {

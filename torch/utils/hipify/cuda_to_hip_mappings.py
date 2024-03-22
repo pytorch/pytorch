@@ -8692,6 +8692,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
         ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
         ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
+        ("c10/cuda/driver_api.h", ("c10/hip/driver_api.h", API_C10)),
         (
             "c10/cuda/impl/cuda_cmake_macros.h",
             ("c10/hip/impl/hip_cmake_macros.h", API_C10),
