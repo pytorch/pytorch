@@ -150,7 +150,9 @@ sys.excepthook = handle_exception
 
 
 def init():
+    from torch.testing._internal.common_fsdp import MLP
     test_case = "nested_fully_shard"  # "simple_mlp" / "nested_fully_shard"
+    mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)
     if test_case == "simple_mlp":
@@ -163,9 +165,7 @@ def init():
         )
         fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
     elif test_case == "nested_fully_shard":
-        from torch.testing._internal.common_fsdp import MLP
-        model = nn.Sequential(*[MLP(hidden_dim) for _ in range(1)])  # range(3)
-        mesh = init_device_mesh("cuda", (world_size,))
+        model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])  # range(3)
         for mlp in model:
             fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
@@ -204,14 +204,11 @@ def run(model, optim, n_iter):
     for _ in range(n_iter):
         optim.zero_grad(set_to_none=True)
         inp = create_input()
-        torch.storage.resize_count_and_loc = {}
         torch_log.warning("FORWARD")
         out = model(inp)
         torch_log.warning("END FORWARD")
-        # torch.storage.resize_count_and_loc = {}
         loss = out.sum()
         losses.append(loss.item())
-        torch.storage.resize_count_and_loc = {}
         torch_log.warning("BACKWARD")
         # torch_log.warning("OUT GRAPH\n%s", make_dot(loss))
         loss.backward()
@@ -226,7 +223,7 @@ def main_compiled(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
     run(model, optim, 1)
-    print("done eager 1st run!")
+    print("done eager 1st run for compiled!")
 
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
@@ -250,6 +247,7 @@ def main_eager(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
     run(model, optim, 1)
+    print("done eager 1st run for eager!")
 
     res = run(model, optim, n_iter)
     return res
