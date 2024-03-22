@@ -7009,12 +7009,24 @@ class CollectiveKernel(ExternKernel):
     def __init__(self, layout, inputs, constant_args):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
+        self.should_emit_register_tensor_work = True
+        self.should_emit_find_or_create_pg = True
 
+    @property
     def should_emit_register_tensor_work(self):
-        return True
+        return self._should_emit_register_tensor_work
 
+    @should_emit_register_tensor_work.setter
+    def should_emit_register_tensor_work(self, value):
+        self._should_emit_register_tensor_work = value
+
+    @property
     def should_emit_find_or_create_pg(self):
-        return True
+        return self._should_emit_find_or_create_pg
+
+    @should_emit_find_or_create_pg.setter
+    def should_emit_find_or_create_pg(self, value):
+        self._should_emit_find_or_create_pg = value
 
     def codegen_collective(self, wrapper, output_name, input_names):
         # factor so the boilerplate can be handled in CollectiveKernel.codegen
@@ -7045,7 +7057,7 @@ class CollectiveKernel(ExternKernel):
         output_name = self.get_name()
         tag, ranks, group_size = self.constant_args
 
-        if self.should_emit_find_or_create_pg():
+        if self.should_emit_find_or_create_pg:
             # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
             wrapper.writeline(
                 f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
@@ -7053,7 +7065,60 @@ class CollectiveKernel(ExternKernel):
 
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
-        if self.should_emit_register_tensor_work():
+        if self.should_emit_register_tensor_work:
+            wrapper.writeline(
+                f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
+            )
+
+
+class FusedCollectiveKernel(CollectiveKernel):
+    """
+    Each collective should follow the pattern:
+    - extend InPlaceCollectiveKernel or OutOfPlaceCollectiveKernel.
+    - the kernel delegates into c10d processgroup, which returns a 'work' obj
+    - the work obj is registered via _register_tensor_work so it can be waited on later
+    """
+
+    def __init__(self, colls: List[CollectiveKernel]):
+        assert len(colls) > 0
+        super().__init__(colls[0].layout, colls[0].inputs, colls[0].constant_args)
+        self.colls = colls
+        self.name = V.graph.register_buffer(self)
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
+        wrapper.add_import_once(
+            "import torch.distributed._functional_collectives_impl as fun_col_impl"
+        )
+
+        pg_name = f"{self.get_name()}_pg"
+        tag, ranks, group_size = self.colls[0].constant_args
+        wrapper.writeline(
+            f"{pg_name} = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        for coll in self.colls:
+            output_name = coll.get_name()
+            wrapper.writeline(
+                f"{output_name}_pg = {pg_name}"
+            )
+
+        wrapper.writeline(
+            f"with c10d._coalescing_manager(async_ops=True) as cm:"
+        )
+
+        for coll in self.colls:
+            coll.should_emit_find_or_create_pg = False
+            coll.should_emit_register_tensor_work = False
+            coll.codegen(wrapper)
+
+        wrapper.writeline(
+            f"cm.wait()"
+        )
+
+        for coll in self.colls:
+            output_name = coll.get_name()
             wrapper.writeline(
                 f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
             )

@@ -64,6 +64,26 @@ def raise_comms(
     return new_order_reversed[::-1]
 
 
+def fuse_comms(
+    snodes: List["scheduler.BaseSchedulerNode"],
+) -> List["scheduler.BaseSchedulerNode"]:
+    """
+    Greedily fuses comms that are in the same compute graph.
+    """
+    cur_comms: List["scheduler.BaseSchedulerNode"] = []
+    new_comms: List["scheduler.BaseSchedulerNode"] = []
+    for snode in snodes:
+        if isinstance(snode.node, ir.CollectiveKernel):
+            print(f"fusing {snode.get_name()}")
+            cur_comms.append(snode)
+
+    fused_kernel = ir.FusedCollectiveKernel([snode.node for snode in cur_comms])
+    scheduler = cur_comms[0].scheduler
+    fused_snode = scheduler.create_scheduler_node(fused_kernel)
+    new_comms.append(fused_snode)
+    return new_comms
+
+
 def get_ancestors(node):
     ancestors = set()
     cur_nodes = [node]

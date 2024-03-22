@@ -277,6 +277,33 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    @patch.object(
+        torch._inductor.config,
+        "reorder_for_compute_comm_overlap_passes",
+        [
+            "fuse_comms",
+        ],
+    )
+    def test_fuse_comms(self):
+        def func(a, b, *, tag, ranks, group_size):
+            ar1 = _functional_collectives.all_reduce(a, "sum", ranks, tag)
+            ar2 = _functional_collectives.all_reduce(b, "sum", ranks, tag)
+            return (ar1, ar2)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            a = b = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, a, b, **self.get_world_trs())
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
     def test_nccl_heuristics(self):
         assert len(baseLat) == len(NCCL_ALGO)
         assert all(len(x) == len(NCCL_PROTO) for x in baseLat)
