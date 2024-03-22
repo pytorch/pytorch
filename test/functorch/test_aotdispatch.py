@@ -731,6 +731,23 @@ def forward(self, arg0_1, arg1_1):
         # by the time it becomes a graph input. Good to test both cases.
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    def test_input_mutation_hidden_from_autograd_aliasing(self):
+        def f(a):
+            a_alias = a.view(-1)
+            with torch.no_grad():
+                a_alias.mul_(2)
+            return a + 1
+        inp = [torch.ones(4, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [-1])
+    mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
+    view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1)
+    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = None
+    return [add]""")
+
     def test_input_mutation_requires_grad_no_grad(self):
         def f(a):
             with torch.no_grad():
