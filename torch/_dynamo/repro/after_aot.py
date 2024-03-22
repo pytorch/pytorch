@@ -847,8 +847,9 @@ divergences--you just might not end up with a useful repro in the end.""",
     parser_minify = subparsers.add_parser(
         "minify", help="run the minifier on the repro"
     )
-    parser_minify = subparsers.add_parser("get_args", help="get the args")
     common_flags(parser_minify)
+    parser_get_args = subparsers.add_parser("get_args", help="get the args")
+    common_flags(parser_get_args)
     parser_minify_isolate = parser_minify.add_mutually_exclusive_group()
     parser_minify_isolate.add_argument(
         "--isolate",
