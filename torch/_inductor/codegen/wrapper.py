@@ -439,7 +439,7 @@ class WrapperCodeGen(CodeGen):
         # or (nested) subgraph---is currently codegened; the primary use case is
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
-        self.codegened_graph_stack = [V.graph]
+        self.codegened_graph_stack = []
 
         self.write_header()
         self.write_prefix()
