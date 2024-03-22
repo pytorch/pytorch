@@ -741,7 +741,7 @@ def min_cut_rematerialization_partition(
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten.upsample_bilinear2d] # noqa: E501,B950
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten.upsample_bilinear2d]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
@@ -769,11 +769,8 @@ def min_cut_rematerialization_partition(
         return False
 
     def should_ban_recomputation(node):
-        if "recompute" in node.meta:
-            return node.meta["recompute"] == 0
-        elif config.aggressive_recomputation:
+        if config.aggressive_recomputation:
             ignored_ops = random_ops + compute_intensive_ops
-
             return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
             if node.op != 'call_function':
@@ -830,13 +827,17 @@ def min_cut_rematerialization_partition(
 
     nx_graph = nx.DiGraph()
     banned_nodes = set()
-    def ban_recomputation(node):
+
+    def ban_recomputation_if_allowed(node):
+        if "recompute" in node.meta:
+            return False
         banned_nodes.add(node)
         # A node will only ever be recomputed if there is a path from an
         # ancestor of this node to the backwards path through this node that
         # doesn't go through any saved value. If this node is saved, then that
         # condition is not possible.
         nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        return True
 
     for node in joint_graph.nodes:
         if node.op == 'output':
@@ -857,13 +858,13 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
-            ban_recomputation(node)
+            ban_recomputation_if_allowed(node)
 
         # If a node can't be recomputed (too expensive or involves randomness),
         # we prevent it from being recomputed by adding an inf edge to the source
         # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
         if node in required_fw_nodes and should_ban_recomputation(node):
-            ban_recomputation(node)
+            ban_recomputation_if_allowed(node)
 
         # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
@@ -884,7 +885,7 @@ def min_cut_rematerialization_partition(
     import heapq
 
     # This heuristic is fairly straightforward. The idea is that although it is
-    # cheap to recompute pointwise ops, we don't want to end up in a situation
+    # cheap to recompute bandwidth-bound ops, we don't want to end up in a situation
     # where we have a long chain of pointwise ops from the beginning to the end
     # of the model (like say, residual connections)
 
@@ -903,7 +904,7 @@ def min_cut_rematerialization_partition(
     #         visited.add(cur)
     #         if cur.fw_order > start_order + 100 and len(fusible) == 0:
     #             print("too long", cur, start_node, cur.fw_order, start_node.fw_order)
-    #             ban_recomputation(cur)
+    #             ban_recomputation_if_allowed(cur)
     #             break
 
     #         for user in cur.users:
@@ -937,21 +938,24 @@ def min_cut_rematerialization_partition(
     # downstream nodes together.
 
     # Thus, we shouldn't aim to recompute far downstream nodes that depend on
-    # this node. That intuition of "far downstream" is captured in their
-    # heuristic.
-    for used_node in joint_graph.nodes:
-        if used_node not in required_fw_nodes:
-            continue
-        orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
-        fw_users = [user for user in used_node.users if user in required_fw_nodes]
-        if len(orders) > 0:
-            first_unfusible_use = find_first_unfusible(fw_users, max(orders))
-            for user in tuple(used_node.users):
-                if user in required_fw_nodes and user.fw_order > first_unfusible_use:
-                    if user in banned_nodes:
-                        continue
-                    print(f"used above/below fusible {used_node}:{used_node.fw_order} -> {first_unfusible_use} -> {user} {user.fw_order}")
-                    nx_graph.add_edge("source", user.name+"_in", capacity=math.inf)
+    # this node. That intuition of "far downstream" is captured by whether
+    # there's an unfusible op along the chain somewhere
+
+    # It could probably be improved by properly analyzing what's going on in the
+    # backwards pass instead of only relying on whether it's unfusible in the
+    # forwards.
+    if config.ban_recompute_materialized_in_backwards:
+        for used_node in required_fw_nodes:
+            orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
+            fw_users = [user for user in used_node.users if user in required_fw_nodes]
+            if len(orders) > 0:
+                first_unfusible_use = find_first_unfusible(fw_users, max(orders))
+                for user in tuple(used_node.users):
+                    if user in required_fw_nodes and user.fw_order > first_unfusible_use and is_fusible(used_node, user):
+                        if user in banned_nodes:
+                            continue
+                        print(f"used above/below fusible {used_node}:{used_node.fw_order} -> {first_unfusible_use} -> {user} {user.fw_order}")
+                        ban_recomputation_if_allowed(user)
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
@@ -990,7 +994,7 @@ def min_cut_rematerialization_partition(
 
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
-        storages = set(get_node_storage(node) for node in saved_values)
+        storages = {get_node_storage(node) for node in saved_values}
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         # for i in sorted_sizes: print(i)

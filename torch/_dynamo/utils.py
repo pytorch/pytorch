@@ -1256,17 +1256,17 @@ def same(
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif type(ref).__name__ == "QuestionAnsweringModelOutput":
-         return same(
-                ref.loss,
-                res.loss,
-                fp64_ref.loss,
-                cos_similarity,
-                tol,
-                equal_nan,
-                exact_dtype,
-                relax_numpy_equality,
-                ignore_non_fp,
-                log_error=log_error,
+        return same(
+            ref.loss,
+            res.loss,
+            fp64_ref.loss,
+            cos_similarity,
+            tol,
+            equal_nan,
+            exact_dtype,
+            relax_numpy_equality,
+            ignore_non_fp,
+            log_error=log_error,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
