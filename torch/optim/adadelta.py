@@ -58,6 +58,16 @@ class Adadelta(Optimizer):
                                        if group['capturable']
                                        else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
+
+    def init_state_per_param(self, param, param_group):
+        state = self.state[param]
+        if len(state) == 0:
+            state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=param.device)
+                             if param_group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
+            state["square_avg"] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            state["acc_delta"] = torch.zeros_like(param, memory_format=torch.preserve_format)
+
+
     def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps):
         has_complex = False
         for p in group["params"]:
@@ -69,20 +79,10 @@ class Adadelta(Optimizer):
                 raise RuntimeError("Adadelta does not support sparse gradients")
             grads.append(p.grad)
 
-            state = self.state[p]
-
             # Lazy state initialization
-            if len(state) == 0:
-                state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                                 if group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
+            self.init_state_per_param(p, group)
 
-                state["square_avg"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
-                )
-                state["acc_delta"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
-                )
-
+            state = self.state[p]
             square_avgs.append(state["square_avg"])
             acc_deltas.append(state["acc_delta"])
             state_steps.append(state["step"])

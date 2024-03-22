@@ -50,16 +50,21 @@ class Adagrad(Optimizer):
 
         for group in self.param_groups:
             for p in group["params"]:
-                state = self.state[p]
-                state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
-                init_value = (
-                    complex(initial_accumulator_value, initial_accumulator_value)
-                    if torch.is_complex(p)
-                    else initial_accumulator_value
-                )
-                state["sum"] = torch.full_like(
-                    p, init_value, memory_format=torch.preserve_format
-                )
+                self.init_state_per_param(p, group)
+
+    def init_state_per_param(self, param, param_group):
+        state = self.state[param]
+        if len(state) == 0:
+            state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
+            initial_accumulator_value = param_group["initial_accumulator_value"]
+            init_value = (
+                complex(initial_accumulator_value, initial_accumulator_value)
+                if torch.is_complex(param)
+                else initial_accumulator_value
+            )
+            state["sum"] = torch.full_like(
+                param, init_value, memory_format=torch.preserve_format
+            )
 
     def __setstate__(self, state):
         super().__setstate__(state)

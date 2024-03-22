@@ -992,6 +992,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adadelta,
         optim_error_inputs_func=optim_error_inputs_func_adadelta,
         supported_impls=("foreach", "differentiable"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1056,6 +1057,11 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo("no param_groups, see #117165"),
+                "TestOptimRenewed",
+                "test_init_state_per_param",
+            ),
             # Note on tolerances:
             # test_correctness_Adadelta_cuda_float32
             # Mismatched elements: 10 / 100 (10.0%)
@@ -1082,6 +1088,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu"),
+        supports_init_state_per_param=True,
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1144,6 +1151,11 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("no param_groups, see #117165"),
+                "TestOptimRenewed",
+                "test_init_state_per_param",
             ),
         ),
     ),
