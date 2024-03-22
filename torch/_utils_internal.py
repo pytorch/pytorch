@@ -100,6 +100,10 @@ def log_torchscript_usage(api: str):
     return
 
 
+def export_api_rollout_check() -> bool:
+    return False
+
+
 def justknobs_check(name: str) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
