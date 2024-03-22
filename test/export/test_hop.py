@@ -15,24 +15,25 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase as TorchTestCase
-from torch.testing._internal.hop_opinfo_db import (
-    hop_opinfo_db,
+from torch.testing._internal.hop_db import (
+    hop_db,
     hop_that_doesnt_have_opinfo_test_allowlist,
 )
 
 hop_tests = []
 
-for key, val in hop_opinfo_db.items():
-    if key in hop_that_doesnt_have_opinfo_test_allowlist:
+for op_info in hop_db:
+    op_info_hop_name = op_info.name
+    if op_info_hop_name in hop_that_doesnt_have_opinfo_test_allowlist:
         continue
-    hop_tests.extend(val)
+    hop_tests.append(op_info)
 
 
 class TestHOPGeneric(TestCase):
     def test_all_hops_have_op_info(self):
         from torch._ops import _higher_order_ops
 
-        hops_that_have_op_info = hop_opinfo_db.keys()
+        hops_that_have_op_info = set([k.name for k in hop_db])
         all_hops = _higher_order_ops.keys()
 
         missing_ops = []
