@@ -38,6 +38,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakIdRef
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -233,14 +234,28 @@ class FakeTensorConverter:
         del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t):
-        tid = self.meta_converter.describer.lookup_tensor.get(t)
-        if tid is None:
-            return None
-        return self.tensor_memo.get(tid)
+        if WeakIdRef(t) in self.tensor_memo:
+            out = self.tensor_memo[WeakIdRef(t)]
+            out._fix_weakref()
+            return out
+        return None
 
     def set_tensor_memo(self, t, v):
-        tid = self.meta_converter.describer.get_tensor_id(t)
-        self.meta_converter.tensor_memo[tid] = v
+        th = WeakIdRef(t)
+
+        # hold a weak ref to self, otherwise it will be kept alive
+        # by the del_ten closure
+        self_weak_ref = weakref.ref(self)
+
+        def del_ten():
+            self_ref = self_weak_ref()
+            if self_ref is None:
+                return
+            # on shutdown, th may not be in memo
+            self_ref.tensor_memo.pop(th, None)
+
+        weakref.finalize(t, del_ten)
+        self.tensor_memo[th] = v
 
     def from_real_tensor(
         self,
@@ -307,8 +322,6 @@ class FakeTensorConverter:
         assert (
             t.device.type == "meta"
         ), f"tensor's device must be `meta`, got {t.device.type} instead"
-        # This is a bit abusive (this is not the "real" tensor) but whatever,
-        # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -847,7 +860,7 @@ class FakeTensorMode(TorchDispatchMode):
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: List[Tuple[bool, Optional[FakeTensorMode]]] = []
 
-        self.shape_env: ShapeEnv = shape_env
+        self.shape_env = shape_env
 
         self.stack = "".join(traceback.format_stack())
 
