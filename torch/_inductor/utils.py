@@ -187,7 +187,9 @@ def get_read_only_benchmark_value(
     extra_size: int = 0,
 ):
     """
-    Generate a tensor that will be read-only from existing parameters and
+    Generate a tensor that will be read-only from existing parameters.
+
+    XXX: mutating this tensor will cause incorrectness issues.
     """
 
     from .virtualized import V
