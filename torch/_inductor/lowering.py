@@ -5286,9 +5286,7 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayoutSHOULDREMOVE.realize_into(
-        val, changed_data, unsafe_alias=unsafe_alias
-    )
+    ir.MutationLayoutSHOULDREMOVE.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
     return changed
 
 

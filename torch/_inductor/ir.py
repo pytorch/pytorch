@@ -2721,7 +2721,7 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Is a view into the storage of another tensor"""
+    """Shares the same storage as another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -2796,9 +2796,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
             return target
 
         result = unwrap_views(self.target)
-        assert isinstance(
-            result, Buffer
-        ), "MutationLayoutSHOULDREMOVE must refer to a buffer"
+        assert isinstance(result, Buffer), "MutationLayoutSHOULDREMOVE must refer to a buffer"
         return result
 
     def real_layout(self):
@@ -5355,8 +5353,7 @@ class MultiOutput(ExternKernel):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel)
-            and len(inp.get_inputs_that_alias_output()) > 0
+            if isinstance(inp, FallbackKernel) and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
 
@@ -5386,7 +5383,7 @@ def _prepare_convolution_fusion_create(
     ):
         assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
         dim = len(output_size)
-        assert dim  2, "Expect input dim > 2"
+        assert dim > 2, "Expect input dim > 2"
 
         BATCH_DIM = 0
         WEIGHT_INPUT_CHANNELS_DIM = 1
@@ -7381,11 +7378,11 @@ class Wait(ExternKernelAlloc):
 
     def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].get_name()]
+        return [self.inputs[0].codegen_reference()]
 
     def get_mutation_names(self):
         # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].get_name()]
+        return [self.inputs[0].codegen_reference()]
 
 
 class CollectiveKernel(ExternKernel):
