@@ -339,6 +339,11 @@ class CachingAutotuner(KernelInterface):
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
+                "enable_fp_fusion": (
+                    config.triton.enable_fp_fusion
+                    or self.heuristic_type
+                    in (HeuristicType.TEMPLATE, HeuristicType.USER_AUTOTUNE)
+                ),
             }
             compile_kwargs = {
                 "target": target,

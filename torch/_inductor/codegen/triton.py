@@ -590,6 +590,12 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.expm1({x})"
 
     @staticmethod
+    def truediv(a, b):
+        if config.triton.precise_div:
+            return f"triton_helpers.precise_div({a}, {b})"
+        return f"{a} / {b}"
+
+    @staticmethod
     def sqrt(x):
         return f"libdevice.sqrt({x})"
 

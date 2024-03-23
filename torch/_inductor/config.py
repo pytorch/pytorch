@@ -633,6 +633,12 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
+    # Use IEEE rounding on division operations
+    precise_div = False
+
+    # Allow ptxas to generate fma instructions
+    enable_fp_fusion = False
+
 
 class aot_inductor:
     # AOTInductor output path
