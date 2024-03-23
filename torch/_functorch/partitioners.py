@@ -763,7 +763,7 @@ def min_cut_rematerialization_partition(
     BAN_IF_REDUCTION = config.ban_recompute_reductions
     BAN_IF_NOT_IN_ALLOWLIST = config.ban_recompute_not_in_allowlist
 
-    if config.aggressive_fusion:
+    if config.aggressive_recomputation:
         BAN_IF_MATERIALIZED_BACKWARDS = False
         BAN_IF_USED_FAR_APART = False
         BAN_IF_LONG_FUSIBLE_CHAINS = False
