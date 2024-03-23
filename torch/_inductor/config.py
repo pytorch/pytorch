@@ -463,6 +463,11 @@ use_minimal_arrayref_interface: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
+# assume_aligned_inputs means that we assume that inputs will be aligned; we generate
+# code using this assumption, and clone tensors before use if they aren't aligned.
+# In the common case, most inputs will be aligned.
+assume_aligned_inputs: bool = True
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -702,9 +707,6 @@ class cuda:
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
-
-    # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
-    cutlass_backend_min_gemm_size: int = 1
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
