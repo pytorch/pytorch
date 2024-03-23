@@ -7,7 +7,7 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 template <typename mask_t>
 struct VecMaskLoad<float, 1, mask_t, 1> {
@@ -43,7 +43,8 @@ struct VecMaskCast<dst_t, 1, int64_t, 2> {
     low = _mm256_permute4x64_epi64(low, _MM_SHUFFLE(3, 1, 2, 0));
     high = _mm256_permute4x64_epi64(high, _MM_SHUFFLE(3, 1, 2, 0));
     return VecMask<int, 1>(
-        Vectorized<int>(_mm256_blend_epi32(low, high, 0xF0)));
+        Vectorized<int>(_mm256_blend_epi32(low, high, 0xF0)))
+        .cast<dst_t, 1>();
   }
 };
 
