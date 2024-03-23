@@ -596,9 +596,11 @@ class OpOverrides:
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: str
-    triton: Optional[str] = None  # None when not impl in libdevice/triton
-    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
+    cpp: Union[str, Callable[..., str]]
+    # None when not impl in libdevice/triton
+    triton: Union[Optional[str], Callable[..., str]] = None
+    # None when not impl in aten/.../vec
+    cppvec: Union[Optional[str], Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
