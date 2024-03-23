@@ -494,6 +494,38 @@ class OpsHandler(Protocol[T]):
         ...
 
 
+class NoopHandler:
+    def __getattr__(self, name):
+        if name == "name":
+            return "NoopHandler"
+
+        def inner(*args, **kwargs):
+            return None
+
+        return inner
+
+    @staticmethod
+    def masked(mask, body, other) -> None:
+        return None
+
+    @staticmethod
+    def frexp(x) -> Tuple[None, None]:
+        return (None, None)
+
+    @staticmethod
+    def scan(dtypes, combine_fn, values, inits) -> Tuple[None, ...]:
+        return tuple(None for i in range(len(values)))
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+        return sympy.Integer(0)
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_NoopHandler(h: NoopHandler) -> OpsHandler[None]:
+    return h
+
+
 class MockHandler:
     def __getattr__(self, name):
         if name == "name":
@@ -663,4 +695,18 @@ class OpCounterCSE:
 
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
+    return h
+
+
+class ExtractConstantsHandler(NoopHandler):
+    def __init__(self, device):
+        self.device = device
+
+    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+        from torch._inductor import ir
+
+        return ir.Constant(value=value, dtype=dtype, device=self.device)
+
+
+def _typecheck_ExtractConstantsHandler(h: ExtractConstantsHandler) -> OpsHandler[Any]:
     return h

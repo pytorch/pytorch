@@ -2044,6 +2044,39 @@ class CommonTemplate:
             fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
         )
 
+    def test_div_precision(self):
+        # Reproducer for https://github.com/pytorch/pytorch/issues/101039
+
+        def forward(y):
+            z = y.div(1e-06)
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        y = torch.matmul(query, key.transpose(-2, -1))
+        self.common(forward, (y,))
+
+    def test_div_by_zero(self):
+        def fn(x, runtime_zero, runtime_neg_zero):
+            zero = torch.zeros_like(x)
+            return (
+                x / 0.0,
+                x / -0.0,
+                zero / 0.0,
+                x / zero,
+                x / -zero,
+                zero / zero,
+                x / runtime_zero,
+                # NOTE: -runtime_zero doesn't work as -(0.0) is broken in triton
+                x / runtime_neg_zero,
+                runtime_zero / runtime_neg_zero,
+            )
+
+        a = torch.randn(10)
+        zero = torch.zeros(10)
+        neg_zero = -zero
+        self.common(fn, (a, zero, neg_zero))
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
