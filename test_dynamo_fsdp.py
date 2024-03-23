@@ -3,17 +3,17 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >run_output.txt 2>&1
+CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >run_output.txt 2>&1
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >run_output.txt 2>&1
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >run_output.txt 2>&1
+CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >run_output.txt 2>&1
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >run_output.txt 2>&1
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 gdb --args python3 /data/users/willfeng/miniconda3/bin/torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py
 """
@@ -35,8 +35,6 @@ from torch.distributed._tensor import init_device_mesh
 # from torchviz import make_dot
 
 torch_log = logging.getLogger("torch")
-
-hidden_dim = 1234
 
 device_type = "cuda"
 
@@ -126,8 +124,8 @@ def export_memory_snapshot(file_prefix) -> None:
        return
 
    try:
-       print(f"Saving snapshot to local file: {file_prefix}.pickle")
-       torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+       print(f"Saving snapshot to local file: artifacts/{file_prefix}.pickle")
+       torch.cuda.memory._dump_snapshot(f"artifacts/{file_prefix}.pickle")
    except Exception as e:
        print(f"Failed to capture memory snapshot {e}")
        return
@@ -151,7 +149,16 @@ sys.excepthook = handle_exception
 
 def init():
     from torch.testing._internal.common_fsdp import MLP
-    test_case = "simple_mlp"  # "simple_mlp" / "nested_fully_shard"
+    # simple_mlp + balanced -> works
+    # simple_mlp + unbalanced -> works
+    # nested_fully_shard + balanced -> works
+    # nested_fully_shard + unbalanced -> works
+    test_case = "nested_fully_shard"  # "simple_mlp" / "nested_fully_shard"
+    balanced = False
+    if balanced:
+        hidden_dim = 1234
+    else:
+        hidden_dim = 1235
     mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)
@@ -165,7 +172,7 @@ def init():
         )
         fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
     elif test_case == "nested_fully_shard":
-        model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])  # range(3)
+        model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])
         for mlp in model:
             fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
@@ -181,7 +188,7 @@ def init():
     #         **fsdp_kwargs,
     #     )
     optim = torch.optim.SGD(model.parameters(), lr=1e-6)
-    return model, optim
+    return model, optim, hidden_dim
 
 
 def printing_eager(gm, inputs):
@@ -192,18 +199,18 @@ def printing_eager(gm, inputs):
 local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 
-def create_input():
+def create_input(hidden_dim):
     torch.manual_seed(0)
     inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
     return inp
 
 
-def run(model, optim, n_iter):
+def run(model, optim, n_iter, hidden_dim):
     torch.manual_seed(42)
     losses = []
     for _ in range(n_iter):
         optim.zero_grad(set_to_none=True)
-        inp = create_input()
+        inp = create_input(hidden_dim)
         torch_log.warning("FORWARD")
         out = model(inp)
         torch_log.warning("END FORWARD")
@@ -220,9 +227,9 @@ def run(model, optim, n_iter):
 
 
 def main_compiled(n_iter):
-    model, optim = init()
+    model, optim, hidden_dim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim, 1)
+    run(model, optim, 1, hidden_dim)
     print("done eager 1st run for compiled!")
 
     def compiler_fn(gm):
@@ -238,18 +245,18 @@ def main_compiled(n_iter):
     #     time.sleep(600)
     model = torch.compile(model, backend="inductor", fullgraph=True)
     with compiled_autograd.enable(compiler_fn):
-        res = run(model, optim, n_iter)
+        res = run(model, optim, n_iter, hidden_dim)
     print(f"res: {res}")
     return res
 
 
 def main_eager(n_iter):
-    model, optim = init()
+    model, optim, hidden_dim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim, 1)
+    run(model, optim, 1, hidden_dim)
     print("done eager 1st run for eager!")
 
-    res = run(model, optim, n_iter)
+    res = run(model, optim, n_iter, hidden_dim)
     return res
 
 
@@ -284,13 +291,13 @@ if __name__ == "__main__":
     n_iter = 5
     losses_compiled = execute_and_profile(
         lambda: main_compiled(n_iter=n_iter),
-        "compiled_trace.json",
+        "artifacts/compiled_trace.json",
         "compiled_memory_snapshot",
     )
     print(f"losses_compiled: {losses_compiled}")
     losses_eager = execute_and_profile(
         lambda: main_eager(n_iter=n_iter),
-        "eager_trace.json",
+        "artifacts/eager_trace.json",
         "eager_memory_snapshot",
     )
     print(f"losses_eager: {losses_eager}")
