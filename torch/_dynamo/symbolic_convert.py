@@ -300,6 +300,36 @@ def _detect_and_normalize_assert_statement(
 
 
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
+    def jump_graph_break(self, inst, value, extra_msg=""):
+        if not self.should_compile_partial_graph():
+            unimplemented("should_compile_partial_graph=False")
+        # compile a partial subgraph prefix then jump into user code
+        if self.has_backedge():
+            msg = (
+                "Skipping frame because there is a graph break in a for/while loop\n"
+                f"{self.frame_summary()}"
+            )
+            log.info(msg)
+            raise exc.SkipFrame(msg)
+
+        self.push(value)
+        log.debug("generic_jump triggered compile")
+        self.output.compile_subgraph(
+            self,
+            reason=GraphCompileReason(
+                f"generic_jump {typestr(value)}{extra_msg}", [self.frame_summary()]
+            ),
+        )
+        self.pop()
+
+        if_next = self.create_call_resume_at(self.next_instruction)
+        push and self.push(value)
+        if_jump = self.create_call_resume_at(inst.target)
+
+        self.output.add_output_instructions(
+            [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
+        )
+
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         if (
@@ -366,32 +396,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif (
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
         ):
-            # compile a partial subgraph prefix then jump into user code
-            if self.has_backedge():
-                msg = (
-                    "Skipping frame because there is a graph break in a for/while loop\n"
-                    f"{self.frame_summary()}"
-                )
-                log.info(msg)
-                raise exc.SkipFrame(msg)
-
-            self.push(value)
-            log.debug("generic_jump triggered compile")
-            self.output.compile_subgraph(
-                self,
-                reason=GraphCompileReason(
-                    f"generic_jump {typestr(value)}", [self.frame_summary()]
-                ),
-            )
-            self.pop()
-
-            if_next = self.create_call_resume_at(self.next_instruction)
-            push and self.push(value)
-            if_jump = self.create_call_resume_at(inst.target)
-
-            self.output.add_output_instructions(
-                [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
-            )
+            jump_graph_break(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
@@ -429,7 +434,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
-            eval_result = value.evaluate_expr(self.output)
+            try:
+                eval_result = value.evaluate_expr(self.output)
+            except exc.UserError as e:
+                if self.should_compile_partial_graph():
+                    return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
+                raise
             if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
