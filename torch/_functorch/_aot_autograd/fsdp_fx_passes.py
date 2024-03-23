@@ -1,6 +1,7 @@
 import torch
 import operator
 import copy
+from collections import defaultdict
 
 
 _view_ops = [
@@ -363,16 +364,11 @@ def undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(mod):
             if i + 2 + num_blocks * 4 >= len(node_list):  # each pattern block contains: split_with_sizes * 1 + _foreach_copy_ * 1 + (getitem + slice + slice_scatter + slice_scatter) * num_block + slice * 1
                 continue
             getitem_start_index = i + 1
-            for j, node in enumerate(node_list[getitem_start_index:getitem_start_index+num_blocks]):
-                # TODO(yf225): debug why we see this scenario (sometimes we see aten.full instead of getitem node for some slice)
-                if node.target is not operator.getitem:
-                    with mod.graph.inserting_before(node):
-                        new_getitem_node = mod.graph.call_function(operator.getitem, (split_with_sizes_node, j), {})
-                    node.replace_all_uses_with(new_getitem_node)
-                    mod.graph.erase_node(node)
-                else:
-                    if node.args[0] != split_with_sizes_node:
-                        continue
+            if not all(
+                node.target is operator.getitem and node.args[0] == split_with_sizes_node
+                for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
+            ):
+                continue
             block_start_index = i+len(n.args[1])+2
             if not all(
                 oc[0].target is torch.ops.aten.slice.Tensor \
@@ -508,3 +504,140 @@ def _get_chunks(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
+
+
+def _collect_node_types_and_indices(mod):
+    node_type_to_node_set = defaultdict(set)
+    node_to_node_index = {}
+    for i, n in enumerate(mod.graph.nodes):
+        node_type_to_node_set[n.target].add(n)
+        node_to_node_index[n] = i
+    return node_type_to_node_set, node_to_node_index
+
+
+def replace_empty_then_slice_then_compute_then_foreach_copy_then_slice_scatter_pattern(mod):
+    """
+    NOTE: pattern from `foreach_reduce_scatter_copy_in`:
+    ```
+    for grad in unsharded_grads:
+        grad_size = grad.size()
+        dim0_padded_size = _get_dim0_padded_size(grad_size, world_size)
+        if dim0_padded_size != grad_size:
+            padded_grad = grad.new_empty(dim0_padded_size)
+            padded_grad_slices.append(padded_grad[: grad.size(0)])
+            grads_to_copy.append(grad)
+            grad = padded_grad
+        grad_views.append(grad.view(world_size, -1))
+    if padded_grad_slices:
+        with torch.no_grad():
+            torch._foreach_copy_(padded_grad_slices, grads_to_copy)
+    ```
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:252 in foreach_reduce_scatter_copy_in, code: padded_grad = grad.new_empty(dim0_padded_size)
+    empty_2: "f32[16, 7]" = torch.ops.aten.empty.memory_format([16, 7], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:253 in foreach_reduce_scatter_copy_in, code: padded_grad_slices.append(padded_grad[: grad.size(0)])
+    slice_11: "f32[15, 7]" = torch.ops.aten.slice.Tensor(empty_2, 0, 0, 15)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:252 in foreach_reduce_scatter_copy_in, code: padded_grad = grad.new_empty(dim0_padded_size)
+    empty_3: "f32[16]" = torch.ops.aten.empty.memory_format([16], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:253 in foreach_reduce_scatter_copy_in, code: padded_grad_slices.append(padded_grad[: grad.size(0)])
+    slice_12: "f32[15]" = torch.ops.aten.slice.Tensor(empty_3, 0, 0, 15)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:252 in foreach_reduce_scatter_copy_in, code: padded_grad = grad.new_empty(dim0_padded_size)
+    empty_4: "f32[4, 15]" = torch.ops.aten.empty.memory_format([4, 15], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:253 in foreach_reduce_scatter_copy_in, code: padded_grad_slices.append(padded_grad[: grad.size(0)])
+    slice_13: "f32[3, 15]" = torch.ops.aten.slice.Tensor(empty_4, 0, 0, 3)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:252 in foreach_reduce_scatter_copy_in, code: padded_grad = grad.new_empty(dim0_padded_size)
+    empty_5: "f32[4]" = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:253 in foreach_reduce_scatter_copy_in, code: padded_grad_slices.append(padded_grad[: grad.size(0)])
+    slice_14: "f32[3]" = torch.ops.aten.slice.Tensor(empty_5, 0, 0, 3)
+
+    ...
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:259 in foreach_reduce_scatter_copy_in, code: torch._foreach_copy_(padded_grad_slices, grads_to_copy)
+    _foreach_copy_2 = torch.ops.aten._foreach_copy.default([slice_11, slice_12, slice_13, slice_14], [mm_2, view_10, mm_1, view_9]);  slice_11 = slice_12 = slice_13 = slice_14 = mm_2 = view_10 = mm_1 = view_9 = None
+    getitem_48: "f32[15, 7]" = _foreach_copy_2[0]
+    getitem_49: "f32[15]" = _foreach_copy_2[1]
+    getitem_50: "f32[3, 15]" = _foreach_copy_2[2]
+    getitem_51: "f32[3]" = _foreach_copy_2[3];  _foreach_copy_2 = None
+
+    # No stacktrace found for following nodes
+    slice_scatter_default_8: "f32[16, 7]" = torch.ops.aten.slice_scatter.default(empty_2, getitem_48, 0, 0, 15);  empty_2 = getitem_48 = None
+
+    ... (uses slice_scatter_default_8)
+
+    # No stacktrace found for following nodes
+    slice_scatter_default_9: "f32[16]" = torch.ops.aten.slice_scatter.default(empty_3, getitem_49, 0, 0, 15);  empty_3 = getitem_49 = None
+
+    ... (uses slice_scatter_default_9)
+
+    # No stacktrace found for following nodes
+    slice_scatter_default_10: "f32[4, 15]" = torch.ops.aten.slice_scatter.default(empty_4, getitem_50, 0, 0, 3);  empty_4 = getitem_50 = None
+
+    ... (uses slice_scatter_default_10)
+
+    # No stacktrace found for following nodes
+    slice_scatter_default_11: "f32[4]" = torch.ops.aten.slice_scatter.default(empty_5, getitem_51, 0, 0, 3);  empty_5 = getitem_51 = None
+
+    ... (uses slice_scatter_default_11)
+
+    ->
+
+    empty_2: "f32[16, 7]" = torch.ops.aten.empty.memory_format([16, 7], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+    slice_11: "f32[15, 7]" = torch.ops.aten.slice.Tensor(empty_2, 0, 0, 15)
+    empty_3: "f32[16]" = torch.ops.aten.empty.memory_format([16], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+    slice_12: "f32[15]" = torch.ops.aten.slice.Tensor(empty_3, 0, 0, 15)
+    empty_4: "f32[4, 15]" = torch.ops.aten.empty.memory_format([4, 15], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+    slice_13: "f32[3, 15]" = torch.ops.aten.slice.Tensor(empty_4, 0, 0, 3)
+    empty_5: "f32[4]" = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=1), pin_memory = False)
+    slice_14: "f32[3]" = torch.ops.aten.slice.Tensor(empty_5, 0, 0, 3)
+    ...
+    _foreach_copy_2 = torch.ops.aten._foreach_copy_.default([slice_11, slice_12, slice_13, slice_14], [mm_2, view_10, mm_1, view_9]);  slice_11 = slice_12 = slice_13 = slice_14 = mm_2 = view_10 = mm_1 = view_9 = None
+    ... (uses empty_2)
+    ... (uses empty_3)
+    ... (uses empty_4)
+    ... (uses empty_5)
+    """
+    node_list = list(mod.graph.nodes)
+    node_type_to_node_set, node_to_node_index = _collect_node_types_and_indices(mod)
+    for foreach_copy_node in node_type_to_node_set[torch.ops.aten._foreach_copy.default]:
+        foreach_copy_node_index = node_to_node_index[foreach_copy_node]
+        foreach_copy_to = foreach_copy_node.args[0]
+        num_blocks = len(foreach_copy_to)
+        getitem_nodes = node_list[foreach_copy_node_index+1:foreach_copy_node_index+num_blocks+1]
+        assert all(node.target is operator.getitem for node in getitem_nodes)
+        mismatch = False
+        empty_nodes = []
+        ss_nodes = []
+        for i, slice_node in enumerate(foreach_copy_to):
+            if not (slice_node.target is torch.ops.aten.slice.Tensor and slice_node.args[0].target is torch.ops.aten.empty.memory_format):
+                mismatch = True
+                break
+            empty_node = slice_node.args[0]
+            getitem_node = getitem_nodes[i]
+            ss_node = None
+            for node in node_type_to_node_set[torch.ops.aten.slice_scatter.default]:
+                if node.args[0] == empty_node and node.args[1] == getitem_node:
+                    ss_node = node
+                    break
+            if not ss_node:
+                mismatch = True
+                break
+            empty_nodes.append(empty_node)
+            ss_nodes.append(ss_node)
+        if mismatch:
+            continue
+        # We have a match!
+        for node in ss_nodes:
+            node.replace_all_uses_with(node.args[0])
+            mod.graph.erase_node(node)
+        foreach_copy_node.target = torch.ops.aten._foreach_copy_.default
+        for node in getitem_nodes:
+            node.replace_all_uses_with(foreach_copy_node.args[0][node.args[1]])
+            mod.graph.erase_node(node)
+    mod.graph.lint()
+    mod.recompile()

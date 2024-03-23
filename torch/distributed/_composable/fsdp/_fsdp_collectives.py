@@ -255,7 +255,8 @@ def foreach_reduce_scatter_copy_in(
             grad = padded_grad
         grad_views.append(grad.view(world_size, -1))
     if padded_grad_slices:
-        torch._foreach_copy_(padded_grad_slices, grads_to_copy)
+        with torch.no_grad():
+            torch._foreach_copy_(padded_grad_slices, grads_to_copy)
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
         torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
     else:

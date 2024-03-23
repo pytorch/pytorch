@@ -125,6 +125,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fsdp_fx_passes.remove_unnecessary_split_with_sizes(gm)  # only matters for CA BWD graph
     fsdp_fx_passes.replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_then_inplace_foreach_copy_pattern(gm)
     fsdp_fx_passes.undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(gm)
+    fsdp_fx_passes.replace_empty_then_slice_then_compute_then_foreach_copy_then_slice_scatter_pattern(gm)
     fsdp_fx_passes.replace_inplace_foreach_copy_with_inplace_copy(gm)
     fsdp_fx_passes.remove_clone_if_input_is_alias_of_graph_input(gm)
     fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
