@@ -775,13 +775,13 @@ class _FindNodesLookupTable:
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
         if op == "call_function":
             assert target is not None
-            return sorted(dict(self.table[(op, target)]).keys())
+            return dict(self.table[(op, target)]).keys()
 
         if target is None:
-            return sorted(dict(self.table[(op, None)]).keys())
+            return dict(self.table[(op, None)]).keys()
 
         # op is call_method, get_attr, call_module
-        return sorted([node for node in self.table[(op, None)].keys() if node.target == target])
+        return [node for node in self.table[(op, None)].keys() if node.target == target]
 
 @compatibility(is_backward_compatible=True)
 class Graph:
@@ -870,22 +870,28 @@ class Graph:
         return _node_list(self)
 
     @compatibility(is_backward_compatible=False)
-    def find_nodes(self, *, op: str, target: Optional['Target'] = None):
+    def find_nodes(self, *, op: str, target: Optional['Target'] = None, sort: bool = True):
         """
         Allows for fast query of nodes
 
         Args:
 
-            op: the name of the operation
-            target: the target of the node. For call_function, the target is
-                required. For other ops, the target is optional.
+            op (str): the name of the operation
+
+            target (Optional[Target]): the target of the node. For call_function,
+                the target is required. For other ops, the target is optional.
+
+            sort (bool): whether to return nodes in the order they appear on
+                         on the graph.
 
         Returns:
 
             Iteratable of nodes with the requested op and target.
-            The nodes are guaranteed to be in order they appear on the graph.
         """
-        return self._find_nodes_lookup_table.find_nodes(op=op, target=target)
+        node_list = self._find_nodes_lookup_table.find_nodes(op=op, target=target)
+        if sort:
+            return sorted(node_list)
+        return node_list
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
