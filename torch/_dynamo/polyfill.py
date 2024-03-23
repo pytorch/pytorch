@@ -45,3 +45,11 @@ def accumulate_grad(x, new_grad):
         x.grad = new_grad
     else:
         x.grad.add_(new_grad)
+
+
+def list_cmp(op, left, right):
+    """emulate `(1,2,3) > (1,2)` etc"""
+    for a, b in zip(left, right):
+        if a != b:
+            return op(a, b)
+    return op(len(left), len(right))
