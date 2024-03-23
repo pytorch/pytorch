@@ -324,9 +324,9 @@ class DistMatrixOpsTest(DTensorTestBase):
 
             out.sum().backward()
             dist_out.sum().backward()
-            self.assertEqual(dist_query.full_tensor(), query)
-            self.assertEqual(dist_key.full_tensor(), key)
-            self.assertEqual(dist_value.full_tensor(), value)
+            self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+            self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+            self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
 
 if __name__ == "__main__":
