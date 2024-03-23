@@ -10,6 +10,7 @@ import torch
 import torch.fx as fx
 import operator
 import math
+import heapq
 import torch.utils._pytree as pytree
 import copy
 import os
@@ -21,9 +22,11 @@ from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+import logging
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
+log = logging.getLogger(__name__)
 
 
 def must_recompute(node):
@@ -754,6 +757,19 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
+    BAN_IF_MATERIALIZED_BACKWARDS = config.ban_recompute_materialized_backward
+    BAN_IF_USED_FAR_APART = config.ban_recompute_used_far_apart
+    BAN_IF_LONG_FUSIBLE_CHAINS = config.ban_recompute_long_fusible_chains
+    BAN_IF_REDUCTION = config.ban_recompute_reductions
+    BAN_IF_NOT_IN_ALLOWLIST = config.ban_recompute_not_in_allowlist
+
+    if config.aggressive_fusion:
+        BAN_IF_MATERIALIZED_BACKWARDS = False
+        BAN_IF_USED_FAR_APART = False
+        BAN_IF_LONG_FUSIBLE_CHAINS = False
+        BAN_IF_REDUCTION = False
+        BAN_IF_NOT_IN_ALLOWLIST = False
+
     def is_materialized_backwards(node):
         if get_aten_target(node) in view_ops:
             return False
@@ -769,43 +785,48 @@ def min_cut_rematerialization_partition(
         return False
 
     def should_ban_recomputation(node):
-        if config.aggressive_recomputation:
-            ignored_ops = random_ops + compute_intensive_ops
-            return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
-        else:
-            if node.op != 'call_function':
-                return False
+        if node.op != 'call_function':
+            return False
+        if node.target == operator.getitem:
+            return False
+        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+            return False
+
+        if BAN_IF_NOT_IN_ALLOWLIST:
             if get_aten_target(node) not in recomputable_ops:
                 return True
-            if node.target == operator.getitem:
-                return False
-            if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
-                return False
-
-            # If a node *must* be materialized in the backwards pass, then we
-            # should never recompute it. This is a pretty subtle point.  In
-            # general, the assumption we make is that recomputing a node in the
-            # backwards pass is "free". However, if a node must be materialized
-            # in the backwards pass, then recomputing it is never free.
-            if is_materialized_backwards(node):
-                print("materialized backwards", node, tuple(node.users))
+        else:
+            ignored_ops = random_ops + compute_intensive_ops
+            if get_aten_target(node) in ignored_ops:
                 return True
 
-            # Arbitrary hack that sometimes seems to help things. The above
-            # modification appears to have made this heuristic a lot less critical
-            # for performance.
-            # TODO: Investigate why this hack helps.
-            # TODO: Investigate the interaction with compiler assisted
-            # activation checkpointing. Removing the heuristic improves both
-            # memory footprint and speedup.
-            if not graph_has_recomputable_ops:
-                if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
-                    return True
-            # If the output of an op is 4x smaller (arbitrary choice),
-            # then we don't allow recomputation.
+
+        # If a node *must* be materialized in the backwards pass, then we
+        # should never recompute it. This is a pretty subtle point.  In
+        # general, the assumption we make is that recomputing a node in the
+        # backwards pass is "free". However, if a node must be materialized
+        # in the backwards pass, then recomputing it is never free.
+        if is_materialized_backwards(node) and BAN_IF_MATERIALIZED_BACKWARDS:
+            log.info("materialized backwards: %s %s", node, tuple(node.users))
+            return True
+
+        # Arbitrary hack that sometimes seems to help things. The above
+        # modification appears to have made this heuristic a lot less critical
+        # for performance.
+        if not graph_has_recomputable_ops:
+            if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
+                return True
+
+        # If the output of an op is 4x smaller (arbitrary choice),
+        # then we don't allow recomputation. The idea here is that for
+        # things like reductions, saving the output of the reduction is very
+        # cheap/small, and it makes sure we don't do things like recompute
+        # normalizations in the backwards.
+        if BAN_IF_REDUCTION:
             input_tensors_size = sum(_size_of(i) for i in node.args if isinstance(i, fx.Node))
             output_size = _size_of(node)
             return (output_size * 4 < input_tensors_size)
+        return False
 
 
     def is_materialized(node):
@@ -882,51 +903,6 @@ def min_cut_rematerialization_partition(
         for user in node.users:
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
-    import heapq
-
-    # This heuristic is fairly straightforward. The idea is that although it is
-    # cheap to recompute bandwidth-bound ops, we don't want to end up in a situation
-    # where we have a long chain of pointwise ops from the beginning to the end
-    # of the model (like say, residual connections)
-
-    # visited = set()
-    # for start_node in joint_graph.nodes:
-    #     if start_node not in required_fw_nodes:
-    #         continue
-    #     import heapq
-    #     fusible = [(start_node.fw_order, start_node)]
-    #     start_pos = start_node.fw_order
-    #     start_order = start_node.fw_order
-    #     while len(fusible) > 0:
-    #         _, cur = heapq.heappop(fusible)
-    #         if cur in visited:
-    #             continue
-    #         visited.add(cur)
-    #         if cur.fw_order > start_order + 100 and len(fusible) == 0:
-    #             print("too long", cur, start_node, cur.fw_order, start_node.fw_order)
-    #             ban_recomputation_if_allowed(cur)
-    #             break
-
-    #         for user in cur.users:
-    #             if user in required_fw_nodes and is_fusible(cur, user):
-    #                 heapq.heappush(fusible, (user.fw_order, user))
-
-    def find_first_unfusible(start_nodes, max_range):
-        sorted_nodes = []
-        for n in start_nodes:
-            heapq.heappush(sorted_nodes, (n.fw_order, n, True))
-
-        while len(sorted_nodes) > 0:
-            _, node, node_is_fusible = heapq.heappop(sorted_nodes)
-            if not node_is_fusible:
-                return node.fw_order
-            if node.fw_order > max_range:
-                continue
-            for user in node.users:
-                if user in required_fw_nodes:
-                    heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
-        return max_range
-
     # todo(chilli): This is the most questionable of the 3 heuristics for banning recompute.
     # I would look more into it but I'm out of time for now
     # Some example models to look at where this helps perf: poolformer_m36,
@@ -944,7 +920,25 @@ def min_cut_rematerialization_partition(
     # It could probably be improved by properly analyzing what's going on in the
     # backwards pass instead of only relying on whether it's unfusible in the
     # forwards.
-    if config.ban_recompute_materialized_in_backwards:
+
+    def find_first_unfusible(start_nodes, max_range):
+        import heapq  # ???? Somehow I need this???
+        sorted_nodes = []
+        for n in start_nodes:
+            heapq.heappush(sorted_nodes, (n.fw_order, n, True))
+
+        while len(sorted_nodes) > 0:
+            _, node, node_is_fusible = heapq.heappop(sorted_nodes)
+            if not node_is_fusible:
+                return node.fw_order
+            if node.fw_order > max_range:
+                continue
+            for user in node.users:
+                if user in required_fw_nodes:
+                    heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
+        return max_range
+
+    if BAN_IF_USED_FAR_APART:
         for used_node in required_fw_nodes:
             orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
             fw_users = [user for user in used_node.users if user in required_fw_nodes]
@@ -954,8 +948,41 @@ def min_cut_rematerialization_partition(
                     if user in required_fw_nodes and user.fw_order > first_unfusible_use and is_fusible(used_node, user):
                         if user in banned_nodes:
                             continue
-                        print(f"used above/below fusible {used_node}:{used_node.fw_order} -> {first_unfusible_use} -> {user} {user.fw_order}")
+                        log.info(
+                            "used above/below fusible %s:(%s) -> %s -> %s:(%s)",
+                            used_node, used_node.fw_order, first_unfusible_use, user, user.fw_order
+                        )
                         ban_recomputation_if_allowed(user)
+
+
+    # This heuristic is fairly straightforward. The idea is that although it is
+    # cheap to recompute bandwidth-bound ops, we don't want to end up in a situation
+    # where we have a long chain of pointwise ops from the beginning to the end
+    # of the model (like say, residual connections)
+
+    # It's possible this heuristic is obsoleted by the below one - checking that now
+
+    if BAN_IF_LONG_FUSIBLE_CHAINS:
+        visited = set()
+        for start_node in joint_graph.nodes:
+            if start_node not in required_fw_nodes:
+                continue
+            fusible = [(start_node.fw_order, start_node)]
+            start_pos = start_node.fw_order
+            start_order = start_node.fw_order
+            while len(fusible) > 0:
+                _, cur = heapq.heappop(fusible)
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                if cur.fw_order > start_order + 100 and len(fusible) == 0:
+                    log.info("too long %s %s %s %s", cur, start_node, cur.fw_order, start_node.fw_order)
+                    ban_recomputation_if_allowed(cur)
+                    break
+
+                for user in cur.users:
+                    if user in required_fw_nodes and is_fusible(cur, user) and user not in banned_nodes:
+                        heapq.heappush(fusible, (user.fw_order, user))
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")

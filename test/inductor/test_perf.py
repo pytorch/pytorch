@@ -682,6 +682,7 @@ class MinCutPartitioningTests(TestCase):
 
     def test_partitioning_with_view(self):
         class Foo(torch.autograd.Function):
+            @staticmethod
             def forward(ctx, x):
                 y = x.sin()
                 x = x.cos()
@@ -690,6 +691,7 @@ class MinCutPartitioningTests(TestCase):
                 x = x.cos()
                 return x
 
+            @staticmethod
             def backward(ctx, gradOut):
                 x, y = ctx.saved_tensors
                 return torch.mm(gradOut, x).view(100) * y

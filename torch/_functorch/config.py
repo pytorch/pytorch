@@ -34,11 +34,15 @@ cse = True
 # Restricts the amount of computation AOTAutograd can do.
 max_dist_from_bw = 1000
 
-ban_recompute_materialized_in_backwards = True
+ban_recompute_used_far_apart = True
+ban_recompute_materialized_backward = True
+ban_recompute_long_fusible_chains = True
+ban_recompute_reductions = True
+ban_recompute_not_in_allowlist = True
 
-# Enable aggressive_recomputation in the min-cut algorithm in partitioners to reduce
-# memory usage with some penalty of performance. It allows more ops to be considered
-# as recomputable except random ops and compute-intensive ops.
+# Sets all of the ban_compute heuristics to False
+# Generally, this will probably result in some memory improvement, but at the
+# cost of some performance
 aggressive_recomputation = False
 
 if TYPE_CHECKING:
