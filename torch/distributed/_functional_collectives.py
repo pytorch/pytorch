@@ -550,8 +550,6 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     __slots__ = ["elem", "completed"]
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]

@@ -10,7 +10,7 @@ in `runtime_wrappers`.
 import logging
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 import torch
 import torch.utils.dlpack
@@ -23,6 +23,7 @@ from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
@@ -79,6 +80,34 @@ def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
                 continue
             out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
     return out
+
+
+# See Note [Tangents must be contiguous, Part 2]
+def coerce_runtime_tangent(x, metadata_tensor):
+    if not isinstance(x, torch.Tensor):
+        return x
+    if not is_traceable_wrapper_subclass(x):
+        return x
+    assert is_traceable_wrapper_subclass(metadata_tensor)
+    _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
+    _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
+    if runtime_tangent_metadata == expected_tangent_metadata:
+        return x
+    if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
+        raise RuntimeError(
+            f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+
+Expected metadata: {str(expected_tangent_metadata)}
+
+Runtime metadata: {str(runtime_tangent_metadata)}
+
+shape: {str(x.shape)}
+To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+"""
+        )
+    return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
 
 
 def aot_dispatch_base(
@@ -173,6 +202,32 @@ def aot_dispatch_base(
     )
 
     return compiled_fn
+
+
+def _output_node(gm: torch.fx.GraphModule) -> torch.fx.Node:
+    """Return the output node of a graph"""
+    # reversed() since we expect output at end of graph
+    return next(n for n in reversed(gm.graph.nodes) if n.op == "output")
+
+
+def _input_node(gm: torch.fx.GraphModule, i: int) -> torch.fx.Node:
+    """Fetch the i-th placeholder in the graph"""
+    seen = 0
+    for n in gm.graph.nodes:
+        if n.op == "placeholder":
+            if seen == i:
+                return n
+            seen += 1
+    raise IndexError(f"input {i} does not exist, only {seen} inputs in graph")
+
+
+def _can_detach(node: torch.fx.Node):
+    """
+    Avoid calling .detach() on inputs passed to _bind_nn_parameter()
+    """
+    from torch._dynamo.create_parameter_op import _bind_nn_parameter
+
+    return all(n.target is not _bind_nn_parameter for n in node.users)
 
 
 def aot_dispatch_autograd(
@@ -295,8 +350,8 @@ def aot_dispatch_autograd(
         # and we will end up with a zero grad at x.
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
-        _indices_of_inps_to_detach = []
-        bw_outs = next(n for n in bw_module.graph.nodes if n.op == "output").args[0]
+        _indices_of_inps_to_detach: List[int] = []
+        bw_outs: Sequence[torch.fx.Node] = _output_node(bw_module).args[0]  # type: ignore[assignment]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).
@@ -311,7 +366,7 @@ def aot_dispatch_autograd(
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
             for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None:
+                if bw_out is None and _can_detach(_input_node(fx_g, i)):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
@@ -486,8 +541,10 @@ def aot_dispatch_autograd(
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
-                ctx.mark_dirty(deduped_flat_tensor_args[i])
-                marked_dirty_inps.append(deduped_flat_tensor_args[i])
+                arg = deduped_flat_tensor_args[i]
+                if not (arg.requires_grad and arg.is_leaf):  # would error
+                    ctx.mark_dirty(arg)
+                marked_dirty_inps.append(arg)
 
             if not CompiledFunction._fakify_first_call:
                 if CompiledFunction.metadata.is_rng_op_functionalized:
@@ -542,7 +599,7 @@ def aot_dispatch_autograd(
             ), str([type(x) for x in symint_outs])
             ctx.symints = symint_outs
 
-            raw_returns = fw_outs[0 : num_forward_returns + num_tokens]
+            raw_returns = fw_outs[0:num_forward_returns]
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
@@ -554,7 +611,10 @@ def aot_dispatch_autograd(
                     # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
                     info = CompiledFunction.metadata.input_info[idx]
                     if info.mutates_metadata and not info.mutates_data:
-                        raw_returns[i] = TensorAlias(raw_returns[i])
+                        raw_return_idx = num_tokens + i
+                        raw_returns[raw_return_idx] = TensorAlias(
+                            raw_returns[raw_return_idx]
+                        )
 
                 if config.debug_assert:
                     user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
@@ -567,7 +627,7 @@ def aot_dispatch_autograd(
 
             if CompiledFunction.metadata.num_unsafe_view_outputs > 0:
                 for idx in CompiledFunction.metadata.unsafe_view_out_indices:
-                    raw_return_idx = num_mutated_runtime_inps + idx
+                    raw_return_idx = num_tokens + num_mutated_runtime_inps + idx
                     o = raw_returns[raw_return_idx]
                     raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(
                         o, o.shape
@@ -575,14 +635,14 @@ def aot_dispatch_autograd(
 
             if num_outputs_aliased > 0:
                 for idx in CompiledFunction.metadata.aliased_out_indices:
-                    raw_return_idx = num_mutated_runtime_inps + idx
+                    raw_return_idx = num_tokens + num_mutated_runtime_inps + idx
                     raw_returns[raw_return_idx] = TensorAlias(
                         raw_returns[raw_return_idx]
                     )
 
                 if config.debug_assert:
                     intermediates_raw = raw_returns[
-                        num_mutated_runtime_inps + num_outputs :
+                        num_tokens + num_mutated_runtime_inps + num_outputs :
                     ]
                     assert not any(
                         isinstance(x, TensorAlias) for x in intermediates_raw
@@ -591,7 +651,7 @@ def aot_dispatch_autograd(
             # invariant: intermediate bases always require gradients, so we don't have to
             # consider marking them as non-differentiable.
             raw_returns_not_including_intermediate_bases = raw_returns[
-                : num_mutated_runtime_inps + num_outputs
+                : num_mutated_runtime_inps + num_outputs + num_tokens
             ]
             raw_returns_meta = [
                 x
@@ -601,7 +661,9 @@ def aot_dispatch_autograd(
 
             fw_outs_not_requiring_grad = [
                 x
-                for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
+                for (i, x) in enumerate(
+                    raw_returns_not_including_intermediate_bases[num_tokens:]
+                )
                 if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
@@ -632,10 +694,12 @@ def aot_dispatch_autograd(
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
+            num_tokens = len(CompiledFunction.metadata.tokens)
             expected_grad_outs = (
                 CompiledFunction.metadata.num_outputs
                 + num_mutated_runtime_inps
                 + num_intermediate_bases
+                + num_tokens
             )
             deterministic = CompiledFunction.metadata.deterministic
             global_deterministic = torch.are_deterministic_algorithms_enabled()
@@ -656,13 +720,17 @@ def aot_dispatch_autograd(
             out_info = CompiledFunction.metadata.output_info
 
             inp_tangents, out_tangents, intermediate_base_tangents = (
-                flat_args[0:num_mutated_runtime_inps],
+                flat_args[num_tokens:num_mutated_runtime_inps],
                 flat_args[
-                    num_mutated_runtime_inps : num_mutated_runtime_inps
+                    num_tokens
+                    + num_mutated_runtime_inps : num_tokens
+                    + num_mutated_runtime_inps
                     + CompiledFunction.metadata.num_outputs
                 ],
                 flat_args[
-                    num_mutated_runtime_inps + CompiledFunction.metadata.num_outputs :
+                    num_tokens
+                    + num_mutated_runtime_inps
+                    + CompiledFunction.metadata.num_outputs :
                 ],
             )
             # input_info contains info on *every* input,
@@ -781,6 +849,17 @@ Got grad_output types: {str(grad_output_types)}"""
                         is_joint_structure=False,
                     )
                 )
+                all_args = [
+                    coerce_runtime_tangent(
+                        t,
+                        CompiledFunction.metadata.traced_tangents[
+                            i - tangents_start_idx
+                        ],
+                    )
+                    if tangents_start_idx <= i < tangents_end_idx
+                    else t
+                    for i, t in enumerate(all_args)
+                ]
                 all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
                 tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                 tangents_end_idx = tangents_start_idx + len_tangents
@@ -889,8 +968,8 @@ Got grad_output types: {str(grad_output_types)}"""
                     out,
                     subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
                 )
-                return outs_wrapped
-            return out
+                return (*[None] * num_tokens, *outs_wrapped)
+            return (*[None] * num_tokens, *out)
 
     compiled_function = create_runtime_wrapper(
         CompiledFunction.apply,
