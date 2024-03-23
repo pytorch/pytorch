@@ -1533,6 +1533,11 @@ class Module:
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
+            if isinstance(args[0], list) and any([not isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor) for t in args[0]]):
+                # breakpoint()
+                print("Hacky unpack")
+                args = args[0]
+            print(f"Module._call_impl args={args}")
             return forward_call(*args, **kwargs)
 
         try:

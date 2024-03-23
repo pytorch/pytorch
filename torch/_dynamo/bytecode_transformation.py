@@ -1033,7 +1033,13 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     instructions = cleaned_instructions(code, safe)
     propagate_line_nums(instructions)
 
+    print("starting transform")
     transformations(instructions, code_options)
+    print("done transform")
+    import os
+    print("always reenabling breakpoints")
+    if os.environ.get("PYTHONBREAKPOINT", None):
+        del os.environ["PYTHONBREAKPOINT"]
     return clean_and_assemble_instructions(instructions, keys, code_options)[1]
 
 

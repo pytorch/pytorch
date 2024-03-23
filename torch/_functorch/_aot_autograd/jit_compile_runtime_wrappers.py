@@ -484,7 +484,8 @@ def aot_dispatch_autograd(
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
-            args = deduped_flat_tensor_args
+            assert(len(deduped_flat_tensor_args) == 1)
+            args = deduped_flat_tensor_args[0]
             if backward_state_indices:
                 bw_state = args[backward_state_indices[0]]
                 assert isinstance(bw_state, BackwardState)

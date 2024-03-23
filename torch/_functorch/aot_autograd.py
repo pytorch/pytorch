@@ -525,6 +525,8 @@ def create_aot_dispatcher_function(
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             and torch.is_grad_enabled()
         )
+        print("fake_flat_args: ", fake_flat_args)
+        # ignore the pad_mm (4) (4,4) (4,4,4) stuff with requires_grad=True
 
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
@@ -911,6 +913,16 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     def forward(*runtime_args):
+        if len(runtime_args) == 1 and all([isinstance(t, torch.Tensor) for t in runtime_args[0]]):
+            # TODO: only for compiled autograd? or always?
+            full_args = []
+            full_args.extend(params_flat)
+            full_args.extend(runtime_args[0])
+            runtime_args[0].clear()
+            # breakpoint()
+            return compiled_fn(full_args)
+
+        # breakpoint()  # this will somehow prevent frees
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
