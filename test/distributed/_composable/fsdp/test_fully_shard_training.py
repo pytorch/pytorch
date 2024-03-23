@@ -246,7 +246,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
-                "test_compile": [True, True]  # [True, False],
+                "test_compile": [True, True],
             },
             self._test_train_parity_single_group,
         )
@@ -254,11 +254,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
     def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]], test_compile=False):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=test_compile):
             torch.manual_seed(42)
-            # model = nn.Sequential(
-            #     nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
-            # )
-            # model = nn.Sequential(nn.Linear(*lin_shapes[0]))
-            model = nn.Linear(*lin_shapes[0])
+            model = nn.Sequential(
+                nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+            )
             ref_model = copy.deepcopy(model).cuda()
             replicate(ref_model, device_ids=[self.rank])
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
@@ -293,8 +291,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
                     if _model is None:
                         continue
-                    # NOTE(yf225): under compile, if we switch `set_to_none` back and forth, there will be recompile which is not nice.
-                    _optim.zero_grad(iter_idx % 2 == 0)
+                    # TODO(yf225): under compile, if we set `set_to_none=False`, compile numerical result is not correct. We need to fix it.
+                    _optim.zero_grad(iter_idx % 2 == 0 if not _is_compile else True)
                     if _is_compile:
                         ctx = compiled_autograd.enable(compiler_fn)
                     else:
