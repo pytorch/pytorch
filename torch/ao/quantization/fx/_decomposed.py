@@ -1,3 +1,4 @@
+import math
 from typing import Optional, Tuple
 
 import torch
@@ -577,6 +578,392 @@ def dequantize_per_channel_meta(
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     return torch.empty_like(input, dtype=out_dtype)
+
+
+quantized_decomposed_lib.define(
+    "choose_qparams_per_token(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token",
+    "CompositeExplicitAutograd",
+)
+def choose_qparams_per_token(
+    input: torch.Tensor,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Choose quantization parameters for per token quantization. This means for a N dimension Tensor
+    (M1, M2, ...Mn, N), we calculate scales/zero_points for each N elements and quantize
+    every N elements with the same quantization parameter. The dimension for scales/zero_points
+    will be (M1 * M2 ... * Mn)
+
+    Args:
+       input (torch.Tensor): original float32/float16 Tensor
+       dtype (torch.dtype): dtype (e.g. torch.uint8) for input Tensor
+
+    Returns:
+        scales and zero_points, both float32 Tensors
+    """
+
+    scales = input.abs().amax(dim=-1, keepdim=True)
+    if scales.dtype == torch.float16:
+        scales = (
+            scales.float()
+        )  # want float scales to avoid overflows for fp16, (bf16 has wide enough range)
+    if dtype == torch.int8:
+        n_bits = 8
+        quant_max = 2 ** (n_bits - 1) - 1
+    else:
+        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")
+
+    scales = scales.clamp(min=1e-5).div(quant_max)
+    zero_points = torch.zeros_like(scales)
+    return scales, zero_points
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token",
+    "Meta",
+)
+def choose_qparams_per_token_meta(
+    input: torch.Tensor,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    size = (1, input.size(-1))
+    return torch.empty(size, dtype=torch.double, device=input.device), torch.empty(
+        size, dtype=torch.int64, device=input.device
+    )
+
+
+# TODO: move this to https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
+quantized_decomposed_lib.define(
+    "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token_asymmetric",
+    "CompositeExplicitAutograd",
+)
+def choose_qparams_per_token_asymmetric(
+    input: torch.Tensor,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Choose quantization parameters for per token quantization. This means for a N dimension Tensor
+    (M1, M2, ...Mn, N), we calculate scales/zero_points for each N elements and quantize
+    every N elements with the same quantization parameter. The dimension for scales/zero_points
+    will be (M1 * M2 ... * Mn)
+
+    Args:
+       input (torch.Tensor): original float32/float16 Tensor
+       dtype (torch.dtype): dtype (e.g. torch.uint8) for input Tensor
+
+    Returns:
+        scales and zero_points, both float32 Tensors
+    """
+    # Based on https://github.com/google/XNNPACK/blob/df156f0cf3db5a4576cc711123eeb54915f82ffc/src/xnnpack/quantization.h#L18
+    qmin, qmax = -128, 127
+    min_val, max_val = torch.aminmax(input, dim=-1, keepdim=True)
+    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+    eps = torch.finfo(torch.float32).eps  # use xnnpack eps?
+
+    # scale
+    scale = (max_val_pos - min_val_neg) / float(qmax - qmin)
+    scale = scale.clamp(min=eps)
+
+    # zero point
+    descaled_min = min_val_neg / scale
+    descaled_max = max_val_pos / scale
+    zero_point_from_min_error = qmin + descaled_min
+    zero_point_from_max_error = qmax + descaled_max
+    zero_point = torch.where(
+        zero_point_from_min_error + zero_point_from_max_error > 0,
+        qmin - descaled_min,
+        qmax - descaled_max,
+    )
+    zero_point = torch.clamp(zero_point, qmin, qmax).round()
+
+    return scale.to(torch.float32), zero_point.to(torch.float32)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token_asymmetric",
+    "Meta",
+)
+def choose_qparams_per_token_asymmetric_meta(
+    input: torch.Tensor,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    size = (1, input.size(-1))
+    return torch.empty(size, dtype=torch.double, device=input.device), torch.empty(
+        size, dtype=torch.int64, device=input.device
+    )
+
+
+def _per_token_quant_qparam_dim_check(input, scales, zero_points):
+    num_tokens = math.prod(list(input.size())[:-1])
+    assert (
+        num_tokens == scales.numel()
+    ), f"num_tokens: {num_tokens} scales: {scales.size()}"
+    assert (
+        num_tokens == zero_points.numel()
+    ), f"num_tokens: {num_tokens} zero_points: {zero_points.size()}"
+
+
+quantized_decomposed_lib.define(
+    "quantize_per_token(Tensor input, Tensor scales, Tensor zero_points, "
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor"
+)
+
+
+@impl(quantized_decomposed_lib, "quantize_per_token", "CompositeExplicitAutograd")
+def quantize_per_token(
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+):
+    """Per token quantization for the Tensor using the quantization parameters to map
+    from floating point to quantized values. This means for a N dimension Tensor
+    (M1, M2, ...Mn, N), we calculate scales/zero_points for each N elements and quantize
+    every N elements with the same quantization parameter. The dimension for scales/zero_points
+    will be (M1 * M2 ... * Mn)
+
+    Args:
+       input (torch.Tensor): original float32 or bfloat16 Tensor
+       scales (float32 torch.Tensor): quantization parameter for per token affine quantization
+       zero_points (int32 torch.Tensor): quantization parameter for per token affine quantization
+       quant_min (int): minimum quantized value for output Tensor
+       quant_max (int): maximum quantized value for output Tensor
+       dtype (torch.dtype): requested dtype (e.g. torch.uint8) for output Tensor
+
+    Returns:
+       Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
+       are not stored in the Tensor, we are storing them in function arguments instead
+    """
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    _per_token_quant_qparam_dim_check(input, scales, zero_points)
+    input = (
+        torch.round(input / scales + zero_points).clamp(quant_min, quant_max).to(dtype)
+    )
+    return input
+
+
+@impl(quantized_decomposed_lib, "quantize_per_token", "Meta")
+def quantize_per_token_meta(
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+):
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    return torch.empty_like(input, dtype=dtype)
+
+
+quantized_decomposed_lib.define(
+    "dequantize_per_token(Tensor input, Tensor scales, Tensor zero_points, "
+    "int quant_min, int quant_max, ScalarType dtype, ScalarType output_dtype) -> Tensor"
+)
+
+
+@impl(quantized_decomposed_lib, "dequantize_per_token", "CompositeExplicitAutograd")
+def dequantize_per_token(
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    output_dtype: torch.dtype = torch.float32,
+):
+    """Per token dequantization for the Tensor using the quantization parameters to map
+    from floating point to quantized values. This means for a N dimension Tensor
+    (M1, M2, ...Mn, N), we calculate scales/zero_points for each N elements and quantize
+    every N elements with the same quantization parameter. The dimension for scales/zero_points
+    will be (M1 * M2 ... * Mn)
+
+    Args:
+       input (torch.Tensor): quantized Tensor (uint8, int8 etc.)
+       scales (float32 torch.Tensor): quantization parameter for per token affine quantization
+       zero_points (int32 torch.Tensor): quantization parameter for per token affine quantization
+       quant_min (int): minimum quantized value for input Tensor
+       quant_max (int): maximum quantized value for input Tensor
+       dtype (torch.dtype): dtype (e.g. torch.uint8) for input Tensor
+       output_dtype (torch.dtype): dtype (e.g. torch.float32) for output Tensor
+
+    Returns:
+       dequantized Tensor with dtype `output_dtype`
+    """
+    input = input - zero_points
+    input = input.to(output_dtype) * scales
+    return input
+
+
+@impl(quantized_decomposed_lib, "dequantize_per_token", "Meta")
+def dequantize_per_token_meta(
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    output_dtype: torch.dtype = torch.float32,
+):
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    # TODO: support fp16
+    return torch.empty_like(input, dtype=output_dtype)
+
+
+quantized_decomposed_lib.define(
+    "quantize_per_channel_group(Tensor input, Tensor scales, Tensor zero_points, int quant_min, "
+    "int quant_max, ScalarType dtype, int group_size) -> Tensor"
+)
+
+
+# TODO: dtype is ignored for now
+@impl(
+    quantized_decomposed_lib, "quantize_per_channel_group", "CompositeExplicitAutograd"
+)
+def quantize_per_channel_group(
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    group_size=128,
+):
+    assert group_size > 1
+    # needed for GPTQ single column quantize
+    if group_size > input.shape[-1] and scales.shape[-1] == 1:
+        group_size = input.shape[-1]
+
+    assert input.shape[-1] % group_size == 0
+    assert input.dim() == 2
+
+    # TODO: check for dtype, currently we can't express torch.int4 so it's omitted
+    to_quant = input.reshape(-1, group_size)
+    assert torch.isnan(to_quant).sum() == 0
+
+    scales = scales.reshape(-1, 1)
+    zero_points = zero_points.reshape(-1, 1)
+
+    input_int8 = (
+        to_quant.div(scales)
+        .add(zero_points)
+        .round()
+        .clamp_(quant_min, quant_max)
+        .to(dtype)
+        .reshape_as(input)
+    )
+
+    return input_int8
+
+
+@impl(quantized_decomposed_lib, "quantize_per_channel_group", "Meta")
+def quantize_per_channel_group_meta(
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    group_size=128,
+):
+    """Groupwise quantization within each channel for an 2-d Tensor using the quantization parameters
+    to map from floating point to quantized values. This means for each row of a 2-d Tensor
+    (M, N), we calculate scales/zero_points for each `group_size` elements
+    and quantize every `group_size` elements with the same quantization parameter.
+    The dimension for scales/zero_points will be (M * ceil(N, group_size),)
+
+    Args:
+       input (torch.Tensor): original float32 or bfloat16 Tensor
+       scales (float32 torch.Tensor): quantization parameter for per channel group affine quantization
+       zero_points (int32 torch.Tensor): quantization parameter for per channel group affine quantization
+       quant_min (int): minimum quantized value for output Tensor
+       quant_max (int): maximum quantized value for output Tensor
+       dtype (torch.dtype): requested dtype (e.g. torch.uint8) for output Tensor
+
+    Returns:
+       Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
+       are not stored in the Tensor, we are storing them in function arguments instead
+    """
+    assert group_size > 1
+    # needed for GPTQ single column quantize
+    if group_size > input.shape[-1] and scales.shape[-1] == 1:
+        group_size = input.shape[-1]
+
+    assert input.shape[-1] % group_size == 0
+    assert input.dim() == 2
+    return torch.empty_like(input, dtype=dtype)
+
+
+quantized_decomposed_lib.define(
+    "dequantize_per_channel_group(Tensor input, Tensor scales, Tensor? zero_points, int quant_min, "
+    "int quant_max, ScalarType dtype, int group_size, ScalarType output_dtype) -> Tensor"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "dequantize_per_channel_group",
+    "CompositeExplicitAutograd",
+)
+def dequantize_per_channel_group(
+    w_int8: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: Optional[torch.Tensor],
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    group_size: int = 128,
+    output_dtype: torch.dtype = torch.float32,
+):
+    """Groupwise dequantization within each channel for an 2-d Tensor using the quantization parameters
+    to map from floating point to quantized values. This means for each row of a 2-d Tensor
+    (M, N), we calculate scales/zero_points for each `group_size` elements
+    and quantize every `group_size` elements with the same quantization parameter.
+    The dimension for scales/zero_points will be (M * ceil(N, group_size),)
+
+    Args:
+       input (torch.Tensor): quantized Tensor (uint8/int8 etc.)
+       scales (float32 torch.Tensor): quantization parameter for per channel group affine quantization
+       zero_points (int32 torch.Tensor): quantization parameter for per channel group affine quantization
+       quant_min (int): minimum quantized value for input Tensor
+       quant_max (int): maximum quantized value for input Tensor
+       dtype (torch.dtype): dtype (e.g. torch.uint8) for input Tensor
+       output_dtype (torch.dtype): dtype (e.g. torch.float32) for output Tensor
+
+    Returns:
+       dequantized Tensor with dtype `output_dtype`
+    """
+
+    assert group_size > 1
+    # needed for GPTQ single column dequantize
+    if group_size > w_int8.shape[-1] and scales.shape[-1] == 1:
+        group_size = w_int8.shape[-1]
+    assert w_int8.shape[-1] % group_size == 0
+    assert w_int8.dim() == 2
+
+    w_int8_grouped = w_int8.reshape(-1, group_size)
+    scales = scales.reshape(-1, 1)
+    if zero_points is not None:
+        zp = zero_points.reshape(-1, 1)
+    else:
+        zp = torch.zeros([], dtype=torch.int32, device=scales.device)
+    w_dq = w_int8_grouped.sub(zp).mul(scales).reshape_as(w_int8).to(output_dtype)
+    return w_dq
+
 
 quantized_decomposed_lib.define(
     "fake_quant_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
