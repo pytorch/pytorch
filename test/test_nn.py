@@ -7104,8 +7104,8 @@ class TestFusionEval(TestCase):
         bn_ref.eval()
 
         Y_ref = bn_ref(linear_ref(inputs))
-        linear_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(linear_ref,
-                                                                  bn_ref)
+        linear_bn_fused = torch.nn.utils.fusion.fuse_linear_bn_eval(linear_ref,
+                                                                    bn_ref)
         Y_hat = linear_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat)
