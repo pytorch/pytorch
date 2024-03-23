@@ -922,7 +922,6 @@ def min_cut_rematerialization_partition(
     # forwards.
 
     def find_first_unfusible(start_nodes, max_range):
-        import heapq  # ???? Somehow I need this???
         sorted_nodes = []
         for n in start_nodes:
             heapq.heappush(sorted_nodes, (n.fw_order, n, True))
