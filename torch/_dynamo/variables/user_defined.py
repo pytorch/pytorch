@@ -12,24 +12,14 @@ import threading
 import types
 from typing import Dict, List
 
-from ..bytecode_transformation import create_call_function
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
-try:
-    from torch.utils._cxx_pytree import PyTreeSpec
-except ImportError:
-    PyTreeSpec = type(None)
-
 import torch._dynamo.config
 
 import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
+
+from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
@@ -50,6 +40,17 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
+
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec
+except ImportError:
+    PyTreeSpec = type(None)
 
 
 class UserDefinedVariable(VariableTracker):
@@ -134,6 +135,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
+
         elif ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
 
@@ -234,6 +236,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif istype(
+            inspect.getattr_static(self.value.__class__, name, None), types.FunctionType
+        ):
+            # Metaclass method
+            return variables.UserFunctionVariable(
+                getattr(self.value.__class__, name)
+            ).call_function(tx, [self, *args], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 

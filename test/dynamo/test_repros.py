@@ -2080,6 +2080,41 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_issue122093(self):
+        try:
+            from jaxtyping import Float
+        except ImportError:
+            raise unittest.SkipTest("requires jaxtyping")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return g(x)
+
+        def g(x):
+            # This example will graph break
+            if isinstance(x, Float[torch.Tensor, "..."]):
+                return x + 1
+            return x - 100
+
+        x = torch.ones(2)
+        self.assertEqual(f(x), g(x))
+
+    def test_metaclass_isinstance(self):
+        class Meta(type):
+            def __instancecheck__(cls, instance):
+                return str(instance.dtype) == "torch.float32"
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if isinstance(x, MyClass):
+                return x + 1
+            return x - 100
+
+        self.assertEqual(f(torch.zeros(2)), torch.ones(2))
+
     def test_vdd_duplicate_error(self):
         def fn(a, dt):
             keys = list(dt._jt_dict.keys())

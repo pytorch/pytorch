@@ -1330,7 +1330,16 @@ class BuiltinVariable(VariableTracker):
                 f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
             )
 
-        isinstance_type = isinstance_type.as_python_constant()
+        type_var = isinstance_type
+        try:
+            isinstance_type = isinstance_type.as_python_constant()
+        except NotImplementedError:
+            unimplemented(f"isinstance(..., {type_var}) with non-constant type")
+
+        if isinstance(type_var, variables.UserDefinedClassVariable) and istype(
+            isinstance_type.__class__.__instancecheck__, types.FunctionType
+        ):
+            return type_var.call_method(tx, "__instancecheck__", [arg], {})
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
 
