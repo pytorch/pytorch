@@ -971,9 +971,13 @@ class DeviceCachingAllocator {
     TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
     pool = pool_it->second.get();
 
+    TORCH_INTERNAL_ASSERT(pool != nullptr);
+
     size_t allocated_pool_blocks = 0;
 
     for (Block* b : active_blocks) {
+      TORCH_INTERNAL_ASSERT(b != nullptr);
+      TORCH_INTERNAL_ASSERT(b->pool != nullptr);
       if (b->allocated && b->pool->owner_PrivatePool == pool) {
         if (!expected_live_allocations.count(b->ptr)) {
           return false;
@@ -1446,8 +1450,6 @@ class DeviceCachingAllocator {
   }
 
   void freeBlocksAllocatedToPool(PrivatePool* private_pool, RestoreResult& rr) {
-    std::unordered_map<void*, Block*> orig_ptrs_to_blocks;
-
     auto pool_blocks = get_private_pool_head_blocks(private_pool);
 
     std::vector<Block*> head_blocks;
@@ -2840,8 +2842,7 @@ static void uncached_delete(void* ptr) {
 
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_memory_deallocation(
-        c10::kCUDA, reinterpret_cast<uintptr_t>(ptr));
+    (*interp)->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
   }
   C10_CUDA_CHECK(cudaFree(ptr));
 }
@@ -2925,7 +2926,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_allocation(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
+          reinterpret_cast<uintptr_t>(*devPtr));
     }
   }
 
@@ -2940,7 +2941,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_deallocation(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(block->ptr));
+          reinterpret_cast<uintptr_t>(block->ptr));
     }
     device_allocator[block->device]->free(block);
   }
@@ -3129,7 +3130,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_memory_allocation(
-            c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
+            reinterpret_cast<uintptr_t>(devPtr));
       }
     } else {
       if (size != 0) {

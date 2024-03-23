@@ -4,7 +4,6 @@ from typing import List, Optional
 import torch
 from torch import Tensor
 from torch._dynamo.utils import counters
-from torch._inductor import utils
 
 from ..pattern_matcher import (
     Arg,
@@ -31,11 +30,7 @@ def check_device(a: Tensor, b: Tensor) -> bool:
 def should_decompose_common(
     mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
 ) -> bool:
-    return (
-        torch._inductor.config.decompose_mem_bound_mm
-        and check_device(mat1, mat2)
-        and not utils.any_is_symbolic(mat1, mat2, input)
-    )
+    return torch._inductor.config.decompose_mem_bound_mm and check_device(mat1, mat2)
 
 
 def should_decompose_bmm(mat1, mat2) -> bool:
