@@ -1356,10 +1356,7 @@ def fwd_only(fn, args, *, run_dce=True) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        mode = (
-            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
-        )
-        gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
+        gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
     if run_dce:
         gm.graph.eliminate_dead_code()
     gm.recompile()
