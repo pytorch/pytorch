@@ -270,7 +270,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
-  m.def("_prepare_profiler", prepareProfiler);
+  m.def(
+      "_prepare_profiler",
+      prepareProfiler,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -431,7 +434,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
   });
 
-  _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
       _C_m, "_InferenceMode");
