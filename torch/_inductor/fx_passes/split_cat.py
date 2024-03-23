@@ -61,6 +61,22 @@ def _get_split_args_default(split_node):
     )
 
 
+def _get_dim(node: torch.fx.Node) -> int:
+    if "dim" in node.kwargs:
+        return node.kwargs["dim"]
+    if node.target == torch.unbind:
+        if len(node.args) == 2:
+            return node.args[-1]
+        return 0  # defaults to dim=0
+    if node.target == torch.split:
+        if len(node.args) == 3:
+            return node.args[-1]
+        return 0  # defaults to dim=0
+    raise AssertionError(
+        f"Can't extract `dim` from {node.target} {node.args} {node.kwargs}"
+    )
+
+
 # noqa: W605
 # ############The pattern to be optimized is#########
 #         unbind (dim=0)
@@ -418,7 +434,7 @@ def merge_splits(
     new_split_sections = list(first_split_sections)
     new_split_sections[next_split_index : next_split_index + 1] = next_split_sections  # type: ignore[operator, misc]
 
-    first_split_dim = first_split.kwargs["dim"]  # type: ignore[union-attr]
+    first_split_dim = _get_dim(first_split)
 
     to_remove = []
 
@@ -657,7 +673,7 @@ class SplitCatSimplifier:
 
         We replace a split node with an unflatten followed by a movedim
         """
-        split_dim = split_node.kwargs["dim"]
+        split_dim = _get_dim(split_node)
         split_sections = split_node.args[1]
         transform_params_list: List[List[_TransformParam]] = []
 
@@ -713,7 +729,7 @@ class SplitCatSimplifier:
         Returns the new `user_inputs_list`, with tuples replaced with new getitems from the newer split node.
         """
         split_input = split_node.args[0]
-        split_dim = split_node.kwargs["dim"]
+        split_dim = _get_dim(split_node)
         if len(split_ranges) == 1:  # We can completely eliminate the split node
             split_items = [split_input]
         else:
@@ -764,8 +780,7 @@ class SplitCatSimplifier:
         user_inputs_list_new,
         transform_params_list: List[List[_TransformParam]],
     ):
-        split_dim = split_node.kwargs["dim"]
-
+        split_dim = _get_dim(split_node)
         split_users = split_node.users.keys()
         new_cats = []
         for user_node, user_inputs_new, transform_params in zip(
@@ -940,7 +955,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
 
         """
-        split_dim = unbind_node.kwargs["dim"]
+        split_dim = _get_dim(unbind_node)
         transform_params_list: List[List[_TransformParam]] = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             cat_dim = get_arg_value(user_node, 1, "dim") or 0
