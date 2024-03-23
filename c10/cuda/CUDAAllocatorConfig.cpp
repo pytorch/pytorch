@@ -25,11 +25,11 @@ size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
   size_t log_size = (63 - llvm::countLeadingZeros(size));
 
   // Our intervals start at 1MB and end at 64GB
-  const size_t interval_start =
+  constexpr size_t interval_start =
       63 - llvm::countLeadingZeros(static_cast<size_t>(1048576));
-  const size_t interval_end =
+  constexpr size_t interval_end =
       63 - llvm::countLeadingZeros(static_cast<size_t>(68719476736));
-  TORCH_CHECK(
+  static_assert(
       (interval_end - interval_start == kRoundUpPowerOfTwoIntervals),
       "kRoundUpPowerOfTwoIntervals mismatch");
 
