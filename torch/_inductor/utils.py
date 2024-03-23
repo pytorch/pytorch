@@ -46,8 +46,10 @@ from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from . import config
 
@@ -977,12 +979,7 @@ def use_triton_template(layout, *, enable_int32=False):
     )
 
 
-def use_cutlass_template(layout, m, n, k):
-    from .virtualized import V
-
-    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
-        return False
+def use_cutlass_template(layout):
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
@@ -1327,7 +1324,7 @@ class Placeholder(enum.Enum):
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
 
-def pass_execution_and_save(func, gm, msg):
+def pass_execution_and_save(func, gm, inp, msg):
     from .pattern_matcher import stable_topological_sort
 
     with tempfile.NamedTemporaryFile(
@@ -1337,6 +1334,7 @@ def pass_execution_and_save(func, gm, msg):
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
+        ShapeProp(gm=gm, fake_mode=detect_fake_mode(inp)).propagate(*inp)
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()

@@ -7,7 +7,7 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 template <typename mask_t>
 struct VecMaskLoad<float, 1, mask_t, 1> {
