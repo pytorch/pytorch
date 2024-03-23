@@ -579,21 +579,28 @@ class OpOverrides:
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
+            if impl is None:
+                continue
+
             if isinstance(impl, str):
                 nof_args = 2 if "{y}" in impl else 1
                 # extend the following dictionary with factory
                 # functions for a specific number of arguments as
                 # needed:
                 factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                setattr(cls, funcname, staticmethod(factory(impl)))
+                impl = factory(impl)
+
+            setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: str
-    triton: Optional[str] = None  # None when not impl in libdevice/triton
-    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
+    cpp: Union[str, Callable[..., str]]
+    # None when not impl in libdevice/triton
+    triton: Union[Optional[str], Callable[..., str]] = None
+    # None when not impl in aten/.../vec
+    cppvec: Union[Optional[str], Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -642,6 +649,13 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
         cpp="calc_erfcx({x})",
         triton="libdevice.erfcx({x})",
         name="special_erfcx",
+    ),
+    fma=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
+        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
+        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
