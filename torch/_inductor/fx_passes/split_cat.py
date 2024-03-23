@@ -61,15 +61,19 @@ def _get_split_args_default(split_node):
     )
 
 
-def _get_dim(node: torch.fx.Node) -> int:
+def _get_dim(node: Any) -> int:
+    assert isinstance(node, torch.fx.Node)
     if "dim" in node.kwargs:
+        assert isinstance(node.kwargs["dim"], int)
         return node.kwargs["dim"]
     if node.target == torch.unbind:
         if len(node.args) == 2:
+            assert isinstance(node.args[-1], int)
             return node.args[-1]
         return 0  # defaults to dim=0
     if node.target == torch.split:
         if len(node.args) == 3:
+            assert isinstance(node.args[-1], int)
             return node.args[-1]
         return 0  # defaults to dim=0
     raise AssertionError(
