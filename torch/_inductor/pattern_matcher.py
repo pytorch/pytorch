@@ -1245,7 +1245,10 @@ class PatternMatcherPass:
         count = 0
         for node in sorted(
             itertools.chain.from_iterable(
-                (graph.find_nodes(op=op, target=target) for op, target in self.patterns)
+                (
+                    graph.find_nodes(op=op, target=target, sort=False)
+                    for op, target in self.patterns
+                )
             ),
             reverse=True,
         ):
