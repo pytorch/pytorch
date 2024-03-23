@@ -478,6 +478,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 assert (
                     len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
                 ), "Initializers must be present after loading it from model_state_dict"
+                # Let's make sure consecutive `save` calls don't create dupes
+                onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
         elif checkpoint_type == "checkpoint_file":
             # Variant 2: Save ONNX proto using Model checkpoint file
             with tempfile.NamedTemporaryFile(
@@ -488,6 +493,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 torch.save(
                     Model().state_dict(), tmp_checkpoint_file.name
                 )  # Create checkpoint file for testing
+                onnx_program.save(
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
+                )
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
+                # Let's make sure consecutive `save` calls don't create dupes
                 onnx_program.save(
                     tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
                 )
