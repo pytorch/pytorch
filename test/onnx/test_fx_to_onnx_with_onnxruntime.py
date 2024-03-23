@@ -887,11 +887,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.xfail_dynamic_fx_test(
         error_message="shape_env should be set if tracing with 'symbolic'"
     )
-    @pytorch_test_common.xfail(
-        error_message="Type Error: Data in initializer 'h_0_attn_bias' has element type tensor(uint8) "
-        "but usage of initializer in graph expects tensor(bool)",
-        reason="https://github.com/huggingface/transformers/issues/21013",
-    )
     def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
         device = "cpu"
@@ -1073,7 +1068,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 onnx_program.save(
-                    tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
                 )
 
                 # Generate random inputs.
@@ -1100,7 +1095,14 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
                 assert len(ref_outputs) == len(ort_outputs)
+                for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+                    torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
+                # Test ONNXProgram.__call__ interface
+                ort_outputs = onnx_program(
+                    *args, model_with_state_dict=real_model, **kwargs
+                )
+                assert len(ref_outputs) == len(ort_outputs)
                 for ref_output, ort_output in zip(ref_outputs, ort_outputs):
                     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
@@ -1255,8 +1257,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     @pytorch_test_common.xfail_dynamic_fx_test(
-        error_message=" Failed running call_function <built-in function scaled_dot_product_attention>",
-        reason="dynamo does not support it.",
+        error_message="NOT_IMPLEMENTED : Could not find an implementation for Trilu(14) node",
+        reason="Need to check Trilu node in the ONNX graph",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
@@ -1320,8 +1322,9 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
-    @pytorch_test_common.xfail(
-        error_message="whole graph export entails exactly one guard export"
+    @pytorch_test_common.skip_dynamic_fx_test(
+        reason="Dynamic shape check is not expected for exported program in this test suite.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
         config = transformers.MptConfig(

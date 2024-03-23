@@ -329,7 +329,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
+                        field_var = SourcelessBuilder.create(
+                            tx, field_defaults[field_name]
+                        )
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
@@ -756,7 +758,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else:
                 return trace_rules.lookup(func)(func)
         elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, source=source)
+            return variables.UserMethodVariable(
+                subobj.__func__, self.var_getattr(tx, "__class__"), source=source
+            )
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)

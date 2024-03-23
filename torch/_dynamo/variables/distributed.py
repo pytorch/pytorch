@@ -206,6 +206,8 @@ class DeviceMeshVariable(DistributedVariable):
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
+        if name == "device_type":
+            return ConstantVariable.create(self.value.device_type)
         return super().var_getattr(tx, name)
 
     def call_method(
@@ -357,7 +359,7 @@ class BackwardHookVariable(VariableTracker):
                 ),
             )
 
-        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module)
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
         user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
         user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
         proxy = tx.output.create_proxy(
