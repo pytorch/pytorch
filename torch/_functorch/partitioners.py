@@ -744,7 +744,7 @@ def min_cut_rematerialization_partition(
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten.upsample_bilinear2d]  # noqa: E501,B950
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten._scaled_dot_product_efficient_attention, aten.upsample_bilinear2d]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
@@ -757,17 +757,16 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    BAN_IF_MATERIALIZED_BACKWARDS = config.ban_recompute_materialized_backward
     BAN_IF_USED_FAR_APART = config.ban_recompute_used_far_apart
     BAN_IF_LONG_FUSIBLE_CHAINS = config.ban_recompute_long_fusible_chains
-    BAN_IF_REDUCTION = config.ban_recompute_reductions
+    BAN_IF_MATERIALIZED_BACKWARDS = config.ban_recompute_materialized_backward
     BAN_IF_NOT_IN_ALLOWLIST = config.ban_recompute_not_in_allowlist
+    BAN_IF_REDUCTION = config.ban_recompute_reductions
 
     if config.aggressive_recomputation:
         BAN_IF_MATERIALIZED_BACKWARDS = False
         BAN_IF_USED_FAR_APART = False
         BAN_IF_LONG_FUSIBLE_CHAINS = False
-        BAN_IF_REDUCTION = False
         BAN_IF_NOT_IN_ALLOWLIST = False
 
     def is_materialized_backwards(node):
