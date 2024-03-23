@@ -225,6 +225,7 @@ exclude_patterns = [
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*',
+    'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/import_legacy.cpp',
