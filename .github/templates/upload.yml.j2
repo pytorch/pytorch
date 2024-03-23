@@ -1,7 +1,14 @@
 {% import 'common.yml.j2' as common %}
 
 {%- macro binary_env(config, is_windows=False) -%}
-    env:!{{ binary_env_as_input(config, is_windows, True) }}
+    env:
+{%- if "BUILD_SHARED_LIBS" in config %}
+      BUILD_SHARED_LIBS : !{{ config["BUILD_SHARED_LIBS"] }}
+{%- endif %}
+{%- if "BUILD_TEST" in config %}
+      BUILD_TEST : !{{ config["BUILD_TEST"] }}
+{%- endif -%}
+    !{{ binary_env_as_input(config, is_windows, True) }}
 {%- endmacro %}
 
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}

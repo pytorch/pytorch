@@ -7,7 +7,10 @@ export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export VC_YEAR=2019
 
 pushd "$BUILDER_ROOT"
-
-./windows/internal/smoke_test.bat
+if [[ ${BUILD_SHARED_LIBS:-true} == "false" ]]; then
+    ./windows/internal/static_lib_test.bat
+else
+    ./windows/internal/smoke_test.bat
+fi
 
 popd

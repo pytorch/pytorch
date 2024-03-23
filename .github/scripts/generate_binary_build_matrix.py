@@ -234,6 +234,7 @@ def generate_libtorch_matrix(
     abi_version: str,
     arches: Optional[List[str]] = None,
     libtorch_variants: Optional[List[str]] = None,
+    generate_shared_build_only: Optional[bool] = True,
 ) -> List[Dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
@@ -283,6 +284,28 @@ def generate_libtorch_matrix(
                     ),
                 }
             )
+    if os == "windows" and generate_shared_build_only is False:
+        ret.append(
+            {
+                "gpu_arch_type": gpu_arch_type,
+                "gpu_arch_version": gpu_arch_version,
+                "desired_cuda": translate_desired_cuda(gpu_arch_type, gpu_arch_version),
+                "BUILD_SHARED_LIBS": "false",
+                "BUILD_TEST": "false",
+                "libtorch_variant": "static-without-deps",
+                "libtorch_config": abi_version if os == "windows" else "",
+                "devtoolset": abi_version if os != "windows" else "",
+                "container_image": LIBTORCH_CONTAINER_IMAGES[
+                    (arch_version, abi_version)
+                ]
+                if os != "windows"
+                else "",
+                "package_type": "libtorch",
+                "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-static-build-deps-{abi_version}".replace(
+                    ".", "_"
+                ),
+            }
+        )
     return ret
 
 
