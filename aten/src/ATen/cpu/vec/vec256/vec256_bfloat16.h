@@ -48,7 +48,9 @@ static inline __m128i cvtfp32_bf16(const __m256& src) {
   t_value = _mm256_srli_epi32(t_value, 16);
   // Check NaN before converting back to bf16
   t_value = _mm256_blendv_epi8(nan, t_value, mask);
-  return _mm256_cvtusepi32_epi16(t_value);
+  t_value = _mm256_packus_epi32(t_value, t_value);   // t[4-7] t[4-7] t[0-4] t[0-4]
+  t_value = _mm256_permute4x64_epi64(t_value, 0xd8); // 11     01     10     00
+  return _mm256_castsi256_si128(t_value);
 }
 
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
