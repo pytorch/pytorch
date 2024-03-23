@@ -48,7 +48,6 @@ from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes
 from .reinplace import reinplace_inplaceable_ops
 from torch._functorch._aot_autograd import fsdp_fx_passes
-from torch._functorch import config as functorch_config
 
 
 log = logging.getLogger(__name__)
@@ -118,21 +117,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
+    # print(lazy_format_graph_code("before reinplace_inplaceable_ops: ", gm))
     reinplace_inplaceable_ops(gm.graph)
-    if functorch_config.enable_fsdp_fx_passes:
-        fsdp_fx_passes.move_resize_to_full_to_beginning_of_graph(gm)
-        fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
-        fsdp_fx_passes.remove_clone_if_input_has_no_other_use_in_graph(gm)
-        fsdp_fx_passes.remove_inplace_copy_into_the_same_buffer(gm)
-        fsdp_fx_passes.dedup_temporary_buffers_that_are_eventually_resized_to_0(gm)
-        gm.graph.eliminate_dead_code()
-        fsdp_fx_passes.dedup_resize_to_same_size(gm)
-        fsdp_fx_passes.undo_functionalization_for_slice_split_with_sizes_inplace_copy(gm)
-        gm.graph.eliminate_dead_code()
-        fsdp_fx_passes.replace_resize_to_full_then_inplace_copy_into_then_resize_to_0_pattern(gm)
-        fsdp_fx_passes.remove_buffers_that_only_participate_in_storage_resize(gm)
-        gm.graph.eliminate_dead_code()
-        fsdp_fx_passes.replace_resize_to_full_then_inplace_copy_into_then_compute_then_resize_to_0_pattern(gm)
+    fsdp_fx_passes.remove_no_use_slice(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+    fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+    fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(gm)
+    fsdp_fx_passes.remove_unnecessary_split_with_sizes(gm)  # only matters for CA BWD graph
+    fsdp_fx_passes.replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_then_inplace_foreach_copy_pattern(gm)
+    fsdp_fx_passes.undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(gm)
+    fsdp_fx_passes.replace_inplace_foreach_copy_with_inplace_copy(gm)
+    fsdp_fx_passes.remove_clone_if_input_is_alias_of_graph_input(gm)
+    fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+    fsdp_fx_passes.remove_no_use_empty(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
 
     decompose_auto_functionalized(gm.graph)
     gm.recompile()

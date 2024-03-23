@@ -29,7 +29,6 @@ from .dispatch_and_compile_graph import (
     aot_dispatch_base_graph,
 )
 from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
-from torch._functorch._aot_autograd import fsdp_fx_passes
 
 from .runtime_wrappers import (
     aot_dispatch_subclass_wrapper,
@@ -257,11 +256,6 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-
-            if config.enable_fsdp_fx_passes:
-                # fsdp_fx_passes.insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(fw_module)
-                fsdp_fx_passes.move_resize_to_0_to_end_of_graph(fw_module)
-                fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(fw_module)
 
             fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints

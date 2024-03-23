@@ -746,11 +746,20 @@ def fx_codegen_and_compile(
 
 
 def clone_preserve_strides(x: torch.Tensor):
+    # NOTE(yf225): if we don't do this,
+    # `buffer = torch.as_strided(x, (needed_size,), (1,)).clone()` below will fail with:
+    # "RuntimeError: setStorage: sizes [1522756], strides [1], storage offset 0, and itemsize 4 requiring a storage size of 6091024 are out of bounds for storage of size 0"
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
     )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
+    if x.untyped_storage().size() == 0:
+        buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
+    else:
+        buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    ret = torch.as_strided(buffer, x.size(), x.stride())
+    if x.untyped_storage().size() == 0:
+        ret.untyped_storage().resize_(0)
+    return ret
 
 
 def copy_misaligned_inputs(
