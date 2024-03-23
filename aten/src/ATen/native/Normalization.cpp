@@ -672,6 +672,23 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "Expected at least 2 input dimensions, but got ",
+      input.dim());
+
+  if (training) {
+    auto size = input.sizes();
+    int64_t size_prods = size[0];
+    for (const auto i : c10::irange(size.size() - 2)) {
+      size_prods *= size[i + 2];
+    }
+    TORCH_CHECK(
+        size_prods != 1,
+        "Expected more than 1 value per channel when training, got input size ",
+        size);
+  }
+
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
   // TODO: switch to the new stack after the 2 week FC window

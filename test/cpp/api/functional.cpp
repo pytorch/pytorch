@@ -1931,6 +1931,37 @@ TEST_F(FunctionalTest, Threshold) {
                   .defined());
 }
 
+TEST_F(FunctionalTest, BatchNormExceptions) {
+  double eps = 1e-05;
+  double momentum = 0.1;
+  auto input = torch::randn({1});
+  ASSERT_THROWS_WITH(
+    F::batch_norm(
+      input,
+      torch::tensor({}),
+      torch::tensor({}),
+      F::BatchNormFuncOptions()
+          .weight(torch::tensor({}))
+          .bias(torch::tensor({}))
+          .momentum(momentum)
+          .eps(eps)
+          .training(false)),
+      "Expected at least 2 input dimensions, but got ");
+
+  ASSERT_THROWS_WITH(
+    at::batch_norm(
+      input,
+      torch::tensor({}),
+      torch::tensor({}),
+      torch::tensor({}),
+      torch::tensor({}),
+      false,
+      momentum,
+      eps,
+      at::globalContext().userEnabledCuDNN()),
+      "Expected at least 2 input dimensions, but got ");
+}
+
 TEST_F(FunctionalTest, BatchNorm1d) {
   int num_features = 5;
   double eps = 1e-05;

@@ -19,22 +19,6 @@ inline Tensor batch_norm(
     bool training,
     c10::optional<double> momentum,
     double eps) {
-  TORCH_CHECK(
-      input.dim() >= 2,
-      "Expected at least 2 input dimensions, but got ",
-      input.dim());
-  if (training) {
-    auto size = input.sizes();
-    int64_t size_prods = size[0];
-    for (const auto i : c10::irange(size.size() - 2)) {
-      size_prods *= size[i + 2];
-    }
-    TORCH_CHECK(
-        size_prods != 1,
-        "Expected more than 1 value per channel when training, got input size ",
-        size);
-  }
-
   return torch::batch_norm(
       input,
       weight,
