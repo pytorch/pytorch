@@ -3590,8 +3590,6 @@ class CppScheduling(BaseScheduling):
                             v, exprs = get_indexing_ranges_exprs(snode)
                             if var_ranges is None:
                                 var_ranges = v
-                            # TODO: this can be also a strong assumption that fused nodes have
-                            # the same variable and ranges
                             assert var_ranges == v, (var_ranges, v, node.snodes)
                             for expr in exprs:
                                 indexing_exprs.add(expr)
@@ -3668,15 +3666,17 @@ class CppScheduling(BaseScheduling):
         ranges2 = node_to_recomp.node.data.get_size()
         ranges1 = None
         if isinstance(ref_node, FusedSchedulerNode):
-            ranges_list = []
+            ranges_set = set()
             for snode in ref_node.snodes:
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
                 assert isinstance(snode.node, ir.ComputedBuffer)
-                ranges_list.append(tuple(snode.node.data.get_size()))
+                ranges_set.add(tuple(snode.node.data.get_size()))
 
-            if len(set(ranges_list)) == 1:
-                ranges1 = list(ranges_list[0])
+            if len(ranges_set) != 1:
+                return False
+
+            ranges1 = list(next(iter(ranges_set)))
         else:
             assert isinstance(ref_node, SchedulerNode)
             assert isinstance(ref_node.node, ir.ComputedBuffer)
