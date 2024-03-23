@@ -322,7 +322,11 @@ class DistMatrixOpsTest(DTensorTestBase):
             )
             self.assertEqual(dist_out.full_tensor(), out)
 
-        # TODO: add backward test once we support the backward op
+            out.sum().backward()
+            dist_out.sum().backward()
+            self.assertEqual(dist_query.full_tensor(), query)
+            self.assertEqual(dist_key.full_tensor(), key)
+            self.assertEqual(dist_value.full_tensor(), value)
 
 
 if __name__ == "__main__":
