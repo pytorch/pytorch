@@ -2055,7 +2055,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             pass
         spec = importlib.util.spec_from_file_location(module_name, path)
         assert spec is not None
-        module =  importlib.util.module_from_spec(spec)
+        module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
