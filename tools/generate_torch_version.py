@@ -14,13 +14,20 @@ RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
     try:
-        return (
-            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=pytorch_root)
-            .decode("ascii")
-            .strip()
-        )
+        rev = None
+        if os.path.exists(os.path.join(pytorch_root, ".git")):
+            rev = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=pytorch_root
+            )
+        elif os.path.exists(os.path.join(pytorch_root, ".hg")):
+            rev = subprocess.check_output(
+                ["hg", "identify", "-r", "."], cwd=pytorch_root
+            )
+        if rev:
+            return rev.decode("ascii").strip()
     except Exception:
-        return UNKNOWN
+        pass
+    return UNKNOWN
 
 
 def get_tag(pytorch_root: Union[str, Path]) -> str:

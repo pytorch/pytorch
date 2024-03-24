@@ -235,12 +235,12 @@ def scaled_dot_product_attention_backward_strategy(
     # assuming q/k/v have the same shape
     qkv_shape = q_input_strategy.output_shape
 
-    # there might be extra tensor inputs
-    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
-    # at indices 6, 7, 12, 13, respectively
-    num_extra_inputs = sum(
-        [strategy is not None for strategy in op_schema.args_schema[6:14]]
-    )
+    tensor_input_indices = [
+        i
+        for i, arg_spec in enumerate(op_schema.args_schema)
+        if isinstance(arg_spec, OpStrategy)
+    ]
+    num_tensor_inputs = len(tensor_input_indices)
 
     all_mesh_dim_strategies = []
 
@@ -250,7 +250,7 @@ def scaled_dot_product_attention_backward_strategy(
         # placement list stores placements of [outputs, inputs]
         # in the spda backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
         # first we can always accept full replication for both inputs and outputs
-        all_replicate: List[Placement] = [Replicate()] * (9 + num_extra_inputs)
+        all_replicate: List[Placement] = [Replicate()] * (3 + num_tensor_inputs)
 
         single_mesh_dim_strategies.append(all_replicate)
 
@@ -273,8 +273,10 @@ def scaled_dot_product_attention_backward_strategy(
             output_sharding,
             logsumexp_sharding,
         ]
-        # accept replicate on the extra inputs
-        num_heads_dim_sharding.extend([Replicate()] * num_extra_inputs)
+        # accept replicate on the rest tensor inputs, potentially
+        # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+        # at indices 6, 7, 12, 13, respectively
+        num_heads_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
         single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
         all_mesh_dim_strategies.append(single_mesh_dim_strategies)
@@ -287,19 +289,21 @@ def scaled_dot_product_attention_backward_strategy(
         for specs in zip(*strategy_comb):
             spec_list.append(DTensorSpec(mesh, tuple(specs)))
 
-        assert len(spec_list) == 9 + num_extra_inputs
+        assert len(spec_list) == 3 + num_tensor_inputs
         input_expected_specs = spec_list[3:]
         output_specs: List[Optional[DTensorSpec]] = list(spec_list[:3])
-        if all(is_tensor_shardable(qkv_shape, spec) for spec in input_expected_specs):
+        if all(
+            is_tensor_shardable(qkv_shape, spec) for spec in input_expected_specs[:6]
+        ):
             # only add to the strategy list when all inputs are shardable
             redistribute_cost = []
-            for input_idx, qkv_strategy in enumerate(op_schema.args_spec):
-                expected_spec = input_expected_specs[input_idx]
+            for input_idx, spec in enumerate(input_expected_specs):
+                qkv_strategy = op_schema.args_schema[tensor_input_indices[input_idx]]
                 assert isinstance(qkv_strategy, OpStrategy)
                 qkv_tensor_meta = qkv_strategy.strategies[0].output_spec.tensor_meta
-                expected_spec.tensor_meta = qkv_tensor_meta
+                spec.tensor_meta = qkv_tensor_meta
                 redistribute_cost.append(
-                    generate_redistribute_costs(qkv_strategy, expected_spec)
+                    generate_redistribute_costs(qkv_strategy, spec)
                 )
 
             strat = PlacementStrategy(

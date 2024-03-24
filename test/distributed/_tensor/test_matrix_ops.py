@@ -324,8 +324,11 @@ class DistMatrixOpsTest(DTensorTestBase):
 
             out.sum().backward()
             dist_out.sum().backward()
+            self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
             self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+            self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
             self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+            self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
             self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
 
