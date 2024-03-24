@@ -559,8 +559,43 @@ class FakeTensorTest(TestCase):
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
-
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+            self.assertRaises(DynamicOutputShapeException, lambda: torch.unique(x))
+
+        # unique()
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.rand([10, 10])
+            y = torch.unique(x)
+            self.assertEqual(type(y.shape[0]), torch.SymInt)
+            self.assertEqual(shape_env.var_to_range.get(y.shape[0].node.expr).lower, 1)
+            self.assertEqual(shape_env.var_to_range.get(y.shape[0].node.expr).upper, 100)
+
+            output, counts = torch.unique(x, return_inverse=False, return_counts=True)
+            self.assertEqual(type(y.shape[0]), torch.SymInt)
+            self.assertEqual(shape_env.var_to_range.get(output.shape[0].node.expr).lower, 1)
+            self.assertEqual(shape_env.var_to_range.get(output.shape[0].node.expr).upper, 100)
+            self.assertEqual(counts.shape, output.shape)
+            self.assertEqual(counts.dtype, torch.int64)
+
+            output, inverse_indices, counts = torch.unique(x, return_inverse=True, return_counts=True)
+            self.assertEqual(type(y.shape[0]), torch.SymInt)
+            self.assertEqual(shape_env.var_to_range.get(output.shape[0].node.expr).lower, 1)
+            self.assertEqual(shape_env.var_to_range.get(output.shape[0].node.expr).upper, 100)
+            self.assertEqual(inverse_indices.shape, x.shape)
+            self.assertEqual(inverse_indices.dtype, torch.int64)
+            self.assertEqual(counts.shape, output.shape)
+            self.assertEqual(counts.dtype, torch.int64)
+
+            output, inverse_indices, counts = torch._unique2(x, return_inverse=True, return_counts=True)
+            self.assertEqual(type(y.shape[0]), torch.SymInt)
+            self.assertEqual(shape_env.var_to_range.get(output.shape[0].node.expr).lower, 1)
+            self.assertEqual(shape_env.var_to_range.get(output.shape[0].node.expr).upper, 100)
+            self.assertEqual(inverse_indices.shape, x.shape)
+            self.assertEqual(inverse_indices.dtype, torch.int64)
+            self.assertEqual(counts.shape, output.shape)
+            self.assertEqual(counts.dtype, torch.int64)
+
 
     def test_tolist(self):
         shape_env = ShapeEnv()
