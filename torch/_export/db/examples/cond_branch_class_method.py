@@ -13,7 +13,7 @@ class MySubModule(torch.nn.Module):
 
 
 @export_case(
-    example_inputs=(torch.ones(3),),
+    example_inputs=(torch.randn(3),),
     tags={
         "torch.cond",
         "torch.dynamic-shape",
