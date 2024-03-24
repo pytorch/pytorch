@@ -1853,9 +1853,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        output_args = extract_output_name(outputs)
-        if isinstance(output_args, str):
-            output_args = [output_args]
+        output_args = None
+        if config.abi_compatible:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
 
         if config.is_fbcode():
             assert op_overload is not None
