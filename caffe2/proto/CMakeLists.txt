@@ -7,6 +7,7 @@ endif()
 caffe2_protobuf_generate_cpp_py(Caffe2_PROTO_SRCS Caffe2_PROTO_HEADERS Caffe2_PROTO_PY ${Caffe2_PROTOBUF_FILES})
 
 add_library(Caffe2_PROTO OBJECT ${Caffe2_PROTO_HEADERS} ${Caffe2_PROTO_SRCS})
+target_link_libraries(Caffe2_PROTO PRIVATE protobuf::libprotobuf)
 
 if(MSVC)
   if(BUILD_SHARED_LIBS)
