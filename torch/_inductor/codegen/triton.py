@@ -1825,25 +1825,6 @@ class TritonKernel(Kernel):
     def assert_function(self) -> str:
         return "tl.device_assert"
 
-    def indirect_assert(self, var, lower, upper, mask=None):
-        if lower and upper:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"({lower} <= {var}) & ({var} < {upper})"
-            cond_print = f"{lower} <= {var} < {upper}"
-        elif lower:
-            cond = f"{lower} <= {var}"
-            cond_print = cond
-        else:
-            assert upper
-            cond = f"{var} < {upper}"
-            cond_print = cond
-
-        if mask:
-            cond = f"({cond}) | ~{mask}"
-
-        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
-
     def get_strides_of_load(self, index: sympy.Expr):
         """
         This gets the stride of the index for each of the tiling variables
