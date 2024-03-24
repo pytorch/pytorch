@@ -182,13 +182,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/utils.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
-                #ifndef AT_PER_OPERATOR_HEADERS
-                #include <ATen/Functions.h>
-                #else
-                #include <ATen/ops/bernoulli.h>
-                #include <ATen/ops/copy.h>
-                #include <ATen/ops/index_put.h>
-                #endif
+                #include <ATen/ops/bernoulli_native.h>
 
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
