@@ -3582,6 +3582,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
+    def test_randint_out_dynamic(self):
+        def randint_fn(high, size, out):
+            return torch.randint(high, size, out=out)
+
+        opt_model = torch.compile(randint_fn)
+
+        out1 = torch.empty(10, dtype=torch.int32)
+        opt_model(17, (10,), out1)
+
+        out2 = torch.empty(12, dtype=torch.int32)
+        opt_model(17, (12,), out2)
+
     @requires_cuda
     def test_guard_default_device(self):
         try:
