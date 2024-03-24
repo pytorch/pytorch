@@ -6732,6 +6732,35 @@ class CommonTemplate:
         check(torch.ones(3, device=self.device, dtype=torch.float32))
         self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
 
+    # Already on by default, just want to make sure
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_reuse_buffers_with_aliasing(self):
+        def f(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
+
+        code = run_and_get_triton_code(torch.compile(f), torch.zeros((4, 2)))
+        # Make sure that we haven't added complex support and made this test
+        # invalid. If we've added complex support please update the test to use
+        # a different set of view ops we don't lower
+        self.assertTrue("aten.view_as_real" in code)
+
+        def f2(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            z = torch.view_as_real(z)
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -9394,6 +9423,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @config.patch(assume_aligned_inputs=False)
+        def test_config_option_dont_assume_alignment(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin() + x.cos()
+
+            for offset in (0, 1, 2):
+                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
+                inps = torch.as_strided(base, (64, 64), (64, 1), offset)
+                torch._dynamo.reset()
+                kernels = self.get_kernels(fn, [inps])
+                arguments_that_are_divisible_by_16 = (
+                    kernels[0].triton_meta["configs"][0].divisible_by_16
+                )
+
+                #             NO_ALIGN ALIGN     ALIGN
+                # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
+
+                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
