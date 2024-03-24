@@ -481,7 +481,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if not (user.op == "call_function" and (user.target in foreach_ops)):
                     realize_outputs = True
 
-        print("realize_outputs:", realize_outputs)
+        # print("realize_outputs:", realize_outputs)
 
         a_list_input = None
         for input in inputs:
@@ -523,6 +523,8 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 V.graph.register_list(buffer_list)
 
         assert all(x is not None for x in outputs)
+        V.graph.foreach_tbs.update(id(output) for output in outputs)
+
         return outputs
 
     return inner

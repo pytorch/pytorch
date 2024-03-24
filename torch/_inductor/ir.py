@@ -2833,7 +2833,7 @@ class MutationLayout(Layout):
             ).data
 
         src.realize()
-        print(f"{src.get_name()} -> {dst.get_name()}")
+        # print(f"{src.get_name()} -> {dst.get_name()}")
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
         return src.data
@@ -6847,7 +6847,7 @@ class StorageBox(MutableBox):
         self.data.origin_node = origin_node
         self.data.traceback = traceback
         # breakpoint()
-        print(f"realized {self.data.name}")
+        # print(f"realized {self.data.name}")
         return self.data.name
 
     def realize_hint(self):
