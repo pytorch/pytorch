@@ -680,3 +680,25 @@ def put(self, index, source, accumulate=False):
 def put_(self, index, source, accumulate=False):
     out = aten.put(self, index, source, accumulate=accumulate)
     return self.copy_(out)
+
+
+@register_decomposition(aten.index_reduce)
+def index_reduce(self, dim: int, index, src, reduction_type, **kwargs):
+    return index_reduce_(self.clone(), dim, index, src, reduction_type, **kwargs)
+
+
+@register_decomposition(aten.index_reduce_)
+def index_reduce_(
+    self, dim: int, index, src, reduction_type, *, include_self: bool = True
+):
+    repeats = self.numel() // max(1, self.shape[dim])
+    index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
+    perm = (*range(self.ndim - dim, self.ndim), *range(self.ndim - dim))
+    scatter_index = index.repeat_interleave(repeats).reshape(index_shape).permute(perm)
+    return self.scatter_reduce_(
+        dim,
+        scatter_index.to(torch.int64),
+        src,
+        reduction_type,
+        include_self=include_self,
+    )

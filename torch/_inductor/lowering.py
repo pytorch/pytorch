@@ -2272,7 +2272,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 
 # WIP
-make_fallback(aten.index_reduce)  # @pearu
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
