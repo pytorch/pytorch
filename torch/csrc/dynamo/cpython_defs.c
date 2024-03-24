@@ -209,7 +209,7 @@ _PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
 
 // From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Objects/frameobject.c#L1020
 PyFrameObject*
-THP_PyFrame_New_NoTrack(PyCodeObject *code)
+THP_PyFrame_New_NoTrack(const PyCodeObject *code)
 {
     // DYNAMO: commented out
     // CALL_STAT_INC(frame_objects_created);

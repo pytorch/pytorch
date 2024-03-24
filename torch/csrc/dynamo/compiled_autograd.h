@@ -749,10 +749,8 @@ class SwapSavedVariables {
   template <typename T>
   struct StashedVars : public std::unordered_map<const T*, Stashed<T>> {
     void save(const T* key, T&& value) {
-      auto it = this->find(key);
-      if (it == this->end()) {
-        this->emplace(key, std::move(value));
-      } else {
+      auto [it, inserted] = this->try_emplace(key, std::move(value));
+      if (!inserted) {
         // keep the value from the prior save()
         it->second.count++;
       }
