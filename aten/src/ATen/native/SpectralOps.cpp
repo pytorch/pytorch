@@ -86,7 +86,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     device.is_cuda() || device.is_meta()
   );
   if (maybe_support_half) {
-    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    TORCH_CHECK(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble, "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
   }
