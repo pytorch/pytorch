@@ -115,7 +115,7 @@ def valuetype_type(
         if elem is None:
             return None
         if not mutable:
-            if str(t.elem) == "Generator":
+            if str(t.elem) in ("Generator", "SymInt"):
                 return NamedCType(binds, ConstRefCType(OptionalCType(elem.type)))
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
