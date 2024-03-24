@@ -1782,7 +1782,8 @@ torch.cuda.synchronize()
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_graphsafe_set_get_rng_state(self):
-
+        
+        _do_cuda_memory_leak_check = True
         # Define a function to create generator states, with optional graph registration
         def create_states(generator):
             """Initializes generator states and registers them with a CUDA graph if provided."""
