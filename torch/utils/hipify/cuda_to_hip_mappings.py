@@ -454,6 +454,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("cublasDiagType_t", ("hipblasDiagType_t", CONV_TYPE, API_BLAS)),
         ("cublasSideMode_t", ("hipblasSideMode_t", CONV_TYPE, API_BLAS)),
         ("cublasPointerMode_t", ("hipblasPointerMode_t", CONV_TYPE, API_BLAS)),
+        ("cublasGemmAlgo_t", ("hipblasGemmAlgo_t", CONV_TYPE, API_BLAS)),
         (
             "cublasAtomicsMode_t",
             ("hipblasAtomicsMode_t", CONV_TYPE, API_BLAS, HIP_UNSUPPORTED),
