@@ -37,17 +37,20 @@ default_compiler_flags = [
     "-DUSE_FBGEMM",
     "-DUSE_QNNPACK",
     "-DUSE_PYTORCH_QNNPACK",
-    # The dynamically loaded NVRTC trick doesn't work in fbcode,
-    # and it's not necessary anyway, because we have a stub
-    # nvrtc library which we load canonically anyway
-    "-DUSE_DIRECT_NVRTC",
     "-DUSE_RUY_QMATMUL",
 ] + select({
     # XNNPACK depends on an updated version of pthreadpool interface, whose implementation
     # includes <pthread.h> - a header not available on Windows.
     "DEFAULT": ["-DUSE_XNNPACK"],
     "ovr_config//os:windows": [],
-}) + (["-O1"] if native.read_config("fbcode", "build_mode_test_label", "") == "dev-nosan" else [])
+}) + (["-O1"] if native.read_config("fbcode", "build_mode_test_label", "") == "dev-nosan" else []
+) + (
+    # The dynamically loaded NVRTC trick doesn't work in fbcode,
+    # and it's not necessary anyway, because we have a stub
+    # nvrtc library which we load canonically anyway
+    # use '-c fbcode.skip_using_direct_nvrtc=1' to turn off direct nvrtc
+    ["-DUSE_DIRECT_NVRTC"] if not native.read_config("fbcode", "skip_using_direct_nvrtc", None) else []
+)
 
 compiler_specific_flags = {
     "clang": [
