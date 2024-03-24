@@ -5264,7 +5264,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=True):
+def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
