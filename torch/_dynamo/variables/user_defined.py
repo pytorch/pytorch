@@ -609,6 +609,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ]
         return super().unpack_var_sequence(tx)
 
+    def next_variable(self, tx):
+        return self.call_method(tx, "__next__", [], {})
+
     def is_supported_random(self):
         try:
             return self.value in self._supported_random_functions()

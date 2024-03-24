@@ -17,7 +17,7 @@ from collections import namedtuple
 from copy import deepcopy
 from enum import Enum
 from functools import wraps
-from typing import List
+from typing import Any, Iterator, List
 
 import numpy as np
 import torch
@@ -360,6 +360,56 @@ class ReformerEncoder(torch.nn.Module):
             all_attentions=all_attentions,
             past_buckets_states=past_buckets_states,
         )
+
+
+class ListConfig:
+    class ValueNode:
+        def __init__(self, value):
+            self.value = value
+
+        def _dereference_node(self):
+            return self
+
+        def _is_missing(self):
+            return False
+
+        def _value(self):
+            return self.value
+
+    # Based on an example from omegaconfig.listconfig
+    class ListIterator(Iterator[Any]):
+        def __init__(self, lst: Any, resolve: bool) -> None:
+            self.resolve = resolve
+            self.iterator = iter(lst.__dict__["_content"])
+            self.index = 0
+
+        def __next__(self) -> Any:
+            x = next(self.iterator)
+            if self.resolve:
+                x = x._dereference_node()
+                if x._is_missing():
+                    raise AssertionError()
+
+            self.index = self.index + 1
+            if isinstance(x, ListConfig.ValueNode):
+                return x._value()
+            raise AssertionError()
+
+    def __iter__(self):
+        return self._iter_ex(True)
+
+    def _iter_ex(self, resolve: bool) -> Iterator[Any]:
+        try:
+            return ListConfig.ListIterator(self, resolve)
+        except Exception as e:
+            raise AssertionError()
+
+    def __init__(self):
+        self._content = [
+            ListConfig.ValueNode(1),
+            ListConfig.ValueNode(3),
+            ListConfig.ValueNode(torch.tensor([7.0])),
+        ]
 
 
 def longformer_chunk(hidden_states, window_overlap=256):
@@ -2449,6 +2499,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_omegaconf_listconfig_iter(self):
+        obj = ListConfig()
+        x = torch.zeros(2)
+
+        def fn():
+            y = x
+            for i in obj:
+                y += i
+            return y
+
+        expected = fn()
+        actual = torch.compile(fn, fullgraph=True, backend="eager")()
+        self.assertEqual(actual, expected)
+
+    def test_user_defined_iter(self):
+        class MyIter:
+            def __init__(self):
+                self.i = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.i < 3:
+                    self.i += 1
+                    return self.i
+                raise StopIteration()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            for i in MyIter():
+                x += i
+            return x
+
+        self.assertEqual(fn(torch.zeros(1)), torch.full([1], 6.0))
+
+    def test_stop_iteration_reconstruct(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.sin(), StopIteration(1, 2, 3)
+
+        _, res = fn(torch.ones(1))
+        self.assertEqual(str(res), str(StopIteration(1, 2, 3)))
 
     def test_tensor_data_kwarg(self):
         # https://github.com/pytorch/pytorch/issues/96278

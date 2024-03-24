@@ -1383,14 +1383,14 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx, arg):
-        if isinstance(
-            arg, (variables.ListIteratorVariable, variables.IteratorVariable)
-        ):
-            val, next_iter = arg.next_variables(tx)
-            return val
-        elif isinstance(arg, variables.BaseListVariable):
-            return arg.items[0]
+    def call_next(self, tx, arg: VariableTracker):
+        try:
+            return arg.next_variable(tx)
+        except Unsupported as ex:
+            if isinstance(arg, variables.BaseListVariable):
+                ex.remove_from_stats()
+                return arg.items[0]
+            raise
 
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
@@ -1432,6 +1432,9 @@ class BuiltinVariable(VariableTracker):
                 ],
                 {},
             )
+
+    def call_StopIteration(self, tx, *args):
+        return variables.StopIterationVariable([*args])
 
     def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
