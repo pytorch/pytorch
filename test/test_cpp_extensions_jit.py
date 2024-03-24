@@ -240,11 +240,17 @@ class TestCppExtensionJIT(common.TestCase):
                 self._run_jit_cuda_archflags(flags, expected)
             except RuntimeError as e:
                 # Using the device default (empty flags) may fail if the device is newer than the CUDA compiler
-                # This raises a RuntimeError with a specific message which we explictely ignore here
+                # This raises a RuntimeError with a specific message which we explicitly ignore here
                 if not flags and "Error building" in str(e):
                     pass
                 else:
                     raise
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError:
+                # Ignore any error, e.g. unsupported PTX code on current device
+                # to avoid errors from here leaking into other tests
+                pass
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
