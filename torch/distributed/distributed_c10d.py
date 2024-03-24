@@ -1476,7 +1476,7 @@ def _new_process_group_helper(
             # out of sync.
             if split_from:
                 split_from.perform_nocolor_split(_get_default_group().bound_device_id)
-            return GroupMember.NON_GROUP_MEMBER, None
+            return None, GroupMember.NON_GROUP_MEMBER
 
     prefix_store = PrefixStore(f"{group_name}/", store)
     base_pg_options = ProcessGroup.Options(backend=str(backend))
