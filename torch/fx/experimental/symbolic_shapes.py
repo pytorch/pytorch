@@ -4381,6 +4381,10 @@ class ShapeEnv:
             if vr == ValueRanges(lower, upper):
                 continue
 
+            # If the range is refined to singleton, set replacement
+            if lower == upper:
+                self._set_replacement(symbol, lower, "range_refined_to_singleton")
+
             # Updates the range and the guards corresponding to each bound of the symbol.
             self.var_to_range[symbol] = ValueRanges(lower, upper)
             # Clears the cache, since this update can change the result.

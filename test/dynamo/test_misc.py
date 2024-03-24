@@ -7113,6 +7113,20 @@ def fn():
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_raise_guard_indirect_full_constraint(self):
+        y = torch.randn([3, 3, 3])
+        
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.cos()
+            if x.shape[0] < 3:
+                return x * 2
+            return x.sin()
+
+        torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
     def test_mark_dynamic_with_ranges(self):
