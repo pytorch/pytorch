@@ -460,6 +460,26 @@ class TestViewOps(DTensorTestBase):
             ),
         )
 
+        # TODO: Test with complex numbers cannot be run for the following reason:
+        #       Input tensor data type is not supported for NCCL process group: ComplexFloat
+        # self.dimmap_test(
+        #     torch.view_as_complex,
+        #     (randn(24, 13, 2),),
+        #     (
+        #         InputDim(0),
+        #         Flatten((InputDim(1), InputDim(2))),
+        #     ),
+        # )
+        # self.dimmap_test(
+        #     torch.view_as_real,
+        #     (torch.randn(24, 13, dtype=torch.cfloat),),
+        #     (
+        #         InputDim(0),
+        #         Split(InputDim(1), (13, 2), 0),
+        #         Split(InputDim(1), (13, 2), 1),
+        #     ),
+        # )
+
 
 if __name__ == "__main__":
     run_tests()
