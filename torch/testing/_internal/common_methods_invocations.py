@@ -2316,6 +2316,12 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         ),
         (
             [
+                torch.Size([1, 2, 129]),
+                torch.Size([1, 2, 297]),
+            ], -1, 5
+        ),
+        (
+            [
                 torch.Size([1, 2, 3]),
                 torch.Size([1, 2, 3]),
             ], 1, 5
@@ -2339,6 +2345,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         torch.Size([2, 3, 1, 2]),
         torch.Size([2, 3]),
         torch.Size([2, 3, 2]),
+        torch.Size([2, 3, 271]),
     ]
     max_dim, num_chunks = 2, 3
     for dim in range(max_dim):
@@ -8478,6 +8485,11 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
          dict(reduction="abc"),
          ValueError, "abc is not a valid value for reduction"),
 
+        # invalid margin
+        (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
+         dict(margin=-1.0),
+         ValueError, "margin must be greater than 0, got -1.0"),
+
         # shape mismatch
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
          dict(),
@@ -13060,7 +13072,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           allow_cow_input_materialize=[3, 4],
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
@@ -13088,7 +13101,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           allow_cow_input_materialize=[3, 4],
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
@@ -13286,6 +13300,8 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
+        # TODO: Avoid COW materialize
+        supports_cow_input_no_materialize=False,
         dtypes=floating_types_and(torch.half, torch.bfloat16),
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         sample_inputs_func=sample_inputs_binary_cross_entropy_with_logits,
@@ -13326,6 +13342,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -13372,6 +13390,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -13420,6 +13440,8 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -13478,6 +13500,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -13518,6 +13542,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13549,6 +13575,8 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13591,6 +13619,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            error_inputs_func=error_inputs_group_norm,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
