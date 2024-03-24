@@ -1969,6 +1969,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    def test_issue111522(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, y):
+            return x + y.a
+
+        class A:
+            a = 2
+
+        self.assertEqual(f(torch.zeros(2), A()), torch.full([2], 2.0))
+
+        del A.a
+
+        # graph break on missing attr
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            f(torch.zeros(2), A())
+
     def test_dict_list_values(self):
         def inner_fn(args):
             return [x[1].shape for x in args]
@@ -2079,6 +2095,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_m.forward(listy)
 
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_issue111918(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            x = x + 1
+            y = x.item()
+            if y > 2:
+                return x * 2
+            else:
+                return x * 3
+
+        x = torch.tensor([3.0])
+        fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
+
+        torch._dynamo.reset()
+        fn = torch.compile(fn, fullgraph=True, backend="eager")
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            fn(x)
 
     def test_vdd_duplicate_error(self):
         def fn(a, dt):
@@ -4105,6 +4144,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         opt_fn(x, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_arange_in_bounds(self):
+        # see https://github.com/pytorch/pytorch/issues/113002
+        class PaddingNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, lengths):
+                max_seq_len = lengths.max().item()
+                row_vector = torch.arange(0, max_seq_len, 1)
+                matrix = torch.unsqueeze(lengths, dim=-1)
+                mask = row_vector < matrix
+                mask = mask.type(torch.float32)
+                mask_3d_btd = mask[:, :, None]
+                return mask_3d_btd
+
+        model = PaddingNet()
+        lengths = torch.tensor([5, 4, 4, 4], dtype=torch.int32)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(model)
+        opt_fn(lengths)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_user_ctor_ctx_manager_custom_init(self):

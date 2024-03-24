@@ -56,7 +56,7 @@ from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.select_algorithm import ChoiceCaller
+    from torch._inductor.ir import ChoiceCaller
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -1001,11 +1001,9 @@ def install_gcc_via_conda() -> str:
 
 
 def is_gcc() -> bool:
+    if sys.platform == "darwin" and is_apple_clang():
+        return False
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
-
-
-def is_clang() -> bool:
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 @functools.lru_cache(None)
@@ -1013,6 +1011,13 @@ def is_apple_clang() -> bool:
     cxx = cpp_compiler()
     version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
+
+
+def is_clang() -> bool:
+    # Mac OS apple clang maybe named as gcc, need check compiler info.
+    if sys.platform == "darwin":
+        return is_apple_clang()
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 class VecISA:
@@ -1472,6 +1477,7 @@ def get_include_and_linking_paths(
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
+        ipaths.append(build_paths.python())
         ipaths.append(build_paths.cc_include())
         ipaths.append(build_paths.libgcc())
         ipaths.append(build_paths.libgcc_arch())
@@ -2042,9 +2048,17 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
         )
-        return importlib.machinery.ExtensionFileLoader(
-            f"{key}.{cls.entry_function}", path
-        ).load_module()  # type: ignore[call-arg]
+        module_name = f"{key}.{cls.entry_function}"
+        try:
+            return sys.modules[module_name]
+        except KeyError:
+            pass
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        return module
 
     @classmethod
     def load_pybinding(
