@@ -1,6 +1,10 @@
 r"""
 This package adds support for CUDA tensor types.
 
+CUDA is a parallel computing platform and programming model
+developed by NVIDIA for general computing on GPUs.
+See https://en.wikipedia.org/wiki/CUDA for more details.
+
 It implements the same function as CPU tensors, but they utilize
 GPUs for computation.
 
