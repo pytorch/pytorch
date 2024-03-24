@@ -2112,8 +2112,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            low,
-            high,
+            ops.index_expr(low, torch.int64),
+            ops.index_expr(high, torch.int64),
         )
 
     return Pointwise.create(
