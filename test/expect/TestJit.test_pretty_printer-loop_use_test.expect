@@ -1,0 +1,10 @@
+def loop_use_test(y: Tensor) -> Tuple[Tensor, Tensor]:
+  x = torch.add(y, 1)
+  z = torch.add(x, 5)
+  z0 = z
+  y0 = y
+  _0 = bool(torch.lt(y, 8))
+  while _0:
+    y1 = torch.add_(y0, 1)
+    _0, z0, y0 = bool(torch.lt(y1, 8)), x, y1
+  return (x, z0)
