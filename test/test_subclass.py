@@ -276,6 +276,7 @@ class TestSubclass(TestCase):
 
     def test_priority(self):
         order = []
+
         class BaseUnwrapper(WrapperTensor):
             @classmethod
             def get_wrapper_properties(cls, t, requires_grad=False):
@@ -289,7 +290,9 @@ class TestSubclass(TestCase):
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs=None):
                 order.append(cls.__name__)
-                rs = tree_map_only(torch.Tensor, lambda t: cls(t), func(*tree_map_only(cls, lambda t: t._t, args), **tree_map_only(cls, lambda t: t._t, kwargs or {})))
+                rs = tree_map_only(torch.Tensor, lambda t: cls(t),
+                    func(*tree_map_only(cls, lambda t: t._t, args),
+                         **tree_map_only(cls, lambda t: t._t, kwargs or {})))
                 return rs
 
         class A(BaseUnwrapper):

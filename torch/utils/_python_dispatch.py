@@ -2,7 +2,6 @@ import contextlib
 from typing import Optional, Union, List, Set, Dict, Any
 import functools
 import importlib
-import inspect
 
 import warnings
 from dataclasses import dataclass
@@ -502,7 +501,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 _SUBLCASS_PRIORITY_RULES = defaultdict(set)
 _SUBCLASS_MAP = {}
 
-@functools.cache
+@functools.lru_cache
 def _get_cls_name(cls):
     if isinstance(cls, str):
         return cls
@@ -523,7 +522,7 @@ def _get_cls_object(cls_s):
 
         return getattr(mod, name, None)
 
-@functools.cache
+@functools.lru_cache
 def _known_lower_priority(cls1_s, cls2_s):
     if cls1_s is None or cls2_s is None:
         return False
