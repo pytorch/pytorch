@@ -7,23 +7,24 @@ namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 /**
- * The `VecMask` class provides a convenient interface for working with vectorized masks
- * in SIMD operations. It encapsulates a `Vectorized<T, N>` mask that can be directly usable
- * in masked vectorized operations. It provides various methods for manipulating and
- * accessing the mask elements:
- * 1. `from` and `to`: Conversion between a vector of boolean values and a vectorized mask.
+ * The `VecMask` class provides a convenient interface for working with
+ * vectorized masks in SIMD operations. It encapsulates a `Vectorized<T, N>`
+ * mask that can be directly usable in masked vectorized operations. It provides
+ * various methods for manipulating and accessing the mask elements:
+ * 1. `from` and `to`: Conversion between a vector of boolean values and a
+ * vectorized mask.
  * 2. `cast`: Casts the mask to a different base type.
  * 3. `all_zero`: Checks if all mask elements are zero.
  * 4. `is_masked`: Checks if a specific element is masked.
  * 5. `loadu`: Loads data from memory using the mask.
  * 6. `all_masked`: Checks if all mask elements are masked.
- * 
- * Some helper template classes are provided to simplify the specialization of the `VecMask`
- * for the specific CPU arch:
+ *
+ * Some helper template classes are provided to simplify the specialization of
+ * the `VecMask` for the specific CPU arch:
  * 1. `VecMaskLoad`: Loads data from memory using the mask.
  * 2. `VecMaskTo`: Converts the mask to boolean.
  * 3. `VecMaskCast`: Casts the mask to a different base type.
- * 
+ *
  */
 template <typename T, int N>
 class VecMask;
