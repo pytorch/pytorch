@@ -4,6 +4,7 @@
 Python polyfills for common builtins.
 """
 import math
+from typing import Any, Callable, Sequence
 
 import torch
 
@@ -47,7 +48,7 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad)
 
 
-def list_cmp(op, left, right):
+def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
     for a, b in zip(left, right):
         if a != b:
