@@ -224,15 +224,10 @@ class AOTInductorModelContainer {
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
       bool use_inactive,
       bool validate_full_update) {
-#ifdef USE_CUDA
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
     auto num_constants = models_[0]->num_constants();
-
-    auto* constants_blob_ptr =
-        static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
-    auto constants_map_to_update = get_constants_map(use_inactive);
 
     if (validate_full_update) {
       for (size_t idx = 0; idx < num_constants; idx++) {
@@ -250,12 +245,18 @@ class AOTInductorModelContainer {
       }
     }
 
+    auto constants_map_to_update = get_constants_map(use_inactive);
+
     for (size_t idx = 0; idx < num_constants; idx++) {
       auto constant_name = std::string(models_[0]->constant_name(idx));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
         continue;
       }
+
+#ifdef USE_CUDA
+      auto* constants_blob_ptr =
+          static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
 
       // Move the data to container handled blob.
       uint8_t* internal_constants_ptr =
@@ -291,16 +292,17 @@ class AOTInductorModelContainer {
           aoti_torch_device_type_cuda(),
           device_idx,
           &tensor_handle));
+#else // USE_CUDA
+      AtenTensorHandle tensor_handle = it->second;
+#endif // USE_CUDA
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
       constants_map_to_update->emplace(constant_name, tensor_handle);
     }
-
     // Update the inactive constant array.
     update_array_from_map(
         get_constants_array(use_inactive), constants_map_to_update);
-#endif // USE_CUDA
   }
 
   void update_array_from_map(
