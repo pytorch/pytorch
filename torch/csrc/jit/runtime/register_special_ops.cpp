@@ -406,7 +406,7 @@ RegisterOperators reg({
           double a;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
-          c10::optional<at::Generator> generator =
+          std::optional<at::Generator> generator =
               pop(stack).toOptional<at::Generator>();
 
           pop(stack, tensor, a, b);
@@ -425,7 +425,7 @@ RegisterOperators reg({
           double mean;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
-          c10::optional<at::Generator> generator =
+          std::optional<at::Generator> generator =
               pop(stack).toOptional<at::Generator>();
 
           pop(stack, tensor, mean, std);

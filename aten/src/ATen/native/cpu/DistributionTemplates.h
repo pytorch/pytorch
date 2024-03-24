@@ -58,10 +58,10 @@ void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG generator) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIteratorBase& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, uint64_t range, int64_t base, const std::optional<Generator>& gen) {
     random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
-  void operator()(TensorIteratorBase& iter, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, const std::optional<Generator>& gen) {
     random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
@@ -79,7 +79,7 @@ void random_kernel(TensorIteratorBase& iter, RNG generator) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIteratorBase& iter, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, const std::optional<Generator>& gen) {
     random_kernel(iter, check_generator<RNG>(gen));
   }
 };
@@ -200,7 +200,7 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(Tensor& self, double mean, double std, const std::optional<Generator>& gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -222,7 +222,7 @@ void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gene
 
 template<typename RNG>
 struct UniformKernel {
-  void operator()(TensorIteratorBase& iter, double from, double to, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double from, double to, const std::optional<Generator>& gen) {
     uniform_kernel(iter, from, to, check_generator<RNG>(gen));
   }
 };
@@ -242,7 +242,7 @@ void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, RNG ge
 
 template<typename RNG>
 struct CauchyKernel {
-  void operator()(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double median, double sigma, const std::optional<Generator>& gen) {
     cauchy_kernel(iter, median, sigma, check_generator<RNG>(gen));
   }
 };
@@ -262,7 +262,7 @@ void log_normal_kernel(TensorIteratorBase& iter, double mean, double std, RNG ge
 
 template<typename RNG>
 struct LogNormalKernel {
-  void operator()(TensorIteratorBase& iter, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double mean, double std, const std::optional<Generator>& gen) {
     log_normal_kernel(iter, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -282,7 +282,7 @@ void geometric_kernel(TensorIteratorBase& iter, double p, RNG generator) {
 
 template<typename RNG>
 struct GeometricKernel {
-  void operator()(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double p, const std::optional<Generator>& gen) {
     geometric_kernel(iter, p, check_generator<RNG>(gen));
   }
 };
@@ -303,7 +303,7 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, RNG generator) 
 
 template<typename RNG>
 struct ExponentialKernel {
-  void operator()(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double lambda, const std::optional<Generator>& gen) {
     exponential_kernel(iter, lambda, check_generator<RNG>(gen));
   }
 };
@@ -358,10 +358,10 @@ void bernoulli_kernel(const TensorBase &self, double p, RNG generator) {
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(const TensorBase &self, double p, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, double p, const std::optional<Generator>& gen) {
     bernoulli_kernel(self, p, check_generator<RNG>(gen));
   }
-  void operator()(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, const TensorBase &p_, const std::optional<Generator>& gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };
