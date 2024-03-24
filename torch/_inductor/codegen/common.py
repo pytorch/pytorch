@@ -1415,23 +1415,7 @@ class Kernel(CodeGen):
         raise NotImplementedError()
 
     def indirect_assert(self, var, lower, upper, mask=None):
-        if lower and upper:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"({lower} <= {var}) & ({var} < {upper})"
-            cond_print = f"{lower} <= {var} < {upper}"
-        elif lower:
-            cond = f"{lower} <= {var}"
-            cond_print = cond
-        else:
-            assert upper
-            cond = f"{var} < {upper}"
-            cond_print = cond
-
-        if mask:
-            cond = f"({cond}) | ~{mask}"
-
-        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
+        raise NotImplementedError()
 
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError()
