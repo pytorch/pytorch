@@ -869,7 +869,7 @@ static Tensor _mask_to_indices(const Tensor& mask) {
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask,
+    const Tensor& not_zero_mask,
     ScalarType index_dtype,
     Device index_device) {
   auto col_indices =
