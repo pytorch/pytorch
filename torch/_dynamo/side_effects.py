@@ -1,4 +1,5 @@
 import inspect
+import warnings
 from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
@@ -227,7 +228,8 @@ class SideEffects:
         options,
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
-            obj = torch.autograd.Function()
+            with warnings.catch_warnings(record=True):
+                obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
