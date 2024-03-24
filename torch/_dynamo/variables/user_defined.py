@@ -419,6 +419,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.source:
+            source = AttrSource(self.source, name)
+            install_guard(source.make_guard(GuardBuilder.HASATTR))
+            return variables.ConstantVariable(hasattr(self.value, name))
+        return super().call_hasattr(tx, name)
+
     def const_getattr(self, tx, name):
         if name == "__name__":
             return self.value.__name__
