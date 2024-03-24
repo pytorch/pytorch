@@ -683,13 +683,13 @@ def put_(self, index, source, accumulate=False):
 
 
 @register_decomposition(aten.index_reduce)
-def index_reduce(self, dim: int, index, src, reduction_type, **kwargs):
+def index_reduce(self, dim: int, index, src, reduction_type: str, **kwargs):
     return index_reduce_(self.clone(), dim, index, src, reduction_type, **kwargs)
 
 
 @register_decomposition(aten.index_reduce_)
 def index_reduce_(
-    self, dim: int, index, src, reduction_type, *, include_self: bool = True
+    self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
 ):
     repeats = self.numel() // max(1, self.shape[dim])
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
