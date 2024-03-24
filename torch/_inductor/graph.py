@@ -280,6 +280,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = name
         self.cpp_wrapper = cpp_wrapper
         self.foreach_tbs: Set[int] = set()
+        self.realize_all_users: Set[str] = set()
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -653,6 +654,8 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     for read_name in value.get_read_names():
                         self.name_to_users[read_name].append(value)
+                        if id(value) not in self.foreach_tbs:
+                            self.realize_all_users.add(read_name)
 
         register(node_output)
 
@@ -671,7 +674,7 @@ class GraphLowering(torch.fx.Interpreter):
         # print(self.foreach_tbs)
         # print([id(user) for user in self.name_to_users[name]])
         # print([user for user in self.name_to_users[name] if id(user) not in self.foreach_tbs])
-        if any(id(user) not in self.foreach_tbs for user in self.name_to_users[name]):
+        if name in self.realize_all_users:
             for user in self.name_to_users[name]:
                 # if id(user) not in self.foreach_tbs:
                 user.realize()
