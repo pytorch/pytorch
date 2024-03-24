@@ -3589,8 +3589,17 @@ class CppScheduling(BaseScheduling):
 
                 def get_indexing_ranges_exprs(node):
                     if isinstance(node, FusedSchedulerNode):
-                        assert len(node.snodes) > 0
-                        return get_indexing_ranges_exprs(node.snodes[0])
+                        assert len(node.snodes) > 0, node.snodes
+                        var_ranges = None
+                        indexing_exprs = set()
+                        for snode in node.snodes:
+                            v, exprs = get_indexing_ranges_exprs(snode)
+                            if var_ranges is None:
+                                var_ranges = v
+                            assert var_ranges == v, (var_ranges, v, node.snodes)
+                            for expr in exprs:
+                                indexing_exprs.add(expr)
+                        return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
                         comp_buffer = node.node
@@ -3648,30 +3657,38 @@ class CppScheduling(BaseScheduling):
         if isinstance(node_to_recomp, FusedSchedulerNode):
             return False
 
-        def get_buffer(node):
-            if isinstance(node, FusedSchedulerNode):
-                assert len(node.snodes) > 0
-                # use the last scheduler node from the list as it has the most
-                # relevant indexing expressions
-                return get_buffer(node.snodes[-1])
-            else:
-                assert isinstance(node, SchedulerNode)
-                return node.node
-
-        ref_node_buffer = get_buffer(ref_node)
-        if isinstance(ref_node_buffer, ir.TemplateBuffer):
-            return False
-
-        assert isinstance(ref_node_buffer, ir.ComputedBuffer)
-
         # It may happen that node1 and node2 compatible number of elements
         # but different original ranges, for example:
         # {d0: s0, d1: s1, d2: s2} vs {d0: s0*s1*s2}
         # See https://github.com/pytorch/pytorch/pull/120077/files#r1500427848 for more details
         # TODO: we can fix if it allows us to CSE at least one of the variables
-        var_ranges1 = ref_node_buffer.get_read_writes().var_ranges
-        var_ranges2 = node_to_recomp.node.get_read_writes().var_ranges
-        if var_ranges1 != var_ranges2:
+
+        assert isinstance(node_to_recomp, SchedulerNode)
+        if isinstance(node_to_recomp.node, ir.TemplateBuffer):
+            return False
+        assert isinstance(node_to_recomp.node, ir.ComputedBuffer)
+        # node.data.get_size() is a cheaper version of node.get_read_writes().var_ranges
+        # but without variable name
+        ranges2 = node_to_recomp.node.data.get_size()
+        ranges1 = None
+        if isinstance(ref_node, FusedSchedulerNode):
+            ranges_set = set()
+            for snode in ref_node.snodes:
+                if isinstance(snode.node, ir.TemplateBuffer):
+                    break
+                assert isinstance(snode.node, ir.ComputedBuffer)
+                ranges_set.add(tuple(snode.node.data.get_size()))
+
+            if len(ranges_set) != 1:
+                return False
+
+            ranges1 = list(next(iter(ranges_set)))
+        else:
+            assert isinstance(ref_node, SchedulerNode)
+            assert isinstance(ref_node.node, ir.ComputedBuffer)
+            ranges1 = ref_node.node.data.get_size()
+
+        if ranges1 != ranges2:
             return False
 
         return True
