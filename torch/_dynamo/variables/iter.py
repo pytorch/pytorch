@@ -250,7 +250,7 @@ class CycleIteratorVariable(IteratorVariable):
                 self.item = new_item
                 if self.item is None:
                     return self.next_variable(tx)
-                return self.item, self
+                return self.item
             except StopIteration:
                 self.iterator = None
                 return self.next_variable(tx)

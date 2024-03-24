@@ -402,7 +402,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception as e:
-            assert False
+            raise AssertionError()
 
     def __init__(self):
         self._content = [
