@@ -141,43 +141,8 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx, op, left, right):
-        from .builtin import BuiltinVariable
-
-        eq_result = BaseListVariable.list_eq(tx, left, right)
-        if op is operator.eq:
-            return eq_result
-        elif op is operator.ne:
-            return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
-        else:
-            unimplemented(f"list_compare {left} {op} {right}")
-
-    @staticmethod
-    def list_eq(tx, left, right):
-        from .builtin import BuiltinVariable
-
-        # Most list-like variables implement comparison ops the same way,
-        # so they can re-use this helper.
-        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
-        # but `tuple([2]) != list([2])`
-        if len(left.items) != len(right.items):
-            return ConstantVariable.create(False)
-        if len(left.items) == 0:
-            return ConstantVariable.create(True)
-
-        # Generic list comparison works by iterating over left aka self and right the compared-to list.
-        # If we hit here, their lengths are the same and they cannot be expressed as python constants.
-        # So, we iterate over the zipped list items.
-        comps = []
-        for l, r in zip(left.items, right.items):
-            comp = BuiltinVariable(operator.eq).call_function(tx, [l, r], {})
-            if comp.is_python_constant() and not comp.as_python_constant():
-                # early exit in false case
-                return comp
-            comps.append(comp)
-
-        return functools.reduce(
-            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
-            comps,
+        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+            tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
 
