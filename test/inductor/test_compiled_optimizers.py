@@ -72,6 +72,10 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_momentum_dampening_foreach_cuda": 5,
     "test_sgd_momentum_foreach_cuda": 5,
+    "test_adagrad_weight_decay_foreach_cuda": 6,
+    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 6,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 6,
+    "test_adagrad_weight_decay_maximize_foreach_cuda": 6,
 }
 
 # also tracks currently supported optimizers

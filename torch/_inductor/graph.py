@@ -643,10 +643,13 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     return
 
-                if not (
-                    isinstance(value, TensorBox)
-                    and isinstance(value.data, ir.StorageBox)
-                    and isinstance(value.data.data, ir.InputBuffer)
+                if (
+                    not (
+                        isinstance(value, TensorBox)
+                        and isinstance(value.data, ir.StorageBox)
+                        and isinstance(value.data.data, ir.InputBuffer)
+                    )
+                    # and id(value) not in self.foreach_tbs
                 ):
                     for read_name in value.get_read_names():
                         self.name_to_users[read_name].append(value)
@@ -668,8 +671,9 @@ class GraphLowering(torch.fx.Interpreter):
         # print(self.foreach_tbs)
         # print([id(user) for user in self.name_to_users[name]])
         # print([user for user in self.name_to_users[name] if id(user) not in self.foreach_tbs])
-        if not all(id(user) in self.foreach_tbs for user in self.name_to_users[name]):
+        if any(id(user) not in self.foreach_tbs for user in self.name_to_users[name]):
             for user in self.name_to_users[name]:
+                # if id(user) not in self.foreach_tbs:
                 user.realize()
 
     def add_tensor_constant(self, data, name=None):

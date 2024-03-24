@@ -5727,7 +5727,7 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
 
         return mut_results
 
-    # _register_foreach_lowering(aten_op, fn)
+    _register_foreach_lowering(aten_op, fn)
 
 
 register_foreach_inplace(
