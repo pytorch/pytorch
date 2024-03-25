@@ -171,6 +171,7 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
@@ -254,6 +255,7 @@ class TestCuda(TestCase):
         b.copy_(a, non_blocking=True)
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
+
 
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
@@ -381,6 +383,7 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not orig
         self.assertEqual(torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
+
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
@@ -1460,6 +1463,8 @@ torch.cuda.synchronize()
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
+
+
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
@@ -1777,86 +1782,6 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graphsafe_set_get_rng_state(self):
-
-        # Define a function to create generator states, with optional graph registration
-        def create_states(generator):
-            """Initializes generator states and registers them with a CUDA graph if provided."""
-            # Ensure the CUDA generator is initialized
-            torch.rand(1, device="cuda")
-            generator.manual_seed(0)
-
-            # Save the current state of the generator
-            old_state = generator.graphsafe_get_state()
-            # Create and save a cloned state of the generator
-            new_state = generator.clone_state()
-            # Return the original generator and its two states
-            return generator, old_state, new_state
-
-        def register_states_to_graph(generator_state, graph):
-            generator, old_state, new_state = generator_state
-            graph.register_generator_state(old_state)
-            graph.register_generator_state(new_state)
-
-        # Define a function to perform specific RNG actions using the generator's states
-        def perform_random_generation_steps(generator_state):
-            generator, old_state, new_state = generator_state
-            random_values = []
-
-            # Generate random numbers with the new generator state
-            generator.graphsafe_set_state(new_state)
-            random_values.append(torch.rand(5, device="cuda", generator=generator))
-
-            # Generate random numbers twice with the old generator state
-            generator.graphsafe_set_state(old_state)
-            random_values.extend(
-                [torch.rand(5, device="cuda", generator=generator) for _ in range(2)]
-            )
-
-            return random_values
-
-        # Define a function to retrieve the final offsets of the original and new generator states
-        def get_final_offsets_of_states(generator_state):
-            generator, old_state, new_state = generator_state
-            old_state_offset = old_state.get_offset()
-            new_state_offset = new_state.get_offset()
-            return old_state_offset, new_state_offset
-
-        # Set up and test a new CUDA generator
-        generator = torch.Generator(device="cuda")
-        generator_state = create_states(generator)
-
-        # Set up and test the default CUDA generator with a CUDA Graph
-        g = torch.cuda.CUDAGraph()
-        s = torch.cuda.Stream()
-        default_generator = torch.cuda.default_generators[0]
-        default_generator_state = create_states(default_generator)
-        register_states_to_graph(default_generator_state, g)
-
-        # Perform random number generation within a CUDA graph
-        with torch.cuda.stream(s):
-            g.capture_begin()
-            graphed_random_values = perform_random_generation_steps(
-                default_generator_state
-            )
-            g.capture_end()
-
-        # Synchronize the streams and replay the graph
-        torch.cuda.current_stream().wait_stream(s)
-        for _ in range(3):
-            random_values = perform_random_generation_steps(generator_state)
-            g.replay()
-            offset = get_final_offsets_of_states(generator_state)
-            graph_offset = get_final_offsets_of_states(default_generator_state)
-
-            # Compare the final offsets of states for both generators to ensure consistency
-            self.assertTrue(offset == graph_offset)
-            # Compare the states generated outside and inside the graph
-            self.assertEqual(random_values, graphed_random_values)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_reset_recapture(self):
@@ -2405,37 +2330,19 @@ exit(2)
         gc.collect()
         torch.cuda.empty_cache()
 
-        # Warm up the RNG seed and offset by creating and executing a simple CUDA graph.
-        # This process ensures that the one-element RNG seed and offset holders are allocated
-        # within the default generator. After this initial setup, these elements will be
-        # present and correctly initialized in the generator.
-
         s = torch.cuda.Stream()
-        with torch.cuda.stream(s):
-            g = torch.cuda.CUDAGraph()
-            g.capture_begin()
-            torch.rand(1, device="cuda")  # Execute a simple random number generation.
-            g.capture_end()
 
-        torch.cuda.current_stream().wait_stream(s)
-        g.replay()
-
-        torch.cuda.current_stream().wait_stream(s)
-        del g
-        gc.collect()
-        torch.cuda.empty_cache()
-        # Since the RNG seed and offset holders have been initialized during the warmup,
-        # there is no need to track or calculate any changes (delta) to these buffers afterwards.
-
-        for (
-            numel,
-            delta_cudaMallocs,
-            delta_cudaMalloc_bytes,
-            delta_cudaMalloc_bytes_post_del_g,
-            pool_string,
-        ) in cases:
-            delta_active_blocks = 1
-            delta_active_bytes = numel * elem
+        for (numel,
+             delta_cudaMallocs,
+             delta_cudaMalloc_bytes,
+             delta_cudaMalloc_bytes_post_del_g,
+             pool_string) in cases:
+            if pool_string == "small_pool":
+                delta_active_blocks = 3  # one from "b" plus a sneaky two from CUDAGraph's one-element rng seed and offset holders
+                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
+            else:
+                delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
+                delta_active_bytes = numel * elem
 
             g = torch.cuda.CUDAGraph()
             s.wait_stream(torch.cuda.current_stream())
@@ -3178,6 +3085,8 @@ exit(2)
             self.assertEqual(rc, "3")
 
 
+
+
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
@@ -3255,6 +3164,7 @@ class TestCudaMallocAsync(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(None)
+
 
     @skipIfRocm
     def test_memory_profiler_viz(self):
@@ -3537,6 +3447,7 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
+
 
     @parametrize(
         "max_split_size_mb_setting", [False, True]
