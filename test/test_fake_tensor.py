@@ -1165,10 +1165,10 @@ class FakeTensorOperatorInvariants(TestCase):
     # IMPORTANT!!! Always run even if CUDA is not available
     def test_fake_cuda_no_init(self):
         with FakeTensorMode():
-           t1 = torch.empty(10, device='cuda')
-           t2 = torch.ones(10, device='cuda')
-           t3 = torch.zeros(10, device='cuda')
-           t4 = torch.rand(10, device='cuda')
+            torch.empty(10, device='cuda')
+            torch.ones(10, device='cuda')
+            torch.zeros(10, device='cuda')
+            torch.rand(10, device='cuda')
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

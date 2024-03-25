@@ -459,9 +459,7 @@ class FakeTensor(torch.Tensor):
                     f"{device.type}:{getattr(torch, device.type).current_device()}"
                 )
             else:
-                device = torch.device(
-                    f"{device.type}:0"
-                )
+                device = torch.device(f"{device.type}:0")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
