@@ -390,13 +390,14 @@ class CPUReproTests(TestCase):
         # Reproducer from the maml_omniglot model in Torchbench
         in_channel = 1
         out_channel = 3
-        mod = M(in_channel, out_channel).eval()
-        v = torch.randn(5, in_channel, 15, 15)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
+        for autocast in [False, True]:
+            mod = M(in_channel, out_channel).eval()
+            v = torch.randn(5, in_channel, 15, 15)
+            with torch.no_grad(), torch.cpu.amp.autocast(enabled=autocast):
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)

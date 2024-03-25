@@ -5487,11 +5487,13 @@ def _prepare_convolution_fusion_create(
     # won't change the stride of this tensor since stride for dimensions of size 1 is ignored. While in Conv kernel,
     # this tensor is considered as channels first and the output will be in contiguous format.
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
-    dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
-    if dynamic_shapes and is_contiguous_storage_and_layout(x):
-        output_stride = make_contiguous_strides_for(output_size)
-    else:
-        output_stride = make_channels_last_strides_for(output_size)
+    # dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
+    # if dynamic_shapes and is_contiguous_storage_and_layout(x):
+    #     output_stride = make_contiguous_strides_for(output_size)
+    # else:
+    #     output_stride = make_channels_last_strides_for(output_size)
+
+    output_stride = make_channels_last_strides_for(output_size)
 
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
