@@ -15,8 +15,8 @@ except ImportError:
         sys.exit(0)
     raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.triton_heuristics import triton_config
 
 

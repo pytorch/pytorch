@@ -44,8 +44,10 @@ from ..pattern_matcher import (
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
+from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes
 from .reinplace import reinplace_inplaceable_ops
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -93,6 +95,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
         decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
+
+    if config._fuse_ddp_communication:
+        fuse_ddp_communication(
+            gm.graph,
+            config._fuse_ddp_communication_passes,
+            config._fuse_ddp_bucket_size,
+        )
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
@@ -414,7 +423,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
         src = op(*inputs[i], layout=dst.get_layout()).data.data
         assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
-        src.layout = ir.AliasedLayout(dst)
+        src.layout = ir.NonOwningLayout(dst)
         kernel.inputs.append(src)
 
     kernel.name = V.graph.register_buffer(kernel)
@@ -629,7 +638,11 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
-    for out in output_node.args[0]:
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (list, tuple)):
+        # nested subgraphs can have singleton outputs
+        outputs = (outputs,)
+    for out in outputs:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 

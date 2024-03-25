@@ -820,6 +820,21 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
+def should_use_remote_autotune_cache():
+    if config.use_autotune_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+
+    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+
+    return torch._utils_internal.justknobs_check(
+        "pytorch/autotune_remote_cache:enable"
+    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/autotune_remote_cache:memcache_version"
+    )
+
+
 def cached_autotune(
     size_hints: Optional[List[int]],
     configs: List[Config],
@@ -847,12 +862,7 @@ def cached_autotune(
         remote_cache_key = None
         if config.use_autotune_local_cache:
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        if config.use_autotune_remote_cache or (
-            config.is_fbcode()
-            and torch._utils_internal.justknobs_check(
-                "pytorch/autotune_remote_cache:enable"
-            )
-        ):
+        if should_use_remote_autotune_cache():
             backend_hash = inductor_meta.get("backend_hash", None)
             if backend_hash is not None:
                 key = backend_hash + configs_hash + "autotune-best-config"
