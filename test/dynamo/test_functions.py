@@ -559,6 +559,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_list_compare_polyfill(x):
+        for a, b, c in [
+            [(1, 2, 3), (1, 2, 3), 7.77],
+            [(1, 4, 3), (1, 2, 3), 3.33],
+            [(1, 2), (1, 2, 3), 5.55],
+            [(1, 2, 3), (1, 2), 11.11],
+            [(1, -1, 3), (1, 2, 3), 13.33],
+        ]:
+            if a != b:
+                x += 1 * c
+            if a == b:
+                x += 2 * c
+            if a < b:
+                x += 4 * c
+            if a > b:
+                x += 8 * c
+            if a <= b:
+                x += 16 * c
+            if a >= b:
+                x += 32 * c
+        return x
+
+    @make_test
     def test_promote_types(x):
         if x.dtype == torch.promote_types(torch.int32, torch.float32):
             return x + 1
@@ -1458,6 +1481,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_partials_udf_arg(x):
         par_mul = functools.partial(udf_mul, torch.ones(10, 10))
         return par_mul(x)
+
+    @make_test
+    def test_list_add_then_mutate(x):
+        my_list = [1, x]
+        y = x / 4.0
+        my_list = my_list + [x / 2.0, 4]
+        my_list.append(y)
+        return sum(my_list)
+
+    @make_test
+    def test_list_expand_lhs(x):
+        return sum(4 * [x])
+
+    @make_test
+    def test_in_not_in(x):
+        mylist = [1, 2, 3, 4, 5, x]
+        myotherlist = [1, 2, 3, 4, 5]
+        assert 3 in mylist
+        assert 6 not in myotherlist
+        return sum(mylist)
 
     @make_test
     def test_partials_udf_kwarg(x):

@@ -29,6 +29,7 @@ from torch._C._functorch import (
     is_batchedtensor,
     is_functorch_wrapped_tensor,
     is_gradtrackingtensor,
+    is_legacy_batchedtensor,
     maybe_get_bdim,
     maybe_get_level,
     peek_interpreter_stack,
@@ -189,6 +190,7 @@ class MetaTensorDescriber:
         is_functorch_wrapped = is_functorch_wrapped_tensor(t)
         is_mkldnn = t.is_mkldnn
         is_batchedtensor_v = is_batchedtensor(t)
+        is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
         is_functorch_batched_or_grad = is_batchedtensor_v or is_gradtrackingtensor_v
         is_functional = torch._is_functional_tensor(t)
@@ -203,11 +205,10 @@ class MetaTensorDescriber:
             or is_sparse_compressed_layout(layout)
             or (is_nested and not is_traceable_wrapper_subclass_v)
             or is_mkldnn
-            or
             # TODO: TBH, functorch wrapped tensors probably should have
-            # storage
-            # associated with them
-            is_functorch_wrapped
+            # storage associated with them
+            or is_functorch_wrapped
+            or is_legacy_batchedtensor_v
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
@@ -255,9 +256,9 @@ class MetaTensorDescriber:
                 # is
                 current_level = torch._C._functorch.current_level()
 
-        functorch_stack = None
+        maybe_functorch_stack = None
         if is_functorch_wrapped:
-            with torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack() as functorch_stack:
+            with torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack() as maybe_functorch_stack:
                 pass
 
         attrs = None
@@ -289,6 +290,7 @@ class MetaTensorDescriber:
             is_mkldnn=is_mkldnn,
             is_functorch_wrapped=is_functorch_wrapped,
             is_batchedtensor=is_batchedtensor_v,
+            is_legacy_batchedtensor=is_legacy_batchedtensor_v,
             is_gradtrackingtensor=is_gradtrackingtensor_v,
             is_view=is_view,
             is_conj=t.is_conj(),
@@ -347,7 +349,7 @@ class MetaTensorDescriber:
             # NB: even if functorch is enabled, don't actually save the
             # interpreter stack here unless we are actually functorch wrapped;
             # it's irrelevant for non-functorch stuff
-            functorch_stack=functorch_stack,
+            functorch_stack=maybe_functorch_stack,
             autograd_meta_from=autograd_meta_from,
             current_level=current_level,
         )
@@ -371,6 +373,7 @@ class MetaTensorDesc:
     is_mkldnn: bool
     is_functorch_wrapped: bool
     is_batchedtensor: bool
+    is_legacy_batchedtensor: bool
     is_gradtrackingtensor: bool
     is_view: bool
     is_nested: bool
@@ -1218,7 +1221,7 @@ class MetaConverter:
                     if (
                         not (t.is_batchedtensor or t.is_gradtrackingtensor)
                         and t.is_functorch_wrapped
-                    ):
+                    ) or t.is_legacy_batchedtensor:
                         return NotImplemented
 
                     s = t.storage
