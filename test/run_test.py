@@ -1735,6 +1735,7 @@ def main():
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
 
+    print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
 
