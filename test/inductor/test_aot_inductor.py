@@ -907,6 +907,33 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_cond_non_tensor_predicates(self, dynamic):
+        inputs1 = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((15, 20), device=self.device),
+        )
+        inputs2 = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((5, 20), device=self.device),
+        )
+        inputs = (inputs1,)
+        dynamic_shapes = None
+        if dynamic:
+            inputs = (inputs1, inputs2)
+            dim0_a = Dim("s0", min=2, max=1024)
+            dim0_b = Dim("s1", min=2, max=1024)
+            dynamic_shapes = {
+                "a": {0: dim0_a, 1: None},
+                "b": {0: dim0_b, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            CondModels.WithNonTensorPredicate(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_zero_grid_with_backed_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -964,6 +991,22 @@ class AOTInductorTestsTemplate:
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_buffer_mutation(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("foo", torch.randn(4, 4, device=device))
+
+            def forward(self, x):
+                self.foo.add_(1)
+                return self.foo + x
+
+        example_inputs = (torch.rand(4, 4, device=self.device),)
+        torch._export.aot_compile(Model(self.device), example_inputs)
+        with self.assertRaisesRegex(AssertionError, "False is not true"):
+            # TODO: AOTI seems to mutate the buffer while tracing
+            self.check_model(Model(self.device), example_inputs)
 
     @skipIfRocm
     @requires_multigpu()
@@ -2018,6 +2061,7 @@ CPU_TEST_FAILURES = {
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
+    "test_buffer_mutation": fail_stack_allocation(is_skip=True),
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
@@ -2036,6 +2080,10 @@ CPU_TEST_FAILURES = {
     "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_cond_non_tensor_predicates_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
