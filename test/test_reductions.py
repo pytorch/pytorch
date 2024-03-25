@@ -400,6 +400,7 @@ class TestReductions(TestCase):
     @largeTensorTest("8gb")
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
+    @serialTest(TEST_CUDA)
     def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
         self._test_ref(op, make_tensor((275000000,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
@@ -2289,6 +2290,7 @@ class TestReductions(TestCase):
 
     @onlyCUDA
     @largeTensorTest('10GB')
+    @serialTest(TEST_CUDA)
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
         # https://github.com/pytorch/pytorch/issues/37583
@@ -3601,6 +3603,7 @@ as the input tensor excluding its innermost dimension'):
     @onlyCUDA
     @largeTensorTest("8GB")
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    @serialTest(TEST_CUDA)
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
         t[2**30:] = -1
