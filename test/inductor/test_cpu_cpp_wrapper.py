@@ -319,6 +319,7 @@ if RUN_CPU:
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_scalar_input"),
+        BaseTest("test_scalar_output"),
         BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scatter1"),
         BaseTest("test_scatter2"),
