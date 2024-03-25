@@ -290,23 +290,26 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 
     if constexpr (std::is_same_v<T, float>) {
         return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+    } else {
+        return _mm512_mask_loadu_epi32(zero_vec, mmask, src);
     }
-    return _mm512_mask_loadu_epi32(zero_vec, mmask, src);
 # elif defined(CPU_CAPABILITY_AVX2)
     auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
     if constexpr (std::is_same_v<T, float>) {
-      return _mm256_maskload_ps(src, mmask);
+        return _mm256_maskload_ps(src, mmask);
+    } else {
+        return _mm256_maskload_epi32(src, mmask);
     }
-    return _mm256_maskload_epi32(src, mmask);
 # elif defined(CPU_CAPABILITY_ZVECTOR)
     auto result = at::vec::Vectorized<T>::loadu(src);
     if constexpr (std::is_same_v<T, float>) {
         return result & mask;
+    } else {
+        T maskdata[at::vec::Vectorized<T>::size()];
+        mask.store(maskdata);
+        return result & at::vec::Vectorized<T>::loadu(maskdata);
     }
-    T maskdata[at::vec::Vectorized<T>::size()];
-    mask.store(maskdata);
-    return result & at::vec::Vectorized<T>::loadu(maskdata);
 # else
 # error Unsupported vectorization CPU capability
 # endif
