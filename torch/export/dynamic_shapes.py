@@ -90,6 +90,23 @@ class _Dim(type):
         return _DerivedDim(cls._derived_name(fn), (int,), {"root": cls, "fn": fn})
 
 
+class _StaticDim(_Dim):
+    """
+    Meta class for static :func:`Dim` types.
+
+    This class is only for setting and checking static dim constraints,
+    and the user should never interact with it.
+    """
+
+    @property
+    def min(self):
+        return self.value  # type: ignore[attr-defined]
+
+    @property
+    def max(self):
+        return self.value  # type: ignore[attr-defined]
+
+
 class _DerivedDim(_Dim):
     """
     Metaclass for derived :func:`Dim` types.
@@ -672,6 +689,16 @@ def _process_dynamic_shapes(
                 # NOTE(avik): since we have not processed all inputs yet, we may replace this
                 # with a root that does represent an input shape dimension later (see below)
                 derived_constraints_with_phantom_root.append(constraint)
+        elif isinstance(dim, _StaticDim):
+            constraint = _create_constraint(
+                weakref.ref(tensor),
+                id(tensor),
+                i,
+                StrictMinMaxConstraint(
+                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                ),
+                debug_name=dim.__name__,
+            )
         else:
             constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
             if dim.min != 0:
@@ -698,9 +725,14 @@ def _process_dynamic_shapes(
             bounds[dim.__name__] = (dim.min, dim.max)
 
     def update_symbols(tensor, shape):
+        def _create_static_dim(tensor, i, value):
+            return _StaticDim(str(value), (int,), {"value": value})
+
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, _Dim):
+                if isinstance(dim, (int, _Dim)):
+                    if isinstance(dim, int):
+                        dim = _create_static_dim(tensor, i, dim)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
@@ -713,7 +745,9 @@ def _process_dynamic_shapes(
                         )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, _Dim):
+                if isinstance(dim, (int, _Dim)):
+                    if isinstance(dim, int):
+                        dim = _create_static_dim(tensor, i, dim)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
@@ -828,6 +862,9 @@ def _process_constraints(
     multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
     for constraint in input_shape_constraints:
         for node in tensor_id_to_nodes[constraint["t_id"]]:
+            # skip static shape constraints
+            if constraint["min"] == constraint["max"]:
+                continue
             node_dim = InputDim(node, constraint["dim"])
 
             # Accumulate range constraints
