@@ -10,9 +10,7 @@
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 #include <vector>
 
-namespace at{
-namespace native::xpu {
-namespace onednn {
+namespace at::native::onednn {
 
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
@@ -78,9 +76,6 @@ struct GpuStreamManager {
   }
   ~GpuStreamManager() {}
 
-
 };
 
-} // namespace onednn
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::onednn
