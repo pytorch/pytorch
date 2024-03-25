@@ -18,7 +18,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       op_name_(std::string(op_name)),
       is_symbolic_(is_symbolic),
       device_opt_(c10::nullopt) {
-  device_opt_ = c10::Device(c10::dispatchKeyToDeviceType(dispatch_key), 0);
+  device_opt_ = c10::Device(c10::dispatchKeyToDeviceType(dispatch_key_), 0);
   (void)is_symbolic_; // Suppress unused variable warning
   canonicalizeOpName();
 }
