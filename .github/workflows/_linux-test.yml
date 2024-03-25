@@ -259,7 +259,6 @@ jobs:
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --ipc=host \
