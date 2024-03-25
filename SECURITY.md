@@ -14,7 +14,9 @@
 ### Untrusted models
 Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources.
 
-*Always execute untrusted models within a secure, isolated environment such as a sandbox* (e.g., containers, virtual machines). This helps protect your system from potentially malicious code.
+**Prefer to execute untrusted models within a secure, isolated environment such as a sandbox** (e.g., containers, virtual machines). This helps protect your system from potentially malicious code.
+
+**Be mindful of risky model formats**. Give preference to run models with `.safetensors` format, and if you need to run load models on the [picle](https://docs.python.org/3/library/pickle.html) format, make sure to use the `weights_only` option to `torch.load`.
 
 Important Note: The trustworthiness of a model is not binary. You must always determine the proper level of caution depending on the specific model and how it matches your use case and risk tolerance.
 
