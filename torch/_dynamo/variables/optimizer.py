@@ -156,12 +156,29 @@ class OptimizerVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
         from .lazy import LazyVariableTracker
 
+        # Tracing the _init_group is expensive. But we still have to insert the
+        # necessary guards for _init_group. To do this, we recursively realize
+        # the variable trackers for optim.state and optim.param_groups, which
+        # recursively install the necessary guards.
+
+        # NB: Its necessary to install the guards for optim.state first.
+        # optim.state is a dict with parameters as keys. Therefore, we just put
+        # ID_MATCH on parameters, instead of TENSOR_MATCH. When we install the
+        # guards for param_groups later, VariableTrackerCache just ensures that
+        # we directly return the cached tensor variable tracker without
+        # inserting the TENSOR_MATCH guard.
+        state_vt = LazyVariableTracker.realize_all(
+            VariableBuilder(tx, AttrSource(self.source, "state"))(self.value.state)
+        )
+
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
                 self.value.param_groups
             )
         )
 
+        # Populate self.grad_to_source and self.tensor_to_source so that we can
+        # manually update_list_args
         for g_ind, (group, group_vt) in enumerate(
             zip(self.value.param_groups, param_groups_vt.items)
         ):
@@ -170,6 +187,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):
+                # param_source = GetItemSource(GetItemSource(group_source, "params"), p_ind)
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
                 grad_source = AttrSource(
@@ -181,8 +199,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
-        # state guards take a long time to generate
-        # so we manually generate them here
         state_source = AttrSource(self.source, "state")
         install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for idx, (p, value) in enumerate(self.value.state.items()):
