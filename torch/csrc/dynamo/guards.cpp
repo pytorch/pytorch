@@ -15,6 +15,7 @@
 #endif
 
 #include <sstream>
+#include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
 // underlying tuple and access the item. Before Python 3.12 version, the
@@ -742,7 +743,7 @@ class GuardDebugInfo {
 
   GuardDebugInfo(
       bool result,
-      std::string failed_reason,
+      const std::string& failed_reason,
       int num_guards_executed)
       : GuardDebugInfo(result, num_guards_executed) {
     verbose_code_parts.append(failed_reason);
@@ -1173,7 +1174,7 @@ class TENSOR_ALIASING : public RelationalGuard {
     return result;
   }
 
-  void reset_state() final override {
+  void reset_state() final {
     _is_first_call = true;
   }
 
@@ -1218,7 +1219,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     return true;
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
     bool result = check_nopybind(value);
 
     if (!result) {
@@ -1231,7 +1232,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     return GuardDebugInfo(true, 1);
   }
 
-  void reset_state() final override {
+  void reset_state() final {
     for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
@@ -1248,46 +1249,24 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
 
 class DYNAMIC_INDICES : public LeafGuard {
   // C++ equivalent of
-  // if hasattr(value, "_dynamo_dynamic_indices"):
-  //     code.append(
-  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
-  //         noqa: B950
-  //     )
-  // else:
-  //     code.append(
-  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
-  //     )
+  //  code.append(
+  //      f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+  //      if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
+  //      noqa: B950
+  //  )
  public:
-  DYNAMIC_INDICES(
-      bool has_attr,
-      py::set dynamic_indices,
-      py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _has_attr(has_attr),
-        _dynamic_indices(dynamic_indices) {}
+  DYNAMIC_INDICES(py::set dynamic_indices, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _dynamic_indices(dynamic_indices) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Make an interned string
     static PyObject* dynamic_indices_str =
         PyUnicode_InternFromString("_dynamo_dynamic_indices");
-
     PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
-    bool has_attr = true;
     if (indices == nullptr) {
       // Attr absent. Clear exception.
       PyErr_Clear();
-      has_attr = false;
-    }
-
-    // Common case - hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
-    if (!_has_attr) {
-      return !has_attr;
-    }
-
-    // "((x._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-    //       if hasattr(x, '_dynamo_dynamic_indices') else True)
-    if (!has_attr) {
+      // This is true deliberately. If hasattr fails, we return true.
       return true;
     }
 
@@ -1301,9 +1280,6 @@ class DYNAMIC_INDICES : public LeafGuard {
   }
 
  private:
-  // _has_attr is for the common case - hasattr(x, "_dynamo_dynamic_indices') ==
-  // False
-  bool _has_attr;
   py::set _dynamic_indices;
 };
 
@@ -1372,7 +1348,7 @@ class GuardAccessor {
       py::handle example_value)
       : _guard_manager(make_guard_manager(root, source, example_value)),
         _accessor_key(std::move(accessor_key)),
-        _source(source) {}
+        _source(std::move(source)) {}
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -1457,10 +1433,10 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(source) {}
+      : _root(root), _source(std::move(source)) {}
   GuardManager(const GuardManager& m) = delete;
   GuardManager& operator=(const GuardManager&) = delete;
-  virtual ~GuardManager() {}
+  virtual ~GuardManager() = default;
 
   RootGuardManager* get_root() {
     return _root;
@@ -1695,7 +1671,7 @@ class RootGuardManager : public GuardManager {
   }
 
   // Fast check function.
-  virtual bool check_nopybind(PyObject* value) override { // borrowed ref
+  bool check_nopybind(PyObject* value) override { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
     PyThreadState* _save;
@@ -1723,7 +1699,7 @@ class RootGuardManager : public GuardManager {
   }
 
   // Fast check_verbose function.
-  virtual GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
@@ -1836,14 +1812,14 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : GuardManager(root, source),
+      : GuardManager(root, std::move(source)),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
 
   GuardManager* get_key_manager(
       const py::object& key_index,
-      std::string source,
+      const std::string& source,
       py::handle example_value) {
     KeyValueManager& key_value_manager = _get_index_manager(key_index);
     if (!key_value_manager.first) {
@@ -1855,7 +1831,7 @@ class DictGuardManager : public GuardManager {
 
   GuardManager* get_value_manager(
       const py::object& key_index,
-      std::string source,
+      const std::string& source,
       py::handle example_value) {
     KeyValueManager& key_value_manager = _get_index_manager(key_index);
     if (!key_value_manager.second) {
@@ -1865,7 +1841,7 @@ class DictGuardManager : public GuardManager {
     return key_value_manager.second.get();
   }
 
-  virtual bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
     // TODO(janimesh) - Implement a fast-path using dict versions.
 
     if (Py_TYPE(obj) != _expected_type) {
@@ -1920,7 +1896,7 @@ class DictGuardManager : public GuardManager {
     return true;
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     if (Py_TYPE(obj) != _expected_type) {
       return GuardDebugInfo(false, "TYPE_MISMATCH(" + get_source() + ")", 0);
@@ -1995,7 +1971,7 @@ class DictGuardManager : public GuardManager {
 
   void fail_on_get_child_manager(
       py::object a,
-      std::string source,
+      const std::string& source,
       py::object b) {
     throw std::runtime_error("Can not add an accessor to DictGuardManager");
   }
@@ -2115,7 +2091,7 @@ class TENSOR_MATCH : public LeafGuard {
         _root_guard_manager->_local_state, THPVariable_Unpack(value));
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
@@ -2691,6 +2667,15 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   return THPVariable_Unpack(obj).data_ptr();
 }
 
+void* convert_to_root_guard_manager(py::object root) {
+  RootGuardManager* root_mgr = root.cast<RootGuardManager*>();
+  return (void*)root_mgr;
+}
+
+bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
@@ -2813,7 +2798,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &DICT_CONTAINS::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
-      .def(py::init<bool, py::set, py::list>())
+      .def(py::init<py::set, py::list>())
       .def("__call__", &DYNAMIC_INDICES::check);
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
@@ -3006,11 +2991,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "add_dynamic_indices_guard",
           [](GuardManager& self,
-             bool has_attr,
              py::set value,
              py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
-                has_attr, value, verbose_code_parts));
+            self.add_leaf_guard(
+                std::make_shared<DYNAMIC_INDICES>(value, verbose_code_parts));
           })
       .def(
           "add_dict_version_guard",
@@ -3253,7 +3237,7 @@ PyObject* torch_c_dynamo_guards_init() {
              std::string source,
              py::handle example_value) -> GuardManager* {
             if (self.is_exact_dict_type()) {
-              std::runtime_error(
+              throw std::runtime_error(
                   "getattr_manager on a DictGuardManager is supported only for dict subclasses");
             }
             return self.get_child_manager<GetAttrGuardAccessor>(
