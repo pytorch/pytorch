@@ -500,9 +500,9 @@ inline at::vec::Vectorized<float> cvt_int64_to_fp32(at::vec::VectorizedN<int64_t
   __at_align__ float result[float_vec_size];
   __at_align__ int64_t src_buf[int64_vec_size];
   for (int i = 0; i < 2; i++) {
-    src[i].store(src_buf + i * int64_vec_size);
+    src[i].store(src_buf);
     for (int j = 0; j < int64_vec_size; j++) {
-      result[i * int64_vec_size + j] = static_cast<float>(src_buf[i * int64_vec_size + j]);
+      result[i * int64_vec_size + j] = static_cast<float>(src_buf[j]);
     }
   }
   return at::vec::Vectorized<float>::loadu(result);
@@ -551,9 +551,9 @@ inline at::vec::Vectorized<int32_t> cvt_int64_to_int32(at::vec::VectorizedN<int6
   __at_align__ int32_t result[int32_vec_size];
   __at_align__ int64_t src_buf[int64_vec_size];
   for (int i = 0; i < 2; i++) {
-    src[i].store(src_buf + i * int64_vec_size);
+    src[i].store(src_buf);
     for (int j = 0; j < int64_vec_size; j++) {
-      result[i * int64_vec_size + j] = static_cast<int32_t>(src_buf[i * int64_vec_size + j]);
+      result[i * int64_vec_size + j] = static_cast<int32_t>(src_buf[j]);
     }
   }
   return at::vec::Vectorized<int32_t>::loadu(result);
