@@ -126,7 +126,15 @@ constexpr bool IsUsingGoogleLogging() {
  */
 C10_API void ShowLogInfoToStderr();
 
-C10_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
+// Overwrites the return value of GetFetchStackTrace() with the supplied parameter.
+C10_API void SetStackTraceFetcher(std::function<c10::Error::BacktraceGenerator()> fetcher);
+
+// Overwrites the return value of GetFetchStackTrace() with a std::function that always
+// returns the supplied parameter.
+C10_API void SetStackTraceFetcher(c10::Error::BacktraceGenerator fetcher);
+
+// Convenience method as per the overload above - will wrap the function in a shared_ptr.
+C10_API void SetStackTraceFetcher(std::function<std::string()> fetcher);
 
 using EnforceNotMet = ::c10::Error;
 

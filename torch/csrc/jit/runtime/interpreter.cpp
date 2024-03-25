@@ -929,7 +929,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
-          not_implemented_error->backtrace(),
+          not_implemented_error->backtraceCallback(),
           not_implemented_error->caller());
     } else {
       if (get_cpp_stacktraces_enabled()) {
