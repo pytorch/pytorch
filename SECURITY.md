@@ -49,14 +49,6 @@ You must make sure that models run separately. Since models can run code, it's i
 
 Separating networks is also a big part of isolation. If you keep model network traffic separate, you not only prevent unauthorized access to data or models, but also prevent malicious users or tenants sending graphs to execute under another tenant’s identity.
 
-#### Resource Allocation
-
-A denial of service caused by one model can impact the overall system health. Implement safeguards like rate limits, access controls, and health monitoring.
-
-#### Model Sharing
-
-In a multitenant design that allows sharing models, it's crucial to ensure that tenants and users fully understand the potential security risks involved. They must be aware that they will essentially be running code provided by other users. Unfortunately, there are no reliable methods available to detect malicious models, graphs, or checkpoints. To mitigate this risk, the recommended approach is to sandbox the model execution, effectively isolating it from the rest of the system.
-
 #### Hardware Attacks
 
 Besides the virtual environment, the hardware (GPUs or TPUs) can also be attacked. [Research](https://scholar.google.com/scholar?q=gpu+side+channel) has shown that side channel attacks on GPUs are possible, which can make data leak from other models or processes running on the same system at the same time.
