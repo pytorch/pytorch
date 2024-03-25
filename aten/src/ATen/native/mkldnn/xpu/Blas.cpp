@@ -182,7 +182,7 @@ Tensor& baddbmm_out(
   }
 
   // general case
-  xpu::onednn::Attr attr;
+  onednn::Attr attr;
   float beta_ = beta.to<float>();
   Tensor binary;
   if (beta_ == 0.f) {
@@ -200,7 +200,7 @@ Tensor& baddbmm_out(
     if (beta_ != 1.f)
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
   }
-  xpu::onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
+  onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
   return result;
 }
 
@@ -304,7 +304,7 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
     AT_ERROR(
         "Double and complex datatype matmul is not supported in oneDNN");
   }
-  xpu::onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
+  onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
   return result;
 }
 

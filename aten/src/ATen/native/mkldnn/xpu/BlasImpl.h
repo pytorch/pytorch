@@ -38,17 +38,17 @@ this helper function is used to adjust binary tensor size according different
 matmul cases.*/
 static bool get_onednn_matmul_binary_attr(
     Tensor& result,
-    xpu::onednn::Attr& attr,
+    onednn::Attr& attr,
     int dim_tensor1,
     int dim_tensor2,
     DimVector output_shape,
     bool t2_is_matrix = true,
     bool should_fold_tensor1 = false,
     bool should_fold_tensor2 = false) {
-  xpu::onednn::Attr attr_update;
+  onednn::Attr attr_update;
   for (size_t i = 0; i < attr.ops_params_.size(); ++i) {
-    xpu::onednn::kind_t kind = attr.ops_params_[i].kind_;
-    if (kind != xpu::onednn::kind_t::binary || !attr.ops_params_[i].binary_.defined()) {
+    onednn::kind_t kind = attr.ops_params_[i].kind_;
+    if (kind != onednn::kind_t::binary || !attr.ops_params_[i].binary_.defined()) {
       attr_update.ops_params_.push_back(attr.ops_params_[i]);
       continue;
     }
@@ -167,8 +167,8 @@ static bool get_onednn_matmul_binary_attr(
       }
     }
 
-    if (!xpu::onednn::binary_valid(result, binary_final, true)) {
-      attr = xpu::onednn::Attr();
+    if (!onednn::binary_valid(result, binary_final, true)) {
+      attr = onednn::Attr();
       return false;
     }
 
@@ -252,7 +252,7 @@ static Tensor& matmul_fusion_variants(
     const Tensor& tensor1,
     const Tensor& tensor2,
     bool trans,
-    xpu::onednn::Attr& attr,
+    onednn::Attr& attr,
     bool& is_fused,
     Tensor bias = at::Tensor()) {
   const auto dim_tensor1 = tensor1.dim();
@@ -277,7 +277,7 @@ static Tensor& matmul_fusion_variants(
     is_fused = true;
     Tensor result = output.defined() ? output.view({1, 1})
                                      : at::empty({1, 1}, tensor1.options());
-    xpu::onednn::matmul(
+    onednn::matmul(
         result,
         tensor1.view({1, tensor1.size(0)}),
         tensor2.view({tensor2.size(0), 1}),
@@ -304,7 +304,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::onednn::matmul(result, tensor1, t2, bias, trans, attr);
+    onednn::matmul(result, tensor1, t2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -326,7 +326,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::onednn::matmul(result, t1, tensor2, bias, trans, attr);
+    onednn::matmul(result, t1, tensor2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -346,7 +346,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::onednn::matmul(result, tensor1, tensor2, bias, trans, attr);
+    onednn::matmul(result, tensor1, tensor2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -387,7 +387,7 @@ static Tensor& matmul_fusion_variants(
         t2_is_matrix,
         should_fold_tensor1,
         should_fold_tensor2);
-    xpu::onednn::matmul(result, t1, t2, bias, trans, attr);
+    onednn::matmul(result, t1, t2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -440,7 +440,7 @@ static Tensor& matmul_fusion_variants(
         t2_is_matrix,
         should_fold_tensor1,
         should_fold_tensor2);
-    xpu::onednn::matmul(result, t1, t2, bias, trans, attr);
+    onednn::matmul(result, t1, t2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -502,7 +502,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::onednn::matmul(
+    onednn::matmul(
         result, tensor1_expanded, tensor2_expanded, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
