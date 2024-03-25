@@ -745,7 +745,7 @@ def fx_codegen_and_compile(
 
                     if stack_trace := node.meta.get("stack_trace", None):
                         break
-                disable = "graph with symbolic shapes inputs and config.triton.skip_dynamic_graphs=True."
+                disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
                 if stack_trace:
                     disable = f"{disable} Found from {stack_trace}\n"
                 else:
