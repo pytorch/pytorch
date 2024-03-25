@@ -2377,6 +2377,17 @@ class CPUReproTests(TestCase):
             self.common(func, (x1, x2))
             check_metrics_vec_kernel_count(2)
 
+    def test_randint_symint_input(self):
+        # https://github.com/pytorch/pytorch/issues/122405
+        @torch.compile(fullgraph=True)
+        def get_traj_idx(lengths: torch.Tensor, num_slices: int) -> torch.Tensor:
+            return torch.randint(lengths.shape[0], (num_slices,), device=lengths.device)
+
+        lengths = torch.zeros(10, dtype=torch.long)
+        get_traj_idx(lengths, num_slices=4)
+        lengths = torch.zeros(11, dtype=torch.long)
+        get_traj_idx(lengths, num_slices=4)
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_sign_cpu_only(self):
@@ -2626,6 +2637,20 @@ class CPUReproTests(TestCase):
                         self.common(fn, (x,))
                         if simdlen != 1:
                             check_metrics_vec_kernel_count(2)
+
+    @torch._dynamo.config.patch(specialize_int=False)
+    def test_slice_scatter_issue122291(self):
+        @torch.compile(fullgraph=True)
+        def fn(t, t_src, dim, start, end, step):
+            return t.slice_scatter(t_src, dim, start, end, step)
+
+        shape = ((16, 16), (16, 2), 1, 4, 10, 1)
+        input_tensor = torch.zeros(shape[0], requires_grad=False, device="cpu")
+        src_tensor = torch.ones(shape[1], requires_grad=False, device="cpu")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed, r".*shape error in scatter op"
+        ):
+            fn(input_tensor, src_tensor, shape[2], shape[3], shape[4], shape[5])
 
     def test_horizontal_fusion(self):
         def fn(a, b, c, idx):
