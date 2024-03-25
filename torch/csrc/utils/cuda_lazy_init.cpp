@@ -3,6 +3,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace torch {
 namespace utils {
@@ -14,11 +15,17 @@ bool is_initialized = false;
 
 void cuda_lazy_init() {
   pybind11::gil_scoped_acquire g;
+
   // Protected by the GIL.  We don't use call_once because under ASAN it
   // has a buggy implementation that deadlocks if an instance throws an
   // exception.  In any case, call_once isn't necessary, because we
   // have taken a lock.
   if (is_initialized) {
+    return;
+  }
+
+  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(c10::impl::TorchDispatchModeKey::FAKE);
+  if (maybe_mode) {
     return;
   }
 

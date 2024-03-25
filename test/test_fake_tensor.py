@@ -1108,6 +1108,14 @@ class FakeTensorOperatorInvariants(TestCase):
                 self.assertTrue("output[0]" not in str(e))
                 self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
+    # IMPORTANT!!! Always run even if CUDA is not available
+    def test_fake_cuda_no_init(self):
+        with FakeTensorMode():
+           t1 = torch.empty(10, device='cuda')
+           t2 = torch.ones(10, device='cuda')
+           t3 = torch.zeros(10, device='cuda')
+           t4 = torch.rand(10, device='cuda')
+
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
