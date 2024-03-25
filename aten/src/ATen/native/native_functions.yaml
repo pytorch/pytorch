@@ -10258,6 +10258,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: alias
+    NestedTensorCPU, NestedTensorCUDA: alias_nested
   tags: core
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()

@@ -4,14 +4,63 @@ import sys
 import unittest
 
 import torch
-import torch.xpu._gpu_trace as gpu_trace
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyXPU,
+    OpDTypes,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import ops_and_refs
+from torch.testing._internal.common_utils import (
+    NoTest,
+    run_tests,
+    suppress_warnings,
+    TEST_WITH_UBSAN,
+    TEST_XPU,
+    TestCase,
+)
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
+
+cpu_device = torch.device("cpu")
+xpu_device = torch.device("xpu")
+
+any_common_cpu_xpu_one = OpDTypes.any_common_cpu_cuda_one
+_xpu_computation_op_list = [
+    "fill",
+    "zeros",
+    "zeros_like",
+    "clone",
+    "view_as_real",
+    "view_as_complex",
+    "view",
+    "resize_",
+    "resize_as_",
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "abs",
+]
+_xpu_tensor_factory_op_list = [
+    "as_strided",
+    "empty",
+    "empty_strided",
+]
+_xpu_not_test_dtype_op_list = [
+    "resize_",  # Skipped by CPU
+    "resize_as_",  # Skipped by CPU
+    "abs",  # Not aligned dtype
+]
+_xpu_all_op_list = _xpu_computation_op_list + _xpu_tensor_factory_op_list
+_xpu_all_ops = [op for op in ops_and_refs if op.name in _xpu_all_op_list]
+_xpu_computation_ops = [
+    op for op in ops_and_refs if op.name in _xpu_computation_op_list
+]
 
 
 class TestXpu(TestCase):
@@ -127,67 +176,59 @@ if __name__ == "__main__":
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
 
+    @onlyXPU
+    @suppress_warnings
+    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
+    def test_compare_cpu(self, device, dtype, op):
+        def to_cpu(arg):
+            if isinstance(arg, torch.Tensor):
+                return arg.to(device="cpu")
+            return arg
 
-class TestXpuTrace(TestCase):
-    def setUp(self):
-        torch._C._activate_gpu_trace()
-        self.mock = unittest.mock.MagicMock()
+        samples = op.reference_inputs(device, dtype)
 
-    def test_event_creation_callback(self):
-        gpu_trace.register_callback_for_event_creation(self.mock)
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            xpu_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
-        event = torch.xpu.Event()
-        event.record()
-        self.mock.assert_called_once_with(event._as_parameter_.value)
+            xpu_results = sample.output_process_fn_grad(xpu_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-    def test_event_deletion_callback(self):
-        gpu_trace.register_callback_for_event_deletion(self.mock)
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
 
-        event = torch.xpu.Event()
-        event.record()
-        event_id = event._as_parameter_.value
-        del event
-        self.mock.assert_called_once_with(event_id)
+    @onlyXPU
+    @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
+    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
 
-    def test_event_record_callback(self):
-        gpu_trace.register_callback_for_event_record(self.mock)
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(
+                2, 255, x.shape, dtype=torch.uint8, device=x.device
+            )
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
 
-        event = torch.xpu.Event()
-        event.record()
-        self.mock.assert_called_once_with(
-            event._as_parameter_.value, torch.xpu.current_stream().sycl_queue
-        )
+            ret = x_int.view(torch.bool)
+            self.assertEqual(ret, x)
+            return ret
 
-    def test_event_wait_callback(self):
-        gpu_trace.register_callback_for_event_wait(self.mock)
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
 
-        event = torch.xpu.Event()
-        event.record()
-        event.wait()
-        self.mock.assert_called_once_with(
-            event._as_parameter_.value, torch.xpu.current_stream().sycl_queue
-        )
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
 
-    def test_device_synchronization_callback(self):
-        gpu_trace.register_callback_for_device_synchronization(self.mock)
+            self.assertEqual(expect, actual)
 
-        torch.xpu.synchronize()
-        self.mock.assert_called()
 
-    def test_stream_synchronization_callback(self):
-        gpu_trace.register_callback_for_stream_synchronization(self.mock)
-
-        stream = torch.xpu.Stream()
-        stream.synchronize()
-        self.mock.assert_called_once_with(stream.sycl_queue)
-
-    def test_event_synchronization_callback(self):
-        gpu_trace.register_callback_for_event_synchronization(self.mock)
-
-        event = torch.xpu.Event()
-        event.record()
-        event.synchronize()
-        self.mock.assert_called_once_with(event._as_parameter_.value)
+instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
 
 if __name__ == "__main__":
