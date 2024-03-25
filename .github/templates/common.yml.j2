@@ -1,0 +1,123 @@
+{%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v5" -%}
+{%- set download_artifact_s3_action = "seemethere/download-artifact-s3@v4" -%}
+{%- set upload_artifact_action = "actions/upload-artifact@v3" -%}
+{%- set download_artifact_action = "actions/download-artifact@v3" -%}
+
+{%- set timeout_minutes = 240 -%}
+
+# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
+#       the binary builds will check out
+{%- set builder_repo = "pytorch/builder" -%}
+{%- set builder_branch = "main" -%}
+
+{%- macro concurrency(build_environment) -%}
+concurrency:
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+{%- endmacro -%}
+
+{%- macro display_ec2_information() -%}
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+{%- endmacro -%}
+
+{%- macro setup_ec2_windows() -%}
+      !{{ display_ec2_information() }}
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
+      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
+          # Let's both exclude the path and disable Windows Defender completely just to be sure
+          # that it doesn't interfere
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+{%- endmacro -%}
+
+{%- macro apply_filter() -%}
+      - name: Check if the job is disabled
+        id: filter
+        # Binary workflows checkout to pytorch subdirectory instead
+        uses: ./pytorch/.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # NB: Use a mock test matrix with a default value here. After filtering, if the
+          # returned matrix is empty, it means that the job is disabled
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
+{%- endmacro -%}
+
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
+      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
+        uses: malfet/checkout@silent-checkout
+        with:
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
+      {%- if deep_clone %}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+      {%- endif %}
+          submodules: !{{ submodules }}
+      {%- if repository != "pytorch/pytorch" %}
+          repository: !{{ repository }}
+      {%- endif %}
+      {%- if directory %}
+          path: !{{ directory }}
+      {%- endif %}
+          quiet-checkout: true
+      - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+      {%- if directory%}
+        working-directory: !{{ directory }}
+      {%- endif %}
+{%- endmacro -%}
+
+{%- macro wait_and_kill_ssh_windows(pytorch_directory="") -%}
+      - name: Wait until all sessions have drained
+        shell: powershell
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_to_drain.ps1
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
+        if: always()
+        run: |
+          .github\scripts\kill_active_ssh_sessions.ps1
+{%- endmacro -%}
