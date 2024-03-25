@@ -8,13 +8,13 @@ import numpy as np
 
 import torch
 from torch.testing._internal.common_device_type import (
+    dtypes,
+    floating_and_complex_types_and,
     instantiate_device_type_tests,
     onlyXPU,
     OpDTypes,
     ops,
-    dtypes,
     precisionOverride,
-    floating_and_complex_types_and,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
@@ -236,6 +236,7 @@ if __name__ == "__main__":
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
+
 class TestBasicGEMM(TestCase):
     @precisionOverride(
         {
@@ -399,6 +400,7 @@ class TestBasicGEMM(TestCase):
             )
         )
         self.assertEqual(a, an)
+
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="cpu, xpu")
 
