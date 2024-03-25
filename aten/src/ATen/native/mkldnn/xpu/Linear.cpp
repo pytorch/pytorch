@@ -13,7 +13,7 @@ Tensor linear_pointwise(
     c10::string_view attr,
     torch::List<c10::optional<at::Scalar>> scalars,
     c10::optional<c10::string_view> algorithm) {
-  xpu::onednn::Attr att;
+  onednn::Attr att;
   att = construct_unary_attr(attr, scalars, algorithm, att);
   auto linear_wrapper = LinearConverter();
 
@@ -29,7 +29,7 @@ Tensor linear_pointwise_binary(
     c10::string_view binary_attr) {
   Tensor output;
 
-  xpu::onednn::Attr attr;
+  onednn::Attr attr;
   attr = construct_binary_attr(binary_attr, /*alpha*/ 1.f, other_t, attr);
 
   Tensor _input =

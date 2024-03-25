@@ -13,7 +13,7 @@
 
 using namespace dnnl;
 using namespace at::native;
-using namespace at::native::xpu::onednn;
+using namespace at::native::onednn;
 
 namespace at::native {
 namespace xpu {
@@ -341,7 +341,7 @@ Attr get_onednn_conv_sum_attr(
     mem_fmt = get_cl_tag_by_ndim(ndim);
 
   Tensor out = at::empty(output_size, input_r.options().memory_format(mem_fmt));
-  if (!xpu::onednn::binary_valid(out, accumu)) {
+  if (!onednn::binary_valid(out, accumu)) {
     is_fused = false;
     return attr;
   }
@@ -462,7 +462,7 @@ Tensor _convolution_out(
       output = at::empty(dst_tz, input.options(), mfmt);
     }
 
-    xpu::onednn::deconvolution(
+    onednn::deconvolution(
         output,
         input,
         weight,
@@ -503,7 +503,7 @@ Tensor _convolution_out(
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
     }
-    output = xpu::onednn::convolution(
+    output = onednn::convolution(
         output,
         input,
         weight,
@@ -652,7 +652,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   if (output_mask[0]) {
     if (input.numel() > 0) {
       if (transposed_) {
-        xpu::onednn::deconvolution_backward_data(
+        onednn::deconvolution_backward_data(
             grad_input,
             grad_output_,
             weight_,
@@ -662,7 +662,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             groups_,
             output_mask[2]);
       } else {
-        xpu::onednn::convolution_backward_data(
+        onednn::convolution_backward_data(
             grad_input,
             grad_output_,
             weight_,
@@ -678,7 +678,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   if (output_mask[1] || output_mask[2]) {
     if (input.numel() > 0) {
       if (transposed_) {
-        xpu::onednn::deconvolution_backward_weights(
+        onednn::deconvolution_backward_weights(
             grad_weight,
             grad_bias,
             grad_output_,
@@ -688,7 +688,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             dilation_,
             groups_);
       } else {
-        xpu::onednn::convolution_backward_weights(
+        onednn::convolution_backward_weights(
             grad_weight,
             grad_bias,
             grad_output_,
