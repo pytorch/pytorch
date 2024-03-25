@@ -3,9 +3,7 @@
 #include <ATen/native/mkldnn/xpu/BlasImpl.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace xpu {
+namespace at::native::xpu {
 
 // result = beta * self + alpha * (mat1 * mat2)
 Tensor& addmm_out(
@@ -415,8 +413,4 @@ TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
 
-} // namespace xpu
-
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xpu
