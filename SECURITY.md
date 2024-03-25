@@ -9,6 +9,8 @@
  - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
 
 ## Using Pytorch Securely
+**Consider Pythor models as programs**. Machine Learning models are mathematical vectors and weights in their essence, but as they grow in complexity they can require privileges or be partially composed by programmatic code. That said, running untrusted models is equivelent to running untrusted code.
+
 ### Untrusted models
 Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources.
 
