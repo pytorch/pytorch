@@ -11,14 +11,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-jammy-torchbench-py3_8-test:
-    name: linux-jammy-xpu-py3.8
-    uses: ./.github/workflows/_torchbench-test.yml
-    needs: linux-jammy-xpu-py3_8-build
-    permissions:
-      id-token: write
-      contents: read
+  linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp:
+    name: cuda12.1-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-torchbench-py3.8
-      docker-image: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-torchbench-benchmarks
+      cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+        ]}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+  linux-focal-cuda12_1-py3_10-gcc9-torchbench-test-gcp:
+    name: cuda12.1-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_torchbench-test.yml
+    needs: linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp.outputs.test-matrix }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

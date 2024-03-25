@@ -227,8 +227,6 @@ jobs:
           echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl "
-          # install torchbench
-          docker exec -t "${container_name}" sh -c "cd .. && git clone https://github.com/pytorch/benchmark.git && cd benchmark && bash ./scripts/torchbench_install.sh "
           # test torchbench
           docker exec -t "${container_name}" sh -c "cd ../benchmark && bash ./scripts/torchbench_test.sh "
 
