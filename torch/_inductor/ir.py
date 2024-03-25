@@ -2362,7 +2362,7 @@ class SliceView(View):
         return start, end
 
     @classmethod
-    def create(cls, x, dim, start, end, step=1):
+    def create(cls, x, dim, start, end, step=1, clamp=True):
         step = sympy.expand(step)
         assert step > 0
         try:
@@ -2374,7 +2374,11 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
-        start, end = cls.normalize_start_end(x, dim, start, end)
+        # NB: Ordinarily we default to clamping.
+        # We only don't clamp for split_with_sizes. For split_with_sizes, sizes should be already valid
+        # failing in this situation is ok, since invalid sizes could trigger silent errors.
+        if clamp:
+            start, end = cls.normalize_start_end(x, dim, start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
@@ -2721,8 +2725,8 @@ class FlexibleLayout(Layout):
         super().__init__(device, dtype, size, strides)
 
 
-class AliasedLayout(Layout):
-    """Shares the same storage as another tensor"""
+class NonOwningLayout(Layout):
+    """Is a view into the storage of another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -2767,7 +2771,7 @@ class NoneLayout(IRNode):
         return self
 
 
-class MutationLayout(Layout):
+class MutationLayoutSHOULDREMOVE(Layout):
     def __init__(self, target: IRNode):
         super().__init__(
             target.get_device(),
@@ -2788,7 +2792,7 @@ class MutationLayout(Layout):
 
     def get_buffer(self) -> "Buffer":
         def unwrap_views(target):
-            if isinstance(target, MutationLayout):
+            if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
             if isinstance(target, BaseView):
                 return unwrap_views(target.unwrap_view())
@@ -2797,7 +2801,9 @@ class MutationLayout(Layout):
             return target
 
         result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), "MutationLayout must refer to a buffer"
+        assert isinstance(
+            result, Buffer
+        ), "MutationLayoutSHOULDREMOVE must refer to a buffer"
         return result
 
     def real_layout(self):
@@ -2835,7 +2841,7 @@ class MutationLayout(Layout):
 
         src.realize()
         assert isinstance(src.data.layout, FlexibleLayout)
-        src.data.layout = MutationLayout(dst)
+        src.data.layout = MutationLayoutSHOULDREMOVE(dst)
         return src.data
 
     def as_fixed(self):
@@ -2895,7 +2901,7 @@ class Buffer(IRNode):
         return False
 
     def freeze_layout(self):
-        if not isinstance(self.layout, (MultiOutputLayout, AliasedLayout)):
+        if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
     def freeze_layout_with_stride_order(self, order):
@@ -2933,13 +2939,13 @@ class Buffer(IRNode):
     def decide_layout(self):
         pass
 
-    def get_alias_names(self):
-        if isinstance(self.layout, AliasedLayout):
+    def get_inputs_that_alias_output(self):
+        if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
 
     def get_mutation_names(self):
-        if isinstance(self.layout, MutationLayout):
+        if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
             return [self.layout.target.get_name()]
         return ()
 
@@ -3228,6 +3234,7 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
+    @cache_on_self
     def get_default_sizes_body(self):
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
@@ -3759,7 +3766,7 @@ class ConcatKernel(NopKernel):
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src):
-                src.data.layout = AliasedLayout(dst)
+                src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
         pw = Pointwise.create(
@@ -4049,7 +4056,7 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), AliasedLayout):
+            while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
@@ -4061,10 +4068,10 @@ class ExternKernel(InputsKernel):
                 x.get_layout(), FixedLayout
             ) and x.get_layout().is_stride_ordered(order):
                 return x
-            elif isinstance(x.get_layout(), MutationLayout):
+            elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
                     raise AssertionError(
-                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
+                        "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
                     )
                 elif isinstance(
                     x.get_layout().real_layout(), FixedLayout
@@ -4420,7 +4427,7 @@ class UserDefinedTritonKernel(ExternKernel):
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [i.get_name() for i in self.inputs]
 
 
@@ -4453,7 +4460,7 @@ class MutationOutput(ExternKernel):
     def has_side_effects(self):
         return True
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name()]
 
 
@@ -4603,7 +4610,7 @@ class BindNNParameter(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(self.get_name())
         mark_node_as_mutating(self, variable, placeholder)
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
     def get_mutation_names(self):
@@ -5134,7 +5141,7 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return self.alias_names
 
     def get_mutation_names(self):
@@ -5377,7 +5384,7 @@ class ComplexView(FallbackKernel):
     def should_allocate(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
@@ -5443,11 +5450,12 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel) and len(inp.get_alias_names()) > 0
+            if isinstance(inp, FallbackKernel)
+            and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
 
@@ -7024,6 +7032,15 @@ class Subgraph(IRNode):
     graph: Optional["GraphLowering"] = None
 
 
+def _has_aliased_buffers(buffers):
+    buffers = [
+        buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
+        for buffer in buffers
+    ]
+    # assuming the same buffer is represented by the same IRNode object
+    return len({id(buffer) for buffer in buffers}) < len(buffers)
+
+
 @dataclasses.dataclass
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
@@ -7086,16 +7103,8 @@ class Conditional(ExternKernel):
         true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
         false_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
 
-        def _aliased_buffers(outputs):
-            buffers = [
-                output.unwrap_view() if isinstance(output, ReinterpretView) else output
-                for output in outputs
-            ]
-            # assuming the same buffer is represented by the same IRNode object
-            return len({id(buffer) for buffer in buffers}) < len(outputs)
-
         for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
-            if _aliased_buffers(true_outputs):
+            if _has_aliased_buffers(true_outputs):
                 raise AssertionError(
                     "Output aliasing is currently not supported in compiled torch.cond. "
                     f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
@@ -7150,6 +7159,116 @@ class Conditional(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_conditional(self)
+
+
+@dataclasses.dataclass
+class WhileLoop(ExternKernel):
+    operands: Optional[List[TensorBox]] = None
+    cond_subgraph: Optional[Subgraph] = None
+    body_subgraph: Optional[Subgraph] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self,
+        operands: List[TensorBox],
+        cond_subgraph: Subgraph,
+        body_subgraph: Subgraph,
+        layout: MultiOutputLayout,
+    ):
+        self.operands = operands
+        self.cond_subgraph = cond_subgraph
+        self.body_subgraph = body_subgraph
+
+        super().__init__(
+            name=None,
+            layout=layout,  # type: ignore[arg-type]
+            inputs=operands,  # type: ignore[list-item]
+        )
+
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(
+        cls,
+        cond_fn: Subgraph,
+        body_fn: Subgraph,
+        operands: List[TensorBox],
+    ):
+        operands = [cls.realize_input(x) for x in operands]
+
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
+
+        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
+        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
+
+        if _has_aliased_buffers(body_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.while_loop. "
+                f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
+            )
+
+        # make sure cond_fn returns a boolean scalar Tensor
+        assert len(cond_outputs) == 1, cond_outputs
+        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
+        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+
+        assert (
+            len(operands) > 0
+        ), "torch.while_loop is assumed to have at least one operand."
+
+        device = operands[0].get_device()
+
+        # make sure operands and body outputs are structurally equivalent
+        assert len(operands) == len(body_outputs), (operands, body_outputs)
+        for i, (op, bo) in enumerate(zip(operands, body_outputs)):
+            assert op.get_size() == bo.get_size(), (i, op, bo)
+            assert op.get_stride() == bo.get_stride(), (i, op, bo)
+            # assume all operands and outputs are on the same device
+            # as the MultiOutputLayout below requires single device
+            assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
+            assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
+            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+
+        while_loop = WhileLoop(
+            operands=operands,
+            cond_subgraph=cond_fn,
+            body_subgraph=body_fn,
+            # asserted above that there is at least one operand
+            layout=MultiOutputLayout(device),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                while_loop,
+                [(list, i)],
+            )
+            for i, output in enumerate(body_outputs)
+        ]
+
+        while_loop.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_while_loop(self)
 
 
 class InterpreterShim(torch.fx.Interpreter):
@@ -7480,17 +7599,17 @@ class Wait(ExternKernelAlloc):
         # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
         collective_op.decide_layout()
         return Wait(
-            layout=AliasedLayout(collective_op),
+            layout=NonOwningLayout(collective_op),
             inputs=[collective_op],
         )
 
-    def get_alias_names(self):
+    def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
     def get_mutation_names(self):
         # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
 
 class CollectiveKernel(ExternKernel):
