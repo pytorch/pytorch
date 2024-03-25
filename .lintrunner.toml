@@ -186,11 +186,12 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'aten/src/ATen/core/*.cpp',
     # Enable coverage of headers in aten/src/ATen
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/core/*.h',
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/csrc/*.h',
@@ -223,8 +224,8 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
+    'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/import_legacy.cpp',
