@@ -1,13 +1,11 @@
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 
-/* XXX WARNING:
+/* *
  * Do NOT put any kernels or call any device binaries here!
  * Only maintain oneDNN runtime states in this file.
  * */
-namespace at::native{
-namespace xpu {
-namespace onednn {
+namespace at::native::onednn {
 
 using namespace dnnl;
 
@@ -21,6 +19,4 @@ GpuStreamManager& GpuStreamManager::Instance() {
   return myInstance;
 }
 
-} // namespace onednn
-} // namespace xpu
-} // namespace at::native
+} // namespace at::native::onednn

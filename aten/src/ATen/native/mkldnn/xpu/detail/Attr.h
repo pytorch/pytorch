@@ -5,9 +5,7 @@
 #include <oneapi/dnnl/dnnl_types.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 
-namespace at {
-namespace native::xpu {
-namespace onednn{
+namespace at::native::onednn {
 /* oneDNN quantization usage:
    https://oneapi-src.github.io/oneDNN/dev_guide_attributes_quantization.html#
 
@@ -72,13 +70,6 @@ to oneDNN doc.
 3. append binary post op
    dst = Binary[Conv(src, wei)]
 
-4. append prelu post op
-   // TODO:
-   fusion_dst = prelu(Conv(src, wei), weights[:])
-
-5. append depthwise conv post op
-   // TODO:
-   fusion_dst = Convdw(Conv1x1(...))
 */
 using kind_t = dnnl::primitive::kind;
 struct PostOpParam {
@@ -353,7 +344,7 @@ class Attr {
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
-        binary_m = at::native::xpu::onednn::make_onednn_memory(
+        binary_m = at::native::onednn::make_onednn_memory(
           md, engine, binary.data_ptr()
         );
 
@@ -370,6 +361,4 @@ class Attr {
   dnnl::post_ops dnnl_post_ops_;
 };
 
-} // namespace onednn
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::onednn

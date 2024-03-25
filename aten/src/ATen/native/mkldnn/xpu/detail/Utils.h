@@ -8,15 +8,17 @@
 #include <c10/core/MemoryFormat.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
+#include <oneapi/dnnl/dnnl_version.h>
+
+
+#define ONEDNN_SUPPORT_DETERMINISTIC (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=4)
 
 #define XPU_ONEDNN_EXEC(prim, stream, ...)                               \
 {                                                                        \
   auto e = dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__); \
 }
 
-namespace at {
-namespace native::xpu {
-namespace onednn {
+namespace at::native::onednn {
 
 static inline dnnl::memory::format_tag get_dnnl_default_format(
     int ndims,
@@ -126,12 +128,12 @@ static inline dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
 }
 
 inline bool onednn_strides_check(const at::Tensor& src) {
-  auto adims = xpu::onednn::get_onednn_dims(src);
+  auto adims = get_onednn_dims(src);
   int ndims = (int)adims.size();
   auto dims = adims.data();
   auto data_type = static_cast<dnnl_data_type_t>(
-      xpu::onednn::get_onednn_dtype(src, /*allow_undef*/ true));
-  auto strides_info = xpu::onednn::get_onednn_strides(src);
+      get_onednn_dtype(src, /*allow_undef*/ true));
+  auto strides_info = get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
   dnnl_memory_desc_t md;
@@ -165,7 +167,6 @@ inline bool onednn_strides_check(const at::Tensor& src) {
   }
 
   auto block_size = 1;
-  // const auto& blk = md->format_desc.blocking;
   dnnl_dims_t md_inner_blks;
   dnnl_dims_t md_blk_inner_idxs;
   dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
@@ -283,7 +284,6 @@ static inline bool binary_valid(
     const at::Tensor& self,
     const at::Tensor& other,
     bool is_fusion = false) {
-  // FIXME: update onednn
   if (self.sizes() != other.sizes() &&
       !is_broadcast_from_other_to_self(self, other))
     return false;
@@ -395,6 +395,5 @@ static inline std::vector<int64_t> compatible_groups_deconv_strides(
   return strides;
 }
 
-} // namespace onednn
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::onednn
+
