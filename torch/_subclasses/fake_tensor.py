@@ -35,9 +35,9 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count
+from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
 if TYPE_CHECKING:
@@ -499,11 +499,8 @@ class FakeTensor(torch.Tensor):
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
-
         if FakeTensorConfig.debug:
-            import traceback
-
-            self._debug_trace = traceback.extract_stack()  # type: ignore[attr-defined]
+            self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
         return self
 
     # In some circumstances, a conventional torch.Tensor constructor
