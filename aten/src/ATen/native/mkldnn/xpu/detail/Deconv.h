@@ -6,10 +6,7 @@
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 
-namespace at::native {
-namespace xpu {
-namespace onednn {
-namespace {
+namespace at::native::onednn {
 
 static inline dnnl::memory::dims deconv_compatible_dilation(IntArrayRef& dilation) {
   dnnl::memory::dims ret = dilation.vec();
@@ -108,7 +105,6 @@ static inline dnnl::memory::dims deconv_compatible_wgh_dims(
     TORCH_CHECK(0, "unsupported dimension in xpu oneDNN deconvolution...");
   }
 }
-} // namespace
 
 static std::tuple<
     dnnl::memory::desc,
@@ -407,6 +403,4 @@ static void deconvolution_backward_weights(
 
 }
 
-} // namespace oneDNN
-} // namespace xpu
-} // namespace at::native
+} // namespace at::native::onednn
