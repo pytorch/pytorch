@@ -259,12 +259,14 @@ class TimmRunner(BenchmarkRunner):
         from urllib.request import urlopen
         from PIL import Image
 
-        img = Image.open(urlopen(
-            'https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/beignets-task-guide.png'
-        ))
         transforms = create_transform(**data_config, is_training=False)
-        example_inputs = transforms(img).to(device=device).half().unsqueeze(0).repeat(batch_size, *([1]*len(input_size)))
 
+        input_tensor = torch.randint(
+            256, size=(batch_size,) + input_size, device=device
+        ).to(dtype=torch.float32)
+        mean = torch.mean(input_tensor)
+        std_dev = torch.std(input_tensor)
+        example_inputs = (input_tensor - mean) / std_dev
         # input_tensor = torch.randint(
         #     256, size=(batch_size,) + input_size, device=device
         # ).zero_()
