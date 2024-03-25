@@ -97,7 +97,6 @@ if config.abi_compatible:
     xfail_list = [
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_conv_backward_cuda",
-        "test_custom_op_cuda",  # needs custom op support
         "test_profiler_mark_wrapper_call_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
@@ -188,7 +187,9 @@ if RUN_CUDA:
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
-        BaseTest("test_custom_op"),
+        BaseTest("test_custom_op_1"),
+        BaseTest("test_custom_op_2"),
+        BaseTest("test_custom_op_3"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),

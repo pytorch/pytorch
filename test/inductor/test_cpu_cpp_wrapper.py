@@ -75,7 +75,6 @@ if config.abi_compatible:
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
         "test_cumsum_cpu",
-        "test_custom_op_cpu",  # needs custom op support
         "test_dtype_sympy_expr_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
@@ -212,7 +211,9 @@ if RUN_CPU:
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_cumsum"),
-        BaseTest("test_custom_op"),
+        BaseTest("test_custom_op_1"),
+        BaseTest("test_custom_op_2"),
+        BaseTest("test_custom_op_3"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put1"),
