@@ -426,7 +426,8 @@ Return run_jit_decomposition_with_args_for_jvp(
       name,
       " that does not support it because it has not been implemented yet.\nPlease file an issue "
       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
-      "so that we can prioritize its implementation.\n");
+      "so that we can prioritize its implementation or submit a PR adding the implementation to "
+      "derivatives.yaml");
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunctor(
