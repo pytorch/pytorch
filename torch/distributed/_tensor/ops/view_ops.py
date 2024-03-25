@@ -224,6 +224,8 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
     elif ndim == 1:
         return (InputDim(0),)
     else:
+        # only flattening dims from start_dim to end_dim (inclusive)
+        # other dims are passed through
         if end_dim < 0:
             end_dim += ndim
         results: List[DimSpec] = [InputDim(i) for i in range(start_dim)]
@@ -425,6 +427,8 @@ def dim_unsqueeze(ndim: int, dim: int) -> DimMap:
 def dim_view_as_real(shape: Shape) -> DimMap:
     ndim = len(shape)
     results: List[DimSpec] = [InputDim(i) for i in range(ndim - 1)]
+    # each complex number is split into two real numbers,
+    # resulting in one more dimension of size 2
     results.append(Split(InputDim(ndim - 1), (shape[-1], 2), 0))
     results.append(Split(InputDim(ndim - 1), (shape[-1], 2), 1))
     return tuple(results)
