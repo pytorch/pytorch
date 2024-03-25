@@ -98,7 +98,7 @@ same host, we need to make sure that each instance (job) is
 setup on different ports to avoid port conflicts (or worse, two jobs being merged
 as a single job). To do this you have to run with ``--rdzv-backend=c10d``
 and specify a different port by setting ``--rdzv-endpoint=localhost:$PORT_k``.
-For ``--nodes=1``, its often convenient to let ``torchrun`` pick a free random
+For ``--nodes=1``, it's often convenient to let ``torchrun`` pick a free random
 port automatically instead of manually assigning different ports for each run.
 
 ::
