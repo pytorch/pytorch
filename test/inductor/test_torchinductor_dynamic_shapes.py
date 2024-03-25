@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+
 import math
 import os
 import sys
@@ -11,7 +12,11 @@ import torch
 import torch._custom_ops as custom_ops
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor.codegen.common import device_codegens, register_backend_for_device
+from torch._inductor.codegen.cpp import CppScheduling
+from torch._inductor.codegen.wrapper import WrapperCodeGen
 from torch._inductor.test_case import TestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -608,6 +613,87 @@ class TestInductorDynamic(TestCase):
         expected = func(x, op, a)
         output = cfunc(x, op, a)
         self.assertEqual(output, expected)
+
+    def test_wrapper_codegen_statically_known_int_or_none(self):
+        torch._dynamo.reset()
+
+        _x = torch.randn([5, 3, 3])
+        torch._dynamo.maybe_mark_dynamic(_x, 0)
+
+        # Simple functions introducing constraints on x.shape[0]
+        def fn_1(x):
+            # no constraint
+            return x.sin()
+
+        def fn_2(x):
+            # constrain in two directions
+            if x.shape[0] > 5:
+                return x.cos()
+            if x.shape[0] < 5:
+                return x * 2
+            # x.shape[0] == 5 at this point
+            return x.sin()
+
+        def fn_3(x):
+            # equality constraint, which matches example shape
+            if x.size(0) == 5:
+                return x.sin()
+            else:
+                return x.cos()
+
+        call_count = 0
+
+        def _test_wrapper_codegen_statically_known_int_or_none_in_context():
+            nonlocal call_count
+            call_count += 1
+            graph = V.graph
+            input_layouts = [
+                inp.layout
+                for inp in graph.graph_inputs.values()
+                if hasattr(inp, "layout")
+            ]
+            batch_dim = input_layouts[0].size[0]
+            if call_count == 1:
+                # testing fn_1
+                assert (
+                    WrapperCodeGen.statically_known_int_or_none(batch_dim) is None
+                ), "Should not be statically known on first call"
+            elif call_count == 2:
+                # testing fn_2
+                assert (
+                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                ), "Should be limited to exactly 5 on second call due to multiple constraints"
+            elif call_count == 2:
+                # testing fn_3
+                assert (
+                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                ), "Should be exactly 5 on third call"
+
+        class TestWrapperCodegen(WrapperCodeGen):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def generate(self, is_inference, *args, **kwargs):
+                _test_wrapper_codegen_statically_known_int_or_none_in_context()
+                return super().generate(is_inference, *args, **kwargs)
+
+        if "cpu" not in device_codegens:
+            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+        orig_cpu_codegens = device_codegens["cpu"]
+        try:
+            register_backend_for_device(
+                "cpu", orig_cpu_codegens.scheduling, TestWrapperCodegen
+            )
+            # Compile each of the functions above, with an example input
+            # that has 5 in the first dimension, but is marked as dynamic
+
+            torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
+            torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
+            torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
+        finally:
+            register_backend_for_device(
+                "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
+            )
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

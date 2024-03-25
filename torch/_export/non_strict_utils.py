@@ -82,9 +82,9 @@ def fakify(
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
-    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
 
 
@@ -207,7 +207,7 @@ def make_constraints(
             return True
         if isinstance(x, dict):
             x = list(x.values())
-        return all(isinstance(y, _Dim) or y is None for y in x)
+        return all(isinstance(y, (_Dim, int)) or y is None for y in x)
 
     flat_dynamic_shapes, _ = tree_flatten(
         dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
