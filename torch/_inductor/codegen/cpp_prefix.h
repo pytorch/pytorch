@@ -287,11 +287,18 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
     at::vec::Vectorized<T> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
-    return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+
+    if constexpr (std::is_same_v<T, float>) {
+        return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+    }
+    return _mm512_mask_loadu_epi32(zero_vec, mmask, src);
 # elif defined(CPU_CAPABILITY_AVX2)
     auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
-    return _mm256_maskload_ps(src, mmask);
+    if constexpr (std::is_same_v<T, float>) {
+      return _mm256_maskload_ps(src, mmask);
+    }
+    return _mm256_maskload_epi32(src, mmask);
 # elif defined(CPU_CAPABILITY_ZVECTOR)
     auto result = at::vec::Vectorized<T>::loadu(src);
     if constexpr (std::is_same_v<T, float>) {
@@ -378,8 +385,8 @@ typename std::enable_if_t<std::is_same_v<T, uint64_t> || std::is_same_v<T, int64
 inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
   // TODO: Add vectorized variants for the load
   constexpr auto vec_size = decltype(mask)::size();
-  uint32_t maskdata[vec_size];
-  uint64_t mask_res[vec_size];
+  __at_align__ uint32_t maskdata[vec_size];
+  __at_align__ uint64_t mask_res[vec_size];
   mask.store(maskdata);
   #pragma unroll
   for(auto i = 0; i < vec_size; ++i) {
