@@ -832,6 +832,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @parametrize(
         "pg_mode",
         [
+            "positional",
+            "positional_none",
             "kwargs",
             "kwargs_none",
             "unspecified",
@@ -852,9 +854,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         args = []
         kwargs = {}
 
-        # TODO(yifu): test positional and positional_none
-        # once explicit reduce op is supported
-        if pg_mode == "kwargs":
+        if pg_mode == "positional":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(GroupMember.WORLD)
+        elif pg_mode == "positional_none":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(None)
+        elif pg_mode == "kwargs":
             kwargs["group"] = GroupMember.WORLD
         elif pg_mode == "kwargs_none":
             kwargs["group"] = None
@@ -895,6 +901,44 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         assert counter.frame_count == 1
         assert same(output_compiled, output_eager)
+
+    @run_with_both_funcol_impls
+    @parametrize(
+        "reduce_op",
+        [
+            torch.distributed.ReduceOp.SUM,
+            torch.distributed.ReduceOp.AVG,
+            torch.distributed.ReduceOp.PRODUCT,
+            torch.distributed.ReduceOp.MIN,
+            torch.distributed.ReduceOp.MAX,
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce_reduce_op(self, reduce_op):
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+
+        def verify_rewrite(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            reduce_op_str = ar_nodes[0].args[1]
+            self.assertEqual(REDUCE_OP_TO_STR[reduce_op], reduce_op_str)
+            return gm
+
+        compiled = torch.compile(
+            torch.distributed.all_reduce,
+            backend=verify_rewrite,
+            fullgraph=True,
+        )
+        inputs = (
+            torch.ones(2, device=self.device),
+            reduce_op,
+            GroupMember.WORLD,
+        )
+        compiled(*inputs)
 
     @run_with_both_funcol_impls
     def test_dynamo_support_collective_op_with_async_op_False(self):
