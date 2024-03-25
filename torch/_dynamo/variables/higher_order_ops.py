@@ -1317,12 +1317,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ):
-        # See NOTE [HigherOrderOperator tracing design] for more details
-        # checkpoint = tx.copy_graphstate()
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         tx: InstructionTranslator = tx
-        # Create score tensor with the right size
+
         score = args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
 
         def create_scalar():
@@ -1355,8 +1353,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        # TODO UPDATE THISSince, we call `speculate_subgraph`
-        # all the arguments are lifted.
+        # It is possible that the score-mod function captures some free variables that are not
+        # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
+        # We then need to create proxies for this + the inputs.
+
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
         proxy_args = (body_node,) + lifted_args

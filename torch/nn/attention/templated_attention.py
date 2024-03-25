@@ -3,10 +3,12 @@ from typing import Callable
 import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
-from torch._functorch.eager_transforms import (
-    _unwrap_all_tensors_from_functional,
-    _wrap_all_tensors_to_functional,
+from torch._C import DispatchKey
+from torch._higher_order_ops.utils import (
+    _has_potential_branch_input_alias,
+    _has_potential_branch_input_mutation,
+    autograd_not_implemented,
+    UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -16,18 +18,38 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
-)
 
 sdpa = HigherOrderOperator("templated_attention")
 
-# maybe remove kwargs
+
+def math_attention_2(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
+    scores = query @ key.transpose(-2, -1)
+
+    b = torch.arange(0, query.size(0), device=query.device).view(-1, 1, 1, 1)
+    h = torch.arange(0, query.size(1), device=query.device).view(1, -1, 1, 1)
+    m = torch.arange(0, query.size(2), device=query.device).view(1, 1, -1, 1)
+    n = torch.arange(0, key.size(2), device=query.device).view(1, 1, 1, -1)
+
+    scores = score_mod(scores, b, h, m, n, *other_buffers)
+
+    scores = scores.softmax(dim=-1)
+    return scores @ value
 
 
-def math_attention(q, k, v, score_mod: Callable, *other_buffers):
-    scores = q @ k.transpose(-2, -1)
+def math_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
+    scores = query @ key.transpose(-2, -1)
 
     from functorch.dim import dims
 
@@ -36,40 +58,50 @@ def math_attention(q, k, v, score_mod: Callable, *other_buffers):
     scores = scores[b, h, m, n]
     scores = score_mod(scores, b, h, m, n, *other_buffers)
     scores = scores.order(b, h, m, n)
-
     scores = scores.softmax(dim=-1)
-    return scores @ v
+    return scores @ value
 
 
 @sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
-def sdpa_dense(q, k, v, score_mod, *other_buffers):
-    return math_attention(q, k, v, score_mod, *other_buffers).contiguous()
-    # out = F.scaled_dot_product_attention(q, k, v, scale=1).contiguous()
-    # return out
+def sdpa_dense(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
+    # TODO re-write existing impl using vmap
+    return math_attention_2(query, key, value, score_mod, *other_buffers).contiguous()
 
 
-@sdpa.py_impl(DispatchKey.Autograd)
-def sdpa_autograd(*args, **kwargs):
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
-        return sdpa(*args, **kwargs)
+# TODO For now lets disable but we need to figure this out
+# TODO DOUBLE TODO I should be able to call autograd_not_implemented with sdpa, not sure why this fails functional tensor mode
+sdpa.py_impl(DispatchKey.Autograd)(autograd_not_implemented(sdpa, deferred_error=False))
 
 
-def trace_sdpa(proxy_mode, q, k, v, score_mod, *other_buffers):
+def trace_sdpa(
+    proxy_mode: ProxyTorchDispatchMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
     if score_mod is None:
         with proxy_mode:
-            return F.scaled_dot_product_attention(q, k, v)
+            return F.scaled_dot_product_attention(query, key, value)
 
     with disable_proxy_modes_tracing():
-        example_out = F.scaled_dot_product_attention(q, k, v)
-    example_vals = [torch.zeros((), dtype=q.dtype)] + [
+        example_out = F.scaled_dot_product_attention(query, key, value)
+    example_vals = [torch.zeros((), dtype=query.dtype)] + [
         torch.zeros((), dtype=torch.int) for _ in range(4)
     ]
     score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
-    node_args = (q, k, v, score_graph, *other_buffers)
+    node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", sdpa, proxy_args, {}, name="sdpa_impl"
+        "call_function", sdpa, proxy_args, {}, name="templated_attention"
     )
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
@@ -77,36 +109,77 @@ def trace_sdpa(proxy_mode, q, k, v, score_mod, *other_buffers):
 
 
 @sdpa.py_impl(ProxyTorchDispatchMode)
-def sdpa_proxy_torch_dispatch_mode(q, k, v, score_mod, *other_buffers):
-    mode = _get_current_dispatch_mode()
+def sdpa_proxy_torch_dispatch_mode(
+    mode: ProxyTorchDispatchMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_sdpa(mode, q, k, v, score_mod, *other_buffers)
-        else:
-            return sdpa(q, k, v, score_mod, *other_buffers)
+    if mode.enable_tracing:
+        return trace_sdpa(mode, query, key, value, score_mod, *other_buffers)
+    else:
+        return sdpa(query, key, value, score_mod, *other_buffers)
 
 
-@sdpa.py_impl(DispatchKey.Functionalize)
-def sdpa_functionalize(q, k, v, score_mod, *other_buffers):
-    reapply_views = torch._C._functionalization_reapply_views_tls()
+@sdpa.py_functionalize_impl
+def sdpa_functionalize(
+    ctx: torch._subclasses.functional_tensor.BaseFunctionalizeAPI,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
+    """Defines the functionalization rules for the sdpa operator.
 
-    q, k, v, *other_buffers = _unwrap_all_tensors_from_functional(
-        (q, k, v, *other_buffers), reapply_views=reapply_views
-    )
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        out = sdpa(q, k, v, score_mod, *other_buffers)
-        return _wrap_all_tensors_to_functional(out, level=0)
+    Write now we are unwrapping each tensor and then redispatching to the next, however we want to
+    guard against any mutations or aliases in the score_mod function. To the other_buffers since those
+    are free variables.
+    """
+    query_unwrapped = ctx.unwrap_tensors(query)
+    key_unwrapped = ctx.unwrap_tensors(key)
+    value_unwrapped = ctx.unwrap_tensors(value)
+    other_buffers_unwrapped = ctx.unwrap_tensors(other_buffers)
+    example_vals = [torch.zeros((), dtype=query.dtype)] + [
+        torch.zeros((), dtype=torch.int) for _ in range(4)
+    ]
+    with ctx.redispatch_to_next() as m:
+        functional_score_mod = ctx.functionalize(score_mod)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        aliases = _has_potential_branch_input_alias(
+            functional_score_mod, example_vals, pre_dispatch
+        )
+        mutates = _has_potential_branch_input_mutation(
+            functional_score_mod, example_vals, pre_dispatch
+        )
+        # The only mutations and aliases we care about would be for other_buffers
+        # However, we can just error if anything is detected
+        if aliases:
+            raise UnsupportedAliasMutationException("Aliases detected in score_mod")
+        if mutates:
+            raise UnsupportedAliasMutationException("Mutations detected in score_mod")
+
+        out = sdpa(
+            query_unwrapped,
+            key_unwrapped,
+            value_unwrapped,
+            functional_score_mod,
+            *other_buffers_unwrapped,
+        )
+    return ctx.wrap_tensors(out)
 
 
 @sdpa.py_impl(FakeTensorMode)
-def sdpa_fake_tensor_mode(*args, **kwargs):
-    return sdpa_dense(*args, **kwargs)
-
-
-# sdpa.fallthrough(DispatchKey.PythonDispatcher)
-# sdpa.fallthrough(DispatchKey.PythonTLSSnapshot)
-# sdpa.fallthrough(DispatchKey.ADInplaceOrView)
-# sdpa.fallthrough(DispatchKey.BackendSelect)
-# sdpa.fallthrough(DispatchKey.AutocastCPU)
-# sdpa.fallthrough(DispatchKey.AutocastCPU)
+def sdpa_fake_tensor_mode(
+    mode: FakeTensorMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    *other_buffers: torch.Tensor,
+):
+    with mode:
+        return sdpa_dense(query, key, value, score_mod, *other_buffers)

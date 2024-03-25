@@ -818,39 +818,9 @@ class GraphLowering(torch.fx.Interpreter):
                 layout_constraint = constrain_to_fx_strides
             return layout_constraint, args, kwargs
 
-        if target not in lowerings:
-            assert isinstance(
-                target, torch._ops.OpOverload
-            ), f"{target} is not an OpOverload"
-            base_name = target.name().split(".")[0]
-            if base_name in FALLBACK_ALLOW_LIST:
-                make_fallback(target)
-            elif config.implicit_fallbacks:
-                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
-                    target, args, kwargs
-                )
-                error = (
-                    MissingOperatorWithDecomp
-                    if get_decompositions([target])
-                    else MissingOperatorWithoutDecomp
-                )
-                log.info(
-                    "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
-                )
-                make_fallback(target, layout_constraint)
+        if target.__name__ == "templated_attention":
 
-            elif get_decompositions([target]):
-                # There isn't a good way to dynamically patch this in
-                # since AOT Autograd already ran.  The error message tells
-                # the user how to fix it.
-                raise MissingOperatorWithDecomp(target, args, kwargs)
-            else:
-                raise MissingOperatorWithoutDecomp(target, args, kwargs)
-
-        if target.__name__ == "sdpa":
-
-            def create_placeholder(name, dtype):
+            def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
                 return TensorBox.create(
                     InputBuffer(
                         name,
@@ -881,7 +851,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ("n", torch.int64),
                 ]
             ]
-            for node in args[3].graph.nodes:
+            for node in args[3].graph_module.graph.nodes:
                 if node.op == "placeholder":
                     if cnt >= len(scalar_inps):
                         env[node] = args[cnt - 1]
@@ -895,10 +865,14 @@ class GraphLowering(torch.fx.Interpreter):
                         *tree_map(lambda x: env[x] if x in env else x, node.args)
                     )
                 elif node.op == "output":
+                    from torch._inductor.ir import disable_register_buffer
+
                     output_buffer = env[node.args[0]]
-                    output_buffer.realize(dont_register=True)
+                    # TODO - this is needed to inline the lambda but we dont want to create this
+                    with disable_register_buffer():
+                        output_buffer.realize()
                     # breakpoint() # output_buffer.decide_layout()
-                    from .kernel.sdpa import sdpa_template
+                    from .kernel.templated_attention import sdpa_template
 
                     layout = FixedLayout(
                         output_buffer.get_device(),
@@ -910,10 +884,10 @@ class GraphLowering(torch.fx.Interpreter):
                     from .select_algorithm import autotune_select_algorithm
 
                     sdpa_template.maybe_append_choice(
-                        [],
-                        grid=(args[0], args[1], args[2]),
+                        choices=choices,
+                        input_nodes=(args[0], args[1], args[2]),
                         layout=layout,
-                        subgraph=output_buffer,
+                        subgraphs=output_buffer,
                         num_stages=2,
                         num_warps=8,
                         BLOCK_M=64,
@@ -926,6 +900,36 @@ class GraphLowering(torch.fx.Interpreter):
             return lowerings[torch.ops.aten.scaled_dot_product_attention.default](
                 args[0], args[1], args[2]
             )
+        if target not in lowerings:
+            assert isinstance(
+                target, torch._ops.OpOverload
+            ), f"{target} is not an OpOverload"
+            base_name = target.name().split(".")[0]
+            if base_name in FALLBACK_ALLOW_LIST:
+                make_fallback(target)
+            elif config.implicit_fallbacks:
+                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
+                    target, args, kwargs
+                )
+                error = (
+                    MissingOperatorWithDecomp
+                    if get_decompositions([target])
+                    else MissingOperatorWithoutDecomp
+                )
+                log.info(
+                    "Creating implicit fallback for:\n%s",
+                    error.operator_str(target, args, kwargs),
+                )
+                make_fallback(target, layout_constraint)
+
+            elif get_decompositions([target]):
+                # There isn't a good way to dynamically patch this in
+                # since AOT Autograd already ran.  The error message tells
+                # the user how to fix it.
+                raise MissingOperatorWithDecomp(target, args, kwargs)
+            else:
+                raise MissingOperatorWithoutDecomp(target, args, kwargs)
+
         try:
             log.debug("  via %s", lowerings[target])
             out = lowerings[target](*args, **kwargs)

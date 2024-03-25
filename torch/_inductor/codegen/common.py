@@ -1692,10 +1692,12 @@ class KernelTemplate:
     """
 
     @staticmethod
-    def indent_except_first(s, indents=4):
-        lines = s.splitlines(True)
+    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
+        lines = source.splitlines(True)
         if len(lines) > 1:
-            lines[1:] = [" " * indents + line for line in lines[1:]]
+            lines[1:] = [
+                (" " * indents_spacing * num_indents) + line for line in lines[1:]
+            ]
         return "".join(lines)
 
     @staticmethod
