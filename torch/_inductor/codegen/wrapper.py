@@ -634,6 +634,13 @@ class WrapperCodeGen(CodeGen):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
+
+        # Note: 'from' is python keyword, it is not allowed to appear in python code
+        #       Although, only aten.random(_) has an 'from' overload for now, we handle all possible cases
+        if kernel_name.endswith(".from"):
+            kernel_prefix = kernel_name[:-5]
+            kernel_name = f"getattr({kernel_prefix}, 'from')"
+
         self.writeline(
             f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
