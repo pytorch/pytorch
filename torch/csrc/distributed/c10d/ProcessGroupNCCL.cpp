@@ -2242,8 +2242,6 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 void ProcessGroupNCCL::startCoalescing() {
-  coalescedDevices_.clear();
-  coalescedComms_.clear();
   coalescing_state_ |= CoalActive;
   groupStart();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
@@ -2263,20 +2261,12 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
-  if (coalescedComms_.size() == 0) {
-    // There is no actual work being coalesced, return here
-    groupEnd();
-    coalescing_state_ = 0;
-    return nullptr;
-  }
-
-  // `coalescedComms_` should have same set of comms across collectives
-  auto comm = coalescedComms_[0];
-  // `coalescedDevices_` should have same set of devices across collectives
-  auto device = coalescedDevices_[0];
+  TORCH_CHECK(coalescedDevice_.index() >= 0, MULTI_DEVICE_ERROR_MSG);
+  auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
+  auto comm = getNCCLComm(key, device, OpType::COALESCED);
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
@@ -2357,8 +2347,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalColl;
-    coalescedDevices_.push_back(device);
-    coalescedComms_.push_back(ncclComm);
+    if(coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2720,8 +2713,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalP2P;
-    coalescedDevices_.push_back(device);
-    coalescedComms_.push_back(ncclComm);
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
