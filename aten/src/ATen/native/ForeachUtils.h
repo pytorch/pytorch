@@ -102,12 +102,13 @@ inline void check_foreach_api_restrictions(
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
 inline bool _check_tensors_share_device_and_dtype(
-    ArrayRef<TensorList> tensorLists) {
+    ArrayRef<TensorList> tensorLists,
+    const bool skip_dtype_check = false) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
 
   auto is_tensor_okay = [&](const Tensor& tensor) {
-    return tensor.dtype() == expected_dtype &&
+    return (skip_dtype_check || tensor.dtype() == expected_dtype) &&
         tensor.device() == expected_device && tensor.layout() == at::kStrided &&
         tensor.is_non_overlapping_and_dense();
   };
