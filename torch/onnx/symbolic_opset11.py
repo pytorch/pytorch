@@ -225,6 +225,34 @@ def index_put(
     if len(indices_list) == 0:
         return values
 
+    inv_permutation_self = None
+    nones = [symbolic_helper._is_none(indices_list[i]) for i in range(len(indices_list))]
+    if any(nones):
+
+        # find a permutation that puts all the Nones at the end of indices_list and
+        # use it to permute the axes of the input tensors
+        permutation = list(range(len(indices_list)))
+        permutation.sort(key=lambda i:nones[i])
+
+        # remove nones from inices_list:
+        indices_list = [indices_list[p] for p in permutation if not nones[p]]
+
+        # Find the inverse permutation and save it so we can transpose
+        # back when we return:
+        inv_permutation = [0 for p in permutation]
+        for i,p in enumerate(permutation):
+            inv_permutation[p] = i
+
+        rank_self = symbolic_helper._get_tensor_rank(self)
+        permutation_self = permutation + list(range(len(permutation),rank_self))
+        inv_permutation_self = inv_permutation + list(range(len(inv_permutation),rank_self))
+
+        rank_values = symbolic_helper._get_tensor_rank(values)
+        permutation_values = permutation + list(range(len(permutation),rank_values))
+
+        self = g.op("Transpose", self, perm_i=permutation_self)
+        values = g.op("Transpose", values, perm_i=permutation_values)
+        
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
             if symbolic_helper._is_bool(indices_list[idx_]):
@@ -297,7 +325,15 @@ def index_put(
                 bool_inp = symbolic_helper._unsqueeze_helper(
                     g, bool_inp, list(range(mask_rank, self_rank))
                 )
-            return masked_scatter(g, self, bool_inp, values)
+            result = masked_scatter(g, self, bool_inp, values)
+            if inv_permutation_self is None:
+                return result
+            else:
+                return g.op(
+                    "Transpose",
+                    result,
+                    perm_i = inv_permutation_self
+                )
         broadcast_index_shape = g.op("Shape", index)
         index = symbolic_helper._unsqueeze_helper(g, index, [-1])
     sub_data_shape = symbolic_helper._slice_helper(
@@ -333,7 +369,14 @@ def index_put(
     else:
         result = g.op("ScatterND", self, index, values)
 
-    return result
+    if inv_permutation_self is None:
+        return result
+    else:
+        return g.op(
+            "Transpose",
+            result,
+            perm_i = inv_permutation_self
+        )
 
 
 @_onnx_symbolic("aten::pixel_shuffle")
