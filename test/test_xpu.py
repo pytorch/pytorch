@@ -10,13 +10,13 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_device_type import (
     dtypes,
-    floating_and_complex_types_and,
     instantiate_device_type_tests,
     onlyXPU,
     OpDTypes,
     ops,
     precisionOverride,
 )
+from torch.testing._internal.common_dtype import floating_and_complex_types_and
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
     NoTest,
