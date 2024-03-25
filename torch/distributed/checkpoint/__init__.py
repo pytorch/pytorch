@@ -1,7 +1,6 @@
 from .api import CheckpointException
 from .default_planner import DefaultLoadPlanner, DefaultSavePlanner
 from .filesystem import FileSystemReader, FileSystemWriter
-from .fsspec import FsspecReader, FsspecWriter
 from .metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
