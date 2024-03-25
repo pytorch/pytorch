@@ -373,28 +373,6 @@ def fake_tensor_prop(
     return fake_mode
 
 
-# def convert_to_contiguous_layout(gm: torch.fx.GraphModule):
-#     # """
-#     # Convert 4d convolution weight tensor to channels last format.
-
-#     # This pass is performed before freezing so the added nodes can be constant
-#     # folded by freezing.
-#     # """
-#     bmm_nodes = [
-#         n for n in gm.graph.nodes if n.target == torch.ops.aten.bmm.default
-#     ]
-
-#     for bmm in bmm_nodes:
-#         if bmm.args[0].meta["val"].stride()[0] == 1:
-#             print("before: ", bmm.args[0].meta["val"].stride())
-#             bmm.args[0].meta["val"] = bmm.args[0].meta["val"].contiguous()
-#             print("after: ", bmm.args[0].meta["val"].stride())
-#         if bmm.args[1].meta["val"].stride()[0] == 1:
-#             print("before: ", bmm.args[1].meta["val"].stride())
-#             bmm.args[1].meta["val"] = bmm.args[1].meta["val"].contiguous()
-#             print("after: ", bmm.args[1].meta["val"].stride())
-
-
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
     with config.patch(config_patches):
