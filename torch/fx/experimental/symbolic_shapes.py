@@ -280,15 +280,15 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
         yield val
     elif isinstance(val, (int, float, bool)):
         pass
-    elif is_sparse_any(val):
-        yield from _iterate_exprs(val.size())
+    elif isinstance(val, (tuple, list)):
+        for s in val:
+            yield from _iterate_exprs(s)
     elif isinstance(val, torch.Tensor):
         yield from _iterate_exprs(val.size())
         yield from _iterate_exprs(val.stride())
         yield from _iterate_exprs(val.storage_offset())
-    elif isinstance(val, (tuple, list)):
-        for s in val:
-            yield from _iterate_exprs(s)
+    elif is_sparse_any(val):
+        yield from _iterate_exprs(val.size())
     elif val is None:
         pass
     else:
@@ -511,7 +511,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     if min is None:
         min = 0
     if max is None:
-        max = sympy.oo
+        max = sys.maxsize - 1
 
     if max < min:
         raise ValueError(
@@ -2663,6 +2663,19 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
+        # check if constraint_dim is actually static integer
+        if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
+            dynamic_dim = DimDynamic.STATIC
+            if constraint_dim.vr.lower != val:
+                raise ConstraintViolationError(
+                    f"Static shape constraint of {constraint_dim.vr.lower} does not match input size of {val}, "
+                    f"for {source.name()}"
+                )
+            if symbolic_context:
+                symbolic_context.dynamic_sizes[source.idx] = dynamic_dim
+                symbolic_context.constraint_sizes[source.idx] = None
+            constraint_dim = None
+
         # see note [Tensor Fakification and Symbol Caching]
         source_name = source.name()
         if (isinstance(symbolic_context, StatefulSymbolicContext)
@@ -2758,11 +2771,17 @@ class ShapeEnv:
                 config.extended_debug_create_symbol is not None and
                 str(sympy_expr) in config.extended_debug_create_symbol.split(',')
             )
+            maybe_more_info = ""
+            if not is_debug:
+                maybe_more_info = (
+                    ", for more info run with "
+                    f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{sympy_expr}\""
+                )
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
-                "create_symbol %s = %s for %s %s%s (%s)%s",
+                "create_symbol %s = %s for %s %s%s (%s)%s%s",
                 sympy_expr, val, source.name(), range_str,
-                maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
+                maybe_user_loc, format_frame(fsummary), maybe_more_info, maybe_extra_debug, stack_info=is_debug
             )
 
             self.counter["create_symbol"] += 1
@@ -3047,12 +3066,7 @@ class ShapeEnv:
                     if isinstance(constraint, StrictMinMaxConstraint):
                         # try inferring the ranges of the expr s
                         sym_vrs = {x: self.var_to_range.get(x, None) for x in s.free_symbols}
-                        if all(vr is not None for vr in sym_vrs.values()):
-                            expr_vr = bound_sympy(s, sym_vrs)
-                            if expr_vr != constraint.vr:
-                                # the expr and constrain ranges don't match
-                                constraint_violated = True
-                        else:
+                        if any(vr is None for vr in sym_vrs.values()):
                             # some of the free symbols in s don't have ranges
                             constraint_violated = True
                     elif isinstance(constraint, RelaxedUnspecConstraint):
@@ -3085,7 +3099,8 @@ class ShapeEnv:
                 input_guards.append((source, s))
                 constraint_violated = False
                 if isinstance(constraint, StrictMinMaxConstraint):
-                    constraint_violated = True
+                    if not (s == constraint.vr.lower == constraint.vr.upper):  # allow static constraints
+                        constraint_violated = True
                 elif isinstance(constraint, RelaxedUnspecConstraint):
                     # Don't complain about 0/1 specialization, we
                     # expect to have to compile in this case anyway
@@ -4067,6 +4082,11 @@ class ShapeEnv:
         if is_debug and config.extended_debug_cpp:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
+        else:
+            maybe_extra_debug += (
+                "\nFor C++ stack trace, run with "
+                "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
+            )
 
         return fsummary, maybe_user_loc, maybe_extra_debug
 
@@ -4075,12 +4095,19 @@ class ShapeEnv:
             str_g = str(g)
             is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            maybe_more_info = ""
+            if not is_debug:
+                maybe_more_info = (
+                    ", for more info run with "
+                    f"TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED=\"{str_g}\""
+                )
             self.log.info(
-                "%s %s [guard added]%s (%s)%s",
+                "%s %s [guard added]%s (%s)%s%s",
                 prefix if not forcing_spec else f"{prefix} (forcing_spec)",
                 str_g,
                 maybe_user_loc,
                 format_frame(fsummary),
+                maybe_more_info,
                 maybe_extra_debug,
                 stack_info=is_debug,
             )

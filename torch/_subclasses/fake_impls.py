@@ -301,7 +301,9 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.nonzero_memo is None:
+    if arg.nonzero_memo is not None:
+        nnz = arg.nonzero_memo
+    else:
         nnz = fake_mode.shape_env.create_unbacked_symint()
 
         # This is unsound, but it works well in practice
@@ -330,10 +332,12 @@ def nonzero(fake_mode, func, arg):
 
         _constrain_range_for_size(nnz, max=maxval)
 
-        arg._nonzero_memo = nnz
-        arg._nonzero_memo_vc = arg._version
+        if not torch.is_inference_mode_enabled():
+            # arg._version N/A in inference mode
+            arg._nonzero_memo = nnz
+            arg._nonzero_memo_vc = arg._version
 
-    return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -516,6 +520,8 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(aten._nested_tensor_from_tensor_list.default)
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
+@register_op_impl(aten._nested_view_from_buffer.default)
+@register_op_impl(aten._nested_view_from_buffer_copy.default)
 def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(
         "torch.compile does not support strided NestedTensor"
