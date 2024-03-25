@@ -18,15 +18,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       op_name_(std::string(op_name)),
       is_symbolic_(is_symbolic),
       device_opt_(c10::nullopt) {
-  // TODO: To provide a registration mechanim to avoid adding such if-else block
-  if (dispatch_key_ == c10::DispatchKey::CUDA) {
-    device_opt_ = c10::Device(c10::DeviceType::CUDA, 0);
-  } else if (dispatch_key_ == c10::DispatchKey::XPU) {
-    device_opt_ = c10::Device(c10::DeviceType::XPU, 0);
-  } else {
-    device_opt_ = c10::Device(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-  }
-
+  device_opt_ = c10::Device(c10::dispatchKeyToDeviceType(dispatch_key), 0);
   (void)is_symbolic_; // Suppress unused variable warning
   canonicalizeOpName();
 }
