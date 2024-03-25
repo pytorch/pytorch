@@ -204,6 +204,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="aot_eager")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
+        res.sum().backward()
+
 
 if __name__ == "__main__":
     run_tests()
