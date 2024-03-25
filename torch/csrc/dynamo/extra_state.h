@@ -124,7 +124,10 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 //  - f_locals: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
-PyObject* lookup(ExtraState* extra_state, PyObject* f_locals);
+PyObject* lookup(
+    ExtraState* extra_state,
+    PyObject* f_locals,
+    PyObject* callback);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract
@@ -133,7 +136,13 @@ PyObject* lookup(ExtraState* extra_state, PyObject* f_locals);
 //  - guarded_code: Borrowed
 // return:
 //  - cache_entry: Borrowed reference
-CacheEntry* create_cache_entry(ExtraState* extra_state, PyObject* guraded_code);
+CacheEntry* create_cache_entry(
+    ExtraState* extra_state,
+    PyObject* guraded_code,
+    PyObject* callback);
+
+// Extracts the backend fn from the callback.
+PyObject* get_backend(PyObject* callback);
 
 #ifdef __cplusplus
 

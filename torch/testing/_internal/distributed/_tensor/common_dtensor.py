@@ -3,44 +3,37 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
-from dataclasses import dataclass
 import sys
+from dataclasses import dataclass
 from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    Iterator,
-    Tuple,
-    Dict,
-    List,
-    Sequence,
-    TypeVar,
-    cast,
-)
+from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    PrepareModuleInput,
+    RowwiseParallel,
+    SequenceParallel,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
     skip_if_lt_x_gpu,
+    TEST_SKIPS,
 )
 
+from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
-from torch.distributed._tensor import (
-    DeviceMesh,
-    Shard,
-    Replicate,
-    distribute_tensor,
+DEVICE_TYPE = (
+    "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 )
-from torch.distributed._tensor.placement_types import Placement
-
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
@@ -66,6 +59,7 @@ class RMSNormPython(torch.nn.Module):
     def forward(self, x):
         output = self._norm(x)
         return output * self.weight
+
 
 class MLPModule(nn.Module):
     def __init__(self, device):
@@ -95,6 +89,7 @@ class ModelArgs:
     weight_tying: bool = True
     checkpoint_activations: bool = False
 
+
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
@@ -122,12 +117,16 @@ class Attention(nn.Module):
         values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
 
         output = F.scaled_dot_product_attention(
-            queries, keys, values, None,
+            queries,
+            keys,
+            values,
+            None,
             self.dropout_p if self.training else 0,
             self.use_attn_mask,
         )
         output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
+
 
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout_p):
@@ -140,18 +139,22 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
 
+
 class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.attention_norm = nn.LayerNorm(args.dim)
         self.attention = Attention(args)
         self.ffn_norm = nn.LayerNorm(args.dim)
-        self.feed_forward = FeedForward(args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p)
+        self.feed_forward = FeedForward(
+            args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p
+        )
 
     def forward(self, x):
         h = x + self.attention(self.attention_norm(x))
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
+
 
 # A toy transformer model, partly inspired by the nanoGPT model:
 # https://github.com/karpathy/nanoGPT.
@@ -160,6 +163,7 @@ class Transformer(nn.Module):
         super().__init__()
         assert args.vocab_size is not None
         assert args.max_seq_len is not None
+        self.model_args = args
         self.max_seq_len = args.max_seq_len
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
         self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
@@ -189,6 +193,94 @@ class Transformer(nn.Module):
         h = self.norm(h)
         output = self.output(h).float()
         return output
+
+    @staticmethod
+    def parallelize(
+        module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool
+    ) -> nn.Module:
+        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        # Parallelize the root submodules.
+        if use_seq_parallel:
+            root_plan = {
+                "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
+                "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
+                "norm": SequenceParallel(),
+            }
+        else:
+            root_plan = {
+                "tok_embeddings": ColwiseParallel(output_layouts=Replicate()),
+                "pos_embeddings": ColwiseParallel(output_layouts=Replicate()),
+            }
+
+        module_tp = parallelize_module(module, device_mesh, root_plan)
+        # Parallelize the attention and feed forward submodules.
+        for layer in module_tp.layers:
+            layer_parallelize_plan = {}
+            if use_seq_parallel:
+                layer_parallelize_plan["attention"] = PrepareModuleInput(
+                    input_layouts=Shard(1),
+                    desired_input_layouts=Replicate(),
+                )
+                # shard the RMSNorms
+                layer_parallelize_plan["attention_norm"] = SequenceParallel()
+                layer_parallelize_plan["ffn_norm"] = SequenceParallel()
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wo"] = (
+                RowwiseParallel(output_layouts=Shard(1))
+                if use_seq_parallel
+                else RowwiseParallel()
+            )
+
+            layer_parallelize_plan["feed_forward.w1"] = (
+                ColwiseParallel(input_layouts=Shard(1))
+                if use_seq_parallel
+                else ColwiseParallel()
+            )
+            layer_parallelize_plan["feed_forward.w2"] = (
+                RowwiseParallel(output_layouts=Shard(1))
+                if use_seq_parallel
+                else RowwiseParallel()
+            )
+
+            parallelize_module(layer, device_mesh, layer_parallelize_plan)
+
+        # Parallelize the output submodule. If weight tying is enabled, we need to
+        # make sure output.weight is sharded consistently as tok_embeddings.weight,
+        # at the cost of the all_reduce operation using RowwiseParallel.
+        output_parallelize_plan = None
+        if not module_tp.model_args.weight_tying:
+            output_parallelize_plan = (
+                ColwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Replicate(),
+                )
+                if use_seq_parallel
+                else ColwiseParallel(output_layouts=Replicate())
+            )
+        else:
+            output_parallelize_plan = (
+                RowwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Replicate(),
+                )
+                if use_seq_parallel
+                else RowwiseParallel(input_layouts=Replicate())
+            )
+        parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
+
+        # Do manual setup on features that DTensor does not support yet.
+
+        # Manually adjust the number of heads after sharding the attention modules.
+        for layer in module_tp.layers:
+            layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
+
+        # Manually set output.weight so that parameters and gradients are shared.
+        if module_tp.model_args.weight_tying:
+            module_tp.output.weight = module_tp.tok_embeddings.weight
+
+        return module_tp
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -262,6 +354,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
 
 TestFunc = Callable[[object], object]
+
 
 # wrapper to initialize comms (processgroup)
 def with_comms(func: TestFunc) -> TestFunc:
@@ -393,9 +486,7 @@ class DTensorConverter:
             ]
         )
 
-    def gen_sharding_choices_for_arg(
-        self, arg: torch.Tensor
-    ) -> Sequence[Placement]:
+    def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
         mesh_size = self.mesh.size()
         sharding_choices: List[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
@@ -481,6 +572,4 @@ class DTensorConverter:
             self.miss += 1
             return t
         else:
-            raise RuntimeError(
-                f"Trying to convert to DTensor, but got {type(t)}"
-            )
+            raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
