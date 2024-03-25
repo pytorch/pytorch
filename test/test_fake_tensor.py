@@ -920,8 +920,8 @@ class FakeTensorConverterTest(TestCase):
         y = x[0]
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
-        x_conv = converter(mode, x)
-        y_conv = converter(mode, y)
+        x_conv = converter.from_real_tensor(mode, x)
+        y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
@@ -931,8 +931,8 @@ class FakeTensorConverterTest(TestCase):
         y.set_(x.storage())
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
-        x_conv = converter(mode, x)
-        y_conv = converter(mode, y)
+        x_conv = converter.from_real_tensor(mode, x)
+        y_conv = converter.from_real_tensor(mode, y)
         stor_id = torch._C._storage_id(x_conv)
         self.assertEqual(stor_id, torch._C._storage_id(y_conv))
         del x
@@ -951,11 +951,11 @@ class FakeTensorConverterTest(TestCase):
         y = x[0]
         mode = FakeTensorMode()
         converter = FakeTensorConverter()
-        x_conv = converter(mode, x)
+        x_conv = converter.from_real_tensor(mode, x)
         x_conv_storage = x_conv.untyped_storage()
         del x_conv
         self.assertFalse(x in converter.tensor_memo)
-        y_conv = converter(mode, y)
+        y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
@@ -963,9 +963,9 @@ class FakeTensorConverterTest(TestCase):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
         converter = FakeTensorConverter()
-        x_conv = converter(mode, x)
+        x_conv = converter.from_real_tensor(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
-        x_conv2 = converter(mode, x)
+        x_conv2 = converter.from_real_tensor(mode, x)
         assert x_conv2 is x_conv
         del x
         del x_conv
