@@ -60,7 +60,6 @@ linear_pointwise_ops = [
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
-    aten._conj.default,
     aten.abs.default,
     aten.abs.out,
     aten.abs_.default,
