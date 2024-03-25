@@ -83,6 +83,11 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+
+from .variables.higher_order_ops import (
+    CannotConvertRangeToHigherOrder,
+    RangeHigherOrderVariable,
+)
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -1177,8 +1182,50 @@ class InstructionTranslatorBase(
         if preserve_tos:
             self.push(tos)  # type: ignore[possibly-undefined]
 
-    def FOR_ITER(self, inst):
+    def FOR_ITER(self, inst: Instruction):
         it = self.pop().realize()
+        if (
+            isinstance(it, variables.RangeIteratorVariable)
+            and inst.starts_line is not None
+        ):
+            try:
+                # Converts a loop to a function body, to benefit
+                # from function compilation caching.
+                assert inst.target is not None
+                op = RangeHigherOrderVariable.make_self(
+                    self,
+                    it,
+                    self.f_globals,
+                    self.f_code,
+                    self.instructions[
+                        self.instruction_pointer : self.indexof[inst.target]
+                    ],
+                    self.symbolic_locals,
+                )
+
+                new_locals = op.functionalize(self)
+                for loc in new_locals:
+                    if isinstance(loc, torch.fx.Proxy):
+                        del loc.node.meta["example_value"]
+                args = [
+                    wrap_fx_proxy(self, loc) if isinstance(loc, torch.fx.Proxy) else loc
+                    for loc in new_locals
+                ]
+                for name, v in zip(self.f_code.co_varnames, args):
+                    if (
+                        isinstance(v, ConstantVariable)
+                        and v.as_python_constant()
+                        is RangeHigherOrderVariable.NOT_SET_SENTINEL
+                    ):
+                        continue
+                    self.symbolic_locals[name] = v
+
+                # Skip the rest of the loop completely, now that we transformed it.
+                # Also pop off the iterator.
+                self.jump(inst)
+            except CannotConvertRangeToHigherOrder:
+                pass
+
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             try:
                 val, next_iter = it.next_variables(self)

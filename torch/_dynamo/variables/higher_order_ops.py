@@ -3,14 +3,21 @@
 import contextlib
 import functools
 import logging
+import opcode
+import sys
 import types
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.variables.lists import RangeIteratorVariable
+    from ..bytecode_transformation import Instruction
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dynamo.exc import TorchDynamoException
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -335,6 +342,9 @@ def speculate_subgraph(
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
+    # Allow ConstantVariable return values in the output. Default only allows Tensors.
+    allow_constant_outputs=False,
+    log_error_on_graph_break=True,
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -421,9 +431,15 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
-                from . import TensorVariable
+                from . import ConstantVariable, TensorVariable
 
-                if not only_consist_of(output, TensorVariable, allow_none=True):
+                if not only_consist_of(
+                    output,
+                    (TensorVariable, ConstantVariable, SymNodeVariable)
+                    if allow_constant_outputs
+                    else (TensorVariable, SymNodeVariable),
+                    allow_none=True,
+                ):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
@@ -462,8 +478,9 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.info(msg)
-        log.info(ex)
+        if log_error_on_graph_break:
+            log.info(msg)
+            log.info(ex)
         raise ex
 
 
@@ -1195,6 +1212,329 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
         return super().call_function(tx, args, kwargs)
+
+
+class CannotConvertRangeToHigherOrder(TorchDynamoException):
+    pass
+
+
+class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    """
+    The general idea is that for a simple for loop like
+
+    ```
+    for i in range(10):
+        x = x + 1
+    ```
+
+    We can convert the loop body to a function and the loop itself
+    to a series of calls:
+
+    ```
+    def loop_body(local_0, local_1, local_...):
+        local_1 = local_1 + 1
+        return (local_0, local_1, local_...)
+
+    (i, x) = loop_body(0, x)
+    (i, x) = loop_body(1, x)
+    (i, x) = loop_body(2, x)
+    # ... 7 more times
+    ```
+
+    There are a few benefits to doing this, but mainly we bypass a ton
+    of stuff associated with tracing for loops. That itself provides some speedup.
+
+    Once we implement function compilation caching, or a higher order operator,
+    like jax.lax.fori_loop, for loops will compile in constant time, and perhaps even
+    better than what we currently have.
+    """
+
+    # Any of these nested means the control flow is too complex to be
+    # represented by a higher order op.
+    FORBIDDEN_OPCODES = {
+        "RETURN_VALUE",
+        "YIELD_VALUE",
+        "YIELD_FROM",
+        "GET_YIELD_FROM_ITER",
+        "SEND",
+        "MAKE_FUNCTION",
+        # This could be supported in the future.
+        "LOAD_DEREF",
+        # Exceptions
+        "RAISE_VARARGS",
+        "SETUP_FINALLY",
+        "POP_EXCEPT",
+        # TODO: Nested loops are not supported for now.
+        # We can support them by recursively calling this translation every time
+        # for each nested loop, from the innermost loop to the outermost.
+        #
+        # E.g.
+        # loop1:
+        #   loop2:
+        #     loop3:
+        #
+        # Compile loop3, then loop2, then loop1
+        "FOR_ITER",
+        # These two are fine for the end of the loop body but not within.
+        # TODO: we can support these too. They just need to be transformed to the
+        # right RETURN_VALUEs (see code below for how to do that).
+        "JUMP_BACKWARD",
+        "JUMP_ABSOLUTE",
+        # list, set, dictionary comprehensions
+        "LIST_APPEND",
+        "SET_ADD",
+        "MAP_ADD",
+    }
+
+    store_target: int
+
+    NOT_SET_SENTINEL = None
+
+    def __init__(self, value: "RangeIteratorVariable", **kwargs):
+        from ..source import GlobalSource
+
+        super().__init__(value, source=GlobalSource("__builtins__.range"), **kwargs)
+        self.store_target = -1
+
+    @staticmethod
+    def make_self(
+        tx,
+        value: "RangeIteratorVariable",
+        real_globals: dict,
+        host_code_object: types.CodeType,
+        loop_body_instructions: List["Instruction"],
+        symbolic_locals: Dict[str, VariableTracker],
+    ):
+        from . import ConstantVariable
+
+        if (
+            loop_items := len(value.items)
+        ) < torch._dynamo.config.for_loop_medium_size_boundary:
+            raise CannotConvertRangeToHigherOrder(
+                f"Loop of length {loop_items} too small to consider optimizing"
+            )
+        assert loop_body_instructions[-1].opname in {"JUMP_BACKWARD", "JUMP_ABSOLUTE"}
+        if loop_body_instructions[0].opname == "UNPACK_SEQUENCE":
+            raise CannotConvertRangeToHigherOrder(
+                "Unpacking a range iterator, seems wrong."
+            )
+        if any(
+            op.opname in RangeHigherOrderVariable.FORBIDDEN_OPCODES
+            for op in loop_body_instructions[:-1]
+        ):
+            raise CannotConvertRangeToHigherOrder(
+                "Control flow too complex for loop higher order op."
+            )
+        varnames = host_code_object.co_varnames
+        args = [
+            symbolic_locals.get(k)
+            or ConstantVariable.create(RangeHigherOrderVariable.NOT_SET_SENTINEL)
+            for k in varnames
+        ]
+        # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
+        # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
+        assert loop_body_instructions[0].opname == "STORE_FAST"
+        co_code: List[int] = []
+        if sys.version_info >= (3, 11):
+            co_code.extend((opcode.opmap["RESUME"], 0))
+
+        loop_body = loop_body_instructions[1:-1]
+        if not loop_body:
+            raise CannotConvertRangeToHigherOrder("Empty loop body.")
+        # We skip the first instruction as it's a STORE_FAST, while we skip the last as it's the JUMP_BACKWARD.
+        for inst in loop_body:
+            co_code.extend((inst.opcode, inst.arg or 0))
+            # 3.11 has inline cache entries too.
+            if sys.version_info >= (3, 11):
+                for _ in range(opcode._inline_cache_entries[inst.opcode]):
+                    co_code.extend((opcode.opmap["CACHE"], 0))
+        # We need to replace the last `JUMP_BACKWARD` with a RETURN_VALUE of all
+        # the locals.
+        for i in range(host_code_object.co_nlocals):
+            co_code.extend((opcode.opmap["LOAD_FAST"], i))
+        co_code.extend(
+            (
+                opcode.opmap["BUILD_TUPLE"],
+                host_code_object.co_nlocals,
+                opcode.opmap["RETURN_VALUE"],
+                0,
+            )
+        )
+        co_code = bytes(co_code)
+        argcount = host_code_object.co_nlocals
+        posonlyargcount = kwonlyargouncount = 0
+        nlocals = host_code_object.co_nlocals
+        stacksize = host_code_object.co_stacksize
+        flags = 1
+        codestring = co_code
+        constants = host_code_object.co_consts
+        names = host_code_object.co_names
+        filename = "<dynamo memory>"
+        name = "for_loop_body"
+        qualname = "for_loop_body"
+        firstlineno = 0
+        linetable = b""
+        exceptiontable = b""
+        freevars = ()
+        cellvars = ()
+
+        code_object = None
+        # Translate instructions back to code object.
+        if sys.version_info >= (3, 12):
+            raise CannotConvertRangeToHigherOrder("Unsupported Python version")
+        elif sys.version_info >= (3, 11):
+            code_object = types.CodeType(
+                argcount,
+                posonlyargcount,
+                kwonlyargouncount,
+                nlocals,
+                stacksize,
+                flags,
+                codestring,
+                constants,
+                names,
+                varnames,
+                filename,
+                name,
+                qualname,
+                firstlineno,
+                linetable,
+                exceptiontable,
+                freevars,
+                cellvars,
+            )
+        elif sys.version_info >= (3, 8):  # noqa: UP036
+            code_object = types.CodeType(
+                argcount,
+                posonlyargcount,
+                kwonlyargouncount,
+                nlocals,
+                stacksize,
+                flags,
+                codestring,
+                constants,
+                names,
+                varnames,
+                filename,
+                name,
+                firstlineno,
+                linetable,
+                freevars,
+                cellvars,
+            )
+        else:
+            raise CannotConvertRangeToHigherOrder("Unsupported Python version")
+
+        if code_object is None:
+            raise CannotConvertRangeToHigherOrder("Could not construct code object")
+
+        obj = RangeHigherOrderVariable(value)
+        obj.func = types.FunctionType(code_object, real_globals)
+        obj.args = args
+        store_target = loop_body_instructions[0].arg
+        assert store_target >= 0
+        obj.store_target = store_target
+        return obj
+
+    def functionalize(self, tx) -> tuple:
+        """Converts a for loop into a series of function calls. Returns the modified
+        locals as a tuple of Proxies and VariableTrackers.
+        """
+        from .builder import wrap_fx_proxy
+
+        val_range = self.value.unpack_var_sequence(tx)
+        # Assign the for loop value
+        args = list(self.args)
+        assert self.store_target >= 0
+
+        args[self.store_target] = self.make_symint(tx, val_range[0])
+        try:
+            # Convert the entire loop body to a subgraph.
+            (
+                (body_r, body_spec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                UserFunctionVariable(self.func),
+                args,
+                {},
+                "torch.ops.higher_order.for_loop",
+                source_target=self.func,
+                allow_constant_outputs=True,
+                log_error_on_graph_break=False,
+                set_subgraph_inputs="manual",
+            )
+        except Unsupported as e:
+            raise CannotConvertRangeToHigherOrder("graph break in function") from e
+
+        body_nn_modules = dict(tx.output.nn_modules)
+
+        body_name = add_subgraph(
+            tx,
+            self.source,
+            "for_loop_body",
+            torch.fx.GraphModule(body_nn_modules, body_graph),
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        previous_locals = list(args)
+
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        # TODO: once we get a higher order op representing for loops,
+        # we can compile it down to that and it will compile a lot faster
+        # and perhaps even perform better.
+        # For now, just compile it down to a bunch of proxied calls.
+        # This should be replaced with something better in the future!
+        def for_loop_wrapper(fn, *args):
+            return fn(*args)
+
+        for i in val_range:
+            previous_locals[self.store_target] = self.make_symint(tx, i)
+            args_tmp = [body_node] + [a.as_proxy() for a in previous_locals]
+            result_tuple = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    for_loop_wrapper,
+                    args=tuple(args_tmp),
+                    kwargs={},
+                ),
+                example_value=example_value,
+            )
+            previous_locals = list(result_tuple.items)
+
+        previous_locals = list(previous_locals)
+        previous_locals[self.store_target] = i
+        return previous_locals
+
+    @staticmethod
+    def make_symint(tx, i):
+        import sympy
+
+        const_proxy = tx.output.create_proxy(
+            "call_function", (lambda a: a), *proxy_args_kwargs([i], {})
+        )
+        num = i.as_python_constant()
+        sym_a = torch.SymInt(
+            torch.fx.experimental.sym_node.SymNode(
+                sympy.Integer(num),
+                torch.fx.experimental.symbolic_shapes.ShapeEnv(),
+                int,
+                num,
+                constant=num,
+                fx_node=num,
+            )
+        )
+        const_proxy.node.meta["example_value"] = sym_a
+        sym_arg = SymNodeVariable.create(tx, const_proxy, sym_a)
+        return sym_arg
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
