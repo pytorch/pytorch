@@ -264,6 +264,7 @@ def mps_ops_modifier(ops):
         'H',
         'hsplit',
         'imag',
+        'index_select',
         'isfinite',
         'isinf',
         'isreal',
