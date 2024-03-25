@@ -73,8 +73,14 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     """
     orig_grad_data = grad.data
     grad.data = grad.data.to(state.parameter_type)
+    try:
+        backend = getattr(torch, grad.device.type)
+    except AttributeError as e:
+        raise AttributeError(f"Device {grad.device}  does not have a \
+                corresponding backend registered as 'torch.{grad.device.type}'.") from e
+
     # Don't let this memory get reused until after the transfer.
-    orig_grad_data.record_stream(torch.cuda.current_stream())  # type: ignore[arg-type]
+    orig_grad_data.record_stream(backend.current_stream())  # type: ignore[arg-type]
 
 def allreduce_hook(state: DefaultState, grad: torch.Tensor):
     r"""
