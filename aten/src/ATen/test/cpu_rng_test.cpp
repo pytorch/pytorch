@@ -44,89 +44,89 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
 
 // ==================================================== Random ========================================================
 
-Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
+Tensor& random_(Tensor& self, const std::optional<Generator>& generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, const std::optional<Generator>& generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
+Tensor& random_to(Tensor& self, int64_t to, const std::optional<Generator>& generator) {
   return random_from_to(self, 0, to, generator);
 }
 
 // ==================================================== Normal ========================================================
 
-Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_(Tensor& self, double mean, double std, const std::optional<Generator>& gen) {
   return at::native::templates::normal_impl_<native::templates::cpu::NormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
-Tensor& normal_Tensor_float_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
+Tensor& normal_Tensor_float_out(const Tensor& mean, double std, const std::optional<Generator>& gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_float_Tensor_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+Tensor& normal_float_Tensor_out(double mean, const Tensor& std, const std::optional<Generator>& gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_Tensor_Tensor_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+Tensor& normal_Tensor_Tensor_out(const Tensor& mean, const Tensor& std, const std::optional<Generator>& gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
+Tensor normal_Tensor_float(const Tensor& mean, double std, const std::optional<Generator>& gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_float_Tensor(double mean, const Tensor& std, const std::optional<Generator>& gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, const std::optional<Generator>& gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
 // ==================================================== Uniform =======================================================
 
-Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
+Tensor& uniform_(Tensor& self, double from, double to, const std::optional<Generator>& generator) {
   return at::native::templates::uniform_impl_<native::templates::cpu::UniformKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
+Tensor& cauchy_(Tensor& self, double median, double sigma, const std::optional<Generator>& generator) {
   return at::native::templates::cauchy_impl_<native::templates::cpu::CauchyKernel, TestCPUGenerator>(self, median, sigma, generator);
 }
 
 // ================================================== LogNormal =======================================================
 
-Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+Tensor& log_normal_(Tensor& self, double mean, double std, const std::optional<Generator>& gen) {
   return at::native::templates::log_normal_impl_<native::templates::cpu::LogNormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
 // ================================================== Geometric =======================================================
 
-Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& geometric_(Tensor& self, double p, const std::optional<Generator>& gen) {
   return at::native::templates::geometric_impl_<native::templates::cpu::GeometricKernel, TestCPUGenerator>(self, p, gen);
 }
 
 // ================================================== Exponential =====================================================
 
-Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+Tensor& exponential_(Tensor& self, double lambda, const std::optional<Generator>& gen) {
   return at::native::templates::exponential_impl_<native::templates::cpu::ExponentialKernel, TestCPUGenerator>(self, lambda, gen);
 }
 
 // ================================================== Bernoulli =======================================================
 
-Tensor& bernoulli_Tensor(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+Tensor& bernoulli_Tensor(Tensor& self, const Tensor& p_, const std::optional<Generator>& gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p_, gen);
 }
 
-Tensor& bernoulli_float(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& bernoulli_float(Tensor& self, double p, const std::optional<Generator>& gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
 }
 
-Tensor& bernoulli_out(const Tensor& self, c10::optional<Generator> gen, Tensor& result) {
+Tensor& bernoulli_out(const Tensor& self, const std::optional<Generator>& gen, Tensor& result) {
   return at::native::templates::bernoulli_out_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(result, self, gen);
 }
 
