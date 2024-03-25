@@ -792,6 +792,9 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
 def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
+    if not len(code.co_varnames):
+        # A function with no argument cannot contain a valid "super()" call
+        return
     output = []
     for idx, inst in enumerate(instructions):
         output.append(inst)

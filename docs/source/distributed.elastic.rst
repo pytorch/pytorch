@@ -28,6 +28,7 @@ Documentation
    elastic/timer
    elastic/metrics
    elastic/events
+   elastic/subprocess_handler
 
 .. toctree::
    :maxdepth: 1
