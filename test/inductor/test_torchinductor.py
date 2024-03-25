@@ -2469,7 +2469,6 @@ class CommonTemplate:
             return (full, arg1_1, embedding)
 
         arg0_1 = rand_strided((32128, 768), (768, 1), device="cpu", dtype=torch.float32)
-        arg1_1 = 22
         arg2_1 = rand_strided((1, 22), (22, 1), device="cpu", dtype=torch.int64)
         self.common(fn, [arg0_1, arg2_1])
 
