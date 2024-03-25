@@ -2993,6 +2993,8 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+    TORCH_INTERNAL_ASSERT(
+        initialized(), "Allocator not initialized: did you call init?");
     for (auto& allocator : device_allocator) {
       allocator->attachAllocatorTraceTracker(tracker);
     }
