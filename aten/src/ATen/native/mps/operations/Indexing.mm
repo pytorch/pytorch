@@ -39,6 +39,7 @@
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
