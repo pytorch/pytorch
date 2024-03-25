@@ -121,9 +121,9 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(NamedTensorMeta::HasNonWildcard, names));
+    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(NamedTensorMeta::HasNonWildcard, std::move(names)));
   } else {
-    meta->set_names(NamedTensorMeta::HasNonWildcard, names);
+    meta->set_names(NamedTensorMeta::HasNonWildcard, std::move(names));
   }
 }
 
