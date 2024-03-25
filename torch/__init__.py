@@ -1725,6 +1725,9 @@ class _TorchCompileInductorWrapper:
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
+            if attr_name == "aot_inductor.eager_mode" and val:
+                # In terms of aot inductor for eager mode, cpp_wrapper is prerequisite
+                self.config["cpp_wrapper"] = True
             if type(val) is not type(current_config[attr_name]):
                 val_type_str = type(val).__name__
                 expected_type_str = type(current_config[attr_name]).__name__

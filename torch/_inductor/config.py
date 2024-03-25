@@ -656,6 +656,14 @@ class aot_inductor:
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
 
+    # AOTI is used for eager mode
+    eager_mode = (
+        True if os.environ.get("TORCHINDUCTOR_COMPILE_EAGER", "0") == "1" else False
+    )
+
+    # used for eager mode
+    eager_op_name = ""
+
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 

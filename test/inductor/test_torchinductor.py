@@ -6,6 +6,7 @@ import functools
 import gc
 import importlib
 import itertools
+import json
 import math
 import operator
 import os
@@ -40,6 +41,7 @@ from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    cache_dir,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -3895,6 +3897,28 @@ class CommonTemplate:
         self.common(fn, (torch.randn([2, 8]),))
         # Unrolled reduction
         self.common(fn, (torch.randn([2, 4]),))
+
+    def test_torch_compile_kernel_wrapper_separation(self):
+        def fn(x):
+            return torch.neg(x)
+
+        x = torch.randn(3, 4)
+        opt_fn = torch.compile(fn)
+        with config.patch(
+            {"aot_inductor.eager_mode": True, "aot_inductor.eager_op_name": "neg"}
+        ):
+            with config.patch({"cpp_wrapper": True}):
+                self.assertEqual(opt_fn(x), fn(x))
+
+                aten_eager_conf = os.path.join(cache_dir(), "aten_eager", "neg.json")
+                self.assertTrue(os.path.exists(aten_eager_conf))
+                with open(aten_eager_conf) as f:
+                    neg_kernel_conf = json.load(f)
+                    self.assertTrue(isinstance(neg_kernel_conf, list))
+                    self.assertTrue(len(neg_kernel_conf) > 0)
+                    self.assertTrue("meta_info" in neg_kernel_conf[0])
+                    self.assertTrue("kernel_path" in neg_kernel_conf[0])
+                    self.assertTrue(os.path.exists(neg_kernel_conf[0]["kernel_path"]))
 
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
