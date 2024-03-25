@@ -19,9 +19,12 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/utils/ParamsHash.h>
+#include <ATen/native/utils/TimingUtils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <c10/util/DimVector.h>
 #include <variant>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -1931,7 +1934,59 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out) {
+#define AUTOTUNE_MAX_DIM 6
+
+struct MatmulAutotuneCacheKey {
+  int64_t tensor1_dim[AUTOTUNE_MAX_DIM];
+  int64_t tensor1_stride[AUTOTUNE_MAX_DIM];
+  int64_t tensor2_dim[AUTOTUNE_MAX_DIM];
+  int64_t tensor2_stride[AUTOTUNE_MAX_DIM];
+  int64_t device;
+  ScalarType dtype;
+  bool is_cuda;
+  bool should_fold;
+};
+
+struct MatmulAutotuneCacheKeyWrapper : ParamsWrapper<MatmulAutotuneCacheKey> {
+  MatmulAutotuneCacheKeyWrapper() = default;
+
+  MatmulAutotuneCacheKeyWrapper(
+    const Tensor& tensor1,
+    const Tensor& tensor2,
+    bool should_fold) {
+    std::copy(tensor1.sizes().begin(), tensor1.sizes().end(), this->pod.tensor1_dim);
+    std::copy(tensor1.strides().begin(), tensor1.strides().end(), this->pod.tensor1_stride);
+    std::copy(tensor2.sizes().begin(), tensor2.sizes().end(), this->pod.tensor2_dim);
+    std::copy(tensor2.strides().begin(), tensor2.strides().end(), this->pod.tensor2_stride);
+    this->pod.should_fold = should_fold;
+    this->pod.is_cuda = tensor1.device().type() == at::kCUDA;
+    this->pod.dtype = tensor1.scalar_type();
+    this->pod.device = at::detail::getCUDAHooks().current_device();
+  }
+};
+
+template <typename T, typename KeyType>
+struct MatmulAutotuneCache {
+std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>> engine_cache;
+
+T* find(const KeyType& key) {
+  auto it = engine_cache.find(key);
+  if (it == engine_cache.end()) {
+    return nullptr;
+  }
+  return &(it->second);
+}
+
+void update(const KeyType& key, T&& results) {
+  engine_cache.erase(key);
+  engine_cache.emplace(key, std::move(results));
+}
+
+};
+
+MatmulAutotuneCache<float, MatmulAutotuneCacheKeyWrapper> matmul_autotune_cache;
+
+static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out, MatmulAutotuneCacheKeyWrapper & key, bool& need_profiling, const bool autotune) {
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -1948,6 +2003,33 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   // Just fold for dim_t1 >= 3 and (dim_t2 == 1 || dim_t2 == 2)
   if (!(dim_t1 >= 3 && dim_t2 <= 2)) {
     return false;
+  }
+
+  if (autotune
+      && tensor1.device().type() == at::kCUDA
+      && tensor1.dim() <= AUTOTUNE_MAX_DIM && tensor2.dim() <= AUTOTUNE_MAX_DIM
+      // bail out as we would violate TORCH_INTERNAL_ASSERT(!(transpose && t2_is_matrix));
+      && !(has_out && tensor2.dim() > tensor1.dim() && tensor1.dim() == 2)) {
+
+    need_profiling = true;
+    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, true);
+    const auto true_value = matmul_autotune_cache.find(key);
+    // don't have data for the true case, run it
+    if (!true_value) {
+      return true;
+    }
+    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, false);
+    const auto false_value = matmul_autotune_cache.find(key);
+    // don't have data for the false case, run it
+    if (!false_value) {
+      return false;
+    }
+    need_profiling = false;
+
+    // if false took longer return true
+    return *false_value > *true_value;
+    // key will not be set correctly in this case
+    // but that is OK as we are not doing profiling in this case
   }
 
   // In this case we *do* incur in an extra copy to avoid creating an unnecessary large tensor in the backward
@@ -2011,6 +2093,9 @@ static Tensor _matmul_impl(
   NoNamesGuard guard;
   const auto dim_tensor1 = tensor1.dim();
   const auto dim_tensor2 = tensor2.dim();
+  bool autotune = at::globalContext().matmulAutotune();
+  bool need_profiling = false;
+  MatmulAutotuneCacheKeyWrapper key;
 
   // This is checked up here to simplify the logic below
   // Note that the strings are just evaluated on failure, so almost always we just evaluate
@@ -2031,6 +2116,11 @@ static Tensor _matmul_impl(
     );
   }
 
+  auto callback = [&] (float _timing_result) {
+    matmul_autotune_cache.update(key, std::move(_timing_result));
+  };
+
+
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
@@ -2040,7 +2130,8 @@ static Tensor _matmul_impl(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold(tensor1, tensor2, has_out)) {
+  } else if (should_fold(tensor1, tensor2, has_out, key, need_profiling, autotune)) {
+    AutotuneTimer timer(std::move(callback), key.pod.is_cuda, need_profiling);
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and at least one of the following two conditions hold
@@ -2107,6 +2198,7 @@ static Tensor _matmul_impl(
       return out;
     }
   } else {
+    AutotuneTimer timer(std::move(callback), key.pod.is_cuda, need_profiling);
     // dim_tensor1 >= 3 || dim_tensor2 >= 3
     // We track m1 vs m2 separately even though they must match for nicer error messages
     const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;

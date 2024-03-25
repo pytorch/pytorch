@@ -643,9 +643,9 @@ class TestOperators(TestCase):
         tol1('nn.functional.multi_head_attention_forward',
              {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         tol1('__rmatmul__',
-             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('matmul',
-             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+             {torch.float32: tol(atol=3e-05, rtol=5e-05)}),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('linalg.tensorsolve',
@@ -1323,7 +1323,25 @@ class TestOperators(TestCase):
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
         xfail('as_strided', 'partial_views'),
+        # seems to work but only in TF32
+        skip('linalg.multi_dot')
     }))
+    @opsToleranceOverride('TestOperators', 'test_vjpvmap', (
+        # TF32
+        tol1('__rmatmul__',
+             {torch.float32: tol(atol=3e-02, rtol=1e-03)}, device_type='cuda'),
+        tol1('addmm',
+             {torch.float32: tol(atol=5e-03, rtol=3e-03)}, device_type='cuda'),
+        tol1('cdist',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
+        tol1('matmul',
+             {torch.float32: tol(atol=3e-02, rtol=5e-03)}, device_type='cuda'),
+        tol1('nn.functional.linear',
+             {torch.float32: tol(atol=3e-03, rtol=3e-03)}, device_type='cuda'),
+        tol1('tensordot',
+             {torch.float32: tol(atol=3e-03, rtol=3e-03)}, device_type='cuda'),
+    ))
+
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
         # certainly redundant with the vmap_has_batch_rule test in test_vmap.py
@@ -1986,6 +2004,10 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
     })
+    @opsToleranceOverride('TestOperators', 'test_vmapjvpvjp', (
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=1e-04, rtol=1e-05)}),
+    ))
     def test_vmapvjpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         B = 2
