@@ -234,6 +234,7 @@ class Node:
         self._prev = self
         self._next = self
         self._erased = False
+        self._sort_key = ()
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
@@ -285,6 +286,30 @@ class Node:
         p = self._prev
         p._next, x._prev = x, p
         x._next, self._prev = self, x
+
+        # compute x._sort_key
+        psk = x._prev._sort_key
+        nsk = x._next._sort_key
+        if len(psk) > len(nsk):
+            *prefix, idx = psk[:len(nsk) + 1]
+            x._sort_key = (*prefix, idx + 1)
+        elif len(psk) < len(nsk):
+            *prefix, idx = nsk[:len(psk) + 1]
+            x._sort_key = (*prefix, idx - 1)
+        else:  # same length, increase length by 1
+            x._sort_key = (*psk, 0)
+
+    def __gt__(self, other: 'Node'):
+        return self._sort_key > other._sort_key
+
+    def __lt__(self, other: 'Node'):
+        return self._sort_key < other._sort_key
+
+    def __ge__(self, other: 'Node'):
+        return self > other or self == other
+
+    def __le__(self, other: 'Node'):
+        return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
