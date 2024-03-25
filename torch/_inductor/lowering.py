@@ -1746,6 +1746,66 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        @register_lowering(
+            torch.ops.onednn.qlinear_pointwise.binary, type_promotion_kind=None
+        )
+        @register_lowering(
+            torch.ops.onednn.qlinear_pointwise.binary_tensor, type_promotion_kind=None
+        )
+        def qlinear_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            output_dtype,
+            accum: TensorBox,
+            accum_scale,
+            accum_zp,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            if (
+                binary_attr == "add"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization and inplace add,
+                # there is case when accum dtype is float32 but output dtype is bfloat16.
+                # Since the accum will be inplaced changed with post op sum,
+                # we will do accum dtype convertion here.
+                accum = to_dtype(accum, output_dtype)
+            return TensorBox.create(
+                ir.QLinearPointwiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    output_dtype,
+                    accum,
+                    accum_scale,
+                    accum_zp,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
+            )
+
         if torch._C.has_mkl:
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
