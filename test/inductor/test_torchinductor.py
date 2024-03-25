@@ -415,6 +415,12 @@ def check_model(
     if check_has_compiled:
         assert called, "Ran graph without calling compile_fx"
     assert type(actual) == type(correct)
+    if isinstance(actual, (tuple, list)):
+        assert len(actual) == len(correct)
+        assert all(
+            type(actual_item) == type(correct_item)
+            for actual_item, correct_item in zip(actual, correct)
+        )
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
@@ -2451,6 +2457,20 @@ class CommonTemplate:
             return a
 
         self.common(fn, [torch.randint(5, (1, 8)), 5400])
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_scalar_output(self):
+        def fn(arg0_1, arg2_1):
+            arg1_1 = arg2_1.size(1)
+            view = torch.ops.aten.view.default(arg2_1, [-1, arg1_1])
+            embedding = torch.ops.aten.embedding.default(arg0_1, view)
+            full = torch.ops.aten.full.default([1, arg1_1], 1, dtype=torch.float32)
+            return (full, arg1_1, embedding)
+
+        arg0_1 = rand_strided((32128, 768), (768, 1), device="cpu", dtype=torch.float32)
+        arg2_1 = rand_strided((1, 22), (22, 1), device="cpu", dtype=torch.int64)
+        self.common(fn, [arg0_1, arg2_1])
 
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):

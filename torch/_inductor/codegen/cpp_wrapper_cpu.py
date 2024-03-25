@@ -743,7 +743,7 @@ class CppWrapperCpu(WrapperCodeGen):
     @cache_on_self
     def get_output_refs(self):
         return [
-            f"at::scalar_tensor({x.codegen_reference(self.wrapper_call)})"
+            f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
             if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
             else x.codegen_reference(self.wrapper_call)
             for x in V.graph.graph_outputs
