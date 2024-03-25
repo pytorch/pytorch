@@ -22,5 +22,4 @@ at::native::onednn::Attr construct_binary_attr(
     const Tensor& other,
     onednn::Attr attr);
 
-} // namespace native::xpu
 } // namespace at
