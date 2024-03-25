@@ -242,8 +242,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard({}))
 
     def test_dynamic_indices_guard(self):
-        guard1 = guards.DYNAMIC_INDICES(False, set(), ["x.size(0) == y.size(0)"])
-        guard2 = guards.DYNAMIC_INDICES(True, set({0, 1}), ["x.size(0) == y.size(0)"])
+        guard1 = guards.DYNAMIC_INDICES(set(), ["x.size(0) == y.size(0)"])
+        guard2 = guards.DYNAMIC_INDICES(set({0, 1}), ["x.size(0) == y.size(0)"])
 
         x = torch.randn(4)
         self.assertTrue(guard1(x))

@@ -649,6 +649,34 @@ class DistributedDataParallel(Module, Joinable):
                 "need to be set at the same time.",
             )
 
+        if process_group and device_mesh is not None:
+            raise RuntimeError(
+                "Cannot specify both process_group and device_mesh arguments."
+            )
+        elif process_group is None and device_mesh is None:
+            self.process_group = _get_default_group()
+        elif device_mesh is None:
+            self.process_group = process_group
+        else:
+            if device_mesh.ndim != 1:
+                raise RuntimeError(
+                    f"Only 1D device mesh is supported, but got {device_mesh}."
+                )
+            self.device_mesh = device_mesh
+            self.process_group = device_mesh.get_group(mesh_dim=0)
+            from torch.distributed.device_mesh import _mesh_resources
+
+            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+                # TODO: This is a temporary work around to enable DDP + TP.
+                # We should do the logic in DDP so that the 2D implementation is
+                # sound and the state_dict works out of the box.
+                # This has to be done before check UninitializedParameter.
+                from torch.distributed.tensor.parallel.ddp import (
+                    _pre_dp_module_transform,
+                )
+
+                _pre_dp_module_transform(module)
+
         self._delay_all_reduce_params = []
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
             self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
@@ -722,22 +750,6 @@ class DistributedDataParallel(Module, Joinable):
                 output_device = device_ids[0]
 
             self.output_device = _get_device_index(output_device, True)
-
-        if process_group and device_mesh is not None:
-            raise RuntimeError(
-                "Cannot specify both process_group and device_mesh arguments."
-            )
-        elif process_group is None and device_mesh is None:
-            self.process_group = _get_default_group()
-        elif device_mesh is None:
-            self.process_group = process_group
-        else:
-            if device_mesh.ndim != 1:
-                raise RuntimeError(
-                    f"Only 1D device mesh is supported, but got {device_mesh}."
-                )
-            self.device_mesh = device_mesh
-            self.process_group = device_mesh.get_group(mesh_dim=0)
 
         self.static_graph = False
         self.dim = dim
@@ -875,6 +887,9 @@ class DistributedDataParallel(Module, Joinable):
             "python_reducer",
             "python_reducer_without_compiled_forward",
         )
+        if self._use_python_reducer:
+            torch._inductor.config._fuse_ddp_communication = True
+            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )

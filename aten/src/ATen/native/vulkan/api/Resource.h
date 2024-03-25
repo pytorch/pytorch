@@ -151,6 +151,10 @@ class VulkanBuffer final {
     return (memory_.allocation != VK_NULL_HANDLE);
   }
 
+  inline bool owns_memory() const {
+    return owns_memory_;
+  }
+
   operator bool() const {
     return (handle_ != VK_NULL_HANDLE);
   }
@@ -370,6 +374,10 @@ class VulkanImage final {
 
   inline bool has_memory() const {
     return (memory_.allocation != VK_NULL_HANDLE);
+  }
+
+  inline bool owns_memory() const {
+    return owns_memory_;
   }
 
   inline operator bool() const {
