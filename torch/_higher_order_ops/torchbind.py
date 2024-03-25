@@ -39,16 +39,20 @@ def enable_torchbind_tracing():
     behavior. Once torchbind tracing has been stabilized, we can remove this and
     turn it always on.
     """
+    global ENABLE_TORCHBIND
     try:
         KNOWN_TYPES.append(torch.ScriptObject)
         torch.ScriptMethod.__call__ = torchbind_method_redispatch  # type: ignore[method-assign]
+        ENABLE_TORCHBIND = True
         yield
     finally:
         assert (
             KNOWN_TYPES.pop() is torch.ScriptObject
         ), "Someone else messed with KNOWN_TYPES during tracing, exploding."
         torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
+        ENABLE_TORCHBIND = False
 
+ENABLE_TORCHBIND = False
 
 @call_torchbind.py_impl(DispatchKey.CompositeExplicitAutograd)
 def call_torchbind_impl(obj, method, *args, **kwargs):
@@ -78,8 +82,14 @@ def inner(mode, *args, **kwargs):
 # But we should make it possible to register a fake torchbind implementation.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
+    global ENABLE_TORCHBIND
     with mode:
-        return call_torchbind_impl(*args, **kwargs)
+        ENABLE_TORCHBIND = False
+        self_, method_name, *args = args
+        ret = getattr(self_, method_name)(*args, **kwargs)
+        # ret = call_torchbind_impl(*args, **kwargs)
+        ENABLE_TORCHBIND = True
+        return ret
 
 
 call_torchbind.py_impl(DispatchKey.Autograd)(

@@ -53,8 +53,11 @@ def create_abstract_obj(x: torch.ScriptObject):
 
     def _call_torchbind(method_name):
         def wrapped(self_, *args, **kwargs):
-            # TODO: wrap with call_torchbind higher order op
-            return getattr(self_.abstract_obj, method_name)(*args, **kwargs)
+            from torch._higher_order_ops.torchbind import call_torchbind, ENABLE_TORCHBIND
+            if ENABLE_TORCHBIND:
+                return call_torchbind(self_, method_name, *args, **kwargs)
+            else:
+                return getattr(self_.abstract_obj, method_name)(*args, **kwargs)
 
         return wrapped
 
