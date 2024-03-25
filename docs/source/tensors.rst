@@ -212,6 +212,8 @@ Tensor class reference
      (see :ref:`tensor-creation-ops`).
    - To create a tensor with similar type but different size as another tensor,
      use ``tensor.new_*`` creation ops.
+   - There is a legacy constructor ``torch.Tensor`` whose use is discouraged.
+     Use :func:`torch.tensor` instead.
 
 .. autoattribute:: Tensor.T
 .. autoattribute:: Tensor.H
@@ -221,6 +223,8 @@ Tensor class reference
 .. autosummary::
     :toctree: generated
     :nosignatures:
+
+    Tensor.__init__
 
     Tensor.new_tensor
     Tensor.new_full
