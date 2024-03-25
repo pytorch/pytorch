@@ -59,6 +59,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
     }
+    refresh_has_data_ptr_check();
   }
 
   StorageImpl(
@@ -233,12 +234,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   void refresh_has_data_ptr_check() {
-    has_data_ptr_check_ = data_ptr_.get_deleter() == impl::cow::cow_deleter ||
-        throw_on_mutable_data_ptr_;
+    has_data_ptr_check_ = is_cow() || throw_on_mutable_data_ptr_;
   }
+
+  inline bool is_cow() const {
+    return data_ptr_.get_deleter() == impl::cow::cow_deleter;
+  }
+
   // Triggers a copy if this is a copy-on-write tensor.
   void maybe_materialize_cow() {
-    if (data_ptr_.get_deleter() == impl::cow::cow_deleter) {
+    if (is_cow()) {
       impl::cow::materialize_cow_storage(*this);
     }
   }

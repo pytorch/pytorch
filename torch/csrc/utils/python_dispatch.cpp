@@ -839,6 +839,13 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_set_throw_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    // Otherwise, set (on the StorageImpl) that accessing (mutable) data_ptr
+    // will throw.
     t.unsafeGetTensorImpl()
         ->storage()
         .unsafeGetStorageImpl()
