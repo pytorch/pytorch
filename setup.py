@@ -1103,6 +1103,17 @@ def main():
     ]
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
+    if (
+        use_prioritized_text == ""
+        and platform.system() == "Linux"
+        and platform.processor() == "aarch64"
+    ):
+        print_box(
+            """
+            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            """
+        )
     if use_prioritized_text == "1" or use_prioritized_text == "True":
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
