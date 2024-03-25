@@ -120,6 +120,8 @@ extern "C" typedef struct NVRTC {
 #define CREATE_MEMBER(name) decltype(&name) name;
   AT_FORALL_NVRTC(CREATE_MEMBER)
 #undef CREATE_MEMBER
+  // Must be at end!
+  decltype(nvrtcCompileProgram) nvrtcCompileProgram_real;
 } NVRTC;
 
 extern "C" TORCH_CUDA_CPP_API NVRTC* load_nvrtc();
