@@ -1208,22 +1208,21 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 m = TestHelperModules.LinearAddModule(inplace_add=inplace_add, linear_pos=linear_pos).eval()
                 if linear_pos != NodePosType.both:
                     node_occurrence = {
-                        # one for input and weight of the linear
-                        # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                        # Only one 1 q-dq for input of the linear
+                        # No q-dq for extra input node of add
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                         # quantize_per_channel for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                     }
                 else:
                     node_occurrence = {
-                        # one for input of the linear
-                        # one for input of another linear
-                        # 2 linear will share same input quant/dequant
-                        # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        # One quantize_per_tensor for both linear nodes (shared)
+                        # Two dequantize_per_tensor for two linear nodes
+                        # No q-dq for extra input node of add
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                         # quantize_per_channel for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
@@ -1268,9 +1267,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         with override_quantized_engine("x86"), torch.no_grad():
             for inplace_add in inplace_add_list:
                 m = TestHelperModules.LinearAddModule2(inplace_add=inplace_add).eval()
+                # Two q-dq nodes for inputs of linear nodes
+                # No q-dq for extra input node of add
                 node_occurrence = {
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
@@ -1321,22 +1322,21 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 ).eval()
                 if linear_pos != NodePosType.both:
                     node_occurrence = {
-                        # one for input for linear
-                        # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                        # Only one q-dq node for input of the linear
+                        # No q-dq node for extra input node of add
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                         # note: quantize op for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                     }
                 else:
                     node_occurrence = {
-                        # one for input of the linear
-                        # one for input of another linear
-                        # 2 linear will share same input quant/dequant
-                        # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        # One quantize_per_tensor for both linear nodes (shared)
+                        # Two dequantize_per_tensor for two linear nodes
+                        # No q-dq for extra input node of add
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                         # note: quantize op for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
@@ -1378,8 +1378,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             example_inputs = (torch.randn(2, 16),)
             quantizer = X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
             node_occurrence = {
-                torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 6,
+                # quantize_per_tensor: 1 for linear_1, 1 for linear_2/3 (shared), 1 for linear_4
+                # dequantize_per_tensor: 1 for each linear
+                # No q-dq for extra input node of add
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
                 # quantize_per_channel for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 4,
