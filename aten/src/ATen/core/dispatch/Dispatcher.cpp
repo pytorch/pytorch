@@ -18,7 +18,7 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 
 bool show_dispatch_trace() {
     static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
-    return temp != nullptr;
+    return temp != nullptr && strcmp(temp, "0") != 0;
 }
 
 static thread_local int64_t dispatch_trace_nesting_value_;
