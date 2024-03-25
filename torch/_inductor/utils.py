@@ -874,14 +874,17 @@ class IndentedBuffer:
     def do_unindent(self, offset=1):
         self._indent -= offset
 
-    def splice(self, other_code, strip=False, line_wrapper=None):
-        def default_line_wrapper(x):
-            return x
+    def splice(self, other_code, strip=False, deferred_line_name=None):
+        def maybe_deferred_line(line):
+            if deferred_line_name is not None and not isinstance(line, LineContext):
+                from torch._inductor.codegen.common import DeferredLine
 
-        if line_wrapper is None:
-            line_wrapper = default_line_wrapper
+                return DeferredLine(deferred_line_name, line)
+            else:
+                return line
+
         if isinstance(other_code, IndentedBuffer):
-            other_code_lines = [line_wrapper(line) for line in other_code._lines]
+            other_code_lines = [maybe_deferred_line(line) for line in other_code._lines]
             dedent = float("inf")
             for line in other_code_lines:
                 if not isinstance(line, LineContext) and line:
@@ -901,7 +904,7 @@ class IndentedBuffer:
                 return
             other_code = other_code.rstrip()
             for line in other_code.split("\n"):
-                self.writeline(line_wrapper(line))
+                self.writeline(maybe_deferred_line(line))
 
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
