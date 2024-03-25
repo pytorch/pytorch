@@ -38,7 +38,6 @@ SLEEF_PUBLIC_HEADERS = [
 SLEEF_PRIVATE_INCLUDES = [
     "-Iexternal/sleef/src/arch",
     "-Iexternal/sleef/src/common",
-    "-Iexternal/sleef/src/libm",
 ]
 
 SLEEF_PUBLIC_INCLUDES = [
@@ -202,6 +201,8 @@ cc_library(
     srcs = [
         "src/libm/rempitab.c",
         "src/libm/sleefdp.c",
+        "src/libm/sleefld.c",
+        "src/libm/sleefqp.c",
         "src/libm/sleefsp.c",
     ],
     hdrs = SLEEF_PUBLIC_HEADERS,
