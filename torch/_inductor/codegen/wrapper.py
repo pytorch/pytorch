@@ -1510,11 +1510,19 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
+
+        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
+
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
+        predicate = conditional.predicate.codegen_reference()
+        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
+            # move the Tensor predicate to host
+            predicate = f"{predicate}.item()"
+
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
+        self.writeline(f"if {predicate}:")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
@@ -1523,11 +1531,44 @@ class WrapperCodeGen(CodeGen):
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
 
+    def codegen_while_loop(self, while_loop):
+        name = while_loop.get_name()
+        outer_inputs = [buf.codegen_reference() for buf in while_loop.operands]
+
+        self.writeline(f"{name} = [None] * {len(while_loop.operands)}")
+        for i, inp in enumerate(outer_inputs):
+            # set the initial state before the loop
+            self.writeline(f"{name}[{i}] = {inp}")
+
+        cond_outer_inputs = [f"{name}[{i}]" for i in range(len(while_loop.operands))]
+        cond_outer_outputs = [f"{name}_cond_result"]
+        body_outer_inputs = list(
+            cond_outer_inputs
+        )  # same inputs for cond_fn and body_fn
+        body_outer_outputs = list(
+            body_outer_inputs
+        )  # carry over the state from body_fn
+
+        self.writeline("while True:")
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(
+            f"if not {cond_outer_outputs[0]}.item(): break"
+        )  # condition doesn't hold
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
+        self.writeline(ExitSubgraphLine(self))
+
     @staticmethod
     def statically_known_int_or_none(x):
         try:
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(x)
+            return int(val)
         except Exception:
             return None
 
