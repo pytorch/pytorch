@@ -1408,6 +1408,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_check_errors",
         "torch._linalg_det",
         "torch._linalg_eigh",
+        "torch._linalg_eigvals",
         "torch._linalg_slogdet",
         "torch._linalg_solve_ex",
         "torch._linalg_svd",
