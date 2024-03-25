@@ -607,7 +607,7 @@ void* RefcountedMapAllocator::data() const {
 }
 
 MapAllocator::~MapAllocator() {
-  close();
+  MapAllocator::close();
   c10::reportMemoryUsageToProfiler(base_ptr_, -size_, 0, 0, c10::Device(c10::DeviceType::CPU));
 }
 

@@ -23,7 +23,11 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_false,
+    rename_unbacked_to,
+    sym_eq,
+)
 from torch.nn.utils import stateless
 
 from .. import config
@@ -487,6 +491,27 @@ def create_functionalized_fn(
                     else:
                         inpt_old.copy_(inpt_new)
 
+            # When an output tensor is a functionalized mutated input, and we
+            # were able to move the mutation in to the graph then we can return
+            # the mutated input directly. This prevents duplicating the
+            # tensors contents.
+            flat_outs, outs_spec = pytree.tree_flatten(f_outs)
+            flat_outs = [from_fun(o) for o in flat_outs]
+            num_outs = len(meta.output_info)
+
+            for i, outp in enumerate(flat_outs[:num_outs]):
+                info = meta.output_info[i]
+                if info.output_type != OutputType.is_input:
+                    continue
+
+                assert info.base_idx is not None
+                if (
+                    meta.input_info[info.base_idx].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
+                ):
+                    flat_outs[i] = args[info.base_idx]
+            return pytree.tree_unflatten(flat_outs, outs_spec)
+
         return pytree.tree_map(from_fun, f_outs)
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
@@ -633,7 +658,7 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
             if isinstance(result, torch.SymInt) and isinstance(
                 result.node.expr, sympy.Symbol
             ):
-                torch._check(result == n.meta["example_value"])
+                rename_unbacked_to(n.meta["example_value"], result)
 
         return result
 

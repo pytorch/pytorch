@@ -212,7 +212,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -242,7 +242,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -260,7 +260,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -280,7 +280,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -302,7 +302,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -326,7 +326,7 @@ class Interpreter:
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -459,7 +459,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
@@ -477,7 +477,7 @@ class Transformer(Interpreter):
 
         Args:
             target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                `Node <https://pytorch.org/docs/main/fx.html#torch.fx.Node>`__ for
                 details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation

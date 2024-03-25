@@ -169,13 +169,11 @@ class DistMathOpsTest(DTensorTestBase):
                 with comm_mode:
                     dist_y = loss_fn(dist_x, dist_target, reduction=reduction)
                     if shard_dim == channel_dim:
-                        # TODO: currently CommDebugMode cannot log communications within
-                        # sharding prop; need to fix it before enabling this check.
-                        # self.assertEqual(comm_mode.get_total_counts(), 1)
-                        # self.assertEqual(
-                        #     comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-                        #     1,
-                        # )
+                        self.assertEqual(comm_mode.get_total_counts(), 1)
+                        self.assertEqual(
+                            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                            1,
+                        )
                         self.assertTrue(dist_y.placements[0].is_replicate())
                         self.assertEqual(dist_y.to_local(), y)
                     else:

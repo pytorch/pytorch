@@ -550,8 +550,6 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     __slots__ = ["elem", "completed"]
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -990,6 +988,18 @@ def reduce_scatter_tensor_inplace(
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+
+
+REDUCE_OP_TO_STR = {
+    dist.ReduceOp.SUM: "sum",
+    dist.ReduceOp.AVG: "avg",
+    dist.ReduceOp.PRODUCT: "product",
+    dist.ReduceOp.MIN: "min",
+    dist.ReduceOp.MAX: "max",
+    dist.ReduceOp.BAND: "band",
+    dist.ReduceOp.BOR: "bor",
+    dist.ReduceOp.BXOR: "bxor",
+}
 
 
 def all_reduce_inplace(

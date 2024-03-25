@@ -144,7 +144,7 @@ class TestStateDictUtils(DTensorTestBase):
             self.assertFalse(_check_state_dict_similarity(state_dict, cpu_state_dict))
             cpu_state_dict["tensor1"] = tensor1
 
-            _offload_state_dict_to_cpu(
+            cpu_state_dict = _offload_state_dict_to_cpu(
                 state_dict, cpu_offload_state_dict=cpu_state_dict, type_check=True
             )
 

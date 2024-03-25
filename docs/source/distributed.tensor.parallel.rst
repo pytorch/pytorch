@@ -35,7 +35,7 @@ Tensor Parallelism supports the following parallel styles:
 
 To simply configure the nn.Module's inputs and outputs with DTensor layouts
 and perform necessary layout redistributions, without distribute the module
-parameters to DTensors, the following ``ParallelStyle``s can be used in
+parameters to DTensors, the following ``ParallelStyle`` s can be used in
 the ``parallelize_plan`` when calling ``parallelize_module``:
 
 .. autoclass:: torch.distributed.tensor.parallel.PrepareModuleInput
@@ -47,7 +47,7 @@ the ``parallelize_plan`` when calling ``parallelize_module``:
   :undoc-members:
 
 .. note:: when using the ``Shard(dim)`` as the input/output layouts for the above
-  ``ParallelStyle``s, we assume the input/output activation tensors are evenly sharded on
+  ``ParallelStyle`` s, we assume the input/output activation tensors are evenly sharded on
   the tensor dimension ``dim`` on the ``DeviceMesh`` that TP operates on. For instance,
   since ``RowwiseParallel`` accepts input that is sharded on the last dimension, it assumes
   the input tensor has already been evenly sharded on the last dimension. For the case of uneven

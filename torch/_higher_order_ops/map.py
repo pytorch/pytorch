@@ -13,8 +13,8 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
     FunctionalTensor,
-    unset_functional_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -65,7 +65,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     # when creating the output node, it fails to associate the wrapped tensor with its proxy.
     # Instead, it will create _tensor_constant as output.
 
-    with suspend_functionalization(), unset_functional_temporarily():
+    with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
 
             def _from_fun(t):
