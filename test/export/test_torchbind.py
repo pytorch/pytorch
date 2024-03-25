@@ -2,6 +2,7 @@
 
 import torch
 import torch.testing._internal.torchbind_impls  # noqa: F401
+import torch.utils._pytree as pytree
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.export._trace import _export
@@ -57,6 +58,15 @@ class TestExportTorchbind(TestCase):
         torch._library.abstract_impl_class.deregister_abstract_impl(
             "_TorchScriptTesting::_TensorQueue"
         )
+
+    def _assertEqualSkipScriptObject(self, exp, actual):
+        flat_exp = pytree.tree_leaves(exp)
+        flat_actual = pytree.tree_leaves(actual)
+        self.assertEqual(len(flat_exp), len(flat_actual))
+        for a, b in zip(flat_exp, flat_actual):
+            if isinstance(a, torch.ScriptObject) and isinstance(b, torch.ScriptObject):
+                continue
+            self.assertEqual(a, b)
 
     def _test_export_same_as_eager(
         self, f, args, kwargs=None, strict=True, pre_dispatch=False
@@ -412,6 +422,11 @@ def forward(self, arg0_1, attr, arg1_1):
                 0,
             ).fill_(-1)
         )
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
         x = torch.ones(2, 3)
         with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
             gm = make_fx(mod, tracing_mode="fake")(tq, x)
@@ -432,6 +447,7 @@ def forward(self, arg0_1, arg1_1):
     return (sub, add, arg0_1)
     """,
             )
+            self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
