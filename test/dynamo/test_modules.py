@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import copy
 import itertools
 import traceback
 import types
@@ -2376,6 +2377,36 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod.eval()
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_setattr_on_compiled_module(self):
+        # https://github.com/pytorch/pytorch/issues/114844
+
+        class ReplayMutation(torch.nn.Module):
+            def __init__(self, inp_size, out_size, inner_size):
+                super().__init__()
+                self.Linear1 = torch.nn.Linear(inp_size, inner_size)
+                self.Linear2 = torch.nn.Linear(inner_size, out_size)
+                self.x = None
+
+            def forward(self, inp):
+                res = self.Linear1(inp)
+                self.x = res
+                return self.Linear2(res)
+
+        N, D_in, H, D_out, inner = 2, 2, 2, 2, 4
+        model = ReplayMutation(D_in, H, inner)
+        model2 = copy.deepcopy(model)
+        input = torch.ones(N, D_in)
+
+        # Keep some intermediate value in model.x
+        model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
+        model(input)
+
+        compiled_model = torch.compile(model2, backend="eager")
+        compiled_model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
+        compiled_model(input)
+
+        self.assertEqual(model.x, compiled_model.x)
 
 
 if __name__ == "__main__":

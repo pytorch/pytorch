@@ -117,6 +117,16 @@ class OptimizedModule(torch.nn.Module):
     _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
+    _opt_mod_attributes = {
+        "_orig_mod",
+        "dynamo_ctx",
+        "_torchdynamo_orig_callable",
+        "get_compiler_config",
+        "forward",
+        "_forward",
+        "__dict__",
+    }
+
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
         # Installs the params/buffer
@@ -155,6 +165,15 @@ class OptimizedModule(torch.nn.Module):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
+
+    def __setattr__(self, name, val):
+        # Allow patching over class attributes
+        if hasattr(type(self), name):
+            return super().__setattr__(name, val)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__setattr__(name, val)
+        return setattr(self._orig_mod, name, val)
 
     def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
