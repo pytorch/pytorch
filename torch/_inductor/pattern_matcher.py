@@ -23,13 +23,12 @@ from typing import (
     List,
     NoReturn,
     Optional,
-    Self,
     Set,
     Tuple,
     Union,
 )
 
-from typing_extensions import TypeGuard
+from typing_extensions import TypeGuard, Self
 
 import torch
 import torch._guards
@@ -238,7 +237,6 @@ class PatternExpr:
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
 
-    @abstractmethod
     def pattern_eq(self, other: Any) -> bool:
         """
         Compare two `PatternExpr`s and return true if they are the
@@ -271,9 +269,6 @@ class Ignored(PatternExpr):
 
     def pretty_print(self, pp: PatternPrettyPrinter):
         return "Ignored()"
-
-    def pattern_eq(self, other: Any) -> bool:
-        return super().pattern_eq(other)
 
 
 class KeywordArg(PatternExpr):
