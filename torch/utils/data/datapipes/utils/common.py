@@ -9,6 +9,7 @@ from io import IOBase
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from torch.utils._import_utils import dill_available
+from torch.testing._internal.common_utils import LazyVal
 
 __all__ = [
     "validate_input_col",
@@ -18,6 +19,10 @@ __all__ = [
     "match_masks",
     "validate_pathname_binary_tuple",
 ]
+
+
+# BC for torchdata
+DILL_AVAILABLE = LazyVal(lambda: dill_available())
 
 
 def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
