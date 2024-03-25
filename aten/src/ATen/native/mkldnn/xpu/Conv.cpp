@@ -408,7 +408,7 @@ Attr get_onednn_conv_sum_attr_(
     mem_fmt = get_cl_tag_by_ndim(ndim);
 
   Tensor out = at::empty(output_size, input_r.options().memory_format(mem_fmt));
-  if (!xpu::onednn::binary_valid(out, accumu)) {
+  if (!onednn::binary_valid(out, accumu)) {
     is_fused = false;
     return attr;
   }
