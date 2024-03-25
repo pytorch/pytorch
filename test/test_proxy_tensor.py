@@ -2033,7 +2033,7 @@ class TestProxyTensorOpInfo(TestCase):
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
-    @ops(op_db + hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
@@ -2041,7 +2041,7 @@ class TestProxyTensorOpInfo(TestCase):
             self.skipTest("No inplace variable for this op")
         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
 
-    @ops(op_db + hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):

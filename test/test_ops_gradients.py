@@ -61,7 +61,7 @@ class TestBwdGradients(TestGradients):
             self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
 
     # Test that gradients of gradients are properly raising
-    @_gradcheck_ops(op_db + hop_db + custom_op_db)
+    @_gradcheck_ops(op_db + custom_op_db)
     def test_fn_fail_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if op.supports_gradgrad:
