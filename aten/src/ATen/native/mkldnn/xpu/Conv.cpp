@@ -791,7 +791,6 @@ Tensor convolution_pointwise(
   Attr att;
   att = construct_unary_attr(attr, scalars, algorithm, att);
   const Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
-  auto dim = input_t.ndimension();
   std::vector<int64_t> output_padding = {0};
 
   return _convolution(
