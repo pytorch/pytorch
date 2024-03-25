@@ -2018,7 +2018,7 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, o
 
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures, list_to_skip_from=op_db + hop_db + custom_op_db)
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 

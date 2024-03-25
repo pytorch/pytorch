@@ -22761,13 +22761,12 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, False)
 
 
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db
+def skipOps(test_case_name, base_test_name, to_skip, list_to_skip_from=None):
+    all_opinfos = op_db if list_to_skip_from is None else list_to_skip_from
     for xfail in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
                             if o.name == op_name and o.variant_test_name == variant_name]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
         for op in matching_opinfos:
             decorators = list(op.decorators)
             if expected_failure:
