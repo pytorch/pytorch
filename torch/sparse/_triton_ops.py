@@ -569,6 +569,14 @@ def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
         if meta is None and sparsity != 0.5:
             meta = get_meta('bsr_dense_addmm', key,
                             device_name, version=(0, dtype, 0.5))
+            if meta is None:
+                # find approximate meta such that N % SPLIT_N == 0.
+                for mkey, meta_ in sorted(get_meta(
+                        'bsr_dense_addmm',
+                        (*key[:2], '*', *key[3:]),
+                        device_name, version=(0, dtype, 0.5)) or {}):
+                    if N % meta_['SPLIT_N'] == 0 and mkey[2] <= N:
+                        meta = meta_
         if meta is not None:
             meta.update(**extra)
             return meta
