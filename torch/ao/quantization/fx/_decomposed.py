@@ -1,9 +1,9 @@
-import torch
-from torch.library import Library, impl
-from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
-from typing import Tuple
-from torch._refs import _unsqueeze_multiple
+from typing import Optional, Tuple
 
+import torch
+from torch._refs import _unsqueeze_multiple
+from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
+from torch.library import impl, Library
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
 # name is not too long
@@ -13,7 +13,7 @@ _DTYPE_TO_QVALUE_BOUNDS = {
     torch.uint8: (0, 255),
     torch.int8: (-128, 127),
     torch.int16: (-(2**15), 2**15 - 1),
-    torch.int32: (-(2**31), 2**31 - 1)
+    torch.int32: (-(2**31), 2**31 - 1),
 }
 
 # Helper to check the passed in quant min and max are valid for the dtype
@@ -58,14 +58,27 @@ def quantize_per_tensor(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
-
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
 
     inv_scale = 1.0 / scale
     return torch.clamp(torch.round(input * inv_scale) + zero_point, quant_min, quant_max).to(dtype)
+
+@impl(quantized_decomposed_lib, "quantize_per_tensor", "Meta")
+def quantize_per_tensor_meta(
+        input: torch.Tensor,
+        scale: float,
+        zero_point: int,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    if input.dtype in [torch.float16, torch.bfloat16]:
+        input = input.to(torch.float32)
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    return torch.empty_like(input, dtype=dtype)
 
 quantized_decomposed_lib.define(
     "quantize_per_tensor.tensor(Tensor input, Tensor scale, Tensor zero_point, "
@@ -90,8 +103,15 @@ def quantize_per_tensor_tensor(
     return quantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
 
 @impl(quantized_decomposed_lib, "quantize_per_tensor.tensor", "Meta")
-def quantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
-    if input.dtype == torch.bfloat16:
+def quantize_per_tensor_tensor_meta(
+        input: torch.Tensor,
+        scale: torch.Tensor,
+        zero_point: torch.Tensor,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
@@ -122,7 +142,14 @@ def quantize_per_tensor_tensor2(
     return quantize_per_tensor(input, scale.item(), zero_point.item(), quant_min.item(), quant_max.item(), dtype)
 
 @impl(quantized_decomposed_lib, "quantize_per_tensor.tensor2", "Meta")
-def quantize_per_tensor_tensor2_meta(input, scale, zero_point, quant_min, quant_max, dtype):
+def quantize_per_tensor_tensor2_meta(
+        input: torch.Tensor,
+        scale: torch.Tensor,
+        zero_point: torch.Tensor,
+        quant_min: torch.Tensor,
+        quant_max: torch.Tensor,
+        dtype: torch.dtype
+) -> torch.Tensor:
     return quantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype)
 
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
@@ -131,7 +158,7 @@ def quantize_per_tensor_tensor2_meta(input, scale, zero_point, quant_min, quant_
 # We will revisit this later if we found there are no use cases for it
 quantized_decomposed_lib.define(
     "dequantize_per_tensor(Tensor input, float scale, int zero_point, "
-    "int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor")
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor", "CompositeExplicitAutograd")
 def dequantize_per_tensor(
@@ -140,7 +167,9 @@ def dequantize_per_tensor(
         zero_point: int,
         quant_min: int,
         quant_max: int,
-        dtype: torch.dtype
+        dtype: torch.dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
     """ Affine dequantization for the Tensor using the same quantization parameters to map
     from quantized values to floating point values
@@ -163,22 +192,40 @@ def dequantize_per_tensor(
        dtype (torch.dtype): dtype for input Tensor (not used in computation,
        reserved for pattern matching)
 
+       out_dtype (torch.dtype?): optional dtype for output Tensor
+
     Returns:
        dequantized float32 Tensor
     """
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
+    if out_dtype is None:
+        out_dtype = torch.float32
     if dtype in _DTYPE_TO_QVALUE_BOUNDS:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale
         # failed the test
-        return (input.to(torch.float32) - zero_point) * scale
+        return (input.to(out_dtype) - zero_point) * scale
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
+@impl(quantized_decomposed_lib, "dequantize_per_tensor", "Meta")
+def dequantize_per_tensor_meta(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None
+) -> torch.Tensor:
+    if out_dtype is None:
+        out_dtype = torch.float32
+    return torch.empty_like(input, dtype=out_dtype)
 
 quantized_decomposed_lib.define(
     "dequantize_per_tensor.tensor(Tensor input, Tensor scale, Tensor zero_point, "
-    "int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor")
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor", "CompositeExplicitAutograd")
 def dequantize_per_tensor_tensor(
@@ -187,7 +234,9 @@ def dequantize_per_tensor_tensor(
         zero_point: torch.Tensor,
         quant_min: int,
         quant_max: int,
-        dtype: torch.dtype
+        dtype: torch.dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
     """ Affine dequantization for the Tensor using the same quantization parameters to map
     from quantized values to floating point values
@@ -196,22 +245,33 @@ def dequantize_per_tensor_tensor(
     """
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
-    return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+    return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype, out_dtype=out_dtype)
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor", "Meta")
-def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
+def dequantize_per_tensor_tensor_meta(
+        input: torch.Tensor,
+        scale: torch.Tensor,
+        zero_point: torch.Tensor,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
+) -> torch.Tensor:
+    if out_dtype is None:
+        out_dtype = torch.float32
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
     if dtype in _DTYPE_TO_QVALUE_BOUNDS:
-        return torch.empty_like(input, dtype=torch.float32)
+        return torch.empty_like(input, dtype=out_dtype)
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
 # TODO: remove other variants and keep this one
 quantized_decomposed_lib.define(
     "dequantize_per_tensor.tensor2(Tensor input, Tensor scale, Tensor zero_point, "
-    "Tensor quant_min, Tensor quant_max, ScalarType dtype) -> Tensor")
+    "Tensor quant_min, Tensor quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor")
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor2", "CompositeExplicitAutograd")
 def dequantize_per_tensor_tensor2(
@@ -220,7 +280,9 @@ def dequantize_per_tensor_tensor2(
         zero_point: torch.Tensor,
         quant_min: torch.Tensor,
         quant_max: torch.Tensor,
-        dtype: torch.dtype
+        dtype: torch.dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
     """ Affine dequantization for the Tensor using the same quantization parameters to map
     from quantized values to floating point values
@@ -229,11 +291,21 @@ def dequantize_per_tensor_tensor2(
     """
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
-    return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min.item(), quant_max.item(), dtype)
+    return dequantize_per_tensor(
+        input, scale.item(), zero_point.item(), quant_min.item(), quant_max.item(), dtype, out_dtype=out_dtype)
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor2", "Meta")
-def dequantize_per_tensor_tensor2_meta(input, scale, zero_point, quant_min, quant_max, dtype):
-    return dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype)
+def dequantize_per_tensor_tensor2_meta(
+        input,
+        scale,
+        zero_point,
+        quant_min,
+        quant_max,
+        dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
+) -> torch.Tensor:
+    return dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, out_dtype=out_dtype)
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
@@ -260,7 +332,11 @@ def choose_qparams_tensor(
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert dtype in _DTYPE_TO_QVALUE_BOUNDS, \
         f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
@@ -295,7 +371,11 @@ def choose_qparams_symmetric_tensor(
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert dtype in _DTYPE_TO_QVALUE_BOUNDS, \
         f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
     validate_qmin_qmax(qmin, qmax)
@@ -320,7 +400,11 @@ def choose_qparams_tensor_meta(
         eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: \
         {quant_min} max: {quant_max}"
     return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(1, dtype=torch.int64, device=input.device)
@@ -374,7 +458,7 @@ def quantize_per_channel(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
@@ -402,7 +486,7 @@ def quantize_per_channel_meta(
         quant_max: int,
         dtype: torch.dtype
 ) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
+    if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
@@ -414,18 +498,20 @@ def quantize_per_channel_meta(
 # matching in the future
 # We will revisit this later if we found there are no use cases for it
 quantized_decomposed_lib.define(
-    "dequantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
-    "int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+    "dequantize_per_channel(Tensor input, Tensor scales, Tensor? zero_points, int axis, "
+    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor")
 
 @impl(quantized_decomposed_lib, "dequantize_per_channel", "CompositeExplicitAutograd")
 def dequantize_per_channel(
         input: torch.Tensor,
         scales: torch.Tensor,
-        zero_points: torch.Tensor,
+        zero_points: Optional[torch.Tensor],
         axis: int,
         quant_min: int,
         quant_max: int,
-        dtype: torch.dtype
+        dtype: torch.dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
     """ Affine per channel dequantization for the Tensor using the same quantization
     parameters for each channel/axis to map from quantized values to floating point values
@@ -450,20 +536,25 @@ def dequantize_per_channel(
        dtype (torch.dtype): requested dtype for output Tensor (not used in computation,
        reserved for pattern matching)
 
+       out_dtype (torch.dtype?): optional dtype for output Tensor
+
     Returns:
        dequantized float32 Tensor
     """
     assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    if out_dtype is None:
+        out_dtype = torch.float32
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    res = torch.zeros_like(input, dtype=torch.float32)
+    res = torch.zeros_like(input, dtype=out_dtype)
 
     for i in range(input.size(0)):
+        zp = zero_points[i] if zero_points is not None else 0
         # TODO: investigate why
-        # (input[i] - zero_points[i]).to(torch.float32) * scales[i]
+        # (input[i] - zero_points[i]).to(out_dtype) * scales[i]
         # failed the test
-        res[i] = (input[i].to(torch.float32) - zero_points[i]) * scales[i]
+        res[i] = (input[i].to(out_dtype) - zp) * scales[i]
 
     out = res.permute(tuple(permute_axis_list))
     return out
@@ -472,16 +563,20 @@ def dequantize_per_channel(
 def dequantize_per_channel_meta(
         input: torch.Tensor,
         scales: torch.Tensor,
-        zero_points: torch.Tensor,
+        zero_points: Optional[torch.Tensor],
         axis: int,
         quant_min: int,
         quant_max: int,
-        dtype: torch.dtype
+        dtype: torch.dtype,
+        *,
+        out_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
     assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    if out_dtype is None:
+        out_dtype = torch.float32
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
-    return torch.empty_like(input, dtype=torch.float32)
+    return torch.empty_like(input, dtype=out_dtype)
 
 quantized_decomposed_lib.define(
     "fake_quant_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
@@ -491,7 +586,7 @@ class FakeQuantPerChannel(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, scales, zero_points, axis, quant_min, quant_max):
         with torch._C._AutoDispatchBelowAutograd():
-            if input.dtype == torch.bfloat16:
+            if input.dtype in [torch.float16, torch.bfloat16]:
                 input = input.to(torch.float32)
             if scales.dtype != torch.float32:
                 scales = scales.to(torch.float32)
