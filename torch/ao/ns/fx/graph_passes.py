@@ -759,7 +759,7 @@ def create_a_shadows_b(
                 continue
 
             fqn_base_a = _maybe_get_fqn(subgraph_a.base_op_node, gm_a)
-            fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)
+            fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)  # type: ignore[possibly-undefined]
 
             if node_b_is_start_node:
 
@@ -817,7 +817,7 @@ def create_a_shadows_b(
                 # cast dtype from the dtype of node_c's input to the dtype of
                 # node_a's input (dequant, etc)
                 # prev_node_c = node_c.args[0]
-                prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
+                prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)  # type: ignore[possibly-undefined]
                 if should_log_inputs:
                     # skip the input logger when inserting a dtype cast
                     if isinstance(prev_node_c, Node):
@@ -901,7 +901,7 @@ def create_a_shadows_b(
                     # input_logger = env_c[dtype_cast_node.name]
                     # Find the first node in the subgraph
                     cur_node = node_a_shadows_c
-                    while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:
+                    while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:  # type: ignore[possibly-undefined]
                         cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
                     if isinstance(input_logger, Node):
                         input_logger_mod = getattr(gm_b, input_logger.name)

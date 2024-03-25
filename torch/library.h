@@ -837,6 +837,9 @@ class TORCH_API Library final {
   template <class CurClass>
   inline detail::ClassNotSelected class_(detail::SelectiveStr<false> className);
 
+  // De-registers all registrations created with this Library
+  void reset();
+
  private:
   Kind kind_;
   c10::optional<std::string> ns_;

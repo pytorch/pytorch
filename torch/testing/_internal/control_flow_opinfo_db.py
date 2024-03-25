@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 import functools
 from torch.testing import make_tensor

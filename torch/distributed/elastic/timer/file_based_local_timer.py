@@ -6,7 +6,6 @@
 
 import io
 import json
-import logging
 import os
 import select
 import signal
@@ -16,10 +15,11 @@ import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
+from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 class FileTimerRequest(TimerRequest):
     """
@@ -212,6 +212,18 @@ class FileTimerServer:
         if os.path.exists(self._file_path):
             os.remove(self._file_path)
 
+    @staticmethod
+    def is_process_running(pid: int):
+        """
+        function to check process is running or not
+        """
+        try:
+            # Check if the process exists and we can send signals to it
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
     def _watchdog_loop(self) -> None:
         # Open the pipe in blocking mode blocks the server thread.
         # This is fine for the following reasons:
@@ -225,8 +237,8 @@ class FileTimerServer:
                     self._run_watchdog(fd)
                     if run_once:
                         break
-                except Exception as e:
-                    log.error("Error running watchdog", exc_info=e)
+                except Exception:
+                    log.exception("Error running watchdog")
 
     def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
         timer_requests = self._get_requests(fd, self._max_interval)
@@ -309,7 +321,7 @@ class FileTimerServer:
 
     def clear_timers(self, worker_pids: Set[int]) -> None:
         for (pid, scope_id) in list(self._timers.keys()):
-            if pid in worker_pids:
+            if pid in worker_pids or not FileTimerServer.is_process_running(pid):
                 del self._timers[(pid, scope_id)]
 
     def get_expired_timers(self, deadline: float) -> Dict[int, List[FileTimerRequest]]:
@@ -328,6 +340,6 @@ class FileTimerServer:
         except ProcessLookupError:
             log.info("Process with pid=%s does not exist. Skipping", worker_pid)
             return True
-        except Exception as e:
-            log.error("Error terminating pid=%s", worker_pid, exc_info=e)
+        except Exception:
+            log.exception("Error terminating pid=%s", worker_pid)
         return False

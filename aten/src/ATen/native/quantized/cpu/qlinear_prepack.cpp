@@ -157,9 +157,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
       " instead");
 
   at::Tensor weight_contig = weight.contiguous();
-  std::vector<uint8_t> w_zero_points;
-  at::Tensor  w_scales;
-  std::tie(w_zero_points, w_scales) =
+  auto [w_zero_points, w_scales] =
       make_zero_points_and_scales_tensor(weight_contig);
 
   at::native::initQNNPACK();
@@ -298,7 +296,7 @@ inline at::Tensor pack_weight_to_onednn_tensor(
   expected_weight.feed_from(wei);
   auto packed_weight = at::native::new_with_itensor_mkldnn(
       std::move(expected_weight),
-      optTypeMetaToScalarType(weight.options().dtype_opt()),
+      c10::optTypeMetaToScalarType(weight.options().dtype_opt()),
       weight.options().device_opt());
   return packed_weight;
 }

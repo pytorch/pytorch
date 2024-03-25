@@ -2,7 +2,7 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import cast, Optional, Callable, Tuple
+from typing import cast, List, Optional, Callable, Tuple
 
 import torch
 from torch import nn, Tensor
@@ -13,7 +13,7 @@ from .parametrization import FakeStructuredSparsity, BiasHook
 # BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
-        bias_hooks = []
+        bias_hooks: List[int] = []
         for key, hook in module._forward_hooks.items():
             if isinstance(hook, BiasHook):
                 bias_hooks.append(key)
@@ -117,7 +117,7 @@ def _prune_linear_helper(linear: nn.Linear) -> Tensor:
 
     with torch.no_grad():
         parametrize.remove_parametrizations(linear, "weight", leave_parametrized=True)
-        linear.weight = nn.Parameter(linear.weight[mask])
+        linear.weight = nn.Parameter(linear.weight[mask])  # type: ignore[possibly-undefined]
     linear.out_features = linear.weight.shape[0]
     _remove_bias_handles(linear)
 
@@ -175,7 +175,7 @@ def _prune_conv2d_helper(conv2d: nn.Conv2d) -> Tensor:
 
     with torch.no_grad():
         parametrize.remove_parametrizations(conv2d, "weight", leave_parametrized=True)
-        conv2d.weight = nn.Parameter(conv2d.weight[mask])
+        conv2d.weight = nn.Parameter(conv2d.weight[mask])  # type: ignore[possibly-undefined]
     conv2d.out_channels = conv2d.weight.shape[0]
 
     _remove_bias_handles(conv2d)
@@ -197,7 +197,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
             conv2d_1.bias is not None
         ):  # conv2d_1 has original bias and bias propagated from previous layer
             new_bias = torch.zeros(conv2d_1.bias.shape)
-            new_bias[mask] = conv2d_1.bias[mask]
+            new_bias[mask] = conv2d_1.bias[mask]  # type: ignore[possibly-undefined]
             # adjusted bias that to keep in conv2d_1
             new_bias[~mask] = cast(Tensor, conv2d_1._bias)[~mask]
             # pruned biases that are kept instead of propagated
@@ -209,7 +209,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
         if (
             conv2d_1.bias is not None
         ):  # conv2d_1 has bias propagated from previous layer
-            conv2d_1.bias.data[~mask] = 0
+            conv2d_1.bias.data[~mask] = 0  # type: ignore[possibly-undefined]
 
     if hasattr(conv2d_1, "_bias"):
         delattr(conv2d_1, "_bias")

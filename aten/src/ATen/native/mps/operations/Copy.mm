@@ -2,9 +2,15 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros_like.h>
 
 namespace at::native {
 namespace mps {
@@ -41,14 +47,21 @@ static void copy_cast_mps(at::Tensor& dst,
   MPSShape* srcShape = getMPSShape(src);
 
   @autoreleasepool {
-    string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
+    const bool needs_conj = src.is_conj() != dst.is_conj();
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}) + ":" + std::to_string(needs_conj);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
-      MPSGraphTensor* inputCastTensor = inputTensor;
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
+      auto outputTensor = inputTensor;
       if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
-        inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+        outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
       }
-      MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
+      if (srcDType != dstDType) {
+        outputTensor = [mpsGraph castTensor:outputTensor toType:dstDType name:@"cast"];
+      }
+      if (needs_conj) {
+        TORCH_CHECK(supportsComplex(), "MPS complex tensors conjugation needs MacOS14+");
+        outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
+      }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -140,8 +153,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
       stream->copy_and_sync(
           tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
-      [destBuffer release];
     }
+    [destBuffer release];
   }
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);
@@ -227,7 +240,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   Tensor src;
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-  const bool sameDataType = src_.dtype() == dst_.dtype();
+  const bool sameDataType = src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj();
 
   if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
       // the copy_cast path requires storage_offset to be applied before casting
@@ -266,7 +279,24 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
     stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
   } else {
-    if (dst_byte_offset) {
+    // Simulate cast to Complex on older MacOS by initializing real and imag parts
+    if (dst_.is_complex() && !supportsComplex()) {
+      if (!src.is_complex()) {
+        at::real(dst_).copy_(src);
+        at::imag(dst_).fill_(0);
+      } else if (src.is_conj() || dst_.is_conj()) {
+        // One cannot take view of conjugated tensor, but for some reason real and imag views are fine
+        // Use this to implement a conjugation
+        at::real(dst_).copy_(at::real(src));
+        if (src.is_conj() != dst_.is_conj()) {
+          at::imag(dst_).copy_(at::neg(at::imag(src)));
+        } else {
+          at::imag(dst_).copy_(at::imag(src));
+        }
+      } else {
+        at::view_as_real(dst_).copy_(at::view_as_real(src));
+      }
+    } else if (dst_byte_offset) {
       auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
       auto tmpBuffer = getMTLBufferStorage(tmp);
       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);

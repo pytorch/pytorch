@@ -13,7 +13,7 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
@@ -46,6 +46,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
@@ -382,4 +383,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(to, other);
 }
 
-}}
+} // namespace at::functorch

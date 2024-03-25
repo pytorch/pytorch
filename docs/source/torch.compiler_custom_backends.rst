@@ -45,7 +45,7 @@ You can register your backend using the ``register_backend`` decorator, for exam
 
 .. code-block:: python
 
-    from torch._dynamo.optimizations import register_backend
+    from torch._dynamo import register_backend
 
     @register_backend
     def my_compiler(gm, example_inputs):
@@ -84,7 +84,7 @@ Registration serves two purposes:
 
 * You can pass a string containing your backend function's name to ``torch.compile`` instead of the function itself,
   for example, ``torch.compile(model, backend="my_compiler")``.
-* It is required for use with the `minifier <https://pytorch.org/docs/main/compile/troubleshooting.html>`__. Any generated
+* It is required for use with the `minifier <https://pytorch.org/docs/main/torch.compiler_troubleshooting.html>`__. Any generated
   code from the minifier must call your code that registers your backend function, typically through an ``import`` statement.
 
 Custom Backends after AOTAutograd
@@ -98,7 +98,7 @@ This is useful for 2 main reasons:
   custom backends only need to support the canonical Aten opset, which is a significantly smaller opset than the entire torch/Aten opset.
 
 Wrap your backend with
-``torch._dynamo.optimizations.training.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.
+``torch._dynamo.backends.common.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.
 Backend functions wrapped by ``aot_autograd`` should have the same contract as before.
 
 Backend functions are passed to ``aot_autograd`` through the ``fw_compiler`` (forward compiler)
@@ -112,7 +112,7 @@ For example,
 
 .. code-block:: python
 
-    from torch._dynamo.optimizations.training import aot_autograd
+    from torch._dynamo.backends.common import aot_autograd
     from functorch.compile import make_boxed_func
 
     def my_compiler(gm, example_inputs):
@@ -138,107 +138,107 @@ For example:
 
 .. code-block:: python
 
-   from typing import List
-   import torch
-   def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-       print("my_compiler() called with FX graph:")
-       gm.graph.print_tabular()
-       return gm.forward  # return a python callable
-   @torch.compile(backend=my_compiler)
-   def fn(x, y):
-       a = torch.cos(x)
-       b = torch.sin(y)
-       return a + b
-   fn(torch.randn(10), torch.randn(10))
+    from typing import List
+    import torch
+    def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        print("my_compiler() called with FX graph:")
+        gm.graph.print_tabular()
+        return gm.forward  # return a python callable
+    @torch.compile(backend=my_compiler)
+    def fn(x, y):
+        a = torch.cos(x)
+        b = torch.sin(y)
+        return a + b
+    fn(torch.randn(10), torch.randn(10))
 
 Running the above example produces the following output:
 
 ::
 
-   my_compiler() called with FX graph:
-   opcode         name    target                                                  args        kwargs
-   -------------  ------  ------------------------------------------------------  ----------  --------
-   placeholder    x       x                                                       ()          {}
-   placeholder    y       y                                                       ()          {}
-   call_function  cos     <built-in method cos of type object at 0x7f1a894649a8>  (x,)        {}
-   call_function  sin     <built-in method sin of type object at 0x7f1a894649a8>  (y,)        {}
-   call_function  add     <built-in function add>                                 (cos, sin)  {}
-   output         output  output                                                  ((add,),)   {}
+    my_compiler() called with FX graph:
+    opcode         name    target                                                  args        kwargs
+    -------------  ------  ------------------------------------------------------  ----------  --------
+    placeholder    x       x                                                       ()          {}
+    placeholder    y       y                                                       ()          {}
+    call_function  cos     <built-in method cos of type object at 0x7f1a894649a8>  (x,)        {}
+    call_function  sin     <built-in method sin of type object at 0x7f1a894649a8>  (y,)        {}
+    call_function  add     <built-in function add>                                 (cos, sin)  {}
+    output         output  output                                                  ((add,),)   {}
 
 This works for ``torch.nn.Module`` as well as shown below:
 
 .. code-block:: python
 
-   from typing import List
-   import torch
-   def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-       print("my_compiler() called with FX graph:")
-       gm.graph.print_tabular()
-       return gm.forward  # return a python callable
-   class MockModule(torch.nn.Module):
-       def __init__(self):
-           super().__init__()
-           self.relu = torch.nn.ReLU()
-       def forward(self, x):
-           return self.relu(torch.cos(x))
-   mod = MockModule()
-   optimized_mod = torch.compile(mod, backend=my_compiler)
-   optimized_mod(torch.randn(10))
+    from typing import List
+    import torch
+    def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        print("my_compiler() called with FX graph:")
+        gm.graph.print_tabular()
+        return gm.forward  # return a python callable
+    class MockModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.relu = torch.nn.ReLU()
+        def forward(self, x):
+            return self.relu(torch.cos(x))
+    mod = MockModule()
+    optimized_mod = torch.compile(mod, backend=my_compiler)
+    optimized_mod(torch.randn(10))
 
 Let’s take a look at one more example with control flow:
 
 .. code-block:: python
 
-   from typing import List
-   import torch
-   def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-       print("my_compiler() called with FX graph:")
-       gm.graph.print_tabular()
-       return gm.forward  # return a python callable
-   @torch.compile(backend=my_compiler)
-   def toy_example(a, b):
-       x = a / (torch.abs(a) + 1)
-       if b.sum() < 0:
-           b = b * -1
-       return x * b
-   for _ in range(100):
-       toy_example(torch.randn(10), torch.randn(10))
+    from typing import List
+    import torch
+    def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        print("my_compiler() called with FX graph:")
+        gm.graph.print_tabular()
+        return gm.forward  # return a python callable
+    @torch.compile(backend=my_compiler)
+    def toy_example(a, b):
+        x = a / (torch.abs(a) + 1)
+        if b.sum() < 0:
+            b = b * -1
+        return x * b
+    for _ in range(100):
+        toy_example(torch.randn(10), torch.randn(10))
 
 Running this example produces the following output:
 
 ::
 
-   my_compiler() called with FX graph:
-   opcode         name     target                                                  args              kwargs
-   -------------  -------  ------------------------------------------------------  ----------------  --------
-   placeholder    a        a                                                       ()                {}
-   placeholder    b        b                                                       ()                {}
-   call_function  abs_1    <built-in method abs of type object at 0x7f8d259298a0>  (a,)              {}
-   call_function  add      <built-in function add>                                 (abs_1, 1)        {}
-   call_function  truediv  <built-in function truediv>                             (a, add)          {}
-   call_method    sum_1    sum                                                     (b,)              {}
-   call_function  lt       <built-in function lt>                                  (sum_1, 0)        {}
-   output         output   output                                                  ((truediv, lt),)  {}
+    my_compiler() called with FX graph:
+    opcode         name     target                                                  args              kwargs
+    -------------  -------  ------------------------------------------------------  ----------------  --------
+    placeholder    a        a                                                       ()                {}
+    placeholder    b        b                                                       ()                {}
+    call_function  abs_1    <built-in method abs of type object at 0x7f8d259298a0>  (a,)              {}
+    call_function  add      <built-in function add>                                 (abs_1, 1)        {}
+    call_function  truediv  <built-in function truediv>                             (a, add)          {}
+    call_method    sum_1    sum                                                     (b,)              {}
+    call_function  lt       <built-in function lt>                                  (sum_1, 0)        {}
+    output         output   output                                                  ((truediv, lt),)  {}
 
-   my_compiler() called with FX graph:
-   opcode         name    target                   args         kwargs
-   -------------  ------  -----------------------  -----------  --------
-   placeholder    b       b                        ()           {}
-   placeholder    x       x                        ()           {}
-   call_function  mul     <built-in function mul>  (b, -1)      {}
-   call_function  mul_1   <built-in function mul>  (x, mul)     {}
-   output         output  output                   ((mul_1,),)  {}
+    my_compiler() called with FX graph:
+    opcode         name    target                   args         kwargs
+    -------------  ------  -----------------------  -----------  --------
+    placeholder    b       b                        ()           {}
+    placeholder    x       x                        ()           {}
+    call_function  mul     <built-in function mul>  (b, -1)      {}
+    call_function  mul_1   <built-in function mul>  (x, mul)     {}
+    output         output  output                   ((mul_1,),)  {}
 
-   my_compiler() called with FX graph:
-   opcode         name    target                   args       kwargs
-   -------------  ------  -----------------------  ---------  --------
-   placeholder    b       b                        ()         {}
-   placeholder    x       x                        ()         {}
-   call_function  mul     <built-in function mul>  (x, b)     {}
-   output         output  output                   ((mul,),)  {}
+    my_compiler() called with FX graph:
+    opcode         name    target                   args       kwargs
+    -------------  ------  -----------------------  ---------  --------
+    placeholder    b       b                        ()         {}
+    placeholder    x       x                        ()         {}
+    call_function  mul     <built-in function mul>  (x, b)     {}
+    output         output  output                   ((mul,),)  {}
 
-The order of the last two graphs is nondeterministic depending
-on which one is encountered first by the just-in-time compiler.
+    The order of the last two graphs is nondeterministic depending
+    on which one is encountered first by the just-in-time compiler.
 
 Speedy Backend
 ^^^^^^^^^^^^^^
@@ -249,39 +249,38 @@ with `optimize_for_inference <https://pytorch.org/docs/stable/generated/torch.ji
 
 .. code-block:: python
 
-   def optimize_for_inference_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-       scripted = torch.jit.script(gm)
-       return torch.jit.optimize_for_inference(scripted)
+    def optimize_for_inference_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        scripted = torch.jit.script(gm)
+        return torch.jit.optimize_for_inference(scripted)
 
 And then you should be able to optimize any existing code with:
 
 .. code-block:: python
 
-   @torch.compile(backend=optimize_for_inference_compiler)
-   def code_to_accelerate():
-       ...
+    @torch.compile(backend=optimize_for_inference_compiler)
+    def code_to_accelerate():
+        ...
 
 Composable Backends
 ^^^^^^^^^^^^^^^^^^^
 
-TorchDynamo includes many backends, which can be found in
-`backends.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/optimizations/backends.py>`__
-or ``torch._dynamo.list_backends()``. You can combine these backends
+TorchDynamo includes many backends, which can be listed with
+``torch._dynamo.list_backends()``. You can combine these backends
 together with the following code:
 
 .. code-block:: python
 
-   from torch._dynamo.optimizations import BACKENDS
+    from torch._dynamo import lookup_backend
     def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         try:
-            trt_compiled = BACKENDS["tensorrt"](gm, example_inputs)
+            trt_compiled = lookup_backend("tensorrt")(gm, example_inputs)
             if trt_compiled is not None:
                 return trt_compiled
         except Exception:
             pass
         # first backend failed, try something else...
         try:
-            inductor_compiled = BACKENDS["inductor"](gm, example_inputs)
+            inductor_compiled = lookup_backend("inductor")(gm, example_inputs)
             if inductor_compiled is not None:
                 return inductor_compiled
         except Exception:

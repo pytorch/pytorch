@@ -3,6 +3,9 @@
 #include <ATen/core/boxing/impl/WrapFunctionIntoFunctor.h>
 #include <ATen/core/boxing/impl/WrapFunctionIntoRuntimeFunctor.h>
 
+#include <c10/util/C++17.h>
+#include <type_traits>
+
 namespace c10 {
 
 inline KernelFunction::KernelFunction()
@@ -59,7 +62,7 @@ inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
 
 template <>
 inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
-  return x.expect_int();
+  return x.guard_int(__FILE__, __LINE__);
 }
 
 template <>
@@ -69,7 +72,7 @@ inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIn
 
 template <>
 inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10::optional<c10::SymInt> x) {
-  return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
+  return x.has_value() ? c10::make_optional(x->guard_int(__FILE__, __LINE__)) : c10::nullopt;
 }
 
 template <>
@@ -83,8 +86,7 @@ C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, Di
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
-    // This should get inlined by compiler
-    if (guts::disjunction<has_symint<Args>...>::value) {
+    if constexpr (std::disjunction_v<has_symint<Args>...>) {
       if (sym_unboxed_kernel_func_ != nullptr) {
         auto *functor = boxed_kernel_func_.getFunctor();
         return callUnboxedKernelFunction<Return, Args...>(

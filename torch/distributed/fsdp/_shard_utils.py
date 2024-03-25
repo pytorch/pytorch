@@ -99,8 +99,9 @@ def _create_chunk_dtensor(
     shard_placements = [Replicate() for _ in range(device_mesh.ndim)]
     shard_placements[-1] = DShard(0)  # type: ignore[call-overload]
 
-    return DTensor.from_local(tensor, device_mesh, replicate_placements).redistribute(
-        device_mesh=device_mesh,
+    return DTensor.from_local(
+        tensor, device_mesh, replicate_placements, run_check=False
+    ).redistribute(
         placements=shard_placements,
     )
 

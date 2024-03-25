@@ -16,6 +16,7 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
     def setUp(self):
         torch._C._activate_cuda_trace()
@@ -73,7 +74,14 @@ class TestCudaTrace(TestCase):
     def test_stream_creation_callback(self):
         cuda_trace.register_callback_for_cuda_stream_creation(self.mock)
 
-        torch.cuda.Stream()
+        # see Note [HIP Lazy Streams]
+        if torch.version.hip:
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                tensor = torch.ones(5, device="cuda")
+        else:
+            torch.cuda.Stream()
+
         self.mock.assert_called()
 
     def test_device_synchronization_callback(self):

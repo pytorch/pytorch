@@ -365,7 +365,7 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     Apply a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}`
     non-linearity to an input sequence. For each element in the input sequence,
@@ -378,6 +378,33 @@ class RNN(RNNBase):
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
     previous layer at time `t-1` or the initial hidden state at time `0`.
     If :attr:`nonlinearity` is ``'relu'``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.
+
+    .. code-block:: python
+
+        # Efficient implementation equivalent to the following with bidirectional=False
+        def forward(x, h_0=None):
+            if batch_first:
+                x = x.transpose(0, 1)
+            seq_len, batch_size, _ = x.size()
+            if h_0 is None:
+                h_0 = torch.zeros(num_layers, batch_size, hidden_size)
+            h_t_minus_1 = h_0
+            h_t = h_0
+            output = []
+            for t in range(seq_len):
+                for layer in range(num_layers):
+                    h_t[layer] = torch.tanh(
+                        x[t] @ weight_ih[layer].T
+                        + bias_ih[layer]
+                        + h_t_minus_1[layer] @ weight_hh[layer].T
+                        + bias_hh[layer]
+                    )
+                output.append(h_t[-1])
+                h_t_minus_1 = h_t
+            output = torch.stack(output)
+            if batch_first:
+                output = output.transpose(0, 1)
+            return output, h_t
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -480,7 +507,11 @@ class RNN(RNNBase):
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+        if len(args) > 3:
+            self.nonlinearity = args[3]
+            args = args[:3] + args[4:]
+        else:
+            self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
@@ -575,8 +606,8 @@ class RNN(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
 
-        if not is_batched:
-            output = output.squeeze(batch_dim)
+        if not is_batched:  # type: ignore[possibly-undefined]
+            output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
             hidden = hidden.squeeze(1)
 
         return output, self.permute_hidden(hidden, unsorted_indices)
@@ -596,7 +627,7 @@ class RNN(RNNBase):
 
 
 class LSTM(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
 
     Apply a multi-layer long short-term memory (LSTM) RNN to an input sequence.
     For each element in the input sequence, each layer computes the following
@@ -857,6 +888,7 @@ class LSTM(RNNBase):
                                       max_batch_size, self.hidden_size,
                                       dtype=input.dtype, device=input.device)
                 hx = (h_zeros, c_zeros)
+                self.check_forward_args(input, hx, batch_sizes)
             else:
                 if is_batched:
                     if (hx[0].dim() != 3 or hx[1].dim() != 3):
@@ -887,14 +919,14 @@ class LSTM(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = (hidden[0].squeeze(1), hidden[1].squeeze(1))
             return output, self.permute_hidden(hidden, unsorted_indices)
 
 
 class GRU(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     Apply a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
     For each element in the input sequence, each layer computes the following
@@ -1110,8 +1142,8 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = hidden.squeeze(1)
 
             return output, self.permute_hidden(hidden, unsorted_indices)

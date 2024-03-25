@@ -50,7 +50,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
         if (C10_UNLIKELY(interp)) {
           (*interp)->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(event_));
         }
-        cudaEventDestroy(event_);
+        AT_CUDA_CHECK(cudaEventDestroy(event_));
       }
     } catch (...) { /* No throw */ }
   }
@@ -151,6 +151,10 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     TORCH_CHECK(is_created_ && other.isCreated(),
       "Both events must be recorded before calculating elapsed time.");
     float time_ms = 0;
+    // We do not strictly have to set the device index to the same as our event,
+    // but if we don't and the current device is not initialized, it will
+    // create a new cuda context, which will consume a lot of memory.
+    CUDAGuard guard(device_index_);
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
     return time_ms;

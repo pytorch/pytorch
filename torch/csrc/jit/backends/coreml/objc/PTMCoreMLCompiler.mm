@@ -11,7 +11,7 @@ static NSString *gCompiledModelExtension = @"mlmodelc";
 static NSString *gVersionExtension = @"version";
 
 + (void)setCacheDirectory:(const std::string&)dir {
-  gCacheDirectory = [NSString stringWithCString:dir.c_str()];
+  gCacheDirectory = [NSString stringWithCString:dir.c_str() encoding:NSUTF8StringEncoding];
 }
 
 + (nonnull NSString *)cacheDirectory {

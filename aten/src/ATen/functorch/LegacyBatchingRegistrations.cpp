@@ -19,8 +19,7 @@
 
 #include <utility>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 
 // NOTE: [What is a batching rule?]
@@ -255,6 +254,18 @@ std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, SymIntArr
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = split_with_sizes_symint(self_physical.tensor(), split_sizes, dim_physical);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
+  return result;
+}
+
+std::vector<Tensor> split_with_sizes_copy_batching_rule(const Tensor& self, SymIntArrayRef split_sizes, int64_t dim) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    return split_with_sizes_copy_symint(self, split_sizes, dim);
+  }
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = split_with_sizes_copy_symint(self_physical.tensor(), split_sizes, dim_physical);
   self_physical.getPhysicalToLogicalMap().applyInplace(result);
   return result;
 }
@@ -725,6 +736,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c teturns multiple tensors
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("split_with_sizes_copy", split_with_sizes_copy_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("cat", cat_batching_rule);
   m.impl("block_diag", block_diag_batching_rule);
@@ -751,5 +763,5 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
   m.impl("cat", nested_cat_batching_rule);
 }
-} // namespace functorch
-} // namespace at
+
+} // namespace at::functorch

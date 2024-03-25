@@ -1,9 +1,9 @@
 #pragma once
 
-#include <c10/util/C++17.h>
+#include <functional>
+#include <type_traits>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 /**
  * is_equality_comparable<T> is true_type iff the equality operator is defined
@@ -14,7 +14,7 @@ struct is_equality_comparable : std::false_type {};
 template <class T>
 struct is_equality_comparable<
     T,
-    void_t<decltype(std::declval<T&>() == std::declval<T&>())>>
+    std::void_t<decltype(std::declval<T&>() == std::declval<T&>())>>
     : std::true_type {};
 template <class T>
 using is_equality_comparable_t = typename is_equality_comparable<T>::type;
@@ -25,7 +25,7 @@ using is_equality_comparable_t = typename is_equality_comparable<T>::type;
 template <class T, class Enable = void>
 struct is_hashable : std::false_type {};
 template <class T>
-struct is_hashable<T, void_t<decltype(std::hash<T>()(std::declval<T&>()))>>
+struct is_hashable<T, std::void_t<decltype(std::hash<T>()(std::declval<T&>()))>>
     : std::true_type {};
 template <class T>
 using is_hashable_t = typename is_hashable<T>::type;
@@ -101,7 +101,7 @@ namespace detail {
 template <class LambdaType, class FuncType>
 struct is_stateless_lambda__ final {
   static_assert(
-      !std::is_same<LambdaType, LambdaType>::value,
+      !std::is_same_v<LambdaType, LambdaType>,
       "Base case shouldn't be hit");
 };
 // implementation idea: According to the C++ standard, stateless lambdas are
@@ -137,7 +137,7 @@ template <template <class> class C>
 struct is_type_condition<
     C,
     std::enable_if_t<
-        std::is_same<bool, std::remove_cv_t<decltype(C<int>::value)>>::value>>
+        std::is_same_v<bool, std::remove_cv_t<decltype(C<int>::value)>>>>
     : std::true_type {};
 
 /**
@@ -148,5 +148,4 @@ struct is_type_condition<
  */
 template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

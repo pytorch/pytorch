@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import torch
-
 from typing import (
     Callable,
+    cast,
     Collection,
     List,
     Mapping,
@@ -11,13 +10,12 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
 )
-from torch.distributed.checkpoint.metadata import (
-    STATE_DICT_TYPE,
-)
+
+import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 PATH_ITEM = Union[str, int]
 OBJ_PATH = Tuple[PATH_ITEM, ...]
@@ -47,6 +45,7 @@ def traverse_state_dict(
     By default, all collections with at least one ``torch.Tensor`` element are traversed.
     Visitor takes a path argument that is a tuple of the keys used to reach it.
     """
+
     # a value is terminal if it has no other containers values inside it
     def _is_terminal(value: STATE_DICT_ITEM) -> bool:
         values: Collection[STATE_DICT_ITEM]

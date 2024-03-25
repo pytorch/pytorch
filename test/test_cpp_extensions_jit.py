@@ -40,6 +40,7 @@ def remove_build_path():
 
 
 # There's only one test that runs gracheck, run slow mode manually
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -228,16 +229,28 @@ class TestCppExtensionJIT(common.TestCase):
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Volta": (['70'], ['70']),
         }
-        if int(torch.version.cuda.split('.')[0]) >= 10:
-            # CUDA 9 only supports compute capability <= 7.2
-            archflags["7.5+PTX"] = (['75'], ['75'])
-            archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        archflags["7.5+PTX"] = (['75'], ['75'])
+        archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
         if int(torch.version.cuda.split('.')[0]) < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (['35', '60', '61'], None)
 
         for flags, expected in archflags.items():
-            self._run_jit_cuda_archflags(flags, expected)
+            try:
+                self._run_jit_cuda_archflags(flags, expected)
+            except RuntimeError as e:
+                # Using the device default (empty flags) may fail if the device is newer than the CUDA compiler
+                # This raises a RuntimeError with a specific message which we explicitly ignore here
+                if not flags and "Error building" in str(e):
+                    pass
+                else:
+                    raise
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError:
+                # Ignore any error, e.g. unsupported PTX code on current device
+                # to avoid errors from here leaking into other tests
+                pass
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")

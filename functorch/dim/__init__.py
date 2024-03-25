@@ -24,7 +24,7 @@ class DimensionBindError(Exception):
 from . import op_properties
 
 # use dict to avoid writing C++ bindings for set
-pointwise = {t: True for t in op_properties.pointwise}
+pointwise = dict.fromkeys(op_properties.pointwise, True)
 
 use_c = True
 if not use_c:

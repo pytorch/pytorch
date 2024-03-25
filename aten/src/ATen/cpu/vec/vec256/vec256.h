@@ -143,6 +143,24 @@ inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
   return _mm256_cvttps_epi32(src);
 }
 
+// Only works for inputs in the range: [-2^51, 2^51]
+// From: https://stackoverflow.com/a/41148578
+template<>
+Vectorized<double>
+inline convert_to_fp_of_same_size<double>(const Vectorized<int64_t> &src) {
+  auto x = _mm256_add_epi64(src, _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+  return _mm256_sub_pd(
+    _mm256_castsi256_pd(x),
+    _mm256_set1_pd(0x0018000000000000)
+  );
+}
+
+template<>
+Vectorized<float>
+inline convert_to_fp_of_same_size<float>(const Vectorized<int32_t> &src) {
+  return _mm256_cvtepi32_ps(src);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>

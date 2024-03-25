@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import itertools
 import linecache
@@ -157,7 +158,7 @@ class _CodeOnlyModule(torch.nn.Module):
         self.__dict__ = body
 
 
-def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
+def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=None) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -194,7 +195,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
-    gm = GraphModule(com, graph, class_name=graphmodule_cls_name)
+    from ._lazy_graph_module import _make_graph_module
+    gm = _make_graph_module(com, graph, class_name=graphmodule_cls_name, graph_module_cls=graph_module_cls)
 
     # The GraphModule constructor only retains attributes referenced by the graph.
     # In this case, our goal is return a GraphModule as close to identical as the one
@@ -313,7 +315,6 @@ class _WrappedCall:
                 raise e.with_traceback(None)  # noqa: TRY200
             else:
                 raise e
-
 
 @compatibility(is_backward_compatible=True)
 class GraphModule(torch.nn.Module):
@@ -443,6 +444,7 @@ class GraphModule(torch.nn.Module):
 
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
+        self._replace_hook = None
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -669,8 +671,7 @@ class {module_name}(torch.nn.Module):
                 # modules. For example, if we have the target
                 # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
                 # `foo.bar.baz` to the list.
-                for path in itertools.accumulate(fullpath, join_fn):
-                    used.append(path)
+                used.extend(itertools.accumulate(fullpath, join_fn))
 
                 # For a `call_module` node, also register all recursive submodules
                 # as used
@@ -774,10 +775,14 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph["_graph"]
         return (reduce_graph_module, (dict_without_graph, import_block))
+
+    def _deepcopy_init(self):
+        return GraphModule.__init__
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__
@@ -785,9 +790,8 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo):
         res = type(self).__new__(type(self))
         memo[id(self)] = res
-        fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
-        GraphModule.__init__(res, fake_mod, fake_mod.__dict__["_graph"])
+        fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
+        self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over
         # them explicitly, note right now we are only copying state_dict related
         # hooks, to reduce bc-related issues, we can copy forward/backward related
@@ -796,6 +800,7 @@ class {module_name}(torch.nn.Module):
             "_state_dict_hooks",
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
+            "_replace_hook",
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -807,7 +812,8 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        res = GraphModule(self, self.graph)
+        from ._lazy_graph_module import _make_graph_module
+        res = _make_graph_module(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
 
@@ -845,6 +851,21 @@ class {module_name}(torch.nn.Module):
         new_gm = self.__copy__()
         new_gm._is_replica = True
         return new_gm
+
+    @contextlib.contextmanager
+    def _set_replace_hook(self, f):
+        """
+        Takes a callable which will be called everytime when we replace a node
+        to a new node, or change the node's name. Callable takes three arguments:
+        the old node we're changing, and NAME of the new node, followed by the
+        user node which consumes the old node to be replaced.
+        """
+        assert callable(f), "Replace hook must be a callable."
+        prev, self._replace_hook = self._replace_hook, f
+        try:
+            yield
+        finally:
+            self._replace_hook = prev
 
 
 # workarounds for issues in __torch_function__

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from torch import Tensor
 import itertools
@@ -115,7 +117,6 @@ def generate_cct_and_mode(autograd_view_consistency=True):
         elem: torch.Tensor
 
         __slots__ = ['elem']
-        __torch_function__ = torch._C._disabled_torch_function_impl
 
         @staticmethod
         def __new__(cls, elem, mode, *args, **kwargs):
@@ -159,7 +160,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            all_args = pytree.arg_tree_leaves(*args, **kwargs or {})
+            all_args = pytree.arg_tree_leaves(*args, **(kwargs or {}))
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")

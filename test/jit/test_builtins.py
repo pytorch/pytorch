@@ -90,7 +90,7 @@ class TestBuiltins(JitTestCase):
             def fn(x):
                 a = x ** 2
                 del a
-                return a
+                return a  # noqa: F821
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
@@ -104,7 +104,7 @@ class TestBuiltins(JitTestCase):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
-                del b
+                del b  # noqa: F821
                 return a
 
     def test_del_multiple_operands(self):
