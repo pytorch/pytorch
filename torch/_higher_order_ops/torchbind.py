@@ -67,7 +67,7 @@ def inner(mode, *args, **kwargs):
             proxy_args,
             proxy_kwargs,
         )
-        out = call_torchbind_impl(*args, **kwargs)
+        out = call_torchbind(*args, **kwargs)
 
         return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     else:
