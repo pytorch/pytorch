@@ -12,13 +12,13 @@ import torch.utils.cpp_extension
 from torch._C import FileCheck
 
 try:
-    from extension_backends.extension_codegen_backend import (
+    from extension_backends.cpp.extension_codegen_backend import (
         ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
 except ImportError:
-    from .extension_backends.extension_codegen_backend import (
+    from .extension_backends.cpp.extension_codegen_backend import (
         ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
@@ -60,7 +60,7 @@ class ExtensionBackendTests(TestCase):
         # Build Extension
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
-            source_file_path, "extension_backends/extension_device.cpp"
+            source_file_path, "extension_backends/cpp/extension_device.cpp"
         )
 
         extension_cache_dir = os.path.join(codecache.cache_dir(), "cpp_extension")
