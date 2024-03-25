@@ -1,0 +1,80 @@
+name: target-determination
+
+on:
+  workflow_call:
+
+jobs:
+  target-determination:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.2xlarge
+    steps:
+      # [pytorch repo ref]
+      # Use a pytorch/pytorch reference instead of a reference to the local
+      # checkout because when we run this action we don't *have* a local
+      # checkout. In other cases you should prefer a local checkout.
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}
+
+      - name: Download LLM Artifacts from S3
+        uses: seemethere/download-artifact-s3@v4
+        continue-on-error: true
+        with:
+          name: llm_results
+          path: .additional_ci_files/llm_results
+
+      - name: Do TD
+        id: td
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
+          python3 -m pip install boto3==1.19.12
+          python3 tools/testing/do_target_determination_for_s3.py
+
+      - name: Upload TD results to s3
+        uses: seemethere/upload-artifact-s3@v5
+        if: steps.td.outcome == 'success'
+        with:
+          name: td_results
+          retention-days: 14
+          if-no-files-found: error
+          path: td_results.json
+
+      - name: Store TD results on GHA
+        uses: actions/upload-artifact@v3
+        if: steps.td.outcome == 'success'
+        with:
+          name: td_results.json
+          retention-days: 14
+          if-no-files-found: error
+          path: td_results.json
