@@ -16,6 +16,47 @@ from torch.testing._internal.common_utils import (
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
+    def setUp(self):
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_concrete(cls, foo):
+                (x, y), _ = foo.__getstate__()
+                return cls(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
+
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, q):
+                self.queue = q
+
+            @classmethod
+            def from_concrete(cls, real_tq):
+                return cls(real_tq.clone_queue())
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+    def tearDown(self):
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_Foo"
+        )
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_TensorQueue"
+        )
+
     def _test_export_same_as_eager(
         self, f, args, kwargs=None, strict=True, pre_dispatch=False
     ):
@@ -350,6 +391,68 @@ def forward(self, arg0_1, attr, arg1_1):
     add_1 = torch.ops.aten.add.Tensor(arg1_1, getitem_4);  arg1_1 = getitem_4 = None
     return (getitem_3, add_1)""",  # noqa: B950
         )
+
+
+@skipIfTorchDynamo("torchbind not supported with dynamo yet")
+class TestImplAbstractClass(TestCase):
+    def tearDown(self):
+        torch._library.abstract_impl_class.global_abstract_class_registry.clear()
+
+    def test_impl_abstract_class_no_torch_bind_class(self):
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate class"):
+
+            @torch._library.impl_abstract_class("_TorchScriptTesting::NOT_A_VALID_NAME")
+            class Invalid:
+                pass
+
+    def test_impl_abstract_class_no_from_concrete(self):
+        with self.assertRaisesRegex(RuntimeError, "define a classmethod from_concrete"):
+
+            @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+            class InvalidFakeFoo:
+                def __init__(self):
+                    pass
+
+    def test_impl_abstract_class_from_concrete_not_classmethod(self):
+        with self.assertRaisesRegex(RuntimeError, "is not a classmethod"):
+
+            @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+            class FakeFoo:
+                def __init__(self, x, y):
+                    self.x = x
+                    self.y = y
+
+                def from_concrete(self, foo_obj):
+                    x, y = foo_obj.__getstate__()
+                    return FakeFoo(x, y)
+
+    def test_impl_abstract_class_valid(self):
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_concrete(cls, foo_obj):
+                x, y = foo_obj.__getstate__()
+                return cls(x, y)
+
+        torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
+
+    def test_impl_abstract_class_duplicate_registration(self):
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_concrete(cls, foo_obj):
+                x, y = foo_obj.__getstate__()
+                return cls(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, "already registered"):
+            torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
 
 
 instantiate_parametrized_tests(TestExportTorchbind)
