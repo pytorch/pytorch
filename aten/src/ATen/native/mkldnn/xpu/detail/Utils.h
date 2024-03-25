@@ -396,4 +396,3 @@ static inline std::vector<int64_t> compatible_groups_deconv_strides(
 }
 
 } // namespace at::native::onednn
-
