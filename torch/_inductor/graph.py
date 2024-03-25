@@ -20,8 +20,12 @@ from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
-
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_symbols,
+    ShapeEnv,
+    SymTypes,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -1058,9 +1062,10 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if not unbacked_symbols_in_strides and dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
                     if (
                         len(result.get_size()) == 4
