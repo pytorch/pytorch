@@ -280,19 +280,36 @@ inline float flag_to_float_scalar(T src) {
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 
-inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectorized<float> mask) {
+template<typename T>
+typename std::enable_if_t<std::is_same_v<T, float> ||  std::is_same_v<T, int32_t> || std::is_same_v<T, uint32_t>, at::vec::Vectorized<T>>
+inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 # if defined(CPU_CAPABILITY_AVX512)
-    at::vec::Vectorized<float> zero_vec(0);
+    at::vec::Vectorized<T> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
-    return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+
+    if constexpr (std::is_same_v<T, float>) {
+        return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+    } else {
+        return _mm512_mask_loadu_epi32(zero_vec, mmask, src);
+    }
 # elif defined(CPU_CAPABILITY_AVX2)
     auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
-    return _mm256_maskload_ps(src, mmask);
+    if constexpr (std::is_same_v<T, float>) {
+        return _mm256_maskload_ps(src, mmask);
+    } else {
+        return _mm256_maskload_epi32(src, mmask);
+    }
 # elif defined(CPU_CAPABILITY_ZVECTOR)
-    auto result = at::vec::Vectorized<float>::loadu(src);
-    return (result & mask);
+    auto result = at::vec::Vectorized<T>::loadu(src);
+    if constexpr (std::is_same_v<T, float>) {
+        return result & mask;
+    } else {
+        T maskdata[at::vec::Vectorized<T>::size()];
+        mask.store(maskdata);
+        return result & at::vec::Vectorized<T>::loadu(maskdata);
+    }
 # else
 # error Unsupported vectorization CPU capability
 # endif
@@ -326,7 +343,7 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
     maskdata_dest[i] = (maskdata[i] == 0xFFFFFFFF) ? 0xFFFF: 0;
   }
   auto maskvector = at::vec::Vectorized<T>::loadu(maskdata_dest);
-  return (result & maskvector);
+  return result & maskvector;
 # else
 # error Unsupported vectorization CPU capability
 # endif
@@ -360,10 +377,26 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
       maskdata_dest[i] = (maskdata[i] == 0xFFFFFFFF) ? 0xFF: 0;
     }
     auto maskvector = at::vec::Vectorized<T>::loadu(maskdata_dest);
-    return (result & maskvector);
+    return result & maskvector;
 # else
 # error Unsupported vectorization CPU capability
 # endif
+}
+
+template <typename T>
+typename std::enable_if_t<std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>, at::vec::VectorizedN<T, 2>>
+inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
+  // TODO: Add vectorized variants for the load
+  constexpr auto vec_size = decltype(mask)::size();
+  __at_align__ uint32_t maskdata[vec_size];
+  __at_align__ uint64_t mask_res[vec_size];
+  mask.store(maskdata);
+  #pragma unroll
+  for(auto i = 0; i < vec_size; ++i) {
+          mask_res[i] = maskdata[i] ? std::numeric_limits<uint64_t>::max() : 0;
+  }
+  auto result = at::vec::VectorizedN<T, 2>::loadu(src);
+  return result & at::vec::VectorizedN<T, 2>::loadu(mask_res);
 }
 
 template <typename T>
