@@ -8,7 +8,7 @@ import inspect
 import re
 import contextlib
 import sys
-from torch._library.define import def_blackbox
+from torch._library.define import opaque_op
 
 __all__ = [
     'Library',
@@ -17,7 +17,7 @@ __all__ = [
     'fallthrough_kernel',
     'impl_abstract',
     'get_ctx',
-    'def_blackbox',
+    'opaque_op',
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered

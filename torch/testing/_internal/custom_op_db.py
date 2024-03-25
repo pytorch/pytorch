@@ -19,7 +19,7 @@ from torch import Tensor
 from torch.types import Number
 from typing import *  # noqa: F403
 import torch._custom_ops as custom_ops
-from torch.library import def_blackbox
+from torch.library import opaque_op
 
 # Note: [custom op db]
 #
@@ -149,7 +149,7 @@ def numpy_take_backward(ctx, saved, grad_out):
         'ind_inv': None,
     }
 
-@def_blackbox(mutated_args=())
+@opaque_op(mutated_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
     x_np = to_numpy(x)
     res = np.stack(np.nonzero(x_np), axis=1)

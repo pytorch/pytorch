@@ -936,9 +936,11 @@ class FakeTensorConverterTest(TestCase):
         stor_id = torch._C._storage_id(x_conv)
         self.assertEqual(stor_id, torch._C._storage_id(y_conv))
         del x
+        del x_conv
         self.assertEqual(len(converter.tensor_memo), 1)
         self.assertEqual(len(converter.meta_converter.storage_memo), 1)
         del y
+        del y_conv
         self.assertEqual(len(converter.tensor_memo), 0)
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
 
@@ -966,6 +968,8 @@ class FakeTensorConverterTest(TestCase):
         x_conv2 = converter(mode, x)
         assert x_conv2 is x_conv
         del x
+        del x_conv
+        del x_conv2
         self.assertEqual(len(converter.tensor_memo), 0)
 
     def test_no_active_mode(self):

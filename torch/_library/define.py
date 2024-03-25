@@ -8,8 +8,8 @@ from .. import _C, _library, library, Tensor
 device_types_t = Optional[Union[str, Sequence[str]]]
 
 
-def def_blackbox(*, mutated_args: Sequence[str], types: device_types_t = None):
-    """Wraps a function into a custom operator.
+def opaque_op(*, mutated_args: Sequence[str], types: device_types_t = None):
+    """Wraps a function into an opaque custom operator.
 
     Treats the function as a black-box (that is, PyTorch will never peek into
     the function). The function must have type hints; these are needed
@@ -27,10 +27,10 @@ def def_blackbox(*, mutated_args: Sequence[str], types: device_types_t = None):
     Examples::
         >>> import torch
         >>> from torch import Tensor
-        >>> from torch.library import def_blackbox
+        >>> from torch.library import opaque_op
         >>> import numpy as np
         >>>
-        >>> @def_blackbox(mutated_args=())
+        >>> @opaque_op(mutated_args=())
         >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     x_np = x.cpu().numpy()
         >>>     y_np = np.sin(x_np)
@@ -40,8 +40,8 @@ def def_blackbox(*, mutated_args: Sequence[str], types: device_types_t = None):
         >>> y = numpy_sin(x)
         >>> assert torch.allclose(y, x.sin())
         >>>
-        >>> # Example of a blackbox op that only works for one device type.
-        >>> @def_blackbox(mutated_args=(), types="cpu")
+        >>> # Example of a opaque op that only works for one device type.
+        >>> @opaque_op(mutated_args=(), types="cpu")
         >>> def numpy_sin_cpu(x: Tensor) -> Tensor:
         >>>     x_np = x.numpy()
         >>>     y_np = np.sin(x_np)
@@ -60,12 +60,12 @@ def def_blackbox(*, mutated_args: Sequence[str], types: device_types_t = None):
         namespace = mangle_module(mod.__name__)
 
     def inner(fn):
-        return BlackBoxDef._from_fn(fn, types, mutated_args, namespace)
+        return OpaqueOpDef._from_fn(fn, types, mutated_args, namespace)
 
     return inner
 
 
-class BlackBoxDef:
+class OpaqueOpDef:
     def __init__(self, namespace: str, name: str, schema: str):
         self._namespace = namespace
         self._name = name
@@ -107,11 +107,11 @@ class BlackBoxDef:
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> import torch
             >>> from torch import Tensor
-            >>> from torch.library import def_blackbox
+            >>> from torch.library import opaque_op
             >>> import numpy as np
             >>>
             >>> # Example of split cpu and cuda definitions
-            >>> @def_blackbox(mutated_args=(), types="cpu")
+            >>> @opaque_op(mutated_args=(), types="cpu")
             >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     x_np = x.numpy()
             >>>     y_np = np.sin(x_np)
@@ -202,7 +202,7 @@ class BlackBoxDef:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @torch.library.def_blackbox(mutated_args=())
+            >>> @torch.library.opaque_op(mutated_args=())
             >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     return (x @ weight.t()) + bias
             >>>
@@ -219,11 +219,12 @@ class BlackBoxDef:
             >>> x = torch.randn(2, 2)
             >>> weight = torch.randn(2, 2)
             >>> bias = torch.randn(2)
+            >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> out = torch.compile(custom_linear, fullgraph=True)(x, weight, bias)
             >>> assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @torch.library.def_blackbox(mutated_args=())
+            >>> @torch.library.opaque_op(mutated_args=())
             >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     x_np = x.cpu().numpy()
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
@@ -242,6 +243,7 @@ class BlackBoxDef:
             >>>     return result
             >>>
             >>> x = torch.tensor([0, 1, 2, 0, 0, 1])
+            >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> out = torch.compile(custom_nonzero)(x)
             >>> assert torch.allclose(out, x.nonzero())
 

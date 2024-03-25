@@ -19,7 +19,7 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
-from torch.library import def_blackbox
+from torch.library import opaque_op
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.custom_op_db import custom_op_db, numpy_nonzero
 from typing import *  # noqa: F403
@@ -681,7 +681,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             infer_schema(foo, mutated_args={"y"})
 
     def test_blackbox_basic(self):
-        @def_blackbox(mutated_args=())
+        @opaque_op(mutated_args=())
         def f(x: Tensor, y: float) -> Tensor:
             return x + y
 
@@ -717,7 +717,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     def test_blackbox_compile(self):
-        @torch.library.def_blackbox(mutated_args=())
+        @torch.library.opaque_op(mutated_args=())
         def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             return (x @ weight.t()) + bias
 
@@ -740,7 +740,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
 
     def test_blackbox_replaces(self):
-        @def_blackbox(mutated_args=())
+        @opaque_op(mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x.sin()
 
@@ -748,7 +748,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         y = f(x)
         self.assertEqual(y, x.sin())
 
-        @def_blackbox(mutated_args=())
+        @opaque_op(mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x.cos()
 
@@ -757,7 +757,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_blackbox_split_device(self):
-        @def_blackbox(mutated_args=(), types="cpu")
+        @opaque_op(mutated_args=(), types="cpu")
         def f(x: Tensor) -> Tensor:
             return x.sin()
 
@@ -774,7 +774,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_blackbox_multi_types(self):
-        @def_blackbox(mutated_args=(), types=("cpu", "cuda"))
+        @opaque_op(mutated_args=(), types=("cpu", "cuda"))
         def f(x: Tensor) -> Tensor:
             return x.sin()
 
@@ -786,7 +786,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(y, x.sin())
 
     def test_blackbox_disallows_output_aliasing(self):
-        @def_blackbox(mutated_args=())
+        @opaque_op(mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x.view(-1)
 
@@ -794,7 +794,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
 
-        @def_blackbox(mutated_args=())
+        @opaque_op(mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x
 
