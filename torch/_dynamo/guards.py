@@ -705,6 +705,41 @@ class GuardBuilder(GuardBuilderBase):
         )
         new_guard.create(self)
 
+    # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
+    def HASATTR(self, guard: Guard):
+        assert isinstance(
+            guard.originating_source, AttrSource
+        ), f"invalid source {guard.name}"
+        base_source = guard.originating_source.base
+        base = base_source.name()
+        attr = guard.originating_source.member
+
+        ref = self.arg_ref(base)
+        val = hasattr(self.get(base), attr)
+        code = None
+        if val:
+            code = f"hasattr({ref}, {attr!r})"
+        else:
+            code = f"not hasattr({ref}, {attr!r})"
+        self._set_guard_export_info(
+            guard, [code], provided_guarded_object=self.get(base)
+        )
+
+        if config.enable_cpp_guard_manager:
+            base_manager = self.get_guard_manager_from_source(base_source)
+            if val:
+                # Just install a getattr manager. GetAttrGuardAccessor itself
+                # acts as hasattr guard.
+                base_manager.getattr_manager(
+                    attr=attr, source=guard.name, example_value=val
+                )
+            else:
+                base_manager.add_no_hasattr_guard(
+                    attr, get_verbose_code_parts(code, guard)
+                )
+        else:
+            self._produce_guard_code(guard, [code])
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -825,44 +860,16 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, [code])
 
-    def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
-        base = base_source.name()
-        attr = guard.originating_source.member
-
-        ref = self.arg_ref(base)
-        val = hasattr(self.get(base), attr)
-        code = None
-        if val:
-            code = f"hasattr({ref}, {attr!r})"
-        else:
-            code = f"not hasattr({ref}, {attr!r})"
-        self._set_guard_export_info(
-            guard, [code], provided_guarded_object=self.get(base)
-        )
-
-        if config.enable_cpp_guard_manager:
-            base_manager = self.get_guard_manager_from_source(base_source)
-            if val:
-                # Just install a getattr manager. GetAttrGuardAccessor itself
-                # acts as hasattr guard.
-                base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=val
-                )
-            else:
-                base_manager.add_no_hasattr_guard(
-                    attr, get_verbose_code_parts(code, guard)
-                )
-        else:
-            self._produce_guard_code(guard, [code])
+    def DUAL_LEVEL(self, guard: Guard):
+        # Invalidate dual level if current dual level is different than the one
+        # in the fx graph
+        dual_level = torch.autograd.forward_ad._current_level
+        code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
+        self._produce_guard_code(guard, code)
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        # if torch._C._functorch.peek_interpreter_stack() is not None:
         cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
