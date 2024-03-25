@@ -147,7 +147,10 @@ class _OverlappingCpuLoader(_TensorLoader):
                 if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
-                    if tensor.storage().size() != tensor.numel():
+                    if (
+                        tensor.untyped_storage().size()
+                        != tensor.numel() * tensor.itemsize
+                    ):
                         # this forces the tensor to be both contiguous and with minimal storage
                         tensor = tensor.clone()
 

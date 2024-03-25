@@ -500,13 +500,15 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 5)
         i0 = shape_env.create_unbacked_symint()
-        self.assertTrue(expect_true(i0 <= s0))
+        self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 <= 0]"""
+            """[-s0 + u0 < 0]"""
         )
-        self.assertTrue(i0 <= s0)
+        self.assertTrue(i0 < s0)
+        self.assertTrue(i0 != s0)
         self.assertFalse(i0 > s0)
+        self.assertFalse(i0 >= s0)
 
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
@@ -533,14 +535,14 @@ def forward(self, x_1):
         _constrain_range_for_size(i0)
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """4*u1""")
+        self.assertExpectedInline(str(i0), """u0""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i2)
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """4*u2""")
+        self.assertExpectedInline(str(i3), """u3""")
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
