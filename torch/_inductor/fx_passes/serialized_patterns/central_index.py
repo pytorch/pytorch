@@ -21,6 +21,7 @@ from ._sfdp_pattern_14 import (_sfdp_pattern_14_training, _sfdp_pattern_14_infer
 from ._sfdp_pattern_15 import (_sfdp_pattern_15_training, _sfdp_pattern_15_inference, _sfdp_pattern_15_half_training, _sfdp_pattern_15_half_inference)
 from ._sfdp_pattern_16 import (_sfdp_pattern_16_training, _sfdp_pattern_16_inference, _sfdp_pattern_16_bs1_training, _sfdp_pattern_16_bs1_inference, _sfdp_pattern_16_half_training, _sfdp_pattern_16_half_inference, _sfdp_pattern_16_half_bs1_training, _sfdp_pattern_16_half_bs1_inference, _sfdp_pattern_16_half_mask_fp32_training, _sfdp_pattern_16_half_mask_fp32_inference, _sfdp_pattern_16_half_mask_fp32_bs1_training, _sfdp_pattern_16_half_mask_fp32_bs1_inference)
 from ._sfdp_pattern_17 import (_sfdp_pattern_17_training, _sfdp_pattern_17_inference, _sfdp_pattern_17_half_training, _sfdp_pattern_17_half_inference)
+from ._sfdp_pattern_18 import (_sfdp_pattern_18_training, _sfdp_pattern_18_inference, _sfdp_pattern_18_bs1_training, _sfdp_pattern_18_bs1_inference, _sfdp_pattern_18_half_training, _sfdp_pattern_18_half_inference, _sfdp_pattern_18_half_bs1_training, _sfdp_pattern_18_half_bs1_inference)
 
 central_index = {
     '_sfdp_pattern_1_training': _sfdp_pattern_1_training,
@@ -59,6 +60,10 @@ central_index = {
     '_sfdp_pattern_16_bs1_inference': _sfdp_pattern_16_bs1_inference,
     '_sfdp_pattern_17_training': _sfdp_pattern_17_training,
     '_sfdp_pattern_17_inference': _sfdp_pattern_17_inference,
+    '_sfdp_pattern_18_training': _sfdp_pattern_18_training,
+    '_sfdp_pattern_18_inference': _sfdp_pattern_18_inference,
+    '_sfdp_pattern_18_bs1_training': _sfdp_pattern_18_bs1_training,
+    '_sfdp_pattern_18_bs1_inference': _sfdp_pattern_18_bs1_inference,
     '_sfdp_pattern_1_half_training': _sfdp_pattern_1_half_training,
     '_sfdp_pattern_1_half_inference': _sfdp_pattern_1_half_inference,
     '_sfdp_pattern_2_half_training': _sfdp_pattern_2_half_training,
@@ -95,6 +100,10 @@ central_index = {
     '_sfdp_pattern_16_half_bs1_inference': _sfdp_pattern_16_half_bs1_inference,
     '_sfdp_pattern_17_half_training': _sfdp_pattern_17_half_training,
     '_sfdp_pattern_17_half_inference': _sfdp_pattern_17_half_inference,
+    '_sfdp_pattern_18_half_training': _sfdp_pattern_18_half_training,
+    '_sfdp_pattern_18_half_inference': _sfdp_pattern_18_half_inference,
+    '_sfdp_pattern_18_half_bs1_training': _sfdp_pattern_18_half_bs1_training,
+    '_sfdp_pattern_18_half_bs1_inference': _sfdp_pattern_18_half_bs1_inference,
     '_sfdp_pattern_16_half_mask_fp32_training': _sfdp_pattern_16_half_mask_fp32_training,
     '_sfdp_pattern_16_half_mask_fp32_inference': _sfdp_pattern_16_half_mask_fp32_inference,
     '_sfdp_pattern_16_half_mask_fp32_bs1_training': _sfdp_pattern_16_half_mask_fp32_bs1_training,

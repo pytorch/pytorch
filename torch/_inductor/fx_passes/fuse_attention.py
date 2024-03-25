@@ -350,6 +350,7 @@ def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
 def _sfdp_pattern_15(query, key, value, attn_mask, inv_scale):
     # for DistilBert
     # Permutations are needed to create clones in graph.
+    # Ref: https://github.com/pytorch/pytorch/issues/119911
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
     v = value.permute([0, 2, 1, 3])
@@ -453,6 +454,54 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
+def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
+    # for hf_GPT2 with dropout (introduces clone node) for inference
+    # it also returns permuted key & value
+    query = query.permute([0, 2, 1, 3])
+    key = key.permute([0, 2, 1, 3])
+    value = value.permute([0, 2, 1, 3])
+    attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+    inv_scale = torch.full(
+        [],
+        value.size(-1) ** 0.5,
+        dtype=attn_weights.dtype,
+        device=attn_weights.device,
+    )
+    attn_weights = attn_weights.div(inv_scale)
+    causal_mask_value = torch.full(
+        (), torch.finfo(query.dtype).min, dtype=query.dtype, device=query.device
+    )
+    attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
+    return (
+        (
+            torch.nn.functional.dropout(attn_weights.softmax(dim=-1), dropout_p).matmul(
+                value
+            )
+        ),
+        key,
+        value,
+    )
+
+
+def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    permuted_key = key.transpose(1, 2)
+    permuted_value = value.transpose(1, 2)
+    return (
+        aten.scaled_dot_product_attention(
+            query.transpose(1, 2),
+            permuted_key,
+            permuted_value,
+            attn_mask=causal_mask,
+            dropout_p=dropout_p,
+            is_causal=False,
+            scale=1.0 / math.sqrt(value.size(-1)),
+        ),
+        permuted_key,
+        permuted_value,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -485,20 +534,21 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op, disable_cuda=False):
+def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     def fn(match):
-        scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
-        # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
-        scale_factor = scale_factor_node.args[1]
-        # make sure the scale_factor a float/int. SymInt?
-        if not isinstance(scale_factor, (float, int)):
-            return False
         if (
             disable_cuda
             and "query" in match.kwargs
             and "cuda" in str(match.kwargs["query"].meta["val"].device)
         ):
             return False
+        if scale_factor_op is not None:
+            scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
+            # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
+            scale_factor = scale_factor_node.args[1]
+            # make sure the scale_factor a float/int. SymInt?
+            if not isinstance(scale_factor, (float, int)):
+                return False
         return _sfdp_params_check(match)
 
     return fn
@@ -570,11 +620,13 @@ def _get_sfdp_patterns():
         b = functools.partial(b_inp, dtype=dtype)
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
+        m_bool = functools.partial(m_inp, dtype=torch.bool)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
         m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
         m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
+        m_bs1_bool = functools.partial(m_bs1_inp, dtype=torch.bool)
 
         candidates = [
             (
@@ -703,6 +755,22 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), m(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_18,
+                _sfdp_replacement_18,
+                [g(), g(), g(), m_bool()],
+                d,
+                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
+                _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_18,
+                _sfdp_replacement_18,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
+                d,
+                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
+                _sfdp_extra_check(disable_cuda=True),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
