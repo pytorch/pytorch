@@ -27,6 +27,7 @@ from torch._prims_common import (
 )
 
 from . import config, inductor_prims
+from .utils import use_scatter_fallback
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -686,6 +687,16 @@ def put_(self, index, source, accumulate=False):
 def index_reduce(
     self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
 ):
+    if use_scatter_fallback(
+        "aten.scatter_reduce_",
+        reduction_type,
+        self.dtype,
+        src.dtype,
+        src.device.type,
+        True,
+    ):
+        return NotImplemented
+
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
@@ -697,17 +708,3 @@ def index_reduce(
         reduction_type,
         include_self=include_self,
     )
-
-
-@register_decomposition(aten.index_reduce_)
-def index_reduce_(
-    self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
-):
-    out = self.index_reduce(
-        dim,
-        index,
-        src,
-        reduction_type,
-        include_self=include_self,
-    )
-    return self.copy_(out)

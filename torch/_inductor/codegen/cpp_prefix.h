@@ -224,19 +224,19 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if<!std::is_reduced_floating_point<T>::value, T>::type
+typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if<std::is_reduced_floating_point<T>::value, T>::type
+typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
 
 template <typename T>
-typename std::enable_if<!std::is_integral<T>::value>::type
+typename std::enable_if_t<!std::is_integral_v<T>>
 atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
@@ -260,7 +260,7 @@ atomic_add(volatile T *addr, T offset) {
 // better than compare_exchange_weak, which can be checked by microbenchmark
 // inductor_cpu_atomic.py
 template <typename T>
-typename std::enable_if<std::is_integral<T>::value>::type
+typename std::enable_if_t<std::is_integral_v<T>>
 atomic_add(volatile T *addr, T offset) {
   static_assert(sizeof(std::atomic<T>) == sizeof(T),
                 "std::atomic issue");
@@ -299,7 +299,7 @@ inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectori
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, bfloat16>::value || std::is_same<T, half>::value, at::vec::Vectorized<T>>::type
+typename std::enable_if_t<std::is_same_v<T, bfloat16> || std::is_same_v<T, half>, at::vec::Vectorized<T>>
 inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 # if defined(CPU_CAPABILITY_AVX512)
   auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
@@ -333,7 +333,7 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value || std::is_same<T, int8_t>::value, at::vec::Vectorized<T>>::type
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<T>>
 inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 # if defined(CPU_CAPABILITY_AVX512)
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
@@ -399,7 +399,7 @@ inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<floa
 
 template <typename scalar_t>
 inline
-typename std::enable_if<std::is_same<scalar_t, bfloat16>::value || std::is_same<scalar_t, half>::value, at::vec::Vectorized<scalar_t>>::type
+typename std::enable_if_t<std::is_same_v<scalar_t, bfloat16> || std::is_same_v<scalar_t, half>, at::vec::Vectorized<scalar_t>>
 mask_convert_to_lowp(at::vec::Vectorized<float> src) {
   auto fp_vec = mask_convert_to_float(src);
   return cvt_fp32_to_lowp_fp<scalar_t>(fp_vec);
