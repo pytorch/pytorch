@@ -50,12 +50,16 @@ class TestHOPGeneric(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestHOP(TestCase):
-    def _compare(self, eager_model, export, input):
-        eager_inp = copy.deepcopy(input)
-        export_inp = copy.deepcopy(input)
+    def _compare(self, eager_model, export, args, kwargs):
+        eager_args = copy.deepcopy(args)
+        eager_kwargs = copy.deepcopy(kwargs)
+        export_args = copy.deepcopy(args)
+        export_kwargs = copy.deepcopy(kwargs)
 
-        flat_orig_outputs = pytree.tree_leaves(eager_model(*eager_inp))
-        flat_loaded_outputs = pytree.tree_leaves(export.module()(*export_inp))
+        flat_orig_outputs = pytree.tree_leaves(eager_model(*eager_args, **eager_kwargs))
+        flat_loaded_outputs = pytree.tree_leaves(
+            export.module()(*export_args, **export_kwargs)
+        )
 
         for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
             self.assertEqual(type(orig), type(loaded))
@@ -70,8 +74,11 @@ class TestHOP(TestCase):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = export(model, inp.input)
-            self._compare(model, ep, inp.input)
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            args = (*input, *inp.args)
+            kwargs = inp.kwargs
+            ep = export(model, args, kwargs)
+            self._compare(model, ep, args, kwargs)
 
     @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
     def test_pre_dispatch_export(self, device, dtype, op):
@@ -82,8 +89,11 @@ class TestHOP(TestCase):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = _export(model, inp.input, pre_dispatch=True)
-            self._compare(model, ep, inp.input)
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            args = (*input, *inp.args)
+            kwargs = inp.kwargs
+            ep = _export(model, args, kwargs, pre_dispatch=True)
+            self._compare(model, ep, args, kwargs)
 
     @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
     def test_retrace_export(self, device, dtype, op):
@@ -94,9 +104,12 @@ class TestHOP(TestCase):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = _export(model, inp.input, pre_dispatch=True)
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            args = (*input, *inp.args)
+            kwargs = inp.kwargs
+            ep = _export(model, args, kwargs, pre_dispatch=True)
             ep = ep.run_decompositions()
-            self._compare(model, ep, inp.input)
+            self._compare(model, ep, args, kwargs)
 
     @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
     def test_serialize_export(self, device, dtype, op):
@@ -107,13 +120,16 @@ class TestHOP(TestCase):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
         for inp in sample_inputs_itr:
             model = Foo()
-            ep = _export(model, inp.input, pre_dispatch=True)
+            input = inp.input if isinstance(inp.input, tuple) else (inp.input,)
+            args = (*input, *inp.args)
+            kwargs = inp.kwargs
+            ep = _export(model, args, kwargs, pre_dispatch=True)
             ep = ep.run_decompositions()
             buffer = io.BytesIO()
             save(ep, buffer)
             buffer.seek(0)
             ep = load(buffer)
-            self._compare(model, ep, inp.input)
+            self._compare(model, ep, args, kwargs)
 
 
 instantiate_device_type_tests(TestHOP, globals())

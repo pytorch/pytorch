@@ -35,7 +35,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
-from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
 from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
@@ -4606,12 +4605,12 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)

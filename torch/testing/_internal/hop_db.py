@@ -87,7 +87,7 @@ def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=False
     )
-    yield SampleInput((make_arg(2, 2, 2, low=0.1, high=2),))
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
 
 
 def simple_cond(x):
@@ -98,9 +98,7 @@ def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwa
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=False
     )
-    yield SampleInput(
-        (make_arg(2, 2, 2, low=0.1, high=2), make_arg(2, 2, 2, low=0.1, high=2))
-    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2), make_arg(2, 2, 2, low=0.1, high=2))
 
 
 def simple_auto_functionalize(x, z):
