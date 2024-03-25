@@ -1683,8 +1683,8 @@ class GraphModuleDeserializer:
                 shape_env=self.shape_env,
             )
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
-            self.signature = self.deserialize_signature(serialized_graph_module.signature)
             self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(serialized_graph_module.signature)
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
@@ -2044,8 +2044,10 @@ class ExportedProgramDeserializer:
         constants: Union[Dict[str, torch.Tensor], bytes],
     ) -> ep.ExportedProgram:
         assert isinstance(exported_program, ExportedProgram)
+        version = exported_program.schema_version
 
-        if exported_program.schema_version.major != SCHEMA_VERSION[0]:
+        # TODO(zhxchen17) blocked on thrift schema refactor
+        if version.major != SCHEMA_VERSION[0] and not (version.major == 0 and version.minor == 0):
             raise SerializeError(
                 f"Serialized schema version {exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."
@@ -2084,7 +2086,6 @@ class ExportedProgramDeserializer:
             example_inputs=None,
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
-            from_export=True
         )
         return upgrader.upgrade(exported_program)
 

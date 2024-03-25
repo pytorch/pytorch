@@ -167,6 +167,10 @@ class OptimizedModule(torch.nn.Module):
         return getattr(self._orig_mod, name)
 
     def __setattr__(self, name, val):
+        # Allow patching over class attributes
+        if hasattr(type(self), name):
+            return super().__setattr__(name, val)
+
         if name in OptimizedModule._opt_mod_attributes:
             return super().__setattr__(name, val)
         return setattr(self._orig_mod, name, val)
