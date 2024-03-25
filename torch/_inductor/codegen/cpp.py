@@ -415,8 +415,8 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
     def get_outer_nodes(self):
         return self.outer_fused_nodes
 
-    def _check_outer_fusion_loop_level_attr(
-        self, _cpp_kernel_proxy_list, _outer_loop_fusion_depth
+    def check_outer_fusion_loop_level_attr(
+        self, cpp_kernel_proxy_list, outer_loop_fusion_depth
     ):
         # This function ensures that the same tiling split is applied at each loop level within the outer loop fusion depth.
         # In the fusion stage, we only examine nodes with same vars and reduce.
@@ -425,12 +425,12 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         #   * buf0 tiling along the 2nd loop level, buf1 tiling along the 3rd loop level.
         # If the check failed, we should fall back to standard loop codegen.
         def _inner(
-            _left_loop_level: LoopLevel,
-            _right_loop_level: LoopLevel,
-            _loop_fusion_depth: int,
+            left_loop_level: LoopLevel,
+            right_loop_level: LoopLevel,
+            loop_fusion_depth: int,
         ) -> bool:
             # Check if same loop level attr
-            _outer_loops_attr_compare_list = [
+            outer_loops_attr_compare_list = [
                 "var",
                 "size",
                 "offset",
@@ -438,59 +438,59 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             ]
             if not (
                 all(
-                    getattr(_left_loop_level, _attr_compare)
-                    == getattr(_right_loop_level, _attr_compare)
-                    for _attr_compare in _outer_loops_attr_compare_list
+                    getattr(left_loop_level, attr_compare)
+                    == getattr(right_loop_level, attr_compare)
+                    for attr_compare in outer_loops_attr_compare_list
                 )
             ):
                 return False
 
-            assert _loop_fusion_depth >= 1
-            if (_loop_fusion_depth := _loop_fusion_depth - 1) > 0:
+            assert loop_fusion_depth >= 1
+            if (loop_fusion_depth := loop_fusion_depth - 1) > 0:
                 # If the next loop level is expected to undergo outer loop fusion,
                 # there should be no kernel present at the current loop level.
                 assert (
-                    _left_loop_level.kernel is None and _right_loop_level.kernel is None
+                    left_loop_level.kernel is None and right_loop_level.kernel is None
                 )
                 # Check next loop level attr
-                if len(_left_loop_level.inner) != len(_right_loop_level.inner) or any(
-                    not _inner(left_inner, right_inner, _loop_fusion_depth)
+                if len(left_loop_level.inner) != len(right_loop_level.inner) or any(
+                    not _inner(left_inner, right_inner, loop_fusion_depth)
                     for left_inner, right_inner in zip(
-                        _left_loop_level.inner, _right_loop_level.inner
+                        left_loop_level.inner, right_loop_level.inner
                     )
                 ):
                     return False
             return True
 
-        def _get_parallel_depth(_cpp_proxy_kernel):
-            return _cpp_proxy_kernel.decide_parallel_depth(
-                _cpp_proxy_kernel.call_ranges[
-                    : _cpp_proxy_kernel.loop_nest.max_parallel_depth()
+        def _get_parallel_depth(cpp_proxy_kernel):
+            return cpp_proxy_kernel.decide_parallel_depth(
+                cpp_proxy_kernel.call_ranges[
+                    : cpp_proxy_kernel.loop_nest.max_parallel_depth()
                 ],
                 parallel_num_threads(),
             )
 
-        for idx in range(len(_cpp_kernel_proxy_list) - 1):
-            _left_loop_nest = _cpp_kernel_proxy_list[idx].loop_nest
-            _right_loop_nest = _cpp_kernel_proxy_list[idx + 1].loop_nest
-            if _get_parallel_depth(_cpp_kernel_proxy_list[idx]) != _get_parallel_depth(
-                _cpp_kernel_proxy_list[idx + 1]
+        for idx in range(len(cpp_kernel_proxy_list) - 1):
+            left_loop_nest = cpp_kernel_proxy_list[idx].loop_nest
+            right_loop_nest = cpp_kernel_proxy_list[idx + 1].loop_nest
+            if _get_parallel_depth(cpp_kernel_proxy_list[idx]) != _get_parallel_depth(
+                cpp_kernel_proxy_list[idx + 1]
             ):
                 # Ensure same parallel depth.
                 # Refer to poolformer_m36 in timm_models:
                 # Node1 has loop collapsed(2), Node2 can't be loop collapsed due to it's reduction.
                 return False
-            if len(_left_loop_nest.root) != len(_right_loop_nest.root) or any(  # type: ignore[union-attr]
-                not _inner(left_root, right_root, _outer_loop_fusion_depth)
+            if len(left_loop_nest.root) != len(right_loop_nest.root) or any(  # type: ignore[union-attr]
+                not _inner(left_root, right_root, outer_loop_fusion_depth)
                 for left_root, right_root in zip(
-                    _left_loop_nest.root, _right_loop_nest.root  # type: ignore[union-attr]
+                    left_loop_nest.root, right_loop_nest.root  # type: ignore[union-attr]
                 )
             ):
                 return False
 
         return True
 
-    def _merge_outer_fusion_kernels(
+    def merge_outer_fusion_kernels(
         self,
         cpp_kernel_proxy_list,
     ):
@@ -500,47 +500,45 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         metrics.cpp_outer_loop_fused_inner_counts.append(len(loop_nest_list))
 
         def _merge_outer_fusion_loop_levels(
-            _loop_level_nested_list: List[List["LoopLevel"]],
-            _outer_loop_fusion_depth,
+            loop_level_nested_list: List[List["LoopLevel"]],
+            outer_loop_fusion_depth,
         ):
-            assert _outer_loop_fusion_depth >= 1
-            if (_outer_loop_fusion_depth := _outer_loop_fusion_depth - 1) >= 1:
+            assert outer_loop_fusion_depth >= 1
+            if (outer_loop_fusion_depth := outer_loop_fusion_depth - 1) >= 1:
                 # Further merge the next loop level
                 # In certain outer loop fusion depth, still may have the
                 # splits of main loop and tile loop (refer to test_outer_loop_fusion_log_softmax in test_cpu_repro.py).
                 # We assume for each kernel, same loop split at certain outer loop fusion depth.
-                _loop_level_split_num = len(_loop_level_nested_list[0])
-                for _loop_level_split_idx in range(_loop_level_split_num):
+                loop_level_split_num = len(loop_level_nested_list[0])
+                for loop_level_split_idx in range(loop_level_split_num):
                     # Deal main loop and tail loop seperately
-                    _next_loop_level_nested_list = [
-                        _loop_level_list[_loop_level_split_idx].inner
-                        for _loop_level_list in _loop_level_nested_list
+                    next_loop_level_nested_list = [
+                        loop_level_list[loop_level_split_idx].inner
+                        for loop_level_list in loop_level_nested_list
                     ]
                     _merge_outer_fusion_loop_levels(
-                        _next_loop_level_nested_list,
-                        _outer_loop_fusion_depth,
+                        next_loop_level_nested_list,
+                        outer_loop_fusion_depth,
                     )
             else:
                 # This is the last looplevel to do outer loop fusion
-                _loop_level_split_num = len(_loop_level_nested_list[0])
-                for _loop_level_split_idx in range(_loop_level_split_num):
+                loop_level_split_num = len(loop_level_nested_list[0])
+                for loop_level_split_idx in range(loop_level_split_num):
                     # If at any outer loop fusion depth, we have split loop into main loop and tail loop,
                     # The main loop and tail loop should have different OuterLoopFusedKernel.
                     outer_loop_fused_kernel = OuterLoopFusedKernel()
-                    _loop_level_of_first_kernel = _loop_level_nested_list[0][
-                        _loop_level_split_idx
+                    loop_level_of_first_kernel = loop_level_nested_list[0][
+                        loop_level_split_idx
                     ]
-                    for _kernel_idx in range(len(_loop_level_nested_list)):
+                    for kernel_idx in range(len(loop_level_nested_list)):
                         # Append each LoopLevel into OuterLoopFusedKernel.inner
                         outer_loop_fused_kernel.inner.append(
                             deepcopy(
-                                _loop_level_nested_list[_kernel_idx][
-                                    _loop_level_split_idx
-                                ]
+                                loop_level_nested_list[kernel_idx][loop_level_split_idx]
                             ),
                         )
-                    _loop_level_of_first_kernel.inner = []
-                    _loop_level_of_first_kernel.kernel = outer_loop_fused_kernel  # type: ignore[assignment]
+                    loop_level_of_first_kernel.inner = []
+                    loop_level_of_first_kernel.kernel = outer_loop_fused_kernel  # type: ignore[assignment]
 
         # Merge the List[LoopNestWithSplit] from cpp_kernel_proxy_list
         # into cpp_kernel_proxy_list[0].loop_nest
@@ -689,6 +687,12 @@ class CppPrinter(ExprPrinter):
                 f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
             )
         return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
+
+    def _print_BooleanTrue(self, expr):
+        return "true"
+
+    def _print_BooleanFalse(self, expr):
+        return "false"
 
 
 # A function to print, useful for printing sympy symbols.
@@ -2034,14 +2038,14 @@ class CppKernel(Kernel):
 
                 kernels = loop.get_kernels()
                 assert len(kernels) == 1
-                if type(
-                    kernels[0]
-                ) is not OuterLoopFusedKernel and is_parallel_reduction(loop):
+                if not isinstance(
+                    kernels[0], OuterLoopFusedKernel
+                ) and is_parallel_reduction(loop):
                     kernels[0].update_stores_with_parallel_reduction()
                 gen_kernel(kernels[0])
 
             def gen_kernel(kernel):
-                if type(kernel) is OuterLoopFusedKernel:
+                if isinstance(kernel, OuterLoopFusedKernel):
                     for loop in kernel.inner:
                         if loop.inner:
                             gen_loops(loop.inner, loop.is_reduction)
@@ -3813,8 +3817,17 @@ class CppScheduling(BaseScheduling):
 
                 def get_indexing_ranges_exprs(node):
                     if isinstance(node, FusedSchedulerNode):
-                        assert len(node.snodes) > 0
-                        return get_indexing_ranges_exprs(node.snodes[0])
+                        assert len(node.snodes) > 0, node.snodes
+                        var_ranges = None
+                        indexing_exprs = set()
+                        for snode in node.snodes:
+                            v, exprs = get_indexing_ranges_exprs(snode)
+                            if var_ranges is None:
+                                var_ranges = v
+                            assert var_ranges == v, (var_ranges, v, node.snodes)
+                            for expr in exprs:
+                                indexing_exprs.add(expr)
+                        return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
                         comp_buffer = node.node
@@ -3881,30 +3894,38 @@ class CppScheduling(BaseScheduling):
         if isinstance(node_to_recomp, FusedSchedulerNode):
             return False
 
-        def get_buffer(node):
-            if isinstance(node, FusedSchedulerNode):
-                assert len(node.snodes) > 0
-                # use the last scheduler node from the list as it has the most
-                # relevant indexing expressions
-                return get_buffer(node.snodes[-1])
-            else:
-                assert isinstance(node, SchedulerNode)
-                return node.node
-
-        ref_node_buffer = get_buffer(ref_node)
-        if isinstance(ref_node_buffer, ir.TemplateBuffer):
-            return False
-
-        assert isinstance(ref_node_buffer, ir.ComputedBuffer)
-
         # It may happen that node1 and node2 compatible number of elements
         # but different original ranges, for example:
         # {d0: s0, d1: s1, d2: s2} vs {d0: s0*s1*s2}
         # See https://github.com/pytorch/pytorch/pull/120077/files#r1500427848 for more details
         # TODO: we can fix if it allows us to CSE at least one of the variables
-        var_ranges1 = ref_node_buffer.get_read_writes().var_ranges
-        var_ranges2 = node_to_recomp.node.get_read_writes().var_ranges
-        if var_ranges1 != var_ranges2:
+
+        assert isinstance(node_to_recomp, SchedulerNode)
+        if isinstance(node_to_recomp.node, ir.TemplateBuffer):
+            return False
+        assert isinstance(node_to_recomp.node, ir.ComputedBuffer)
+        # node.data.get_size() is a cheaper version of node.get_read_writes().var_ranges
+        # but without variable name
+        ranges2 = node_to_recomp.node.data.get_size()
+        ranges1 = None
+        if isinstance(ref_node, FusedSchedulerNode):
+            ranges_set = set()
+            for snode in ref_node.snodes:
+                if isinstance(snode.node, ir.TemplateBuffer):
+                    break
+                assert isinstance(snode.node, ir.ComputedBuffer)
+                ranges_set.add(tuple(snode.node.data.get_size()))
+
+            if len(ranges_set) != 1:
+                return False
+
+            ranges1 = list(next(iter(ranges_set)))
+        else:
+            assert isinstance(ref_node, SchedulerNode)
+            assert isinstance(ref_node.node, ir.ComputedBuffer)
+            ranges1 = ref_node.node.data.get_size()
+
+        if ranges1 != ranges2:
             return False
 
         return True
@@ -3959,10 +3980,10 @@ class CppScheduling(BaseScheduling):
                 if node1.outer_loop_fusion_depth == node2.outer_loop_fusion_depth
                 else DISABLE_OUTER_LOOP_FUSION
             )
-        _outer_loop_fusion_depth = min(len(vars1), len(vars2))
+        outer_loop_fusion_depth = min(len(vars1), len(vars2))
         if (
-            _outer_loop_fusion_depth >= 1
-            and vars1[:_outer_loop_fusion_depth] == vars2[:_outer_loop_fusion_depth]
+            outer_loop_fusion_depth >= 1
+            and vars1[:outer_loop_fusion_depth] == vars2[:outer_loop_fusion_depth]
         ):
             if any(
                 type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)
@@ -3970,14 +3991,14 @@ class CppScheduling(BaseScheduling):
                 _compare_node = (
                     node1 if type(node1) is OuterLoopFusedSchedulerNode else node2
                 )
-                if _compare_node.outer_loop_fusion_depth == _outer_loop_fusion_depth:
+                if _compare_node.outer_loop_fusion_depth == outer_loop_fusion_depth:
                     # Same outer loop fusion depth as prev nodes in OuterLoopFusedSchedulerNode
-                    return _outer_loop_fusion_depth
+                    return outer_loop_fusion_depth
                 else:
                     return DISABLE_OUTER_LOOP_FUSION
             else:
                 # First 2 nodes to generate OuterLoopFusedSchedulerNode
-                return _outer_loop_fusion_depth
+                return outer_loop_fusion_depth
         return DISABLE_OUTER_LOOP_FUSION
 
     def can_fuse_vertical(self, node1, node2):
@@ -4007,11 +4028,11 @@ class CppScheduling(BaseScheduling):
                 cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 nodes_list.append(_nodes)
 
-            if node._check_outer_fusion_loop_level_attr(
+            if node.check_outer_fusion_loop_level_attr(
                 cpp_kernel_proxy_list, node.outer_loop_fusion_depth
             ):
                 # Merge the cpp_kernel_proxy_list into cpp_kernel_proxy
-                outer_fusion_cpp_kernel_proxy = node._merge_outer_fusion_kernels(
+                outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
                     cpp_kernel_proxy_list,
                 )
                 kernel_group.finalize_kernel(
