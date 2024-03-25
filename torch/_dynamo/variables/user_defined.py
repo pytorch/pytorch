@@ -329,7 +329,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
+                        field_var = SourcelessBuilder.create(
+                            tx, field_defaults[field_name]
+                        )
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
@@ -805,6 +807,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
+                install_guard(source.make_guard(GuardBuilder.HASATTR))
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
