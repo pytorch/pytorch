@@ -157,9 +157,20 @@ class OptimizerVariable(UserDefinedObjectVariable):
         from .lazy import LazyVariableTracker
 
         # Tracing the _init_group is expensive. But we still have to insert the
-        # necessary guards for _init_group. To do this, we recursively realize
-        # the variable trackers for optim.state and optim.param_groups, which
-        # recursively install the necessary guards.
+        # necessary guards for _init_group. So, we manually handle insertion of
+        # guards. We also want to mark all the tensors inside the state dict to
+        # be static address.
+
+        # Mark all the tensors in the state dict to be static address.
+        from ..decorators import mark_static_address
+        for param, value in self.value.state.items():
+            mark_static_address(param, guard=False)
+            for _, hyper_param in value.items():
+                if isinstance(hyper_param, torch.Tensor):
+                    mark_static_address(hyper_param, guard=False)
+
+        # Recursively realize the variable trackers for optim.state and
+        # optim.param_groups, which recursively install the necessary guards.
 
         # NB: Its necessary to install the guards for optim.state first.
         # optim.state is a dict with parameters as keys. Therefore, we just put
@@ -187,7 +198,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):
-                # param_source = GetItemSource(GetItemSource(group_source, "params"), p_ind)
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
                 grad_source = AttrSource(
@@ -199,14 +209,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
+        # We have to again iterate over the state dict to collect the
+        # tensor_to_source dict. This is used for the finalizer.
         state_source = AttrSource(self.source, "state")
-        install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for idx, (p, value) in enumerate(self.value.state.items()):
-            tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, p)
             p_state_source = GetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
-            install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
                     isinstance(v, torch.Tensor)
@@ -214,14 +223,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     and v not in self.tensor_to_source
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
-                elif v is None or isinstance(v, (bool, int, float, str)):
-                    install_guard(
-                        GetItemSource(p_state_source, k).make_guard(
-                            GuardBuilder.CONSTANT_MATCH
-                        )
-                    )
-                else:
-                    raise GuardInstallException()
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
