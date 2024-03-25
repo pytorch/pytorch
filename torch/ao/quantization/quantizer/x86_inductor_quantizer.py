@@ -1044,7 +1044,7 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([binary_node, linear_node]):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            binary_node_input_qspec_map = {}
+            binary_node_input_qspec_map: Dict[Node, Any] = {}
             # We don't insert q-dq before the binary input node due to accuracy issues
             binary_node_input_qspec_map[extra_input_node] = None
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -1085,7 +1085,7 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([unary_node, binary_node, linear_node]):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            binary_node_input_qspec_map = {}
+            binary_node_input_qspec_map: Dict[Node, Any] = {}
             # We don't insert q-dq before the binary input node due to accuracy issues
             binary_node_input_qspec_map[extra_input_node] = None
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
