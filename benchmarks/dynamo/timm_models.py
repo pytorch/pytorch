@@ -25,7 +25,7 @@ except ModuleNotFoundError:
     pip_install("git+https://github.com/rwightman/pytorch-image-models")
 finally:
     from timm import __version__ as timmversion
-    from timm.data import resolve_data_config
+    from timm.data import resolve_data_config, create_transform
     from timm.models import create_model
 
 TIMM_MODELS = dict()
@@ -208,6 +208,7 @@ class TimmRunner(BenchmarkRunner):
 
     @download_retry_decorator
     def _download_model(self, model_name):
+        print("downloading model", model_name)
         model = create_model(
             model_name,
             in_chans=3,
@@ -262,12 +263,21 @@ class TimmRunner(BenchmarkRunner):
         batch_size = batch_size or recorded_batch_size
 
         torch.manual_seed(1337)
-        input_tensor = torch.randint(
-            256, size=(batch_size,) + input_size, device=device
-        ).to(dtype=torch.float32)
-        mean = torch.mean(input_tensor)
-        std_dev = torch.std(input_tensor)
-        example_inputs = (input_tensor - mean) / std_dev
+        from urllib.request import urlopen
+        from PIL import Image
+
+        img = Image.open(urlopen(
+            'https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/beignets-task-guide.png'
+        ))
+        transforms = create_transform(**data_config, is_training=False)
+        example_inputs = transforms(img).cuda().half().unsqueeze(0).repeat(batch_size, *([1]*len(input_size)))
+
+        # input_tensor = torch.randint(
+        #     256, size=(batch_size,) + input_size, device=device
+        # ).zero_()
+        # transforms = create_transform(**data_config, is_training=True)
+        # breakpoint()
+        # example_inputs = transforms(input_tensor)
 
         if channels_last:
             example_inputs = example_inputs.contiguous(
