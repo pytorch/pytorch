@@ -1311,7 +1311,7 @@ class OutputGraph:
         )
 
         # We are going to mutate the dict
-        symbol_to_proxy = {}
+        symbol_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
         placeholders = set()
         last_placeholder = None
         for node in self.graph.nodes:
@@ -1330,6 +1330,33 @@ class OutputGraph:
 
         log.debug("needed_symbols = %s", needed_symbols)
 
+        def add_runtime_asserts(ras):
+            for ra in ras:
+                log.debug("inserting runtime assert %s", ra.expr)
+                # Need to process ALL free symbols, not just unbacked ones
+                fvs = free_symbols(ra.expr)
+                missing = fvs - symbol_to_proxy.keys()
+                if missing:
+                    i1 = sorted(missing, key=lambda x: str(x))[0]
+                    # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
+                    # assert self.shape_env.is_unbacked_symint(i1), i1
+                    ras_by_symbol.setdefault(i1, []).append(ra)
+                else:
+                    # Convert the sympy expression into a sequence of FX
+                    # nodes
+                    res = sympy_interp(
+                        PythonReferenceAnalysis, symbol_to_proxy, ra.expr
+                    ).node
+                    self.graph.call_function(
+                        torch.ops.aten._assert_scalar.default,
+                        # TODO: use ra.msg here, but it's pretty
+                        # useless right now
+                        (
+                            res,
+                            f"Deferred runtime assertion failed {ra.expr}",
+                        ),
+                    )
+
         for node in self.graph.nodes:
             # Placeholders can match symbols, but when we destructure them
             # with size we have to make sure we insert the nodes after all
@@ -1339,6 +1366,9 @@ class OutputGraph:
             ):
                 if "example_value" not in node.meta:
                     continue
+
+                if node not in placeholders:
+                    add_runtime_asserts(ras_by_symbol.pop(None, []))
 
                 defs = []
 
@@ -1453,31 +1483,7 @@ class OutputGraph:
                             ),
                         )
 
-                    for ra in ras:
-                        log.debug("inserting runtime assert %s", ra.expr)
-                        # Need to process ALL free symbols, not just unbacked ones
-                        fvs = free_symbols(ra.expr)
-                        missing = fvs - symbol_to_proxy.keys()
-                        if missing:
-                            i1 = sorted(missing, key=lambda x: str(x))[0]
-                            # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
-                            # assert self.shape_env.is_unbacked_symint(i1), i1
-                            ras_by_symbol.setdefault(i1, []).append(ra)
-                        else:
-                            # Convert the sympy expression into a sequence of FX
-                            # nodes
-                            res = sympy_interp(
-                                PythonReferenceAnalysis, symbol_to_proxy, ra.expr
-                            ).node
-                            self.graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                # TODO: use ra.msg here, but it's pretty
-                                # useless right now
-                                (
-                                    res,
-                                    f"Deferred runtime assertion failed {ra.expr}",
-                                ),
-                            )
+                    add_runtime_asserts(ras)
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
