@@ -205,11 +205,10 @@ class MetaTensorDescriber:
             or is_sparse_compressed_layout(layout)
             or (is_nested and not is_traceable_wrapper_subclass_v)
             or is_mkldnn
-            or
             # TODO: TBH, functorch wrapped tensors probably should have
-            # storage
-            # associated with them
-            is_functorch_wrapped
+            # storage associated with them
+            or is_functorch_wrapped
+            or is_legacy_batchedtensor_v
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
