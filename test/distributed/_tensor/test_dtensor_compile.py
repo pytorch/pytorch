@@ -304,6 +304,31 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out_test = opt_mod(dt)
         self.assertEqual(out_ref, out_test)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_different_gradient_placement(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x, y, z):
+            permute = x.permute(0, 2, 1)
+            permute2 = permute.contiguous()
+            layer_norm = torch.nn.functional.layer_norm(permute2, (4,), y, z, 1e-05)
+            out = layer_norm.permute(0, 2, 1)
+            return out
+
+        x = torch.randn(4, 2, 4, requires_grad=True, device="cuda")
+        x_dt = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
+
+        y = torch.randn(4, requires_grad=True, device="cuda")
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        z = torch.randn(4, requires_grad=True, device="cuda")
+        z_dt = DTensor.from_local(z, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt, y_dt, z_dt)
+        out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
+        out_dt.sum().backward()
+
     @run_with_both_funcol_impls
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -354,6 +379,24 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_partial_placement_graph_output(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x + x
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [_Partial()], run_check=False)
+
+        y = torch.randn(4, 4, requires_grad=True)
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt)
+        out_dt = torch.matmul(tmp_dt, y_dt)
+        out_dt.sum().backward()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)

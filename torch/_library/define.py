@@ -50,17 +50,6 @@ def def_blackbox(*, mutated_args: Sequence[str], types: device_types_t = None):
         >>> x = torch.randn(3)
         >>> y = numpy_sin_cpu(x)
         >>> assert torch.allclose(y, x.sin())
-        >>>
-        >>> # Example of a blackbox op that muates some inputs
-        >>> @def_blackbox(mutated_args={"x"}, types="cpu")
-        >>> def numpy_sin_(x: Tensor) -> None:
-        >>>     x_np = x.numpy()
-        >>>     np.sin(x_np, out=x_np)
-        >>>
-        >>> x = torch.randn(3)
-        >>> expected = x.sin()
-        >>> numpy_sin_(x)
-        >>> assert torch.allclose(x, expected)
 
     """
     assert len(mutated_args) == 0, "NYI"
@@ -163,8 +152,8 @@ class BlackBoxDef:
                         if isinstance(result, (Tensor, list)):
                             tuple_result = (result,)
                         for tensor in iter_tensors(tuple_result, {}):
-                            key = id(result.untyped_storage())
-                            if id(result.untyped_storage()) in storages:
+                            key = id(tensor.untyped_storage())
+                            if id(tensor.untyped_storage()) in storages:
                                 fn = self._backend_fns[device_type]
                                 module = inspect.getmodule(fn)
                                 raise RuntimeError(
@@ -335,7 +324,7 @@ def iter_tensors(args, kwargs, allowed_nesting=1):
         if isinstance(arg, Tensor):
             yield arg
         elif allowed_nesting > 0 and isinstance(arg, (tuple, list)):
-            yield from iter_tensors(arg, allowed_nesting - 1)
+            yield from iter_tensors(arg, {}, allowed_nesting - 1)
 
     for arg in args:
         yield from check(arg)
