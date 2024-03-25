@@ -31,7 +31,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
     assert weight.dim() == 2
     assert weight.dtype == torch.int8
     assert dtypeq == torch.int8 or dtypeq == torch.quint4x2
-    assert weight.device.type == "cuda"
+    # assert weight.device.type == "cuda"
 
     device = weight.device
 
@@ -63,7 +63,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
     else:
         cols_permuted = (
             torch.tensor(
-                [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
                 device=device,
             )
             + (torch.arange(0, nrows // 16, device=device).reshape(-1, 1) * 16).expand(
@@ -112,8 +112,8 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
     if dtypeq == torch.int8:
         tmp = (tmp.to(torch.int) + 128).to(tmp.dtype)
         outp[0::4] = tmp[0::4]
-        outp[1::4] = tmp[2::4]
-        outp[2::4] = tmp[1::4]
+        outp[1::4] = tmp[1::4]
+        outp[2::4] = tmp[2::4]
         outp[3::4] = tmp[3::4]
     elif dtypeq == torch.quint4x2:
         tmp0 = ((tmp & 0xF) + 8) & 0xF
