@@ -433,6 +433,7 @@ aten::_native_multi_head_attention.out
 aten::_neg_view
 aten::_neg_view_copy
 aten::_neg_view_copy.out
+aten::_nested_compute_contiguous_strides_offsets
 aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
