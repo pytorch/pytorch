@@ -13,7 +13,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
 
 import torch
 from torch._C._distributed_c10d import (
@@ -1009,7 +1009,10 @@ def _get_default_group() -> ProcessGroup:
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
-    return not_none(GroupMember.WORLD)
+    if TYPE_CHECKING:
+        return not_none(GroupMember.WORLD)
+    else:
+        return GroupMember.WORLD
 
 
 def _get_default_store() -> Store:
@@ -2261,7 +2264,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     warnings.warn(
         "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
@@ -3033,7 +3036,7 @@ def all_gather_coalesced(
     warnings.warn(
         "torch.distributed.all_gather_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
