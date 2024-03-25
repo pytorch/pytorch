@@ -4319,6 +4319,56 @@ class CommonTemplate:
             ),
         )
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_unbacked_refinement(self):
+        def fn(x):
+            z = x.nonzero()
+            torch._check(z.size(0) == 4)
+            return z + 3
+
+        self.common(
+            fn,
+            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+        )
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        self.common(
+            fn,
+            (
+                torch.randn(6),
+                torch.tensor([6]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn(7),
+                torch.tensor([7]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify_errors(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        # This is a little suboptimal: we actually fail /in the compiler/ but
+        # not in a way that causes Dynamo to graph break
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.randn(8), torch.tensor(8))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):
@@ -6731,6 +6781,35 @@ class CommonTemplate:
         # Check non-multiple of 4 numel
         check(torch.ones(3, device=self.device, dtype=torch.float32))
         self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
+
+    # Already on by default, just want to make sure
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_reuse_buffers_with_aliasing(self):
+        def f(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
+
+        code = run_and_get_triton_code(torch.compile(f), torch.zeros((4, 2)))
+        # Make sure that we haven't added complex support and made this test
+        # invalid. If we've added complex support please update the test to use
+        # a different set of view ops we don't lower
+        self.assertTrue("aten.view_as_real" in code)
+
+        def f2(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            z = torch.view_as_real(z)
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
 
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
@@ -9394,6 +9473,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @config.patch(assume_aligned_inputs=False)
+        def test_config_option_dont_assume_alignment(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin() + x.cos()
+
+            for offset in (0, 1, 2):
+                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
+                inps = torch.as_strided(base, (64, 64), (64, 1), offset)
+                torch._dynamo.reset()
+                kernels = self.get_kernels(fn, [inps])
+                arguments_that_are_divisible_by_16 = (
+                    kernels[0].triton_meta["configs"][0].divisible_by_16
+                )
+
+                #             NO_ALIGN ALIGN     ALIGN
+                # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
+
+                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
