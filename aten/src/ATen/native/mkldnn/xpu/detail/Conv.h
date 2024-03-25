@@ -280,7 +280,7 @@ static void convolution_backward_weights(
   dnnl::memory::dims _padding_back_bottom_right = padding_back_bottom_right.vec();
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::primitive_attr pattr;
-  
+
   #if ONEDNN_SUPPORT_DETERMINISTIC
     if(at::globalContext().deterministicAlgorithms())
         pattr.set_deterministic(true);
