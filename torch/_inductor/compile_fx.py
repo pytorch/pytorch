@@ -373,6 +373,28 @@ def fake_tensor_prop(
     return fake_mode
 
 
+# def convert_to_contiguous_layout(gm: torch.fx.GraphModule):
+#     # """
+#     # Convert 4d convolution weight tensor to channels last format.
+
+#     # This pass is performed before freezing so the added nodes can be constant
+#     # folded by freezing.
+#     # """
+#     bmm_nodes = [
+#         n for n in gm.graph.nodes if n.target == torch.ops.aten.bmm.default
+#     ]
+
+#     for bmm in bmm_nodes:
+#         if bmm.args[0].meta["val"].stride()[0] == 1:
+#             print("before: ", bmm.args[0].meta["val"].stride())
+#             bmm.args[0].meta["val"] = bmm.args[0].meta["val"].contiguous()
+#             print("after: ", bmm.args[0].meta["val"].stride())
+#         if bmm.args[1].meta["val"].stride()[0] == 1:
+#             print("before: ", bmm.args[1].meta["val"].stride())
+#             bmm.args[1].meta["val"] = bmm.args[1].meta["val"].contiguous()
+#             print("after: ", bmm.args[1].meta["val"].stride())
+
+
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
     with config.patch(config_patches):
@@ -403,7 +425,8 @@ def compile_fx_inner(
     is_inference: bool = False,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     user_visible_outputs: FrozenSet[str] = frozenset(),
-    layout_opt: Optional[bool] = None,
+    channel_last_layout_opt: Optional[bool] = None,
+    contiguous_layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
     """
@@ -437,7 +460,8 @@ def compile_fx_inner(
             is_inference=is_inference,
             boxed_forward_device_index=boxed_forward_device_index,
             user_visible_outputs=user_visible_outputs,
-            layout_opt=layout_opt,
+            channel_last_layout_opt=channel_last_layout_opt,
+            contiguous_layout_opt=contiguous_layout_opt,
         )
 
     if cudagraphs is None:
@@ -455,7 +479,8 @@ def compile_fx_inner(
         "aot_mode": aot_mode,
         "is_inference": is_inference,
         "user_visible_outputs": user_visible_outputs,
-        "layout_opt": layout_opt,
+        "channel_last_layout_opt": channel_last_layout_opt,
+        "contiguous_layout_opt": contiguous_layout_opt,
         "extern_node_serializer": extern_node_serializer,
     }
 
@@ -614,7 +639,8 @@ def fx_codegen_and_compile(
     aot_mode: bool = False,
     is_inference: bool = False,
     user_visible_outputs: FrozenSet[str] = frozenset(),
-    layout_opt: Optional[bool] = None,
+    channel_last_layout_opt: Optional[bool] = None,
+    contiguous_layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
@@ -1087,11 +1113,16 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     _recursive_joint_graph_passes(aot_autograd_model)
 
-    layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
-    if layout_opt:
+    channel_last_layout_opt = GraphLowering.decide_channel_last_layout_opt(
+        aot_autograd_model, is_inference=True
+    )
+    if channel_last_layout_opt:
         # make sure meta['val'] is properly setup
         fake_tensor_prop(aot_autograd_model, aot_example_inputs, True)
         convert_conv_weights_to_channels_last(aot_autograd_model)
+    contiguous_layout_opt = GraphLowering.decide_contiguous_layout_opt(
+        aot_autograd_model, is_inference=True
+    )
 
     opt_model, preserved_arg_indices = freeze(
         dynamo_model,
@@ -1129,7 +1160,8 @@ def fw_compiler_freezing(
             graph_id=graph_id,
             is_inference=True,
             boxed_forward_device_index=forward_device,
-            layout_opt=layout_opt,
+            channel_last_layout_opt=channel_last_layout_opt,
+            contiguous_layout_opt=contiguous_layout_opt,
             user_visible_outputs=user_visible_outputs,
         )
 
