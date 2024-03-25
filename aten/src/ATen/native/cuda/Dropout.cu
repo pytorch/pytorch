@@ -387,7 +387,7 @@ native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
+fused_dropout_cuda(const Tensor& self, double p, const std::optional<Generator>& gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   return dropout_cuda<uint8_t>(gen, self, p);
 }
