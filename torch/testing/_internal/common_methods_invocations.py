@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHINDUCTOR
 )
 
-from torch.testing._internal.hop_db import hop_db
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
@@ -19733,7 +19732,6 @@ op_db: List[OpInfo] = [
     ),
 ]
 op_db += opinfo.definitions.op_db
-op_db += hop_db
 
 
 # Separate registry for experimental Python Reference OpInfos.
