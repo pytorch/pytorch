@@ -17,7 +17,7 @@ struct LinearConverter {
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       Func func) {
-    xpu::onednn::Attr attr = func();
+    onednn::Attr attr = func();
     Tensor _bias = bias.has_value() ? bias.value() : at::Tensor();
     Tensor _input =
         input.dim() <= 2 ? input : input.contiguous();
@@ -30,7 +30,7 @@ struct LinearConverter {
       const Tensor& input,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
-      xpu::onednn::Attr attr) {
+      onednn::Attr attr) {
     Tensor _bias = bias.has_value() ? bias.value() : at::Tensor();
     Tensor _input =
         input.dim() <= 2 ? input : input.contiguous();
