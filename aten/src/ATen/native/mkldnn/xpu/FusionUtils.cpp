@@ -101,5 +101,4 @@ onednn::Attr construct_binary_attr(
   return attr;
 }
 
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::xpu
