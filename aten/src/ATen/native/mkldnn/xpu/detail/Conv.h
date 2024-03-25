@@ -10,9 +10,7 @@
 
 #include <oneapi/dnnl/dnnl.hpp>
 
-namespace at{
-namespace native::xpu {
-namespace onednn {
+namespace at::native::onednn {
 
 constexpr int src_batch_size_dim = 0;
 constexpr int wgh_dst_channels_dim = 0;
@@ -197,6 +195,11 @@ static at::Tensor convolution(
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
+
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
@@ -277,6 +280,11 @@ static void convolution_backward_weights(
   dnnl::memory::dims _padding_back_bottom_right = padding_back_bottom_right.vec();
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::primitive_attr pattr;
+  
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
@@ -368,6 +376,11 @@ static void convolution_backward_data(
   // create fwd primitive desc hint
   dnnl::primitive_attr pattr;
 
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
+
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding_front_top_left = padding_front_top_left.vec();
@@ -430,6 +443,4 @@ static void convolution_backward_data(
 
 }
 
-} // namespace onednn
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::onednn
