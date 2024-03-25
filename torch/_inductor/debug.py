@@ -494,6 +494,7 @@ class DebugFormatter:
         input_nodes: List[ir.IRNode],
         timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
+        precompile_elapse: float,
     ):
         import json
 
@@ -565,6 +566,7 @@ class DebugFormatter:
             "cuda_device_count": torch.cuda.device_count(),
             "input_nodes": [build_node_info(node) for node in input_nodes],
             "autotuning_time": elapse,
+            "precompile_time": precompile_elapse,
         }
         with self.fopen_context(
             "autotuning_result_json_list.txt", "at", encoding="utf-8"
