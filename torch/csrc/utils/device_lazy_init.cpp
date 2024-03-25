@@ -1,5 +1,5 @@
-#include <torch/csrc/utils/device_lazy_init.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
@@ -22,7 +22,8 @@ void device_lazy_init(at::DeviceType device_type) {
     return;
   }
 
-  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(c10::impl::TorchDispatchModeKey::FAKE);
+  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(
+      c10::impl::TorchDispatchModeKey::FAKE);
   if (maybe_mode) {
     return;
   }
