@@ -464,18 +464,10 @@ def quantize_per_channel(
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
-    input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    res = torch.zeros_like(input)
-
-    for i in range(input.size(0)):
-        res[i] = torch.clamp(
-            torch.round(input[i] * (1.0 / scales[i])) + zero_points[i],
-            quant_min,
-            quant_max
-        )
-
-    out = res.permute(tuple(permute_axis_list))
-    return out.to(dtype)
+    input = torch.transpose(input, axis, -1)
+    out_i32 = torch.clamp(torch.round(input / scales).to(torch.int32) + zero_points, quant_min, quant_max)
+    out_i32 = torch.transpose(out_i32, axis, -1)
+    return out_i32.to(dtype)
 
 @impl(quantized_decomposed_lib, "quantize_per_channel", "Meta")
 def quantize_per_channel_meta(
@@ -545,20 +537,17 @@ def dequantize_per_channel(
     assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
     if out_dtype is None:
         out_dtype = torch.float32
+    if zero_points is None:
+        zero_points = torch.zeros_like(scales, dtype=torch.int32)
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
-    input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    res = torch.zeros_like(input, dtype=out_dtype)
 
-    for i in range(input.size(0)):
-        zp = zero_points[i] if zero_points is not None else 0
-        # TODO: investigate why
-        # (input[i] - zero_points[i]).to(out_dtype) * scales[i]
-        # failed the test
-        res[i] = (input[i].to(out_dtype) - zp) * scales[i]
-
-    out = res.permute(tuple(permute_axis_list))
-    return out
+    input = torch.clamp(input, quant_min, quant_max)
+    input = torch.transpose(input, axis, -1)
+    input_i32 = input.to(torch.int32)
+    out_fp32 = (input_i32 - zero_points).to(out_dtype) * scales
+    out_fp32 = torch.transpose(out_fp32, axis, -1)
+    return out_fp32
 
 @impl(quantized_decomposed_lib, "dequantize_per_channel", "Meta")
 def dequantize_per_channel_meta(
