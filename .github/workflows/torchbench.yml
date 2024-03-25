@@ -1,0 +1,24 @@
+name: torchbench
+
+on:
+  push:
+    tags:
+      - ciflow/torchbench/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-jammy-torchbench-py3_8-test:
+    name: linux-jammy-xpu-py3.8
+    uses: ./.github/workflows/_torchbench-test.yml
+    needs: linux-jammy-xpu-py3_8-build
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      build-environment: linux-jammy-torchbench-py3.8
+      docker-image: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.test-matrix }}
