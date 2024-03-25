@@ -691,9 +691,9 @@ def index_reduce(self, dim: int, index, src, reduction_type: str, **kwargs):
 def index_reduce_(
     self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
 ):
-    repeats = self.numel() // max(1, self.shape[dim])
+    repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
-    perm = (*range(self.ndim - dim, self.ndim), *range(self.ndim - dim))
+    perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
     scatter_index = index.repeat_interleave(repeats).reshape(index_shape).permute(perm)
     return self.scatter_reduce_(
         dim,
