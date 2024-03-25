@@ -263,7 +263,7 @@ class TimmRunner(BenchmarkRunner):
             'https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/beignets-task-guide.png'
         ))
         transforms = create_transform(**data_config, is_training=False)
-        example_inputs = transforms(img).cuda().half().unsqueeze(0).repeat(batch_size, *([1]*len(input_size)))
+        example_inputs = transforms(img).to(device=device).half().unsqueeze(0).repeat(batch_size, *([1]*len(input_size)))
 
         # input_tensor = torch.randint(
         #     256, size=(batch_size,) + input_size, device=device
