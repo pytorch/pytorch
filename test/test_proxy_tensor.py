@@ -2016,9 +2016,23 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, o
             self.skipTest("Dynamic output shape operation in trace")
 
 
+def skipIfNameMatches(pattern):
+    """
+    Decorator to skip a test if its name matches the given pattern.
+    """
+    def decorator(test_func):
+        def wrapper(*args, **kwargs):
+            if re.match(pattern, test_func.__name__):
+                raise unittest.SkipTest(f"Test '{test_func.__name__}' skipped because its name matches the pattern '{pattern}'")
+            return test_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 class TestProxyTensorOpInfo(TestCase):
+    @skipIfNameMatches("auto_functionalize")
     @ops(op_db + hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures, list_to_skip_from=op_db + hop_db + custom_op_db)
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 

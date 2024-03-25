@@ -22761,8 +22761,8 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, False)
 
 
-def skipOps(test_case_name, base_test_name, to_skip, list_to_skip_from=None):
-    all_opinfos = op_db if list_to_skip_from is None else list_to_skip_from
+def skipOps(test_case_name, base_test_name, to_skip):
+    all_opinfos = op_db
     for xfail in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
