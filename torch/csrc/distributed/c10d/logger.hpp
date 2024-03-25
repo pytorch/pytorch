@@ -16,8 +16,7 @@ class TORCH_API Logger {
       int output_device,
       bool broadcast_buffers,
       bool has_sync_bn,
-      bool static_graph
-  );
+      bool static_graph);
 
   void set_static_graph();
 
@@ -62,11 +61,7 @@ class TORCH_API Logger {
       Timer::Event end_event);
 
   // Set the absolute time of the event that has been recorded in reducer.
-  void set_event_time(
-    int64_t& event_time,
-    Timer& timer,
-    Timer::Event event
-  );
+  void set_event_time(int64_t& event_time, Timer& timer, Timer::Event event);
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previously ran.
@@ -97,7 +92,6 @@ class TORCH_API Logger {
   // optimization.
   void log_if_graph_static(bool is_static);
 
-
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging
   // data fields.
@@ -105,6 +99,41 @@ class TORCH_API Logger {
   std::shared_ptr<c10d::Reducer> reducer_;
   // track the number of iterations when runtime stats are collected so far.
   long num_iterations_stats_recorded_ = 0;
+};
+
+// a generic logging data struct that holds different types of logging data.
+// starting with key value pairs of strings and integers,
+// It can be extended to more types as needed.
+struct C10dLoggingData {
+  // logging fields that are string types.
+  std::map<std::string, std::string> strings;
+  // logging fields that are int64_t types.
+  std::map<std::string, int64_t> integers;
+};
+
+class TORCH_API C10dLogger {
+ public:
+  C10dLogger(const C10dLogger&) = default;
+  C10dLogger(C10dLogger&&) = delete;
+  C10dLogger& operator=(const C10dLogger&) = default;
+  C10dLogger& operator=(C10dLogger&&) = delete;
+  virtual ~C10dLogger() = default;
+  virtual void log(const C10dLoggingData& data);
+  static C10dLogger* getLogger();
+  static void registerLogger(std::unique_ptr<C10dLogger>);
+
+ protected:
+  // singletion, hide constructor from the public
+  C10dLogger(const std::string& logDestination) {
+    logDestination_ = logDestination;
+  }
+
+  // the name of the destination this logger should log to
+  std::string logDestination_;
+
+ private:
+  static std::unique_ptr<C10dLogger> logger_;
+  static std::atomic<bool> registered_;
 };
 
 } // namespace c10d

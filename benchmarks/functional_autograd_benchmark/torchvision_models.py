@@ -168,7 +168,7 @@ class ResNet(nn.Module):
         if len(replace_stride_with_dilation) != 3:
             raise ValueError(
                 "replace_stride_with_dilation should be None "
-                "or a 3-element tuple, got {}".format(replace_stride_with_dilation)
+                f"or a 3-element tuple, got {replace_stride_with_dilation}"
             )
         self.groups = groups
         self.base_width = width_per_group
@@ -768,14 +768,14 @@ class SetCriterion(nn.Module):
         src_masks = outputs["pred_masks"]
 
         # TODO use valid to mask invalid areas due to padding in loss
-        target_masks, valid = nested_tensor_from_tensor_list(
+        target_masks, valid = nested_tensor_from_tensor_list(  # noqa: F821
             [t["masks"] for t in targets]
         ).decompose()
         target_masks = target_masks.to(src_masks)
 
         src_masks = src_masks[src_idx]
         # upsample predictions to the target size
-        src_masks = interpolate(
+        src_masks = interpolate(  # noqa: F821
             src_masks[:, None],
             size=target_masks.shape[-2:],
             mode="bilinear",
@@ -786,8 +786,10 @@ class SetCriterion(nn.Module):
         target_masks = target_masks[tgt_idx].flatten(1)
 
         losses = {
-            "loss_mask": sigmoid_focal_loss(src_masks, target_masks, num_boxes),
-            "loss_dice": dice_loss(src_masks, target_masks, num_boxes),
+            "loss_mask": sigmoid_focal_loss(  # noqa: F821
+                src_masks, target_masks, num_boxes
+            ),  # noqa: F821
+            "loss_dice": dice_loss(src_masks, target_masks, num_boxes),  # noqa: F821
         }
         return losses
 

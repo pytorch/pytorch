@@ -18,14 +18,19 @@ class Geometric(Distribution):
     r"""
     Creates a Geometric distribution parameterized by :attr:`probs`,
     where :attr:`probs` is the probability of success of Bernoulli trials.
-    It represents the probability that in :math:`k + 1` Bernoulli trials, the
-    first :math:`k` trials failed, before seeing a success.
 
-    Samples are non-negative integers [0, :math:`\inf`).
+    .. math::
+
+        P(X=k) = (1-p)^{k} p, k = 0, 1, ...
+
+    .. note::
+        :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success
+        hence draws samples in :math:`\{0, 1, \ldots\}`, whereas
+        :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`.
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
         tensor([ 2.])

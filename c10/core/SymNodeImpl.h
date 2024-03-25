@@ -5,6 +5,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <cstdint>
+#include <ostream>
+#include <string>
 
 namespace c10 {
 
@@ -33,6 +36,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   };
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
+  };
+  virtual bool is_nested_int() const {
+    return false;
   };
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
@@ -97,6 +103,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode sym_not() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymNode sym_ite(const SymNode& then_val, const SymNode& else_val) {
+    TORCH_CHECK(false, "NYI");
+  };
   // NB: self is ignored here, only the arguments are used
   virtual SymNode is_contiguous(
       ArrayRef<SymNode> sizes,
@@ -152,6 +161,21 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool guard_size_oblivious(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  }
+  virtual bool expect_true(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  };
+  virtual bool expect_size(const char* file, int64_t line) {
+    // No improvement for unbacked SymInts by default, replace this
+    // with a better implementation!
+    return ge(wrap_int(0))->guard_bool(file, line);
+  };
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   };
@@ -164,16 +188,31 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual int64_t large_negative_int() {
-    return 0; // not a large negative int!
+  virtual c10::optional<int64_t> nested_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> nested_int_coeff() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> constant_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<bool> constant_bool() {
+    return c10::nullopt;
   }
   virtual c10::optional<int64_t> maybe_as_int() {
     return c10::nullopt;
   }
+  virtual bool is_constant() {
+    return false;
+  }
+  virtual bool is_symbolic() {
+    return true;
+  }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
-  };
+  }
 };
 
 } // namespace c10

@@ -85,8 +85,8 @@ void CommTraceLogger::recordComms(
     const int world_size,
     const std::vector<at::Tensor>& inputTensors,
     const std::vector<at::Tensor>& outputTensors) {
-  auto inSize = (!inputTensors.empty()) ? inputTensors[0].numel() : 0;
-  auto outSize = (!outputTensors.empty()) ? outputTensors[0].numel() : 0;
+  auto inNelems = (!inputTensors.empty()) ? inputTensors[0].numel() : 0;
+  auto outNelems = (!outputTensors.empty()) ? outputTensors[0].numel() : 0;
   auto dtype =
       (!outputTensors.empty()) ? outputTensors[0].scalar_type() : at::kByte;
   auto devType = (!outputTensors.empty()) ? outputTensors[0].device().type()
@@ -116,14 +116,14 @@ void CommTraceLogger::recordComms(
       ",\n\t\t\"world_size\": ",
       world_size);
 
-  if (inSize > 0 || outSize > 0) {
+  if (inNelems > 0 || outNelems > 0) {
     // for most collectives - append msg sizes, data type, device type
     cur_trace_ = c10::str(
         cur_trace_,
         ",\n\t\t\"in_msg_size\": ",
-        inSize,
+        inNelems,
         ",\n\t\t\"out_msg_size\": ",
-        outSize,
+        outNelems,
         ",\n\t\t\"dtype\": \"",
         at::toString(dtype),
         "\",\n\t\t\"devType\": \"",
@@ -153,11 +153,14 @@ void CommTraceLogger::recordComms(
       0, // process group ptr
       rank,
       commName.c_str(),
-      inSize,
-      outSize,
+      inNelems,
+      outNelems,
       dtype,
       curInSplitSizes_,
-      curOutSplitSizes_);
+      curOutSplitSizes_,
+      -1,
+      -1,
+      world_size);
 
   ++seqnum;
 

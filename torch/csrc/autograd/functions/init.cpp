@@ -31,7 +31,7 @@ struct DelayedErrorCtor {
     auto arg2 = PyTuple_GET_ITEM(args, 1);
     TORCH_CHECK(
         THPUtils_checkLong(arg2), "argument 'num_inputs' must be an int");
-    int num_inputs = THPUtils_unpackLong(arg2);
+    auto num_inputs = THPUtils_unpackLong(arg2);
     return new DelayedError(std::move(msg), num_inputs);
   }
 };

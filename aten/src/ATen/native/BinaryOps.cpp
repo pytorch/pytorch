@@ -146,9 +146,7 @@
 #include <ATen/ops/xor_native.h>
 #endif
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, const Scalar& alpha
@@ -371,10 +369,10 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(le);
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(gt);
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
-} // namespace meta
+} // namespace at::meta
 
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(mul_stub);
@@ -1418,7 +1416,7 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 }
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely
-// referring to *_out function is ambiguious.
+// referring to *_out function is ambiguous.
 using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
 
 // less, alias for torch.lt
@@ -1609,5 +1607,4 @@ Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

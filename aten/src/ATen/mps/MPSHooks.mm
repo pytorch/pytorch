@@ -8,8 +8,7 @@
 #include <ATen/mps/MPSStream.h>
 #include <c10/util/Logging.h>
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 void MPSHooks::initMPS() const {
   C10_LOG_API_USAGE_ONCE("aten.init.mps");
@@ -20,7 +19,16 @@ bool MPSHooks::hasMPS() const {
   return at::mps::is_available();
 }
 
-bool MPSHooks::isOnMacOS13orNewer(unsigned minor) const {
+bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
+  if (major >= 14) {
+    if (major > 14) {
+      TORCH_WARN("Can't check whether running on ", major, ".", minor, "+ returning one for 14.0+");
+    } else if (minor > 0) {
+      TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.0+");
+    }
+    return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+  }
+  TORCH_CHECK(major == 13, "Trying to check for unexpected MacOS major ", major);
   switch (minor) {
     case 0:
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
@@ -84,10 +92,37 @@ void MPSHooks::profilerStopTrace() const {
   at::mps::getMPSProfiler().StopTrace();
 }
 
+uint32_t MPSHooks::acquireEvent(bool enable_timing) const {
+  return at::mps::getMPSEventPool()->acquireEvent(enable_timing);
+}
+
+void MPSHooks::releaseEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->releaseEvent(event_id);
+}
+
+void MPSHooks::recordEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true);
+}
+
+void MPSHooks::waitForEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true);
+}
+
+void MPSHooks::synchronizeEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->synchronizeEvent(event_id);
+}
+
+bool MPSHooks::queryEvent(uint32_t event_id) const {
+  return at::mps::getMPSEventPool()->queryEvent(event_id);
+}
+
+double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
+  return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
 using at::MPSHooksRegistry;
 using at::RegistererMPSHooksRegistry;
 
 REGISTER_MPS_HOOKS(MPSHooks);
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps

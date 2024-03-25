@@ -614,8 +614,8 @@ def _lobpcg(
 
     if m < 3 * n:
         raise ValueError(
-            "LPBPCG algorithm is not applicable when the number of A rows (={})"
-            " is smaller than 3 x the number of requested eigenpairs (={})".format(m, n)
+            f"LPBPCG algorithm is not applicable when the number of A rows (={m})"
+            f" is smaller than 3 x the number of requested eigenpairs (={n})"
         )
 
     method = "ortho" if method is None else method
@@ -648,7 +648,7 @@ def _lobpcg(
         bparams["ortho_use_drop"] = bparams.get("ortho_use_drop", False)
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[assignment]
+        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[method-assign]
 
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
@@ -672,7 +672,7 @@ def _lobpcg(
             bXret[i] = worker.X[:, :k]
 
         if not torch.jit.is_scripting():
-            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
+            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[method-assign]
 
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
@@ -684,7 +684,7 @@ def _lobpcg(
     worker.run()
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
+        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[method-assign]
 
     return worker.E[:k], worker.X[:, :k]
 
@@ -1151,9 +1151,7 @@ class LOBPCG:
                 assert B is not None
                 raise ValueError(
                     "Overdetermined shape of U:"
-                    " #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold".format(
-                        B.shape[-1], U.shape[-1], V.shape[-1]
-                    )
+                    f" #B-cols(={B.shape[-1]}) >= #U-cols(={U.shape[-1]}) + #V-cols(={V.shape[-1]}) must hold"
                 )
         self.ivars["ortho_i"] = i
         self.ivars["ortho_j"] = j

@@ -3,15 +3,22 @@
 #include <c10/core/Backend.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
 #include <iosfwd>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace c10 {
@@ -149,7 +156,7 @@ struct C10_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template <
       typename T,
-      typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -164,8 +171,7 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename =
-          std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -199,7 +205,7 @@ struct C10_API TensorOptions {
   template <typename... Args>
   C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
     return device(
-        c10::optional<Device>(c10::in_place, std::forward<Args>(args)...));
+        c10::optional<Device>(std::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
@@ -285,7 +291,7 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the device index of the `TensorOptions`.
-  int32_t device_index() const noexcept {
+  c10::DeviceIndex device_index() const noexcept {
     return device().index();
   }
 
@@ -353,8 +359,16 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::Sparse;
   }
 
+  /// Returns if the layout is sparse CSR, deprecated, use
+  /// is_sparse_compressed() instead
   bool is_sparse_csr() const {
     return layout_ == c10::Layout::SparseCsr;
+  }
+
+  bool is_sparse_compressed() const {
+    return layout_ == c10::Layout::SparseCsr ||
+        layout_ == c10::Layout::SparseCsc ||
+        layout_ == c10::Layout::SparseBsr || layout_ == c10::Layout::SparseBsc;
   }
 
   // For compatibility with legacy tensor.type() comparisons
@@ -584,9 +598,8 @@ inline TensorOptions device(Device device) {
 
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
-inline TensorOptions device_index(int16_t device_index) {
-  return TensorOptions().device_index(
-      static_cast<c10::DeviceIndex>(device_index));
+inline TensorOptions device_index(c10::DeviceIndex device_index) {
+  return TensorOptions().device_index(device_index);
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
@@ -625,6 +638,7 @@ inline DispatchKey computeDispatchKey(
   const auto layout_ = layout_or_default(layout);
   const auto device_ = device_or_default(device);
   switch (layout_) {
+    case Layout::Jagged:
     case Layout::Strided: {
       const auto dtype_ = dtype_or_default(dtype);
       switch (device_.type()) {
@@ -690,12 +704,15 @@ inline DispatchKey computeDispatchKey(
     case Layout::SparseBsr:
     case Layout::SparseBsc:
       switch (device_.type()) {
-        case c10::DeviceType::CPU:
-          return DispatchKey::SparseCsrCPU;
-        case c10::DeviceType::CUDA:
-          return DispatchKey::SparseCsrCUDA;
+#define DO_CASE(device, _)                 \
+  case c10::DeviceType::device: {          \
+    return DispatchKey::SparseCsr##device; \
+  }
+        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
         default:
-          AT_ERROR(
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
               "Unsupported device type for ",
               layout_,
               " layout: ",
@@ -712,13 +729,11 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
 #undef DO_CASE
     return Layout::Sparse;
-    case DispatchKey::SparseCsrCPU:
-    case DispatchKey::SparseCsrCUDA:
-      TORCH_CHECK(
-          false,
-          "Cannot map DispatchKey ",
-          dispatch_key,
-          " to a unique layout.");
+#define DO_CASE(bc, _) case DispatchKey::SparseCsr##bc:
+    C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
+#undef DO_CASE
+    TORCH_CHECK(
+        false, "Cannot map DispatchKey ", dispatch_key, " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:

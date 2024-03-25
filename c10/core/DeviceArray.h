@@ -1,4 +1,8 @@
 #include <c10/core/Allocator.h>
+#include <c10/util/Exception.h>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
 
 namespace c10 {
 

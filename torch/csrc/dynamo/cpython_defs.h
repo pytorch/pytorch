@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Python.h>
 #include <torch/csrc/utils/python_compat.h>
 
 // Functions that need to be copied from the CPython source

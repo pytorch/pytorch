@@ -1,3 +1,4 @@
+#include <ATen/Functions.h>
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>

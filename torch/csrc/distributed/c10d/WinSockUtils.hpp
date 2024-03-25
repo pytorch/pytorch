@@ -7,12 +7,14 @@ namespace tcputil {
 
 #define CONNECT_SOCKET_OFFSET 1
 
-inline int poll(struct pollfd *fdArray, unsigned long fds, int timeout) {
+inline int poll(struct pollfd* fdArray, unsigned long fds, int timeout) {
   return WSAPoll(fdArray, fds, timeout);
 }
 
-inline void addPollfd(std::vector<struct pollfd> &fds, int socket,
-                      short events) {
+inline void addPollfd(
+    std::vector<struct pollfd>& fds,
+    int socket,
+    short events) {
   fds.push_back({(SOCKET)socket, events});
 }
 

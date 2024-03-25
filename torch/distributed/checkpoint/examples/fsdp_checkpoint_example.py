@@ -1,8 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 """
-The following example demonstrates how to use Pytorch Distributed Checkpoint
-to save a FSDP model. This is the current recommended way to checkpoint FSDP.
+The following example demonstrates how to use Pytorch Distributed Checkpoint to save a FSDP model.
+
+This is the current recommended way to checkpoint FSDP.
 torch.save() and torch.load() is not recommended when checkpointing sharded models.
 """
 
@@ -13,12 +14,10 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 import torch.multiprocessing as mp
+from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.distributed.checkpoint.optimizer import (
-    load_sharded_optimizer_state_dict,
-)
 
 CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
 
@@ -62,7 +61,7 @@ def run_fsdp_checkpoint_example(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # Initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
     # Create a model

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+from typing import Set
 
 import torch
 import torch.nn as nn
@@ -157,7 +158,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # there should only be one conv there in this model
             self.assertEqual(per_channel_info["conv"]["backend"], torch.backends.quantized.engine)
             self.assertEqual(len(per_channel_info), 1)
-            self.assertEqual(list(per_channel_info)[0], "conv")
+            self.assertEqual(next(iter(per_channel_info)), "conv")
             self.assertEqual(
                 per_channel_info["conv"]["per_channel_quantization_supported"],
                 True,
@@ -198,7 +199,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
             # pick a random key to look at
-            rand_key: str = list(per_channel_info.keys())[0]
+            rand_key: str = next(iter(per_channel_info.keys()))
             self.assertEqual(per_channel_info[rand_key]["backend"], torch.backends.quantized.engine)
             self.assertEqual(len(per_channel_info), 2)
 

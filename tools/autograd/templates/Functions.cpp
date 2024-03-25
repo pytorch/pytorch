@@ -13,8 +13,8 @@ using at::Scalar;
 using at::IntArrayRef;
 using at::TensorList;
 
-namespace torch { namespace autograd { namespace generated {
+namespace torch::autograd::generated {
 
 ${autograd_function_definitions}
 
-}}} // namespace torch::autograd::generated
+} // namespace torch::autograd::generated

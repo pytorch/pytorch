@@ -7,7 +7,6 @@
 #include <forward_list>
 #include <new>
 #include <utility>
-#include <vector>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -49,7 +48,7 @@ class AppendOnlyList {
  public:
   using array_t = block_t<T, ChunkSize>;
   static_assert(
-      std::is_base_of<std::array<T, ChunkSize>, array_t>::value,
+      std::is_base_of_v<std::array<T, ChunkSize>, array_t>,
       "AppendOnlyList expects raw low level pointer storage.");
   static_assert(ChunkSize > 0, "Block cannot be empty.");
 
@@ -58,13 +57,19 @@ class AppendOnlyList {
   AppendOnlyList& operator=(const AppendOnlyList&) = delete;
 
   size_t size() const {
-    return n_blocks_ * ChunkSize + (size_t)(next_ - end_);
+    return n_blocks_ * ChunkSize - (size_t)(end_ - next_);
   }
 
   template <class... Args>
   T* emplace_back(Args&&... args) {
     maybe_grow();
-    ::new ((void*)next_) T{std::forward<Args>(args)...};
+    if constexpr (
+        std::is_trivially_destructible_v<T> &&
+        std::is_trivially_destructible_v<array_t>) {
+      ::new ((void*)next_) T{std::forward<Args>(args)...};
+    } else {
+      *next_ = T{std::forward<Args>(args)...};
+    }
     return next_++;
   }
 
@@ -73,6 +78,10 @@ class AppendOnlyList {
       std::is_same<T0, T>::value && std::is_trivially_copyable<T>::value>::type
   copy(c10::ArrayRef<T0> src) {
     size_t n = src.size();
+    if (C10_UNLIKELY(n == 0)) {
+      return;
+    }
+    maybe_grow();
     if (C10_LIKELY(next_ && (next_ + n <= end_))) {
       std::memcpy((void*)next_, (void*)src.begin(), n * sizeof(T0));
       next_ += n;
@@ -170,8 +179,7 @@ class AppendOnlyList {
   }
   // TODO: cbegin and cend()
 
-  // TODO: make private
- protected:
+ private:
   void maybe_grow() {
     if (C10_UNLIKELY(next_ == end_)) {
       buffer_last_ = buffer_.emplace_after(buffer_last_);
@@ -185,10 +193,12 @@ class AppendOnlyList {
 
   // We maintain a pointer to the last element of `buffer_` so that we can
   // insert at the end in O(1) time.
-  typename std::forward_list<array_t>::iterator buffer_last_;
   size_t n_blocks_{0};
   T* next_{nullptr};
   T* end_{nullptr};
+
+ protected:
+  typename std::forward_list<array_t>::iterator buffer_last_;
 };
 
 } // namespace impl

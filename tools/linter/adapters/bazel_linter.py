@@ -10,6 +10,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from enum import Enum
 from typing import List, NamedTuple, Optional, Set
@@ -182,7 +183,7 @@ def main() -> None:
             description=(f"Failed due to {e.__class__.__name__}:\n{e}"),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
     for filename in args.filenames:
         for lint_message in check_bazel(filename, disallowed_checksums):

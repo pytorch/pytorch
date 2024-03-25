@@ -28,8 +28,7 @@
 #include <cstring>
 #include <ostream>
 
-namespace at {
-namespace vec {
+namespace at::vec {
 
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,6 +83,16 @@ inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
 
+template<>
+inline Vectorized<float> cast<float, int32_t>(const Vectorized<int32_t>& src) {
+  return _mm256_castsi256_ps(src);
+}
+
+template<>
+inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) {
+  return _mm256_castsi256_pd(src);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
@@ -103,14 +112,14 @@ inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
-                   const Vectorized<int64_t>& vindex, const Vectorized<double>& mask) {
+                   const Vectorized<int64_t>& vindex, Vectorized<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
-                   const Vectorized<int32_t>& vindex, const Vectorized<float>& mask) {
+                   const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
 
@@ -132,6 +141,24 @@ template<>
 Vectorized<int32_t>
 inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
   return _mm256_cvttps_epi32(src);
+}
+
+// Only works for inputs in the range: [-2^51, 2^51]
+// From: https://stackoverflow.com/a/41148578
+template<>
+Vectorized<double>
+inline convert_to_fp_of_same_size<double>(const Vectorized<int64_t> &src) {
+  auto x = _mm256_add_epi64(src, _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+  return _mm256_sub_pd(
+    _mm256_castsi256_pd(x),
+    _mm256_set1_pd(0x0018000000000000)
+  );
+}
+
+template<>
+Vectorized<float>
+inline convert_to_fp_of_same_size<float>(const Vectorized<int32_t> &src) {
+  return _mm256_cvtepi32_ps(src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -277,4 +304,4 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
 
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-}}}
+}} // namepsace at::vec::CPU_CAPABILITY

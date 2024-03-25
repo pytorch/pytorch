@@ -4,7 +4,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 using at::Dimname;
@@ -12,7 +11,6 @@ using at::DimnameList;
 using at::Symbol;
 using at::namedinference::TensorName;
 using at::namedinference::TensorNames;
-using std::make_unique;
 
 static Dimname dimnameFromString(const std::string& str) {
   return Dimname::fromSymbol(Symbol::dimname(str));

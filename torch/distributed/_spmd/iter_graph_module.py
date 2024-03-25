@@ -14,6 +14,7 @@ from torch.distributed._spmd.partial_lower import partial_lower
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
@@ -21,9 +22,9 @@ logger: logging.Logger = logging.getLogger("IterGraphModule")
 
 
 class IterGraph(fx.Graph):
-    """
-    ``IterGraph`` is used to perform cross-iteration optimization. ``IterGraph``
-    keeps track of the 3 graphs, self (the original graph), setup graph, and
+    """``IterGraph`` is used to perform cross-iteration optimization.
+
+    ``IterGraph`` keeps track of the 3 graphs, self (the original graph), setup graph, and
     cleanup graph. The 3 graphs should be identical copies of a ``fx.Graph``.
 
     IterGraph subclass fx.Graph to override the necessary APIs that will be used
@@ -126,18 +127,17 @@ class IterGraph(fx.Graph):
     def _forward_subgraph_inputs(
         self, subgraph: List[fx.Node], graph: fx.Graph, erase_node: bool
     ) -> int:
-        """
-        This function turns the inputs of a subgraph into the extra output
-        of the entire graph. If ``erase_node`` is True, the subgraph will be
-        erased from the graph -- essentially forward the inputs of the subgraph
-        to the output of the graph.
+        """Turn the inputs of a subgraph into the extra output of the entire graph.
+
+        If ``erase_node`` is True, the subgraph will be erased from the graph -- essentially forward the inputs
+        of the subgraph to the output of the graph.
         """
         output = get_output(graph)
         inputs = []
         all_nodes: Set[fx.Node] = set(subgraph)
 
         for node in subgraph:
-            node_inputs, _ = tree_flatten((node.args, node.kwargs))
+            node_inputs = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             for _input in node_inputs:
                 if not isinstance(_input, fx.Node):
                     continue
@@ -218,10 +218,10 @@ class IterGraph(fx.Graph):
     def _forward_inputs_to_subgraph(
         self, subgraph: List[fx.Node], graph: fx.Graph, extra_input: int
     ) -> None:
-        """
-        This function creates extra input nodes and forward the input nodes to
-        the ``subgraph``. The external input nodes of ``subgraph`` (nodes that
-        are not in ``subgraph``) will replaced by the newly created input nodes.
+        """Create extra input nodes and forward the input nodes to the ``subgraph``.
+
+        The external input nodes of ``subgraph`` (nodes that are not in ``subgraph``) will replaced by the newly
+        created input nodes.
         """
         placeholders = [node for node in graph.nodes if str(node.op) == "placeholder"]
         assert placeholders, "No placeholders are found"
@@ -274,8 +274,8 @@ class IterGraph(fx.Graph):
     def move_to_next_iter_before(
         self, subgraph: List[fx.Node], target_node: fx.Node
     ) -> None:
-        """
-        Move the ``subgraph`` to the next iteration before ``target_node``.
+        """Move the ``subgraph`` to the next iteration before ``target_node``.
+
         The ``subgraph`` is a list of fx.Node and must satisfy the following
         restrictions:
             1. The order of the nodes in ``subgraph`` must obey the topological
@@ -295,7 +295,7 @@ class IterGraph(fx.Graph):
             raise ValueError(
                 "The target nodes for ``move_to_next_iter_before`` must "
                 "satisfy one of the following conditions: 1) the user of the "
-                "node is in the target nodes, 2) the user is the ouput of the "
+                "node is in the target nodes, 2) the user is the output of the "
                 "graph, 3) there are no users -- the node is a side-effect node. "
             )
 
@@ -561,7 +561,7 @@ class IterGraph(fx.Graph):
                 delete_user_cb,
                 propagate_meta=propagate_meta,
             )
-        return ret
+        return ret  # type: ignore[possibly-undefined]
 
     def node_add_user(self, node: fx.Node, user: Any) -> None:
         for graph in self._all_graphs:
@@ -607,8 +607,8 @@ class IterGraph(fx.Graph):
                 "_foreach_add_",
             ):
                 step_node = node
-                self.node_add_user(optim_node, output_node)
-                self.node_add_user(step_node, optim_node)
+                self.node_add_user(optim_node, output_node)  # type: ignore[possibly-undefined]
+                self.node_add_user(step_node, optim_node)  # type: ignore[possibly-undefined]
 
     def defunctionalize_optim(self) -> None:
         # TODO: remove this API after DCE is not used with IterGraph
@@ -624,16 +624,16 @@ class IterGraph(fx.Graph):
                     "_foreach_add_",
                 ):
                     step_node = node
-                    optim_node.users.pop(output_node, None)
-                    step_node.users.pop(optim_node, None)
+                    optim_node.users.pop(output_node, None)  # type: ignore[possibly-undefined]
+                    step_node.users.pop(optim_node, None)  # type: ignore[possibly-undefined]
 
     def freeze_cross_iter_movement(self) -> None:
         self._freeze_cross_iter_movement = True
 
 
 class IterGraphModule(nn.Module):
-    """
-    ``IterGraphModule`` provides the ability to do cross-iteration optimization.
+    """``IterGraphModule`` provides the ability to do cross-iteration optimization.
+
     Given a ``fx.GraphModule``, main_gm, ``IterGraphModule`` internally
     duplicate it to 3 copies and redirect the ``forward`` request to a different
     ``fx.GraphModule`` based on the iteration count. This allows users to do
@@ -673,10 +673,9 @@ class IterGraphModule(nn.Module):
         self._enable_inductor = enable_inductor
 
     def finalize_setup(self) -> None:
-        """
-        Must be called before the forward() is called. This method setups
-        the internal states and also get the signal from users that what
-        is the maximum iteration count.
+        """Set up the internal states and also get the signal from users that what is the maximum iteration count.
+
+        This method must be called before the forward() is called.
         """
         if not self._is_frozen:
             self.graph.freeze_cross_iter_movement()

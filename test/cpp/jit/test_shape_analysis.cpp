@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -401,7 +402,7 @@ TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   EXPECT_EQ(get_shape_cache_size(), 1);
 
   // Same shape but different symbols should return same shape
-  // but different symbolic indicies
+  // but different symbolic indices
   res = calculateSymbolicShapesOnOp(schema, {ss2, const_size_2});
   auto res3_val = res->at(0);
 
@@ -482,7 +483,8 @@ TEST(ShapeAnalysisTest, TestShapeMultipleReturns) {
 
   auto res =
       calculateSymbolicShapesOnOp(max_dim_op, {ss1, const_int, false_ival});
-  c10::SymbolicShape expected_res = c10::SymbolicShape({sym_dim});
+  c10::SymbolicShape expected_res =
+      c10::SymbolicShape(std::vector<c10::optional<int64_t>>{sym_dim});
   assertShapeEqual(res->at(0), expected_res);
   // res0 and res1 should share the same symbolic symbol
   EXPECT_EQ(res->at(0), res->at(1));

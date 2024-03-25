@@ -2,7 +2,7 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic]
+    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm]
     types:
       - completed
 
@@ -10,6 +10,7 @@ jobs:
   # the conclusion field in the github context is sometimes null
   # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
   get_workflow_conclusion:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
@@ -25,11 +26,12 @@ jobs:
   upload-test-stats:
     needs: get_workflow_conclusion
     if:
-      github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
-      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure'
-    runs-on: [self-hosted, linux.2xlarge]
+      github.repository_owner == 'pytorch' &&
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
+      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure')
+    runs-on: ubuntu-22.04
+    environment: upload-stats
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
-
     steps:
       - name: Print workflow information
         env:
@@ -39,14 +41,19 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - run: |
-          pip3 install requests==2.26
-          pip3 install rockset==1.0.3
-          pip3 install boto3==1.19.12
+          pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
 
       - name: Upload test stats
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
@@ -60,6 +67,8 @@ jobs:
 
       - name: Upload test artifacts
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -74,6 +83,8 @@ jobs:
 
       - name: Analyze disabled tests rerun
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -84,14 +95,12 @@ jobs:
           python3 -m tools.stats.check_disabled_tests --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
 
   check-api-rate:
-    if: ${{ always() }}
-    runs-on: [self-hosted, linux.2xlarge]
+    if: ${{ always() && github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN}}
         run: |
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
-          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $PYTORCHBOT_TOKEN" https://api.github.com/rate_limit

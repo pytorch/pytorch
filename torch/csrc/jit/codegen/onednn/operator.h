@@ -94,13 +94,13 @@ class Operator {
   }
 
   template <typename Attr>
-  Operator& setAttr(std::string name, Attr&& attr) {
+  Operator& setAttr(dnnl::graph::op::attr name, Attr&& attr) {
     o.set_attr(name, std::forward<Attr>(attr));
     return *this;
   }
 
   template <typename F>
-  Operator& setAttr(std::string name, const F& fn, size_t offset) {
+  Operator& setAttr(dnnl::graph::op::attr name, const F& fn, size_t offset) {
     return setAttr(name, fn(n, offset));
   }
 

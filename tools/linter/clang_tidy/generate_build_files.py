@@ -18,7 +18,7 @@ def run_cmd(cmd: List[str]) -> None:
     print(stderr)
     if result.returncode != 0:
         print(f"Failed to run {cmd}")
-        exit(1)
+        sys.exit(1)
 
 
 def update_submodules() -> None:
@@ -27,6 +27,7 @@ def update_submodules() -> None:
 
 def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
+    os.environ["USE_PRECOMPILED_HEADERS"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
     run_cmd([sys.executable, "setup.py", "--cmake-only", "build"])

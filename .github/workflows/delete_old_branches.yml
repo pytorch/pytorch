@@ -1,0 +1,39 @@
+# A workflow that deletes branches of closed PRs
+
+name: Delete old branches
+
+on:
+  schedule:
+    # Run daily.
+    - cron: 30 1 * * *
+  workflow_dispatch:
+
+concurrency:
+  group: delete-old-branches
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+
+      - name: Delete old branches
+        run: python .github/scripts/delete_old_branches.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

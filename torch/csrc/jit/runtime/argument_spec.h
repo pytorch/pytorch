@@ -7,7 +7,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -15,8 +15,7 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
@@ -73,10 +72,10 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code =
-        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs)
+      : hash_code(c10::hash_combine(
+            num_flat_tensor_inputs,
+            num_flat_optional_inputs)) {
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
@@ -467,8 +466,7 @@ inline c10::optional<int8_t> convertOptional(
                 : c10::optional<int8_t>{};
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 

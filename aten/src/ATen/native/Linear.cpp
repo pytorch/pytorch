@@ -4,8 +4,8 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
@@ -27,16 +27,15 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/tensordot_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <cctype>
-#include <sstream>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
@@ -53,20 +52,37 @@ static inline bool parseLinearFlatten3d() {
   return bool(value);
 }
 
-// `_flatten_3d_linear` flattens the first two dimensions of the input tensor
-// before passing it to linear operation, if the input tensor is 3D
-static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+// `_flatten_nd_linear` flattens all but the last dimension of the input tensor
+// before passing it to linear operation
+static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
-    const auto result = at::addmm(bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
+    // can't use -1 in reshape because it errors when a dimension is 0
+    c10::SymInt flattened_dim = 1;
+    for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
+      flattened_dim = flattened_dim * input_sizes[i];
+    }
+    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
+    const auto result = at::addmm(bias, inp_reshape, weight.t());
+    auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
+    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
+    sizes_vec.push_back(result.sym_size(1));
+    return result.view_symint(sizes_vec);
 }
 
+
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // _matmul_impl checks this again later, but _flatten_nd_linear does not work on scalars inputs,
+  // so let's try to catch this here already
+  const auto input_dim = input.dim();
+  const auto weight_dim = weight.dim();
+  TORCH_CHECK(input_dim != 0 && weight_dim != 0,
+              "both arguments to linear need to be at least 1D, but they are ",
+              input_dim, "D and ", weight_dim, "D");
+
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
-
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
@@ -75,19 +91,21 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias->defined()) {
+  if (input_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if (input.dim() == 3 && bias->defined() && !input.is_xla()) {
+  if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    if (input.is_contiguous()) {
-      return _flatten_3d_linear(input, weight, *bias);
-    } else if (parseLinearFlatten3d()) {
+    if (input.is_contiguous() && input_dim == 3) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (input.is_contiguous() && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
+      return _flatten_nd_linear(input, weight, *bias);
+    } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
       const Tensor input_cont = input.contiguous();
-      return _flatten_3d_linear(input_cont, weight, *bias);
+      return _flatten_nd_linear(input_cont, weight, *bias);
     }
   }
   auto output = at::matmul(input, weight.t());
@@ -108,7 +126,7 @@ Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optiona
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+              : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -693,6 +711,28 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+  if (bias.defined()) {
+    TORCH_CHECK(
+        input1.dtype() == input2.dtype() && input1.dtype() == weight.dtype() &&
+            input1.dtype() == bias.dtype(),
+        "All tensors must have the same dtype, got input1: ",
+        input1.dtype(),
+        ", input2: ",
+        input2.dtype(),
+        ", weight: ",
+        weight.dtype(),
+        ", bias: ",
+        bias.dtype());
+  } else {
+    TORCH_CHECK(
+        input1.dtype() == input2.dtype() && input1.dtype() == weight.dtype(),
+        "All tensors must have the same dtype, got input1: ",
+        input1.dtype(),
+        ", input2: ",
+        input2.dtype(),
+        ", weight: ",
+        weight.dtype());
+  }
 
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
@@ -775,7 +815,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t2.sym_size(i));
     }
   }
-  // permut and reshape for matrix multiplication
+  // permute and reshape for matrix multiplication
   t1 = t1.permute(p1).reshape_symint({size1, csize});
   t2 = t2.permute(p2).reshape_symint({csize, size2});
   // multiply and reshape to target size
@@ -806,4 +846,4 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -8,8 +8,7 @@
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 //-----------------------------------------------------------------
 //  MPSStream
@@ -147,9 +146,9 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
 }
 
 void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType) {
-  TORCH_INTERNAL_ASSERT(length >= offset);
-  if (length == 0)
+  if (length == 0) {
     return;
+  }
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
@@ -249,7 +248,7 @@ MPSStream* MPSStreamImpl::_stream = nullptr;
 
 MPSStream* MPSStreamImpl::getInstance() {
   if (_stream == nullptr) {
-    _stream = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS), 0));
+    _stream = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS, 0), 0));
   }
   return _stream;
 }
@@ -264,77 +263,4 @@ MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
 }
 
-//-----------------------------------------------------------------
-//  MPSEvent
-//-----------------------------------------------------------------
-
-MPSEvent::MPSEvent(bool deferInitialization)
-    : is_initialized(false), _signalCounter(0), _stream(nil), _event(nil), _listener(nil) {
-  if (!deferInitialization) {
-    initialize();
-  }
-}
-
-MPSEvent::~MPSEvent() {
-  if (_event) {
-    [_event release];
-    _event = nil;
-  }
-  if (_listener) {
-    [_listener release];
-    _listener = nil;
-  }
-}
-
-void MPSEvent::initialize() {
-  _stream = getDefaultMPSStream();
-  _event = [_stream->device() newSharedEvent];
-  _listener = [[MTLSharedEventListener alloc] init];
-  is_initialized = true;
-}
-
-void MPSEvent::recordEvent(bool syncEvent) {
-  if (!is_initialized)
-    initialize();
-
-  dispatch_sync(_stream->queue(), ^() {
-    @autoreleasepool {
-      ++_signalCounter;
-      id<MTLCommandBuffer> commandBuffer = _stream->commandBuffer();
-      [commandBuffer encodeSignalEvent:_event value:_signalCounter];
-      if (syncEvent)
-        _stream->synchronize(SyncType::COMMIT);
-    }
-  });
-}
-
-void MPSEvent::waitForEvent(bool syncEvent) {
-  TORCH_INTERNAL_ASSERT(is_initialized);
-  dispatch_sync(_stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = _stream->commandBuffer();
-      [commandBuffer encodeWaitForEvent:_event value:_signalCounter];
-      if (syncEvent)
-        _stream->synchronize(SyncType::COMMIT);
-    }
-  });
-}
-
-void MPSEvent::notifyEvent(MTLSharedEventNotificationBlock block) {
-  if (!is_initialized)
-    initialize();
-  dispatch_sync(_stream->queue(), ^() {
-    @autoreleasepool {
-      ++_signalCounter;
-      [_event notifyListener:_listener atValue:_signalCounter block:block];
-    }
-  });
-}
-
-bool MPSEvent::queryEvent() const {
-  // return false if not recorded or signaled yet
-  return _signalCounter && (_event.signaledValue >= _signalCounter);
-}
-
-} // namespace mps
-} // namespace at
+} // namespace at::mps

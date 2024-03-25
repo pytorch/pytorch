@@ -112,10 +112,9 @@ class TestFSDPExecOrder(FSDPTest):
     ):
         """Tests that FSDP errors if the all-gather order differs across ranks
         in the first iteration."""
-        dist.set_debug_level(dist.DebugLevel.INFO)
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
-        dist.set_debug_level(dist.DebugLevel.INFO)
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
         fsdp_model = Model.wrap(sharding_strategy, self.device)
         if self.rank != 0:
             fsdp_model.flip_path()
@@ -138,7 +137,7 @@ class TestFSDPExecOrder(FSDPTest):
     ):
         """Tests that FSDP warns the user if the all-gather order changes after
         the first iteration."""
-        dist.set_debug_level(dist.DebugLevel.INFO)
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
         fsdp_model = Model.wrap(sharding_strategy, self.device)
@@ -181,7 +180,7 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     def test_train_eval(self, sharding_strategy: ShardingStrategy):
-        dist.set_debug_level(dist.DebugLevel.INFO)
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
         fsdp_model = Model.wrap(sharding_strategy, self.device)
         NUM_ITERS = 3
         NUM_EPOCHS = 2

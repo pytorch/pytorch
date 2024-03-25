@@ -107,6 +107,7 @@ class Embedding(Module):
                 [-0.7895, -0.7089, -0.0364],
                 [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
+
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
 
@@ -181,7 +182,7 @@ class Embedding(Module):
     def from_pretrained(cls, embeddings, freeze=True, padding_idx=None,
                         max_norm=None, norm_type=2., scale_grad_by_freq=False,
                         sparse=False):
-        r"""Creates Embedding instance from given 2-dimensional FloatTensor.
+        r"""Create Embedding instance from given 2-dimensional FloatTensor.
 
         Args:
             embeddings (Tensor): FloatTensor containing weights for the Embedding.
@@ -224,8 +225,7 @@ class Embedding(Module):
 
 
 class EmbeddingBag(Module):
-    r"""Computes sums or means of 'bags' of embeddings, without instantiating the
-    intermediate embeddings.
+    r"""Compute sums or means of 'bags' of embeddings, without instantiating the intermediate embeddings.
 
     For bags of constant length, no :attr:`per_sample_weights`, no indices equal to :attr:`padding_idx`,
     and with 2D inputs, this class
@@ -301,6 +301,7 @@ class EmbeddingBag(Module):
                 padding_idx=embedding.padding_idx,
                 mode='sum')
     """
+
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
                      'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset',
                      'padding_idx']
@@ -410,7 +411,7 @@ class EmbeddingBag(Module):
                         norm_type: float = 2., scale_grad_by_freq: bool = False,
                         mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False,
                         padding_idx: Optional[int] = None) -> 'EmbeddingBag':
-        r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
+        r"""Create EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
             embeddings (Tensor): FloatTensor containing weights for the EmbeddingBag.

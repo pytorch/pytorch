@@ -7,14 +7,9 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <array>
 #include <mutex>
 
-namespace torch {
-
-namespace cuda {
-
-namespace CUDAPluggableAllocator {
+namespace torch::cuda::CUDAPluggableAllocator {
 
 #if defined(TORCH_HIP_VERSION)
 using streamType = c10::hip::HIPStream;
@@ -29,13 +24,17 @@ createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
     std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
 void changeCurrentAllocator(
-    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
+    const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
+        allocator);
 
 struct _AllocationMetadata {
   _AllocationMetadata();
-  _AllocationMetadata(size_t size, int device_idx, cudaStream_t stream);
+  _AllocationMetadata(
+      size_t size,
+      c10::DeviceIndex device_idx,
+      cudaStream_t stream);
   size_t size;
-  int device_idx;
+  c10::DeviceIndex device_idx;
   cudaStream_t stream;
 };
 
@@ -59,64 +58,68 @@ struct CUDAPluggableAllocator
   void set_record_stream_fn(
       std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn);
 
-  void set_begin_allocate_stream_to_pool(
-      std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
+  void set_begin_allocate_to_pool(
+      std::function<
+          void(int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>)>
           capture_begin_fn);
 
-  void set_end_allocate_stream_to_pool_fn(
-      std::function<void(int, cudaStream_t)> capture_about_to_end_fn);
+  void set_end_allocate_to_pool_fn(
+      std::function<void(int, c10::cuda::MempoolId_t)> capture_about_to_end_fn);
 
   void set_release_pool(
       std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn);
 
-  void* malloc(size_t size, int device, cudaStream_t stream);
+  void* malloc(size_t size, c10::DeviceIndex device, cudaStream_t stream);
 
-  c10::DataPtr allocate(size_t size) const override;
+  c10::DataPtr allocate(size_t size) override;
   c10::DeleterFnPtr raw_deleter() const override;
 
-  virtual void* raw_alloc(size_t nbytes) override;
-  virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream)
-      override;
-  virtual void raw_delete(void* ptr) override;
-  virtual void init(int device_count) override;
-  virtual bool initialized() override;
-  virtual void setMemoryFraction(double fraction, int device) override;
-  virtual void emptyCache() override;
-  virtual void cacheInfo(int dev_id, size_t* largestBlock) override;
-  virtual void* getBaseAllocation(void* ptr, size_t* size) override;
+  void* raw_alloc(size_t nbytes) override;
+  void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) override;
+  void raw_delete(void* ptr) override;
+  void init(int device_count) override;
+  bool initialized() override;
+  void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
+  void emptyCache() override;
+  void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
+  void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  virtual void recordStream(const c10::DataPtr&, streamType stream) override;
+  void recordStream(const c10::DataPtr&, streamType stream) override;
 
-  virtual c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
-      int device) override;
-  virtual void resetAccumulatedStats(int device) override;
-  virtual void resetPeakStats(int device) override;
-  virtual c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
-  virtual void beginAllocateStreamToPool(
-      int device,
-      cudaStream_t stream,
+  c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) override;
+  void resetAccumulatedStats(c10::DeviceIndex device) override;
+  void resetPeakStats(c10::DeviceIndex device) override;
+  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
+  void beginAllocateToPool(
+      c10::DeviceIndex device,
+      c10::cuda::MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)>) override;
+  void endAllocateToPool(
+      c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id) override;
-  virtual void endAllocateStreamToPool(int device, cudaStream_t stream)
+  void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
-  virtual void releasePool(int device, c10::cuda::MempoolId_t mempool_id)
-      override;
-  virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
-  virtual void recordHistory(
+  std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
+  void recordHistory(
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override;
-  virtual void attachOutOfMemoryObserver(
+      c10::cuda::CUDACachingAllocator::RecordContext when) override;
+  void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
-  virtual std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
-  getCheckpointState(int device, at::cuda::MempoolId_t id) override;
-  virtual c10::cuda::CUDACachingAllocator::CheckpointDelta
-  setCheckpointPoolState(
-      int device,
+  void attachAllocatorTraceTracker(
+      c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) override;
+  std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+  getCheckpointState(c10::DeviceIndex device, at::cuda::MempoolId_t id)
+      override;
+  c10::cuda::CUDACachingAllocator::CheckpointDelta setCheckpointPoolState(
+      c10::DeviceIndex device,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
       override;
-  virtual void enablePeerAccess(int dev, int dev_to_access) override;
-  virtual cudaError_t memcpyAsync(
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
+      override;
+  cudaError_t memcpyAsync(
       void* dst,
       int dstDevice,
       const void* src,
@@ -124,7 +127,8 @@ struct CUDAPluggableAllocator
       size_t count,
       cudaStream_t stream,
       bool p2p_enabled) override;
-  virtual std::string name() override;
+  std::string name() override;
+  void copy_data(void* dest, const void* src, std::size_t count) const final;
 
  protected:
   std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
@@ -134,9 +138,10 @@ struct CUDAPluggableAllocator
   std::function<void(double, int)> memory_fraction_fn_;
   std::function<void*(void*, size_t*)> base_alloc_fn_;
   std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn_;
-  std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
-      begin_allocate_stream_to_pool_fn_;
-  std::function<void(int, cudaStream_t)> end_allocate_stream_to_pool_fn_;
+  std::function<
+      void(int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>)>
+      begin_allocate_to_pool_fn_;
+  std::function<void(int, c10::cuda::MempoolId_t)> end_allocate_to_pool_fn_;
   std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators
@@ -144,6 +149,4 @@ struct CUDAPluggableAllocator
 
   bool initialized_ = false;
 };
-} // namespace CUDAPluggableAllocator
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::CUDAPluggableAllocator

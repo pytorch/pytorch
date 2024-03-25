@@ -30,7 +30,7 @@ Tensor adaptive_avg_pool2d(
           output_size[Layout::Activation4D::batch],
           output_size[Layout::Activation4D::channels],
       },
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const uvec3 v_output_size = v_output.extents();
@@ -159,9 +159,15 @@ Tensor pool2d(
           output_height,
           output_width,
       },
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
+  if (v_self.is_quantized()) {
+    v_output.set_is_quantized();
+    v_output.set_scale(v_self.get_scale());
+    v_output.set_zero_point(v_self.get_zero_point());
+  }
 
+  api::UniformParamsBuffer params;
   const struct Block final {
     uvec3 extents;
     int32_t range;
@@ -192,8 +198,8 @@ Tensor pool2d(
           safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
       },
   };
+  params = api::UniformParamsBuffer(context, block);
 
-  api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
@@ -244,14 +250,34 @@ Tensor max_pool2d(
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool ceil_mode) {
-  return pool2d(
-      self_arg,
-      kernel_arg,
-      stride_arg,
-      padding_arg,
-      dilation_arg,
-      ceil_mode,
-      VK_KERNEL(max_pool2d));
+  if (self_arg.scalar_type() == kQUInt8) {
+    return pool2d(
+        self_arg,
+        kernel_arg,
+        stride_arg,
+        padding_arg,
+        dilation_arg,
+        ceil_mode,
+        VK_KERNEL(quantized_max_pool2d_quint8));
+  } else if (self_arg.scalar_type() == kQInt8) {
+    return pool2d(
+        self_arg,
+        kernel_arg,
+        stride_arg,
+        padding_arg,
+        dilation_arg,
+        ceil_mode,
+        VK_KERNEL(quantized_max_pool2d_qint8));
+  } else {
+    return pool2d(
+        self_arg,
+        kernel_arg,
+        stride_arg,
+        padding_arg,
+        dilation_arg,
+        ceil_mode,
+        VK_KERNEL(max_pool2d));
+  }
 }
 
 #ifdef USE_VULKAN_API

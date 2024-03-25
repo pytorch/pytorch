@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import sys
 
 from typing import Set
 
@@ -87,7 +88,7 @@ if __name__ == "__main__":
             torchbench.torchbench_main()
         else:
             print(f"Illegal model name? {name}")
-            exit(-1)
+            sys.exit(-1)
     else:
         import torchbench
 

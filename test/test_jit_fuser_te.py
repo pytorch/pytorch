@@ -21,7 +21,8 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN
+    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN, \
+    TEST_WITH_ROCM, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
     clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions, NoTracerWarnContextManager
@@ -81,7 +82,6 @@ def inline_fusion_groups():
         torch._C._debug_set_fusion_group_inlining(old_inlining)
 
 
-@skipIfTorchDynamo()
 class TestTEFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -1288,7 +1288,7 @@ class TestTEFuser(JitTestCase):
                 self.assertLastGraphAllFused()
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
+                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])  # noqa: F821
                 ) from e
 
     def test_isnan(self):
@@ -1923,6 +1923,7 @@ class TestTEFuser(JitTestCase):
             t = torch.rand(8, dtype=torch.float, device=device)
             scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
+    @skipIfTorchDynamo("too slow")
     def test_chunk_mul_one(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -2042,7 +2043,7 @@ class TestTEFuser(JitTestCase):
         sets = []
         for i in range(0, len(indices) + 1):
             for subset in combinations(indices, i):
-                sets.append(subset)
+                sets.append(subset)  # noqa: PERF402
 
         for set in sets:
             size = [2, 3, 4, 5]
@@ -2199,7 +2200,9 @@ class TestTEFuser(JitTestCase):
             x = torch.ones((8, 1))
             torch.testing.assert_close(eager(x), script(x))
 
+    @skipIfTorchDynamo("too slow")
     @unittest.skipIf(TEST_WITH_ASAN, "takes 10+ minutes on asan")
+    @unittest.skipIf(TEST_WITH_ROCM, "Tensor-likes are not close for nans")
     def test_batch_norm(self):
         def test(fn, args):
             trace = torch.jit.trace(fn, args)
@@ -2625,7 +2628,6 @@ def get_name(op):
 # super() [with no arguments] fails, presumably because of how instantiate_device_type_tests works.
 # super(TestNNCOpInfo, self) fails because TestNNCOpInfo gets deleted from global scope.
 # super(JitCommonTestCase, self).fn() would skip JitCommonTestCase.fn() implementation
-@skipIfTorchDynamo()
 class TestNNCOpInfoParent(JitCommonTestCase):
     pass
 
@@ -2680,7 +2682,6 @@ def f({', '.join(param_names)}):
             self.assertEqual(kernel.fallback(tuple(param_values)), correct_val)
 
     @onlyCPU
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     @ops([op for op in op_db if get_name(op) in works_list], allowed_dtypes=(torch.float,))
     def test_working(self, device, dtype, op):
@@ -2705,7 +2706,7 @@ def f({', '.join(param_names)}):
             return
         try:
             with warnings.catch_warnings():
-                warnings.simplefilter('ignore', TracerWarning)
+                warnings.simplefilter('ignore', TracerWarning)  # noqa: F821
                 self.te_compile(device, dtype, op)
         except Exception as e:
             pass
@@ -2739,11 +2740,11 @@ def f({', '.join(param_names)}):
             # if the CU is not cleared.
             torch.jit._state._python_cu.drop_all_functions()
 
-only_for = ("cpu", "cuda")
+# CPU fuser not currently used in fbcode
+only_for = ("cuda") if IS_FBCODE else ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 # Purpose of this class is to allow super() calls. (See TestNNCOpInfoParent)
-@skipIfTorchDynamo()
 class TestLoopnestRandomizationParent(JitTestCase):
     pass
 

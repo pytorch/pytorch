@@ -679,6 +679,10 @@ void UnpackQuantizedWeights(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
         %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
         return (%r) )";
+  std::string qlinear_relu = R"(
+  graph(%input, %packed_weight, %w_scale, %w_zero_point):
+        %r = quantized::linear_relu(%input, %packed_weight, %w_scale, %w_zero_point)
+        return (%r) )";
   std::string qconv1d = R"(
   graph(%input, %packed_params, %scale, %zero_point):
         %r = quantized::conv1d(%input, %packed_params, %scale, %zero_point)
@@ -719,6 +723,13 @@ void UnpackQuantizedWeights(
       graph,
       paramsDict,
       qlinear,
+      "quantized::linear_unpack",
+      QuantizedParamsType::LINEAR,
+      caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qlinear_relu,
       "quantized::linear_unpack",
       QuantizedParamsType::LINEAR,
       caffe2);

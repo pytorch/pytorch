@@ -84,8 +84,7 @@ Tensor AdamW::step(LossClosure closure) {
       }
       const auto& grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "AdamW does not support sparse gradients" /*, please consider SparseAdamW instead*/);
-      auto param_state =
-          state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
+      auto param_state = state_.find(p.unsafeGetTensorImpl());
       auto& options = static_cast<AdamWOptions&>(group.options());
 
       // Perform stepweight decay
@@ -105,12 +104,11 @@ Tensor AdamW::step(LossClosure closure) {
           // Maintains max of all exp. moving avg. of sq. grad. values
           state->max_exp_avg_sq(torch::zeros_like(p, MemoryFormat::Preserve));
         }
-        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
-            std::move(state);
+        state_[p.unsafeGetTensorImpl()] = std::move(state);
       }
 
-      auto& state = static_cast<AdamWParamState&>(
-          *state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto& state =
+          static_cast<AdamWParamState&>(*state_[p.unsafeGetTensorImpl()]);
       auto& exp_avg = state.exp_avg();
       auto& exp_avg_sq = state.exp_avg_sq();
       auto& max_exp_avg_sq = state.max_exp_avg_sq();
@@ -180,8 +178,7 @@ void AdamW::load(serialize::InputArchive& archive) {
       if (idx < max_exp_average_sq_buffers.size()) {
         state->max_exp_avg_sq(max_exp_average_sq_buffers.at(idx));
       }
-      state_[c10::guts::to_string(params.at(idx).unsafeGetTensorImpl())] =
-          std::move(state);
+      state_[params.at(idx).unsafeGetTensorImpl()] = std::move(state);
     }
   }
 }

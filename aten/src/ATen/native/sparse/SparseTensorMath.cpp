@@ -189,7 +189,7 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
 }
 
 // --------------------------------------------------------------------
-// div(SparseTensor, Scalar)
+// coalesce(SparseTensor)
 // --------------------------------------------------------------------
 
 static SparseTensor& coalesce_(SparseTensor& tensor) {
@@ -216,6 +216,9 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // A float tensor with values=[3., 3.] floor divided by 2 would also produce
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
+// --------------------------------------------------------------------
+// div(SparseTensor, Scalar)
+// --------------------------------------------------------------------
 
 SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, c10::optional<c10::string_view> rounding_mode, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
@@ -1308,7 +1311,7 @@ static Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }
@@ -1712,7 +1715,8 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
     if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
     // use coalesce() to do sum reduction
-    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options());
+    bool is_coalesced = false;  // TODO: can we use input.is_coalesced()?
+    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options(), is_coalesced);
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
@@ -1814,7 +1818,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone(at::MemoryFormat::Contiguous);
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, input.options().dtype(grad_.dtype())); // convert to grad dtype
+    bool grad_is_coalesced = input.is_coalesced();
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, input.options().dtype(grad_.dtype()), grad_is_coalesced); // convert to grad dtype
   }
   else {
     TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be sparse, but got dense");
@@ -1890,7 +1895,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     else {
       grad_input_values = grad_values_expand;
     }
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options());
+    bool grad_is_coalesced = input.is_coalesced();
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options(), grad_is_coalesced);
   }
 }
 

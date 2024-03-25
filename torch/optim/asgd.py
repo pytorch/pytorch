@@ -2,15 +2,15 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
-from torch._utils import is_compiling
+                        _get_scalar_dtype, _view_as_real, _differentiable_doc, _foreach_doc, _maximize_doc,
+                        _capturable_doc)
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
 
-def _to_tensor(x):
+def _to_tensor(x, device=None):
     if not isinstance(x, torch.Tensor):
-        return torch.tensor(x)
+        return torch.tensor(x, device=device)
 
     return x
 
@@ -26,6 +26,7 @@ class ASGD(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
+        capturable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -41,6 +42,7 @@ class ASGD(Optimizer):
             foreach=foreach,
             maximize=maximize,
             differentiable=differentiable,
+            capturable=capturable,
         )
         super().__init__(params, defaults)
 
@@ -50,29 +52,24 @@ class ASGD(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["step"]
-        )
-        if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
-        eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["eta"]
-        )
-        if not eta_is_tensor:
-            for s in state_values:
-                s["eta"] = torch.tensor(s["eta"])
-        mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["mu"]
-        )
-        if not mu_is_tensor:
-            for s in state_values:
-                s["mu"] = torch.tensor(float(s["mu"]))
+            group.setdefault("capturable", False)
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0:
+                    if not torch.is_tensor(p_state['step']):
+                        step_val = float(p_state["step"])
+                        p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
+                    if not torch.is_tensor(p_state["eta"]):
+                        p_state["eta"] = torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device)
+                    if not torch.is_tensor(p_state["mu"]):
+                        p_state["mu"] = torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device)
+
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
+        has_complex = False
         for p in group["params"]:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError("ASGD does not support sparse gradients")
@@ -81,9 +78,9 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
-                    state["eta"] = torch.tensor(group["lr"])
-                    state["mu"] = torch.tensor(1.0)
+                    state["step"] = torch.zeros((), device=p.device, dtype=_get_scalar_dtype())
+                    state["eta"] = torch.tensor(group["lr"], device=p.device, dtype=_get_scalar_dtype())
+                    state["mu"] = torch.ones((), device=p.device, dtype=_get_scalar_dtype())
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -92,15 +89,18 @@ class ASGD(Optimizer):
                 axs.append(state["ax"])
                 etas.append(state["eta"])
                 state_steps.append(state["step"])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -114,7 +114,7 @@ class ASGD(Optimizer):
             etas = []
             state_steps = []
 
-            self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
 
             asgd(
                 params_with_grad,
@@ -131,6 +131,8 @@ class ASGD(Optimizer):
                 foreach=group["foreach"],
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
+                capturable=group["capturable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -152,6 +154,7 @@ ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
+        {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
@@ -171,6 +174,8 @@ def asgd(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    capturable: bool = False,
+    has_complex: bool = False,
     *,
     lambd: float,
     lr: float,
@@ -182,7 +187,6 @@ def asgd(
 
     See :class:`~torch.optim.ASGD` for details.
     """
-
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
@@ -208,6 +212,8 @@ def asgd(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        capturable=capturable,
+        has_complex=has_complex,
     )
 
 
@@ -226,12 +232,9 @@ def _single_tensor_asgd(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
+    has_complex: bool,
 ):
-    def _to_tensor(x):
-        if not isinstance(x, torch.Tensor):
-            return torch.tensor(x)
-        return x
-
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -240,6 +243,12 @@ def _single_tensor_asgd(
         eta = etas[i]
         step_t = state_steps[i]
 
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            assert (param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda) or (
+                param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla
+            ), "If capturable=True, params, mus, etas, and state_steps must be CUDA or XLA tensors."
+
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
             param = torch.view_as_real(param)
@@ -247,28 +256,33 @@ def _single_tensor_asgd(
 
         # update step
         step_t += 1
-        step = _get_value(step_t)
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        eta_value = _get_value(eta)
-        # decay term
-        param.mul_(1 - lambd * eta_value)
-
-        # update parameter
-        param.add_(grad, alpha=-eta_value)
+        if capturable:
+            param.mul_(1 - lambd * eta)
+            param.addcmul_(grad, eta, value=-1)  # update parameter
+        else:
+            eta_value = _get_value(eta)
+            param.mul_(1 - lambd * eta_value)  # decay term
+            param.add_(grad, alpha=-eta_value)  # update parameter
 
         # averaging
-        if is_compiling() or mu.item() != 1:
-            ax.add_(param.sub(ax).mul(mu))
+        if capturable or mu.item() != 1:
+            ax.add_(param.sub(ax).mul_(mu))
         else:
             ax.copy_(param)
 
-        new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
-        eta.copy_(new_eta)
-        new_mu = _to_tensor(1 / max(1, step - t0))
-        mu.copy_(new_mu)
+        if capturable:
+            eta.copy_(lr / ((1 + lambd * lr * step_t) ** alpha))
+            mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
+        else:
+            step = _get_value(step_t)
+            new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
+            eta.copy_(new_eta)
+            new_mu = _to_tensor(1 / max(1, step - t0))
+            mu.copy_(new_mu)
 
 
 def _multi_tensor_asgd(
@@ -286,57 +300,97 @@ def _multi_tensor_asgd(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
+    has_complex: bool,
 ):
-
     if len(params) == 0:
         return
 
     assert not differentiable, "_foreach ops don't support autograd"
 
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and mu.is_cuda and eta.is_cuda and step.is_cuda
+                   for p, mu, eta, step in zip(params, mus, etas, state_steps)), \
+            "If capturable=True, params, mus, etas, and state_steps must be CUDA tensors."
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
-    for ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
-         grouped_etas, grouped_state_steps), _) in grouped_tensors.values():
+    for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
+         grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_axs)
+
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
 
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_axs = _view_complex_as_real(grouped_axs)
-
-        # update step
-        torch._foreach_add_(grouped_state_steps, 1)
-
+        # intermediate = grad + param * lambd
         if weight_decay != 0:
-            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+                intermediate = grouped_grads
             else:
-                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+                intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-        # decay term
-        eta = _get_value(grouped_etas[0])
-        torch._foreach_mul_(grouped_params, 1 - lambd * eta)
+            torch._foreach_add_(intermediate, grouped_params, alpha=lambd)
+        else:
+            intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
 
-        # update parameter
-        torch._foreach_add_(grouped_params, grouped_grads, alpha=-eta)
+        # update param
+        # param * (1 - lambd * eta) - eta * grad
+        # => param - param * lambd * eta - eta * grad
+        # => param - eta * intermediate
+        torch._foreach_addcmul_(grouped_params, intermediate, grouped_etas, value=-1)
+        del intermediate
 
-        # averaging
-        for i in range(len(grouped_axs)):
-            if is_compiling() or grouped_mus[i].item() != 1:
-                grouped_axs[i].add_(grouped_params[i].sub(grouped_axs[i]).mul(grouped_mus[i]))
-            else:
-                grouped_axs[i].copy_(grouped_params[i])
+        # update grouped_axs
+        # averaging: ax = ax + mu * (param - ax)
+        # Note (mlazos): We can't use lerp here since it requires weight to be float64
+        # and our grouping code requires dtypes to match for all tensors in a group (and it should, since
+        # we use the mus in other places)
+        # all dtypes need to match, so we could introduce a cast in a loop
+        # but since this only adds one additional kernel launch, this looks like the cleaner
+        # and faster solution
+        intermediate = torch._foreach_sub(grouped_params, grouped_axs)
+        torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
+        del intermediate
 
-        # update eta and mu
-        for i in range(len(grouped_mus)):
-            new_eta = _to_tensor(
-                lr / (1 + lambd * lr * _get_value(grouped_state_steps[i]) ** alpha)
-            )
-            grouped_etas[i].copy_(new_eta)
-            new_mu = _to_tensor(1 / max(1, _get_value(grouped_state_steps[i]) - t0))
-            grouped_mus[i].copy_(new_mu)
+        if capturable:
+            # update grouped_mus
+            new_mus = torch._foreach_sub(grouped_state_steps, t0)
+            torch._foreach_maximum_(new_mus, 1.0)
+            torch._foreach_reciprocal_(new_mus)
+            torch._foreach_copy_(grouped_mus, new_mus)
+            del new_mus
+
+            # update eta = lr / (1 + lambd * lr * step^alpha)
+            new_etas = torch._foreach_pow(grouped_state_steps, alpha)
+            torch._foreach_mul_(new_etas, lambd)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_add_(new_etas, 1)
+            torch._foreach_reciprocal_(new_etas)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_copy_(grouped_etas, new_etas)
+        else:
+            step = grouped_state_steps[0].item()
+            new_etas = []
+            new_mus = []
+
+            for i in range(len(grouped_mus)):
+                new_eta = _to_tensor(
+                    lr / (1 + lambd * lr * step ** alpha), device=device
+                )
+                new_etas.append(new_eta)
+                new_mu = _to_tensor(1 / max(1, step - t0), device=device)
+                new_mus.append(new_mu)
+
+            torch._foreach_copy_(grouped_etas, new_etas)
+            torch._foreach_copy_(grouped_mus, new_mus)

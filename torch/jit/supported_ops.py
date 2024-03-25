@@ -100,8 +100,8 @@ def _get_nn_functional_ops():
         try:
             # compile fn, get schema
             scripted = torch.jit.script(attr)
-            schema = scripted.schema
-            functions.append(_emit_schema(name, elem, schema))
+            scripted_schema = scripted.schema
+            functions.append(_emit_schema(name, elem, scripted_schema))
         except:  # noqa: B001,E722
             # Skip interpolate / boolean dispatched things
             pass
@@ -276,7 +276,9 @@ def _get_global_builtins():
         if len(schemas) > 0:
             schematized_ops.append("")
         else:
-            table_row = f'":any:`{fn}`", "{schemaless_op_explanations[fn]}"'
+            table_row = (
+                f'":external+python:py:obj:`{fn}`", "{schemaless_op_explanations[fn]}"'
+            )
             schemaless_ops.append(table_row)
 
     schematized_ops_str = "\n".join(schematized_ops)

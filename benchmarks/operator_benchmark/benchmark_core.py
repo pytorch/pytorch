@@ -35,7 +35,7 @@ def _register_test(*test_metainfo):
     1) This input when adds single op to the benchmark
      _register_test(configs, pt_bench_op, create_pytorch_op_test_case,
                       run_backward=True)
-    2) This input when addes a list of ops to the benchmark
+    2) This input when adds a list of ops to the benchmark
     _register_test(configs, pt_bench_op, create_pytorch_op_test_case,
                       run_backward=False,
                       op_name_function=op)
@@ -200,10 +200,10 @@ class BenchmarkRunner:
     def _print_header(self):
         DASH_LINE = "-" * 40
         print(
-            "# {}\n"
+            f"# {DASH_LINE}\n"
             "# PyTorch/Caffe2 Operator Micro-benchmarks\n"
-            "# {}\n"
-            "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter)
+            f"# {DASH_LINE}\n"
+            f"# Tag : {self.args.tag_filter}\n"
         )
         if self.args.list_tests:
             print("# List of tests:")

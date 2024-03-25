@@ -951,11 +951,11 @@ TEST(ExternalCall, JitCustomFusionOp) {
         torch::jit::tensorexpr::BufHandle result_buf(
             "nnc_add_mul_res_buf", output_shape, output_dtype);
         const torch::jit::tensorexpr::BufHandle& a =
-            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[0]);
+            std::get<torch::jit::tensorexpr::BufHandle>(inputs[0]);
         const torch::jit::tensorexpr::BufHandle& b =
-            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
+            std::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
         const torch::jit::tensorexpr::BufHandle& c =
-            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
+            std::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
         torch::jit::tensorexpr::StmtPtr s =
             torch::jit::tensorexpr::ExternalCall::make(
                 result_buf, external_func_name, {a, b, c}, {});

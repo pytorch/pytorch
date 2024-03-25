@@ -41,13 +41,13 @@ static_assert(
     sizeof(SingletonOrSharedTypePtr<void>) == sizeof(std::shared_ptr<void>) && sizeof(std::shared_ptr<void>) == 2 * sizeof(void*),
     "std::shared_ptr has an unexpected representation on this platform!");
 static_assert(
-    std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
+    std::is_same_v<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -248,6 +248,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofSymInts() {
+  static auto value = ListType::create(SymIntType::get());
+  return value;
+}
 ListTypePtr ListType::ofComplexDoubles() {
   static auto value = ListType::create(ComplexType::get());
   return value;
@@ -264,6 +268,10 @@ ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
   return value;
 }
+ListTypePtr ListType::ofNumbers() {
+  static auto value = ListType::create(NumberType::get());
+  return value;
+}
 
 TypePtr OptionalType::get(TypePtr inner) {
   static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
@@ -278,7 +286,7 @@ TypePtr OptionalType::get(TypePtr inner) {
   return containerTypePtrs[inner];
 }
 
-TypePtr ListType::get(std::string identifier, TypePtr inner) {
+TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -292,7 +300,7 @@ TypePtr ListType::get(std::string identifier, TypePtr inner) {
   return containerTypePtrs[key];
 }
 
-TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -306,9 +314,9 @@ TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
   return containerTypePtrs[map_key];
 }
 
-std::string DictType::annotation_str_impl(TypePrinter printer) const {
+std::string DictType::annotation_str_impl(const TypePrinter& printer) const {
   auto keyAnnotation = getKeyType()->annotation_str(printer);
-  auto valueAnnotation = getValueType()->annotation_str(std::move(printer));
+  auto valueAnnotation = getValueType()->annotation_str(printer);
 
   std::string result;
   result.reserve(5 /* "Dict[" */ + keyAnnotation.size() + 2 /* ", " */ + valueAnnotation.size() + 1 /* "]" */);
@@ -356,7 +364,7 @@ SymBoolTypePtr SymBoolType::get() {
   return value;
 }
 
-static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
+static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, const TypePtr& type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(*t2)) {
     return t2;
@@ -438,8 +446,8 @@ static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
-  auto unified = unifyTypesImpl(t1, t2, default_to_union, std::move(type_hint));
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, const TypePtr& type_hint) {
+  auto unified = unifyTypesImpl(t1, t2, default_to_union, type_hint);
 
   if (default_to_union && !unified) {
     return UnionType::create({t1, t2});
@@ -452,7 +460,7 @@ c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
     bool default_to_union,
-    TypePtr type_hint) {
+    const TypePtr& type_hint) {
   if (elements.empty()) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
@@ -492,7 +500,7 @@ MatchTypeReturn matchTypeVariables(
     if (it == type_env.end()) {
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
-    } else if (auto unified = unifyTypes(it->second, actual)) {
+    } else if (unifyTypes(it->second, actual)) {
       // note: unifyTypes allows subtyping in either direction, so actual
       // may be a supertype of the current binding. we're not responsible
       // for reporting the error, only for keeping type_env stable
@@ -908,7 +916,7 @@ std::string TupleType::str() const {
   }
   return ss.str();
 }
-std::string TupleType::annotation_str_impl(TypePrinter printer) const {
+std::string TupleType::annotation_str_impl(const TypePrinter& printer) const {
   if (schema_ && name()) {
     return name()->qualifiedName();
   }

@@ -6,7 +6,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     onlyCPU,
 )
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_default_dtype
 from torch.testing._internal.common_dtype import complex_types
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
@@ -18,14 +18,37 @@ class TestComplexTensor(TestCase):
         # there's no garbage value in the resultant list
         self.assertEqual(torch.zeros((2, 2), device=device, dtype=dtype).tolist(), [[0j, 0j], [0j, 0j]])
 
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.float16)
     def test_dtype_inference(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/36834
-        default_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(dtype)
-        x = torch.tensor([3., 3. + 5.j], device=device)
-        torch.set_default_dtype(default_dtype)
-        self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
+        with set_default_dtype(dtype):
+            x = torch.tensor([3., 3. + 5.j], device=device)
+        if dtype == torch.float16:
+            self.assertEqual(x.dtype, torch.chalf)
+        elif dtype == torch.float32:
+            self.assertEqual(x.dtype, torch.cfloat)
+        else:
+            self.assertEqual(x.dtype, torch.cdouble)
+
+    @dtypes(*complex_types())
+    def test_conj_copy(self, device, dtype):
+        # issue: https://github.com/pytorch/pytorch/issues/106051
+        x1 = torch.tensor([5 + 1j, 2 + 2j], device=device, dtype=dtype)
+        xc1 = torch.conj(x1)
+        x1.copy_(xc1)
+        self.assertEqual(x1, torch.tensor([5 - 1j, 2 - 2j], device=device, dtype=dtype))
+
+    @dtypes(*complex_types())
+    def test_all(self, device, dtype):
+        # issue: https://github.com/pytorch/pytorch/issues/120875
+        x = torch.tensor([1 + 2j, 3 - 4j, 5j, 6], device=device, dtype=dtype)
+        self.assertTrue(torch.all(x))
+
+    @dtypes(*complex_types())
+    def test_any(self, device, dtype):
+        # issue: https://github.com/pytorch/pytorch/issues/120875
+        x = torch.tensor([0, 0j, -0 + 0j, -0 - 0j, 0 + 0j, 0 - 0j], device=device, dtype=dtype)
+        self.assertFalse(torch.any(x))
 
     @onlyCPU
     @dtypes(*complex_types())
@@ -168,4 +191,5 @@ class TestComplexTensor(TestCase):
 instantiate_device_type_tests(TestComplexTensor, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()

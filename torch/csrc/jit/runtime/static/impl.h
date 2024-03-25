@@ -5,7 +5,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/FbcodeMaps.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/graph_node_list.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -21,8 +20,7 @@
 #include <folly/container/F14Set.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
@@ -242,11 +240,59 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
 ///
 class MemoryPlanner;
 class StaticNodeInfo;
-class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 
 using SROperator = std::function<void(ProcessedNode*)>;
+
+#ifdef FBCODE_CAFFE2
+struct TORCH_API SROperatorObserver {
+  using OperatorCallback = void (*)(const Node*);
+  OperatorCallback startCb = nullptr;
+  OperatorCallback endCb = nullptr;
+
+  static void setCurrentThreadObserver(SROperatorObserver* observer);
+  static SROperatorObserver* getCurrentThreadObserver();
+  static void onStart(const Node* name);
+  static void onEnd(const Node* name);
+};
+#endif
+
+class TORCH_API ProcessedFunction {
+ public:
+  ProcessedFunction(
+      Node* node,
+      bool enable_out_variant,
+      bool check_memory_overlap);
+
+  enum class Kind : uint8_t {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+
+  void run(ProcessedNode* pnode) const {
+    return f_(pnode);
+  }
+
+  Kind kind() const {
+    return kind_;
+  }
+
+  bool checkMemoryOverlap() const {
+    return check_memory_overlap_;
+  }
+
+  size_t num_outputs() const {
+    return num_outputs_;
+  }
+
+ private:
+  SROperator f_;
+  Kind kind_{ProcessedFunction::Kind::kOutVariant};
+  bool check_memory_overlap_{false};
+  size_t num_outputs_{0};
+};
 
 // A `BlockInfo` instance stores all of the shared state that each
 // `BlockRunner` will need to access. Most of this information is
@@ -767,42 +813,6 @@ class TORCH_API BlockRunner {
   std::vector<ProcessedNode> nodes_;
 };
 
-class TORCH_API ProcessedFunction {
- public:
-  ProcessedFunction(
-      Node* node,
-      bool enable_out_variant,
-      bool check_memory_overlap);
-
-  enum class Kind : uint8_t {
-    kOutVariant,
-    kNativeFunction,
-    kInterpreterFallback,
-  };
-
-  void run(ProcessedNode* pnode) const {
-    return f_(pnode);
-  }
-
-  Kind kind() const {
-    return kind_;
-  }
-
-  bool checkMemoryOverlap() const {
-    return check_memory_overlap_;
-  }
-
-  size_t num_outputs() const {
-    return num_outputs_;
-  }
-
- private:
-  SROperator f_;
-  Kind kind_{ProcessedFunction::Kind::kOutVariant};
-  bool check_memory_overlap_{false};
-  size_t num_outputs_{0};
-};
-
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API StaticNodeInfo {
  public:
@@ -899,7 +909,7 @@ class TORCH_API ProcessedNode {
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
-  // one. Maybe c10::variant is throwing it off?
+  // one. Maybe std::variant is throwing it off?
   ProcessedNode(ProcessedNode&&) = default;
 
   ProcessedNode(const ProcessedNode&) = delete;
@@ -928,9 +938,9 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  size_t num_outputs() const {
+  uint32_t num_outputs() const {
     DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
+    return static_cast<uint32_t>(fn_->num_outputs());
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
@@ -1132,5 +1142,4 @@ class TORCH_API StaticRuntime {
   IValueArray values_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

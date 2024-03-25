@@ -19,7 +19,7 @@ class HalfNormal(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = HalfNormal(torch.tensor([1.0]))
         >>> m.sample()  # half-normal distributed with scale=1
         tensor([ 0.1046])

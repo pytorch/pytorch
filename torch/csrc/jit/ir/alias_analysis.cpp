@@ -8,8 +8,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/utils/memory.h>
 #include <fstream>
+#include <iostream>
 
 namespace torch::jit {
 
@@ -228,7 +228,7 @@ AliasDb::AliasDb(
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
 
-  memoryDAG_ = std::make_unique<MemoryDAG>(std::move(memoryDAGBuilder_));
+  memoryDAG_ = std::move(*memoryDAGBuilder_).createMemoryDAG();
   memoryDAGBuilder_ = nullptr; // to make further access a hard error
 
   memoryDAG_->setWildcards(

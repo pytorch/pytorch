@@ -14,7 +14,7 @@ class Exponential(ExponentialFamily):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Exponential(torch.tensor([1.0]))
         >>> m.sample()  # Exponential distributed with rate=1
         tensor([ 0.1046])

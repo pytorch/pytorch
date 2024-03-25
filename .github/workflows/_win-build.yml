@@ -105,6 +105,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -120,6 +128,7 @@ jobs:
           PYTHON_VERSION: "3.8"
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"

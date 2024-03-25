@@ -234,9 +234,18 @@ class Vectorized<float> {
     return ret._nor();
   }
 
-  Vectorized<float> _isinf() const {
-    auto x = *this;
-    return (x == v_inf) | (x == v_minus_inf);
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   int zero_mask() const {
@@ -263,6 +272,9 @@ class Vectorized<float> {
   }
   Vectorized<float> atan() const {
     return {Sleef_atanf4_u10(_vec0), Sleef_atanf4_u10(_vec1)};
+  }
+  Vectorized<float> atanh() const {
+    return {Sleef_atanhf4_u10(_vec0), Sleef_atanhf4_u10(_vec1)};
   }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
     return {Sleef_atan2f4_u10(_vec0, b._vec0), Sleef_atan2f4_u10(_vec1, b._vec1)};
@@ -308,6 +320,9 @@ class Vectorized<float> {
   }
   Vectorized<float> expm1() const {
     return {Sleef_expm1f4_u10(_vec0), Sleef_expm1f4_u10(_vec1)};
+  }
+  Vectorized<float> C10_ALWAYS_INLINE exp_u20() const {
+    return exp();
   }
 
   Vectorized<float> C10_ALWAYS_INLINE log() const {
@@ -401,6 +416,10 @@ class Vectorized<float> {
 
   Vectorized<float> i0e() const {
     return map(calc_i0e);
+  }
+
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
   }
 
   DEFINE_MEMBER_OP(operator==, float, vec_cmpeq)

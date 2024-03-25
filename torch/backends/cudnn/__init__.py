@@ -2,6 +2,7 @@ import os
 import sys
 import warnings
 from contextlib import contextmanager
+from typing import Optional
 
 import torch
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
@@ -17,7 +18,7 @@ except ImportError:
 #
 # to globally disable CuDNN/MIOpen
 
-__cudnn_version = None
+__cudnn_version: Optional[int] = None
 
 if _cudnn is not None:
 
@@ -47,7 +48,7 @@ if _cudnn is not None:
                     f"but found runtime version {runtime_version}. "
                     f"PyTorch already comes bundled with cuDNN. "
                     f"One option to resolving this error is to ensure PyTorch "
-                    f"can find the bundled cuDNN."
+                    f"can find the bundled cuDNN. "
                 )
 
                 if "LD_LIBRARY_PATH" in os.environ:
@@ -57,7 +58,7 @@ if _cudnn is not None:
                     ):
                         raise RuntimeError(
                             f"{base_error_msg}"
-                            f"Looks like your LD_LIBRARY_PATH contains incompatible version of cudnn"
+                            f"Looks like your LD_LIBRARY_PATH contains incompatible version of cudnn. "
                             f"Please either remove it from the path or install cudnn {compile_version}"
                         )
                     else:
@@ -78,7 +79,7 @@ else:
 
 
 def version():
-    """Returns the version of cuDNN"""
+    """Return the version of cuDNN."""
     if not _init():
         return None
     return __cudnn_version
@@ -92,7 +93,7 @@ CUDNN_TENSOR_DTYPES = {
 
 
 def is_available():
-    r"""Returns a bool indicating if CUDNN is currently available."""
+    r"""Return a bool indicating if CUDNN is currently available."""
     return torch._C._has_cudnn
 
 

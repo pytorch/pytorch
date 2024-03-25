@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from collections import defaultdict
 from collections.abc import Iterable
 import numpy as np
@@ -159,10 +161,10 @@ Example:
 @st.composite
 def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None, max_numel=None):
     """Return a strategy for array shapes (tuples of int >= 1)."""
-    assert(min_dims < 32)
+    assert min_dims < 32
     if max_dims is None:
         max_dims = min(min_dims + 2, 32)
-    assert(max_dims < 32)
+    assert max_dims < 32
     if max_side is None:
         max_side = min_side + 5
     candidate = st.lists(st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims)
@@ -189,7 +191,7 @@ Generates:
         (If `qparams` arg is None), returns None.
 """
 @st.composite
-def tensor(draw, shapes=None, elements=None, qparams=None):
+def tensor(draw, shapes=None, elements=None, qparams=None, dtype=np.float32):
     if isinstance(shapes, SearchStrategy):
         _shape = draw(shapes)
     else:
@@ -197,7 +199,7 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
     if qparams is None:
         if elements is None:
             elements = floats(-1e6, 1e6, allow_nan=False, width=32)
-        X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+        X = draw(stnp.arrays(dtype=dtype, elements=elements, shape=_shape))
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
@@ -205,7 +207,7 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
         min_value, max_value = _get_valid_min_max(qparams)
         elements = floats(min_value, max_value, allow_infinity=False,
                           allow_nan=False, width=32)
-    X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+    X = draw(stnp.arrays(dtype=dtype, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])
     enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
@@ -334,7 +336,7 @@ def tensor_conv(
     # Resolve the tensors
     if qparams is not None:
         if isinstance(qparams, (list, tuple)):
-            assert(len(qparams) == 3), "Need 3 qparams for X, w, b"
+            assert len(qparams) == 3, "Need 3 qparams for X, w, b"
         else:
             qparams = [qparams] * 3
 
@@ -362,7 +364,7 @@ def assert_deadline_disabled():
         warning_message = (
             "Your version of hypothesis is outdated. "
             "To avoid `DeadlineExceeded` errors, please update. "
-            "Current hypothesis version: {}".format(hypothesis.__version__)
+            f"Current hypothesis version: {hypothesis.__version__}"
         )
         warnings.warn(warning_message)
     else:

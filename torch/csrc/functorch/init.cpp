@@ -18,6 +18,8 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
 
+#include <iostream>
+
 // This file contains functorch's Python bindings.
 
 namespace torch {
@@ -144,6 +146,10 @@ Tensor _remove_batch_dim(
     int64_t level,
     int64_t batch_size,
     int64_t out_dim) {
+  TORCH_CHECK(
+      out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
+      "Nested tensors can only be vmapped over dim=0, but got dim=",
+      out_dim);
   if (!has_level(self, level)) {
     auto self_sizes = self.sizes();
     VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
@@ -156,9 +162,7 @@ Tensor _remove_batch_dim(
   const auto* batched = maybeGetBatchedImpl(self);
   TORCH_INTERNAL_ASSERT(batched != nullptr);
 
-  Tensor self_without_bdim;
-  int64_t newly_exposed_logical_dim;
-  std::tie(self_without_bdim, newly_exposed_logical_dim) =
+  auto [self_without_bdim, newly_exposed_logical_dim] =
       remove_existing_batch_dim(batched, level);
   auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
   return result;
@@ -213,6 +217,7 @@ int64_t dlevel(const Tensor& tensor) {
   if (!wrapped->is_alive()) {
     return -1;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return wrapped->level().value();
 }
 
@@ -301,6 +306,10 @@ static bool is_batchedtensor(const Tensor& tensor) {
   return batched != nullptr;
 }
 
+static bool is_legacy_batchedtensor(const Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::Batched);
+}
+
 static bool is_gradtrackingtensor(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   return wrapped != nullptr;
@@ -336,6 +345,7 @@ static int64_t maybe_get_level(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     if (wrapped->level()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return *wrapped->level();
     }
     // TODO: this is a weird special case...
@@ -362,6 +372,15 @@ static int64_t currentLevel() {
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t current_level = maybe_layer->layerId();
   return current_level;
+}
+
+static c10::optional<int64_t> maybe_current_level() {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  if (maybe_layer.has_value()) {
+    int current_level = maybe_layer->layerId();
+    return current_level;
+  }
+  return nullopt;
 }
 
 static void tls_set_vmap_excluded(bool excluded) {
@@ -463,11 +482,13 @@ void initFuncTorchBindings(PyObject* module) {
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
+  m.def("is_legacy_batchedtensor", &is_legacy_batchedtensor);
   m.def("is_gradtrackingtensor", &is_gradtrackingtensor);
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
+  m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);
   m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
@@ -476,6 +497,18 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
+  m.def(
+      "get_interpreter_stack", []() -> c10::optional<std::vector<Interpreter>> {
+        const auto& stack = getDynamicLayerStack();
+        if (stack.empty()) {
+          return c10::nullopt;
+        }
+        std::vector<Interpreter> result;
+        for (auto i : stack) {
+          result.push_back(i.interpreter());
+        }
+        return result;
+      });
   m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
@@ -488,6 +521,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
   });
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DynamicLayer>(m, "DynamicLayer");
 
   py::enum_<TransformType>(m, "TransformType")

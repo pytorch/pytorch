@@ -113,6 +113,7 @@ def driver_allocated_memory() -> int:
 
 
 from . import profiler
+from .event import Event
 
 __all__ = [
     "get_rng_state",
@@ -124,5 +125,6 @@ __all__ = [
     "set_per_process_memory_fraction",
     "current_allocated_memory",
     "driver_allocated_memory",
+    "Event",
     "profiler",
 ]

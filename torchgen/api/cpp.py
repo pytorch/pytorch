@@ -91,6 +91,7 @@ def valuetype_type(
     t: Type,
     *,
     binds: ArgName,
+    mutable: bool = True,
     remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> Optional[NamedCType]:
@@ -110,9 +111,12 @@ def valuetype_type(
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
-        elem = valuetype_type(t.elem, binds=binds, symint=symint)
+        elem = valuetype_type(t.elem, binds=binds, mutable=mutable, symint=symint)
         if elem is None:
             return None
+        if not mutable:
+            if str(t.elem) == "Generator":
+                return NamedCType(binds, ConstRefCType(OptionalCType(elem.type)))
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if str(t.elem) == "bool":
@@ -124,7 +128,7 @@ def valuetype_type(
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
@@ -140,10 +144,14 @@ def argumenttype_type(
     r = valuetype_type(
         t,
         binds=binds,
+        mutable=mutable,
         symint=symint,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
+        if isinstance(t, OptionalType) and not mutable:
+            if str(t.elem) == "Generator":
+                return NamedCType(binds, ConstRefCType(r.type))
         return r
 
     if isinstance(t, BaseType):
@@ -228,7 +236,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
     # placeholder is ignored
     # NB: symint is ALWAYS respected for return types.  So symint argument
     # here is IGNORED
-    r = valuetype_type(t, binds="__placeholder__", symint=True)
+    r = valuetype_type(t, binds="__placeholder__", mutable=mutable, symint=True)
     if r is not None:
         return r.type
 
@@ -254,6 +262,10 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
+    elif isinstance(t, OptionalType):
+        elem = returntype_type(t.elem, mutable=mutable)
+        if str(t.elem) == "Tensor":
+            return OptionalCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 

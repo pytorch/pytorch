@@ -19,7 +19,7 @@ graph {
       type: STRING
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "input"
     type {

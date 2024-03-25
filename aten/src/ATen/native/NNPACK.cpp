@@ -18,8 +18,7 @@
 
 #if !AT_NNPACK_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 at::Tensor _nnpack_spatial_convolution(
     const Tensor& input,
@@ -34,8 +33,7 @@ bool _nnpack_available() {
   return false;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #else
 
@@ -46,8 +44,7 @@ bool _nnpack_available() {
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static bool init_nnpack() {
   static c10::once_flag once_;
@@ -121,7 +118,11 @@ struct Workspace {
     constexpr size_t nnpack_memory_alignment_boundary = 64;
 
     // Won't work on Windows, but NNPACK doesn't support Windows either
-    posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
+    auto res = posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
+    if (res != 0) {
+      TORCH_CHECK(false, "posix_memalign failed:", strerror(errno), " (", errno, ")");
+    }
+    return;
   }
 
   ~Workspace() {
@@ -316,7 +317,6 @@ Tensor _nnpack_spatial_convolution(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_NNPACK_ENABLED

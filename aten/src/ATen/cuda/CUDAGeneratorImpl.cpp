@@ -4,11 +4,10 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/CallOnce.h>
-#include <ATen/Utils.h>
+#include <deque>
 
 namespace at {
-namespace cuda {
-namespace detail {
+namespace cuda::detail {
 
 namespace {
 
@@ -76,8 +75,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   return gen;
 }
 
-} // namespace detail
-} // namespace cuda
+} // namespace cuda::detail
 
 /**
  * Note [Why enforce RNG offset % 4 == 0?]

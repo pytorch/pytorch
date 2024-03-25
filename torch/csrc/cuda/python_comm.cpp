@@ -12,15 +12,13 @@
 
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-namespace torch {
-namespace cuda {
-namespace python {
+namespace torch::cuda::python {
 void initCommMethods(PyObject* module) {
   auto m = py::cast<py::module>(module);
   m.def(
        "_broadcast_coalesced",
        [](std::vector<at::Tensor>& tensors,
-          std::vector<int64_t> devices,
+          const std::vector<int64_t>& devices,
           size_t buffer_size) {
          return broadcast_coalesced(tensors, devices, buffer_size);
        },
@@ -107,6 +105,4 @@ void initCommMethods(PyObject* module) {
           py::arg("dim"),
           py::call_guard<py::gil_scoped_release>());
 }
-} // namespace python
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::python

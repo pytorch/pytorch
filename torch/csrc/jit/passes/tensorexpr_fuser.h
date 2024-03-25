@@ -7,8 +7,6 @@
 namespace torch {
 namespace jit {
 
-struct Graph;
-
 // Run TensorExpressions-based fuser.
 // If add_composed_op is true, creates a single operation that
 // performs both the runtime check that types align

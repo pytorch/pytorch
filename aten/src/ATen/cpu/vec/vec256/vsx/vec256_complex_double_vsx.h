@@ -212,10 +212,17 @@ class Vectorized<ComplexDbl> {
   static Vectorized<ComplexDbl> el_mergee(
       Vectorized<ComplexDbl>& first,
       Vectorized<ComplexDbl>& second) {
-    // as mergee phased in , we can use vec_perm with mask
     return {
         vec_mergeh(first._vec0, second._vec0),
         vec_mergeh(first._vec1, second._vec1)};
+  }
+
+  static Vectorized<ComplexDbl> el_mergeo(
+      Vectorized<ComplexDbl>& first,
+      Vectorized<ComplexDbl>& second) {
+    return {
+        vec_mergel(first._vec0, second._vec0),
+        vec_mergel(first._vec1, second._vec1)};
   }
 
   Vectorized<ComplexDbl> abs_2_() const {
@@ -226,8 +233,9 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> abs_() const {
-    auto ret = abs_2_();
-    return ret.elwise_sqrt();
+    auto vi = el_mergeo();
+    auto vr = el_mergee();
+    return {Sleef_hypotd2_u05vsx(vr._vec0, vi._vec0), Sleef_hypotd2_u05vsx(vr._vec1, vi._vec1)};
   }
 
   Vectorized<ComplexDbl> abs() const {
@@ -319,6 +327,9 @@ class Vectorized<ComplexDbl> {
     auto ln = (sum / sub).log(); // ln((i + z)/(i - z))
     return ln * vd_imag_half; // i/2*ln()
   }
+  Vectorized<ComplexDbl> atanh() const {
+    return map(std::atanh);
+  }
 
   Vectorized<ComplexDbl> sin() const {
     return map(std::sin);
@@ -381,13 +392,11 @@ class Vectorized<ComplexDbl> {
   static Vectorized<ComplexDbl> horizontal_add(
       Vectorized<ComplexDbl>& first,
       Vectorized<ComplexDbl>& second) {
-    auto first_perm = first.el_swapped(); // 2perm
-    auto second_perm = second.el_swapped(); // 2perm
-    // summ
-    auto first_ret = first + first_perm; // 2add
-    auto second_ret = second + second_perm; // 2 add
-    // now lets choose evens
-    return el_mergee(first_ret, second_ret); // 2 mergee's
+    // Operates on individual floats, see _mm_hadd_ps
+    // {f0+f1, s0+s1, f2+f3, s2+s3, ...}
+    // i.e. it sums the re and im of each value and interleaves first and second:
+    // {f_re0 + f_im0, s_re0 + s_im0, f_re1 + f_im1, s_re1 + s_im1, ...}
+    return el_mergee(first, second) + el_mergeo(first, second);
   }
 
   static Vectorized<ComplexDbl> horizontal_sub(
@@ -428,25 +437,20 @@ class Vectorized<ComplexDbl> {
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2()
     // im = (bc - ad)/abs_2()
-#if 1
-    auto vi = b.el_mergeo();
-    auto vr = b.el_mergee();
-    auto abs_b = b.abs_2_();
-    vi = vi ^ vd_isign_mask;
-    auto ret = elwise_mult(vr);
-    auto vx_swapped = el_swapped();
-    ret = vx_swapped.el_madd(vi, ret);
-    ret = ret.elwise_div(abs_b);
-#else
-    // Vectorized x86 simulation
-    auto ac_bd = elwise_mult(b);
-    auto d_c = b.el_swapped();
-    d_c = d_c ^ vd_rsign_mask;
-    auto ad_bc = elwise_mult(d_c);
-    auto abs_b = b.abs_2_();
-    auto re_im = horizontal_add(ac_bd, ad_bc);
-    auto ret = re_im.elwise_div(abs_b);
-#endif
+    auto fabs_cd =  Vectorized{
+      vec_andc(b._vec0, vd_sign_mask),
+      vec_andc(b._vec1, vd_sign_mask)};       // |c|            |d|
+    auto fabs_dc =  fabs_cd.el_swapped();     // |d|            |c|
+    auto scale = fabs_cd.elwise_max(fabs_dc); // sc = max(|c|, |d|)
+    auto a2 = elwise_div(scale);              // a/sc           b/sc
+    auto b2 = b.elwise_div(scale);            // c/sc           d/sc
+    auto acbd2 = a2.elwise_mult(b2);          // ac/sc^2        bd/sc^2
+    auto dc2 = b2.el_swapped();               // d/sc           c/sc
+    dc2 = dc2 ^ vd_rsign_mask;                // -d/sc          c/sc
+    auto adbc2 = a2.elwise_mult(dc2);         // -ad/sc^2       bc/sc^2
+    auto ret = horizontal_add(acbd2, adbc2);  // (ac+bd)/sc^2   (bc-ad)/sc^2
+    auto denom2 = b2.abs_2_();                // (c^2+d^2)/sc^2 (c^2+d^2)/sc^2
+    ret = ret.elwise_div(denom2);
     return ret;
   }
 
@@ -475,32 +479,6 @@ class Vectorized<ComplexDbl> {
     return map(at::native::sgn_impl);
   }
 
-  Vectorized<ComplexDbl> hypot(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> nextafter(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> igamma(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> igammac(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> atan2(const Vectorized<ComplexDbl>& b) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> erf() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> erfc() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexDbl> operator<(const Vectorized<ComplexDbl>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
@@ -525,19 +503,6 @@ class Vectorized<ComplexDbl> {
     return (ne.real() | ne.imag()) & vd_one;
   }
 
-  Vectorized<ComplexDbl> lt(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> le(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> gt(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> ge(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   DEFINE_MEMBER_OP(operator==, ComplexDbl, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, ComplexDbl, vec_cmpne)
 
@@ -546,13 +511,14 @@ class Vectorized<ComplexDbl> {
   DEFINE_MEMBER_OP(operator&, ComplexDbl, vec_and)
   DEFINE_MEMBER_OP(operator|, ComplexDbl, vec_or)
   DEFINE_MEMBER_OP(operator^, ComplexDbl, vec_xor)
-  // elelemtwise helpers
+  // elementwise helpers
   DEFINE_MEMBER_OP(elwise_mult, ComplexDbl, vec_mul)
   DEFINE_MEMBER_OP(elwise_div, ComplexDbl, vec_div)
   DEFINE_MEMBER_OP(elwise_gt, ComplexDbl, vec_cmpgt)
   DEFINE_MEMBER_OP(elwise_ge, ComplexDbl, vec_cmpge)
   DEFINE_MEMBER_OP(elwise_lt, ComplexDbl, vec_cmplt)
   DEFINE_MEMBER_OP(elwise_le, ComplexDbl, vec_cmple)
+  DEFINE_MEMBER_OP(elwise_max, ComplexDbl, vec_max)
 };
 
 template <>

@@ -33,12 +33,6 @@ target_include_directories(
 target_link_libraries(test_cpp_rpc PRIVATE ${TORCH_RPC_TEST_DEPENDENCY_LIBS})
 
 if(USE_CUDA)
-  target_link_libraries(test_cpp_rpc PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
-
   target_compile_definitions(test_cpp_rpc PRIVATE "USE_CUDA")
 endif()
 

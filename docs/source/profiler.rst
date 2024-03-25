@@ -37,3 +37,9 @@ Intel Instrumentation and Tracing Technology APIs
 .. autofunction:: torch.profiler.itt.range_push
 
 .. autofunction:: torch.profiler.itt.range_pop
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.profiler.itt
+.. py:module:: torch.profiler.profiler
+.. py:module:: torch.profiler.python_tracer

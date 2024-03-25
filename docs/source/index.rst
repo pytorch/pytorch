@@ -66,9 +66,12 @@ Features described in this documentation are classified by release status:
    torch.library <library>
    cpu
    cuda
+   torch.cuda.memory <torch_cuda_memory>
    mps
+   xpu
+   meta
    torch.backends <backends>
-   export
+   torch.export <export>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
@@ -82,6 +85,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   fx.experimental
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
@@ -92,8 +96,8 @@ Features described in this documentation are classified by release status:
    torch.package <package>
    profiler
    nn.init
+   nn.attention
    onnx
-   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
@@ -112,6 +116,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.deterministic <deterministic>
    torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>
@@ -121,7 +126,9 @@ Features described in this documentation are classified by release status:
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   torch.__future__ <future_mod>
    logging
+   torch_environment_variables
 
 .. toctree::
    :maxdepth: 1

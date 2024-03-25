@@ -9,6 +9,8 @@ from ._internal import (
     _init_logs,
     DEFAULT_LOGGING,
     getArtifactLogger,
+    LazyString,
     set_logs,
+    trace_structured,
     warning_once,
 )

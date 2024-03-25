@@ -18,6 +18,30 @@ struct SocketAddress {
   std::uint16_t port{};
 };
 
+class Counter {
+ public:
+  void update(double val);
+  std::unordered_map<std::string, double> observe() const;
+
+  double mean() const noexcept {
+    return mean_;
+  }
+  int64_t count() const noexcept {
+    return count_;
+  }
+  double variance() const noexcept {
+    return m2_ / count_;
+  }
+  double sample_variance() const noexcept {
+    return m2_ / (count_ - 1);
+  }
+
+ private:
+  int64_t count_ = 0;
+  double mean_ = 0;
+  double m2_ = 0;
+};
+
 } // namespace detail
 
 struct TCPStoreOptions {
@@ -79,15 +103,15 @@ class TORCH_API TCPStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
-  void append(
-      const std::string& key,
-      const std::vector<uint8_t>& value) override;
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
 
-  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
 
   void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values) override;
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
 
   bool hasExtendedApi() const override;
 
@@ -104,8 +128,20 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
+  std::unordered_map<std::string, std::unordered_map<std::string, double>>
+  collectClientCounters() const noexcept;
+
+  bool isLibUvBackend() const noexcept {
+    return usingLibUv_;
+  }
+
+  // note(xilunwu): this function is only for internal testing
+  void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
+
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
+
+  void validate(void);
 
   std::vector<uint8_t> doGet(const std::string& key);
 
@@ -121,6 +157,8 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
+  std::unordered_map<std::string, detail::Counter> clientCounters_;
+  bool usingLibUv_ = false;
 };
 
 } // namespace c10d

@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import copy
 import functools
 import importlib
 import itertools
@@ -11,20 +10,12 @@ import weakref
 
 import torch
 
-import torch._dynamo as torchdynamo
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
 from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_quantization import (
-    skipIfNoDynamoSupport,
-    skipIfNoONEDNN,
-)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -33,9 +24,8 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
-    skipIfRocm,
     TEST_WITH_ASAN,
-    TestCase as TorchTestCase,
+    TEST_WITH_ROCM,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -53,13 +43,12 @@ importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 prims = torch.ops.prims
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -184,6 +173,16 @@ class OptimizeForInferenceTemplate(TestCase):
             def forward(self, x):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
+        class MM2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.t1 = torch.nn.Parameter(torch.rand(10, 10))
+                self.t2 = torch.nn.Parameter(torch.rand(10, 10))
+
+            def forward(self, x):
+                return x @ self.t1, x @ self.t2
+
         class AddMM(MM):
             def __init__(self):
                 super().__init__()
@@ -202,7 +201,12 @@ class OptimizeForInferenceTemplate(TestCase):
                     ]
                 ]
 
-        for mod in [MM().to(self.device), AddMM().to(self.device)][1:]:
+        for mod_fn in [
+            lambda: MM().to(self.device),
+            lambda: MM2().to(self.device),
+            lambda: AddMM().to(self.device),
+        ]:
+            mod = mod_fn()
             inp = torch.rand([10, 10]).to(self.device)
 
             @torch.compile()
@@ -219,6 +223,25 @@ class OptimizeForInferenceTemplate(TestCase):
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
+            mod2 = mod_fn()
+            mod2.t1 = torch.nn.Parameter(torch.rand([10, 15], device=self.device))
+            mod2.t2 = torch.nn.Parameter(torch.rand([10, 20], device=self.device))
+
+            if hasattr(mod2, "b1"):
+                mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
+                mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
+
+            # not fused
+            count = 3 if hasattr(mod2, "t3") else 2
+
+            with torch.no_grad():
+                out_eager = mod2(inp)
+                out, code = run_and_get_code(foo, mod2, inp)
+                FileCheck().check_not(kernel_invoke).check_count(
+                    "mm(", count=count, exactly=True
+                ).run(code[0])
+                self.assertEqual(out_eager, out)
+
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -232,7 +255,7 @@ class OptimizeForInferenceTemplate(TestCase):
             foo(mod, x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"
+            RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
         ):
             mod(x)
 
@@ -262,6 +285,33 @@ class OptimizeForInferenceTemplate(TestCase):
             torch._dynamo.mark_dynamic(inp2, 1)
             self.assertEqual(fn(inp2), fn_opt(inp2))
 
+    @requires_cuda
+    def test_conv_multiple_uses(self):
+        from torch import nn
+
+        class ToyModel(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.bn1 = nn.BatchNorm2d(1)
+                self.bn1.weight.data.normal_()
+
+            def forward(self, x, y):
+                return self.conv1(x) + self.bn1(self.conv1(y))
+
+        model = ToyModel()
+        model.eval().cuda()
+
+        a = torch.rand(64, 1, 32, 32).cuda()
+        b = torch.rand(64, 1, 32, 32).cuda()
+
+        output = model(a, b)
+
+        with torch.no_grad():
+            output2 = torch.compile(model)(a, b)
+
+        self.assertEqual(output, output2)
+
     def test_unfolded_bn(self):
         x = torch.rand([3, 32, 15, 15]).to(self.device)
 
@@ -279,6 +329,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn(self):
         for use_bias, dtype in itertools.product(
             [True, False], [torch.float16, torch.bfloat16, torch.float32]
@@ -286,11 +337,7 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
 
-            if (
-                self.device == "cuda"
-                and not dtype == torch.bfloat16
-                and not SM80OrLater
-            ):
+            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
                 continue
 
             mod = (
@@ -321,13 +368,14 @@ class OptimizeForInferenceTemplate(TestCase):
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "constant"
-                ).check_not("constant").check_next("return").run(code[0])
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
 
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
 
@@ -422,7 +470,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfRocm
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -587,6 +634,10 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
 
 
+if TEST_WITH_ROCM:
+    torch._inductor.config.force_layout_optimization = 1
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+
 if HAS_CPU and not torch.backends.mps.is_available():
 
     class FreezingCpuTests(TestCase):
@@ -609,41 +660,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 del OptimizeForInferenceTemplate
 
 
-@skipIfNoDynamoSupport
-class OptimizeForInferenceQuantizationPT2E(TestCase):
-    @skipIfNoONEDNN
-    def test_functional_constant_folding_after_dynamo_export(self):
-        m = ConvBN(3, 3, kernel_size=3, stride=2).eval().to("cpu")
-        example_inputs = (torch.randn(1, 3, 9, 9).to("cpu"),)
-        export_model, guards = torchdynamo.export(
-            m,
-            *copy.deepcopy(example_inputs),
-            aten_graph=True,
-        )
-
-        quantizer = X86InductorQuantizer()
-        operator_config = xiq.get_default_x86_inductor_quantization_config()
-        quantizer.set_global(operator_config)
-        with torch.no_grad(), config.patch({"implicit_fallbacks": True}):
-            # TODO(leslie) Remove implicit_fallbacks=True after we enable the int8 fusion of
-            # int8_weight -> dequant_per_channel -> convolution
-            self.assertTrue(torch._inductor.config.freezing)
-
-            prepare_model = prepare_pt2e(export_model, quantizer)
-            prepare_model(*example_inputs)
-
-            convert_model = convert_pt2e(prepare_model)
-            convert_model.eval()
-            compiler_model = compile_fx(convert_model, example_inputs)
-
-            # First Run
-            _ = compiler_model(*example_inputs)
-            # Second Run
-            _ = compiler_model(*example_inputs)
-
-
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

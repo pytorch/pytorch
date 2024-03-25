@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <iostream>
+#include <iosfwd>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Logging.h>

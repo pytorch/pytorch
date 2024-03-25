@@ -41,7 +41,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
-    EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    EXPECT_LE(std::fabs(out[i] - in[i]) / in[i], 1.0 / 128);
   }
 }
 
@@ -64,7 +64,7 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
-    EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    EXPECT_LE(std::fabs(out[i] - in[i]) / in[i], 1.0 / 128);
   }
 }
 
@@ -181,7 +181,7 @@ TEST_P(BFloat16Test, BFloat16RNETest) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    BFloat16Test_Instantiation,
+    BFloat16TestInstantiation,
     BFloat16Test,
     ::testing::Values(
         BFloat16TestParam{0x3F848000, 0x3F84},

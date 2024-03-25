@@ -8,6 +8,10 @@ __all__ = [
     "allow_in_graph",
     "list_backends",
     "disable",
+    "cudagraph_mark_step_begin",
+    "wrap_numpy",
+    "is_compiling",
+    "is_dynamo_compiling",
 ]
 
 def compile(*args, **kwargs):
@@ -92,3 +96,98 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+def cudagraph_mark_step_begin():
+    """
+    Indicates that a new iteration of inference or training is about to begin.
+
+    CUDA Graphs will free tensors of a prior iteration. A new iteration is started on each invocation of
+    torch.compile, so long as there is not a pending backward that has not been called.
+
+    If that heuristic is wrong, such as in the following example, manually mark it with this api.
+
+    .. code-block:: python
+
+        @torch.compile(mode="reduce-overhead")
+        def rand_foo():
+            return torch.rand([4], device="cuda")
+
+        for _ in range(5):
+            torch.compiler.cudagraph_mark_step_begin()
+            rand_foo() + rand_foo()
+
+    For more details, see `torch.compiler_cudagraph_trees <https://pytorch.org/docs/main/torch.compiler_cudagraph_trees.html>`__
+    """
+    from torch._inductor import cudagraph_trees
+
+    cudagraph_trees.mark_step_begin()
+
+def wrap_numpy(fn):
+    r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
+    from ``torch.Tensor``s to ``torch.Tensor``s.
+
+    It is designed to be used with :func:`torch.compile` with ``fullgraph=True``. It allows to
+    compile a NumPy function as if it were a PyTorch function. This allows you to run NumPy code
+    on CUDA or compute its gradients.
+
+    .. note::
+
+        This decorator does not work without :func:`torch.compile`.
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> # Compile a NumPy function as a Tensor -> Tensor function
+        >>> @torch.compile(fullgraph=True)
+        >>> @torch.compiler.wrap_numpy
+        >>> def fn(a: np.ndarray):
+        >>>     return np.sum(a * a)
+        >>> # Execute the NumPy function using Tensors on CUDA and compute the gradients
+        >>> x = torch.arange(6, dtype=torch.float32, device="cuda", requires_grad=True)
+        >>> out = fn(x)
+        >>> out.backward()
+        >>> print(x.grad)
+        tensor([ 0.,  2.,  4.,  6.,  8., 10.], device='cuda:0')
+    """
+    from torch._dynamo.external_utils import wrap_numpy as wrap
+    return wrap(fn)
+
+_is_compiling_flag: bool = False
+
+def is_compiling() -> bool:
+    """
+    Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().
+
+    Note that there are 2 other related flags that should deprecated eventually:
+      * torch._dynamo.external_utils.is_compiling()
+      * torch._utils.is_compiling()
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_compiling():
+        >>>        ...logic that is not needed in a compiled/traced graph...
+        >>>
+        >>>     ...rest of the function...
+    """
+    if torch.jit.is_scripting():
+        return False
+    else:
+        return _is_compiling_flag
+
+def is_dynamo_compiling() -> bool:
+    """
+    Indicates whether a graph is traced via TorchDynamo.
+
+    It's stricter than is_compiling() flag, as it would only be set to True when
+    TorchDynamo is used.
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_dynamo_compiling():
+        >>>        ...logic that is not needed in a TorchDynamo-traced graph...
+        >>>
+        >>>     ...rest of the function...
+    """
+    return False

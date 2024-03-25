@@ -200,7 +200,7 @@ std::vector<MatchedSubgraph> GraphMatcher::getMatches(
     if (match.isMatch()) {
       MatchedSubgraph ms;
       ms.subgraph = *match.getMatchedSubgraph();
-      // This is a map from the the internal TestMatchGraph to the nodes in the
+      // This is a map from the internal TestMatchGraph to the nodes in the
       // NNGraph
       auto match_graph_map = match.getMatchNodeMap();
       // We iterate through the "varMap_" map (string ->
@@ -251,9 +251,7 @@ std::string convertToNQLString(NNGraph& g) {
   // doesn't mutate the graph and use const reference in this function too.
   auto topoMatch = nom::algorithm::tarjans(&g);
   std::vector<NNGraph::NodeRef> nodes;
-  int sccNum = 0;
   for (auto scc : topoMatch) {
-    sccNum++;
     for (auto node : scc.getNodes()) {
       nodes.emplace_back(node);
     }

@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <future>
 #include <iostream>
+#include <string>
 #include <system_error>
 #include <thread>
 
@@ -16,6 +17,7 @@ constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int defaultTimeout = 20;
 
 c10::intrusive_ptr<c10d::TCPStore> _createServer(
+    bool useLibUV,
     int numWorkers = 1,
     int timeout = defaultTimeout) {
   return c10::make_intrusive<c10d::TCPStore>(
@@ -25,15 +27,18 @@ c10::intrusive_ptr<c10d::TCPStore> _createServer(
           /* isServer */ true,
           numWorkers,
           /* waitWorkers */ false,
-          /* timeout */ std::chrono::seconds(timeout)});
+          /* timeout */ std::chrono::seconds(timeout),
+          /* multiTenant */ false,
+          /* masterListenFd */ c10::nullopt,
+          /* useLibUV*/ useLibUV});
 }
 
 // Different ports for different tests.
-void testHelper(const std::string& prefix = "") {
+void testHelper(bool useLibUV, const std::string& prefix = "") {
   constexpr auto numThreads = 16;
   constexpr auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = _createServer(numWorkers);
+  auto serverTCPStore = _createServer(useLibUV, numWorkers);
 
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
@@ -153,11 +158,19 @@ void testHelper(const std::string& prefix = "") {
 }
 
 TEST(TCPStoreTest, testHelper) {
-  testHelper();
+  testHelper(false);
+}
+
+TEST(TCPStoreTest, testHelperUV) {
+  testHelper(true);
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper("testPrefix");
+  testHelper(false, "testPrefix");
+}
+
+TEST(TCPStoreTest, testHelperPrefixUV) {
+  testHelper(true, "testPrefix");
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {
@@ -183,7 +196,7 @@ TEST(TCPStoreTest, testCleanShutdown) {
   clientTCPStore->get("key");
 
   auto clientThread = std::thread([&clientTCPStore] {
-    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::system_error);
+    EXPECT_THROW(clientTCPStore->get("invalid_key"), c10::DistNetworkError);
   });
 
   // start server shutdown during a client request
@@ -192,10 +205,55 @@ TEST(TCPStoreTest, testCleanShutdown) {
   clientThread.join();
 }
 
-TEST(TCPStoreTest, testMultiTenantStores) {
+TEST(TCPStoreTest, testLibUVPartialRead) {
+  int numWorkers = 2; // thread 0 creates both server and client
+
+  // server part
+  c10d::TCPStoreOptions server_opts{
+      0,
+      true, // is master
+      numWorkers,
+      false, // don't wait otherwise client thread won't spawn
+      std::chrono::seconds(defaultTimeout)};
+  server_opts.useLibUV = true;
+
+  auto serverTCPStore =
+      std::make_unique<c10d::TCPStore>("127.0.0.1", server_opts);
+
+  // client part
+  c10d::TCPStoreOptions client_opts{
+      serverTCPStore->getPort(),
+      false, // is master
+      numWorkers,
+      false, // wait workers
+      std::chrono::seconds(defaultTimeout)};
+  client_opts.useLibUV = true;
+  auto clientTCPStore =
+      c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
+  auto clientThread = std::thread([&clientTCPStore] {
+    std::string keyPrefix(
+        "/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//");
+    std::string value("v");
+    std::vector<uint8_t> valueBuf(value.begin(), value.end());
+
+    // split store->set(key, valueBuf) into two requests
+    for (int i = 0; i < 10; ++i) {
+      std::string key = keyPrefix + std::to_string(i);
+      clientTCPStore->_splitSet(key, valueBuf);
+
+      // check the result on server
+      c10d::test::check(*clientTCPStore, key, "v");
+    }
+  });
+
+  clientThread.join();
+}
+
+void testMultiTenantStores(bool libUV) {
   c10d::TCPStoreOptions opts{};
   opts.isServer = true;
   opts.multiTenant = true;
+  opts.useLibUV = libUV;
 
   // Construct two server stores on the same port.
   auto store1 = c10::make_intrusive<c10d::TCPStore>("localhost", opts);
@@ -210,4 +268,12 @@ TEST(TCPStoreTest, testMultiTenantStores) {
 
   c10d::test::set(*store1, "key0", "value0");
   c10d::test::check(*store1, "key0", "value0");
+}
+
+TEST(TCPStoreTest, testMultiTenantStores) {
+  testMultiTenantStores(false);
+}
+
+TEST(TCPStoreTest, testMultiTenantStoresUV) {
+  testMultiTenantStores(true);
 }

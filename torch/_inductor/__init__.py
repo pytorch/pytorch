@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 import torch.fx
+import torch.utils._pytree as pytree
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
@@ -45,16 +46,53 @@ def aot_compile(
     """
     from .compile_fx import compile_fx_aot
 
-    result = compile_fx_aot(
+    # We will serialize the pytree info into the .so as constant strings
+    in_spec = None
+    out_spec = None
+    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+        codegen = gm.graph._codegen
+        gm.graph._codegen = torch.fx.graph.CodeGen()
+        gm.recompile()
+
+        if codegen.pytree_info.in_spec is not None:
+            in_spec = codegen.pytree_info.in_spec
+        if codegen.pytree_info.out_spec is not None:
+            out_spec = codegen.pytree_info.out_spec
+
+    else:
+        if hasattr(gm, "_in_spec"):
+            in_spec = gm._in_spec
+        if hasattr(gm, "_out_spec"):
+            out_spec = gm._out_spec
+
+    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
+    serialized_out_spec = (
+        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
+    )
+
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
+
+    return compile_fx_aot(
         gm,
         example_inputs,
         config_patches=options,
-    )()
-    lib_path = result[0] if isinstance(result, (list, tuple)) else result
-    return lib_path
+    )
 
 
-def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
+def list_mode_options(
+    mode: Optional[str] = None, dynamic: Optional[bool] = None
+) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
@@ -67,7 +105,7 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options = {
+    mode_options: Dict[str, Dict[str, bool]] = {
         "default": {},
         # enable cudagraphs
         "reduce-overhead": {
@@ -84,10 +122,10 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
             "triton.cudagraphs": True,
         },
     }
-    return mode_options[mode] if mode else mode_options
+    return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
 
 
-def list_options() -> Dict[str, Any]:
+def list_options() -> List[str]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 
@@ -100,7 +138,7 @@ def list_options() -> Dict[str, Any]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+    current_config: Dict[str, Any] = config.shallow_copy_dict()
 
     return list(current_config.keys())
 

@@ -8,14 +8,8 @@ from typing import List
 import torch
 import torch.cuda._sanitizer as csan
 from torch.cuda._sanitizer import StreamId, DataPtr, EventId
-from torch.testing._internal.common_utils import TestCase, run_tests, NoTest
+from torch.testing._internal.common_utils import TestCase, run_tests, NoTest, TEST_CUDA
 
-
-# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here,
-# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
-# multiple times as well during the execution of this test suite, and it will
-# cause CUDA OOM error on Windows.
-TEST_CUDA = torch.cuda.is_available()
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)

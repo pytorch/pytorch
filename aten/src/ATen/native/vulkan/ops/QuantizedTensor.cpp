@@ -39,7 +39,13 @@ Tensor quantize_per_tensor(
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
 
-  vTensor v_output{context, input.sizes(), scale, zero_point, dtype};
+  vTensor v_output{
+      context,
+      v_input.sizes(),
+      scale,
+      zero_point,
+      convert_dtype(dtype),
+  };
 
   const struct Block final {
     uvec3 extents;
@@ -83,6 +89,18 @@ Tensor quantize_per_tensor(
   return convert_quantized(v_output);
 }
 
+Tensor quantize_per_tensor_tensor_qparams(
+    const at::Tensor& input_arg,
+    const at::Tensor& scale,
+    const at::Tensor& zero_point,
+    const c10::ScalarType dtype) {
+  TORCH_CHECK(
+      (scale.numel() == 1 && zero_point.numel() == 1),
+      "Only 1 element expected in scale and zero_point");
+  return quantize_per_tensor(
+      input_arg, scale.item().toDouble(), zero_point.item().toLong(), dtype);
+}
+
 // helper for dequantize function to use scale and zero_point
 Tensor dequantize_helper(
     const at::Tensor& input_arg,
@@ -98,8 +116,8 @@ Tensor dequantize_helper(
 
   vTensor v_output{
       context,
-      input.sizes(),
-      c10::kFloat,
+      v_input.sizes(),
+      api::kFloat,
   };
 
   const struct Block final {
@@ -143,6 +161,18 @@ Tensor dequantize_helper(
   return convert(v_output);
 }
 
+double q_scale(const Tensor& self) {
+  TORCH_CHECK(self.is_vulkan(), "Expecting a vulkan tensor for q_scale");
+  const vTensor& v_input = convert(self);
+  return v_input.get_scale();
+}
+
+int64_t q_zero_point(const Tensor& self) {
+  TORCH_CHECK(self.is_vulkan(), "Expecting a vulkan tensor for q_zero_point");
+  const vTensor& v_input = convert(self);
+  return v_input.get_zero_point();
+}
+
 Tensor dequantize(const Tensor& self) {
   double q_scale = convert(self).get_scale();
   int64_t zero_point = convert(self).get_zero_point();
@@ -154,6 +184,11 @@ Tensor dequantize(const Tensor& self) {
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::quantize_per_tensor"), quantize_per_tensor);
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantize_per_tensor.tensor_qparams"),
+      quantize_per_tensor_tensor_qparams);
+  m.impl(TORCH_SELECTIVE_NAME("aten::q_scale"), q_scale);
+  m.impl(TORCH_SELECTIVE_NAME("aten::q_zero_point"), q_zero_point);
   m.impl(TORCH_SELECTIVE_NAME("aten::dequantize.self"), dequantize);
 }
 

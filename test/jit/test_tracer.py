@@ -1010,6 +1010,21 @@ class TestTracer(JitTestCase):
         self.assertEqual(out, out_state)
         self.assertNotEqual(out, out_ones)
 
+    @unittest.skipIf(not RUN_CUDA, "uses cuda")
+    def test_type_same_device(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dtype = torch.float16
+
+            def forward(self, x=None):
+                h = x.type(self.dtype)
+                return h
+
+        a = Model()
+        b = torch.jit.trace(a, example_inputs=(torch.ones([1], device=torch.device("cuda")),))
+        FileCheck().check_not("device").run(b.code)
+
     def test_export_no_reorder(self):
         def func(a, b):
             return a * b / (a - 2 * b) + b
@@ -1184,6 +1199,28 @@ class TestTracer(JitTestCase):
             return [[torch.zeros(1)], [torch.zeros(5)]]
         with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
             traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_strided_tensor_output(self):
+        @torch.jit.script
+        def nt_construct(values, kv_lengths):
+            kv_lengths_list: List[int] = kv_lengths.tolist()
+            return torch._nested_tensor_from_tensor_list(
+                list(values.split(kv_lengths_list, dim=0)), None, None, None, None
+            )
+
+        def f(x, offsets):
+            kv_lengths = offsets[1:] - offsets[:-1]
+            return nt_construct(x, kv_lengths).cos()
+
+        x = torch.rand(5, 4)
+        offsets = torch.tensor([0, 2, 5])
+        ref = f(x, offsets)
+        f_t = torch.jit.trace(f, (x, offsets))
+        res = f_t(x, offsets)
+        self.assertEqual(ref, res)
+        x2 = torch.rand((8, 4))
+        offsets2 = torch.tensor([0, 2, 4, 8])
+        self.assertEqual(f(x2, offsets2), f_t(x2, offsets2))
 
     def test_trace_variable_instantiation(self):
         def random_foo(x):
@@ -1896,7 +1933,7 @@ class TestTracer(JitTestCase):
 
     def test_non_tensor_tracing(self):
         def f(x):
-            return x + param
+            return x + param  # noqa: F821
         with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 

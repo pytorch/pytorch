@@ -16,8 +16,7 @@
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -308,6 +307,16 @@ public:
     }
     return loadu(res);
   };
+  bool has_inf_nan() const {
+    __at_align__ float tmp[size()];
+    store(tmp);
+    for (const auto i : c10::irange(size())) {
+      if(_isnan(tmp[i]) || _isinf(tmp[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
@@ -340,6 +349,12 @@ public:
       map(std::acos)
     );
   }
+  Vectorized<float> acosh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_acoshf4_u10(values.val[0]), Sleef_acoshf4_u10(values.val[1])),
+      map(std::acosh)
+    );
+  }
   Vectorized<float> asin() const {
     return USE_SLEEF(
       Vectorized<float>(Sleef_asinf4_u10(values.val[0]), Sleef_asinf4_u10(values.val[1])),
@@ -350,6 +365,12 @@ public:
     return USE_SLEEF(
       Vectorized<float>(Sleef_atanf4_u10(values.val[0]), Sleef_atanf4_u10(values.val[1])),
       map(std::atan)
+    );
+  }
+  Vectorized<float> atanh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_atanhf4_u10(values.val[0]), Sleef_atanhf4_u10(values.val[1])),
+      map(std::atanh)
     );
   }
   Vectorized<float> atan2(const Vectorized<float> &exp) const {
@@ -416,6 +437,9 @@ public:
       map(std::expm1)
     );
   }
+  Vectorized<float> exp_u20() const {
+    return exp();
+  }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     USE_SLEEF(
       {
@@ -457,6 +481,9 @@ public:
   }
   Vectorized<float> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];
@@ -868,4 +895,4 @@ inline Vectorized<float> Vectorized<float>::erf() const{
 }
 #endif /* defined(aarch64) */
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

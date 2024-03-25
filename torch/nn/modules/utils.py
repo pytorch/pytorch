@@ -31,7 +31,8 @@ def _reverse_repeat_tuple(t, n):
 
 
 def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
-    if isinstance(out_size, int):
+    import torch
+    if isinstance(out_size, (int, torch.SymInt)):
         return out_size
     if len(defaults) <= len(out_size):
         raise ValueError(
@@ -56,22 +57,23 @@ def consume_prefix_in_state_dict_if_present(
         state_dict (OrderedDict): a state-dict to be loaded to the model.
         prefix (str): prefix.
     """
-    keys = sorted(state_dict.keys())
+    keys = list(state_dict.keys())
     for key in keys:
         if key.startswith(prefix):
             newkey = key[len(prefix) :]
             state_dict[newkey] = state_dict.pop(key)
 
     # also strip the prefix in metadata if any.
-    if "_metadata" in state_dict:
-        metadata = state_dict["_metadata"]
-        for key in list(metadata.keys()):
+    if hasattr(state_dict, "_metadata"):
+        keys = list(state_dict._metadata.keys())
+        for key in keys:
             # for the metadata dict, the key can be:
             # '': for the DDP module, which we want to remove.
             # 'module': for the actual model.
             # 'module.xx.xx': for the rest.
-
             if len(key) == 0:
                 continue
-            newkey = key[len(prefix) :]
-            metadata[newkey] = metadata.pop(key)
+            # handling both, 'module' case and  'module.' cases
+            if key == prefix.replace('.', '') or key.startswith(prefix):
+                newkey = key[len(prefix) :]
+                state_dict._metadata[newkey] = state_dict._metadata.pop(key)

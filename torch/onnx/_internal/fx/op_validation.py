@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
@@ -58,7 +60,6 @@ def validate_op_between_ort_torch(
     There are three signs can be found:
     1. Blue: Pass
     2. Yellow: Bypass
-    3. Red: Fail
 
     Args:
         node (torch.fx.Node): The validated fx.node
@@ -76,10 +77,10 @@ def validate_op_between_ort_torch(
         )
     except ValueError as value_error:
         diagnostic = diagnostic_context.inflight_diagnostic()
-        diagnostic.with_additional_message(
-            f"### Op level debug fails due to unsupported input types\n"
-            f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
-        )
+        with diagnostic.log_section(
+            logging.WARNING, "Op level debug fails due to unsupported input types"
+        ):
+            diagnostic.log_source_exception(logging.WARNING, value_error)
         diagnostic.level = diagnostics.levels.WARNING
         return
 
@@ -90,21 +91,17 @@ def validate_op_between_ort_torch(
         except IndexError as index_error:
             # TODO(titaiwang): How to bound indices/dim: INT64
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug is bypassed\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
-            )
-            diagnostic.with_source_exception(index_error)
+            with diagnostic.log_section(logging.WARNING, "Op level debug is bypassed"):
+                diagnostic.log_source_exception(logging.WARNING, index_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
         # NOTE: Error in torch ops with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug fails on PyTorch\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
-            )
-            diagnostic.with_source_exception(runtime_error)
+            with diagnostic.log_section(
+                logging.WARNING, "Op level debug fails on PyTorch"
+            ):
+                diagnostic.log_source_exception(logging.WARNING, runtime_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
 
@@ -116,7 +113,6 @@ def validate_op_between_ort_torch(
                 symbolic_fn.param_schemas(),
                 torch_args,
                 torch_kwargs,
-                fill_defaults=False,
                 allow_extra_kwargs=True,
             )
             # NOTE: Apply kwargs preprocessing AFTER they are split
@@ -125,14 +121,11 @@ def validate_op_between_ort_torch(
                     function_eager_attributes
                 )
             )
-        # NOTE: Imcompatible kwargs or missing required args
+        # NOTE: Incompatible kwargs or missing required args
         except TypeError as type_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug is bypassed\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(type_error)}"
-            )
-            diagnostic.with_source_exception(type_error)
+            with diagnostic.log_section(logging.WARNING, "Op level debug is bypassed"):
+                diagnostic.log_source_exception(logging.WARNING, type_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
         try:
@@ -142,11 +135,10 @@ def validate_op_between_ort_torch(
         # NOTE: Error in ONNX Runtime with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
-            diagnostic.with_additional_message(
-                f"### Op level debug fails on ONNXRUNTIME:\n"
-                f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
-            )
-            diagnostic.with_source_exception(runtime_error)
+            with diagnostic.log_section(
+                logging.WARNING, "Op level debug fails on ONNXRUNTIME"
+            ):
+                diagnostic.log_source_exception(logging.WARNING, runtime_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
 
@@ -159,6 +151,10 @@ def validate_op_between_ort_torch(
         for torch_output, function_output in zip(
             flattened_torch_outputs, flattened_function_outputs
         ):
+            if isinstance(
+                torch_output, torch.Tensor
+            ) and fx_type_utils.is_torch_complex_dtype(torch_output.dtype):
+                torch_output = torch.view_as_real(torch_output.resolve_conj())
             try:
                 if isinstance(function_output, onnxscript.tensor.Tensor):
                     function_output = function_output.value
@@ -174,11 +170,8 @@ def validate_op_between_ort_torch(
                 )
             except AssertionError as e:
                 diagnostic = diagnostic_context.inflight_diagnostic()
-                diagnostic.with_additional_message(
-                    f"### Validation failed\n"
-                    f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-                )
-                diagnostic.with_source_exception(e)
+                with diagnostic.log_section(logging.WARNING, "Validation failed"):
+                    diagnostic.log_source_exception(logging.WARNING, e)
                 diagnostic.level = diagnostics.levels.WARNING
 
 
@@ -240,8 +233,8 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
         )
     if fx_type_utils.is_torch_complex_dtype(dtype):
         # ONNX does not support complex values, but supports their real representation
-        return torch.randn(
-            (*shape, 2), dtype=fx_type_utils.from_complex_to_float(dtype)
+        return torch.view_as_complex(
+            torch.randn((*shape, 2), dtype=fx_type_utils.from_complex_to_float(dtype))
         )
     return torch.randn(shape, dtype=dtype)
 
@@ -310,16 +303,17 @@ def _convert_torch_args_to_onnxfunction_args(
     param_schemas: Sequence[onnxscript.values.ParamSchema],
     args: List[fx_type_utils.Argument],
     kwargs: Dict[str, fx_type_utils.Argument],
-    fill_defaults: bool = False,
     allow_extra_kwargs: bool = False,
 ) -> Tuple[List[Any], Dict[str, Any],]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
+
+    NOTE: This is different from the param_schema separating in dispatcher, since at this point
+    we are already sure that the args and kwargs are in order and matched.
 
     Args:
         param_schemas: The parameter schemas of an Op or a OnnxFunction.
         args: The Python positional arguments supplied by the caller.
         kwargs: The Python keyword arguments supplied by the caller.
-        fill_defaults: Whether to fill the default values for attributes.
         allow_extra_kwargs: Whether to allow extra keyword arguments.
             When set to True, extra/unknown arguments will be ignored.
 
@@ -359,10 +353,6 @@ def _convert_torch_args_to_onnxfunction_args(
                 tagged_kwargs[param.name] = _convert_tensor_to_numpy(kwargs[param.name])
             else:
                 tagged_kwargs[param.name] = kwargs[param.name]
-        elif param.default is not object():
-            # User did not provide the input/attribute
-            if fill_defaults:
-                tagged_kwargs[param.name] = param.default
         elif param.required:
             raise TypeError(f"Required input/attribute '{param}' was not provided")
 
@@ -373,10 +363,13 @@ def _convert_torch_args_to_onnxfunction_args(
 def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
-    except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
+    except ImportError as exc:
+        raise ImportError(f"{__name__} needs numpy, but it's not installed.") from exc
 
     if isinstance(input, torch.Tensor):
+        if torch.is_complex(input):
+            # from complex to real representation
+            input = torch.view_as_real(input.resolve_conj())
         return input.detach().cpu().numpy()
     if isinstance(input, torch.dtype):
         return int(jit_type_utils.JitScalarType.from_dtype(input).onnx_type())  # type: ignore[union-attr]

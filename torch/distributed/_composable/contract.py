@@ -185,10 +185,10 @@ def contract(state_cls: Type[_State] = _State):
     return inner
 
 
-def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
+def _get_registry(module: nn.Module) -> Optional[Dict[str, RegistryItem]]:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
-    ``module``, indexed by the API name.
+    ``module``, indexed by the API name. If no API has been applied, then this
+    returns ``None``.
     """
-    default_registry: Dict[str, RegistryItem] = OrderedDict()
-    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
+    return getattr(module, REGISTRY_KEY, None)

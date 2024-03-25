@@ -16,7 +16,7 @@ class LogNormal(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = LogNormal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # log-normal distributed with mean=0 and stddev=1
         tensor([ 0.1046])

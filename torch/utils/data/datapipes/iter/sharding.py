@@ -28,8 +28,9 @@ class _ShardingIterDataPipe(IterDataPipe):
 @functional_datapipe('sharding_filter')
 class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     r"""
-    Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``). After ``apply_sharding`` is
-    called, each instance of the DataPipe (on different workers) will have every `n`-th element of the
+    Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``).
+
+    After ``apply_sharding`` is called, each instance of the DataPipe (on different workers) will have every `n`-th element of the
     original DataPipe, where `n` equals to the number of instances.
 
     Args:

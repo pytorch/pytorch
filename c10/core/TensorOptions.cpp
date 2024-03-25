@@ -32,6 +32,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorOptions& options) {
   // default
   stream << ", memory_format=";
   if (options.has_memory_format()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     stream << *options.memory_format_opt();
   } else {
     stream << "(nullopt)";

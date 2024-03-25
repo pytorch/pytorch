@@ -6,7 +6,7 @@ from collections.abc import Collection
 from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
 from torch.utils.data import IterDataPipe, MapDataPipe
-from torch.utils.data._utils.serialization import DILL_AVAILABLE
+from torch.utils._import_utils import dill_available
 
 
 __all__ = ["traverse", "traverse_dps"]
@@ -23,7 +23,7 @@ def _stub_unpickler():
 def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Set[int]) -> List[DataPipe]:
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
-    if DILL_AVAILABLE:
+    if dill_available():
         from dill import Pickler as dill_Pickler
         d = dill_Pickler(f)
     else:
@@ -66,7 +66,7 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
         try:
             p.dump(scan_obj)
         except (pickle.PickleError, AttributeError, TypeError):
-            if DILL_AVAILABLE:
+            if dill_available():
                 d.dump(scan_obj)
             else:
                 raise
@@ -75,7 +75,7 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
             cls.set_reduce_ex_hook(None)
             if only_datapipe:
                 cls.set_getstate_hook(None)
-        if DILL_AVAILABLE:
+        if dill_available():
             from dill import extend as dill_extend
             dill_extend(False)  # Undo change to dispatch table
     return captured_connections
@@ -84,6 +84,7 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
 def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
     r"""
     Traverse the DataPipes and their attributes to extract the DataPipe graph.
+
     This only looks into the attribute from each DataPipe that is either a
     DataPipe and a Python collection object such as ``list``, ``tuple``,
     ``set`` and ``dict``.
@@ -100,10 +101,12 @@ def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
 
 def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPipeGraph:
     r"""
-    [Deprecated] Traverse the DataPipes and their attributes to extract the DataPipe graph. When
-    ``only_dataPipe`` is specified as ``True``, it would only look into the attribute
-    from each DataPipe that is either a DataPipe and a Python collection object such as
-    ``list``, ``tuple``, ``set`` and ``dict``.
+    Traverse the DataPipes and their attributes to extract the DataPipe graph.
+
+    [Deprecated]
+    When ``only_dataPipe`` is specified as ``True``, it would only look into the
+    attribute from each DataPipe that is either a DataPipe and a Python collection object
+    such as ``list``, ``tuple``, ``set`` and ``dict``.
 
     Note:
         This function is deprecated. Please use `traverse_dps` instead.

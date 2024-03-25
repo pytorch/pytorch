@@ -1,15 +1,20 @@
+# mypy: ignore-errors
+
 # Owner(s): ["module: numpy"]
 
 import torch
 import numpy as np
 
 from itertools import product
+import sys
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests)
+    (skipIfTorchDynamo, TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing import make_tensor
+
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -156,6 +161,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     def test_to_numpy_force_argument(self, device) -> None:
         for force in [False, True]:
             for requires_grad in [False, True]:
@@ -218,7 +224,7 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array([1, 2, 3, 4], dtype=np.uint16)
+        array = np.array(['foo', 'bar'], dtype=np.dtype(np.str_))
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 
@@ -252,6 +258,18 @@ class TestNumPyInterop(TestCase):
         x = np.array([3., 5., 8.])
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
+
+    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
+    def test_from_numpy_no_leak_on_invalid_dtype(self):
+        # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
+        # object. See https://github.com/pytorch/pytorch/issues/121138
+        x = np.array("value".encode('ascii'))
+        for _ in range(1000):
+            try:
+                torch.from_numpy(x)
+            except TypeError:
+                pass
+        self.assertTrue(sys.getrefcount(x) == 2)
 
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
@@ -303,6 +321,14 @@ class TestNumPyInterop(TestCase):
         for idx in i:
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
+
+    @onlyCPU
+    def test_numpy_index_multi(self, device):
+        for dim_sz in [2, 8, 16, 32]:
+            i = np.zeros((dim_sz, dim_sz, dim_sz), dtype=np.int32)
+            i[:dim_sz // 2, :, :] = 1
+            x = torch.randn(dim_sz, dim_sz, dim_sz)
+            self.assertTrue(x[i == 1].numel() == np.sum(i))
 
     @onlyCPU
     def test_numpy_array_interface(self, device):
@@ -407,7 +433,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(RuntimeError, "Overflow",
+        self.assertRaisesRegex(RuntimeError, "(Overflow|an integer is required)",
                                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
@@ -471,6 +497,64 @@ class TestNumPyInterop(TestCase):
                     self.assertFalse(t == a)
                 else:
                     self.assertTrue(t == a)
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
+    def test___eq__(self, device, dtype):
+        a = make_tensor((5, 7), dtype=dtype, device=device, low=-9, high=9)
+        b = a.clone().detach()
+        b_np = b.numpy()
+
+        # Check all elements equal
+        res_check = torch.ones_like(a, dtype=torch.bool)
+        self.assertEqual(a == b_np, res_check)
+        self.assertEqual(b_np == a, res_check)
+
+        # Check one element unequal
+        if dtype == torch.bool:
+            b[1][3] = not b[1][3]
+        else:
+            b[1][3] += 1
+        res_check[1][3] = False
+        self.assertEqual(a == b_np, res_check)
+        self.assertEqual(b_np == a, res_check)
+
+        # Check random elements unequal
+        rand = torch.randint(0, 2, a.shape, dtype=torch.bool)
+        res_check = rand.logical_not()
+        b.copy_(a)
+
+        if dtype == torch.bool:
+            b[rand] = b[rand].logical_not()
+        else:
+            b[rand] += 1
+
+        self.assertEqual(a == b_np, res_check)
+        self.assertEqual(b_np == a, res_check)
+
+        # Check all elements unequal
+        if dtype == torch.bool:
+            b.copy_(a.logical_not())
+        else:
+            b.copy_(a + 1)
+        res_check.fill_(False)
+        self.assertEqual(a == b_np, res_check)
+        self.assertEqual(b_np == a, res_check)
+
+    @onlyCPU
+    def test_empty_tensors_interop(self, device):
+        x = torch.rand((), dtype=torch.float16)
+        y = torch.tensor(np.random.rand(0), dtype=torch.float16)
+        # Same can be achieved by running
+        # y = torch.empty_strided((0,), (0,), dtype=torch.float16)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/115068
+        self.assertEqual(torch.true_divide(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/115066
+        self.assertEqual(torch.mul(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/113037
+        self.assertEqual(torch.div(x, y, rounding_mode='floor').shape, y.shape)
+
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
 

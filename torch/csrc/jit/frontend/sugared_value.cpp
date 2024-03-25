@@ -70,14 +70,26 @@ bool SimpleValue::hasAttr(
     const SourceRange& loc,
     GraphFunction& m,
     const std::string& field) {
-  auto class_type = value_->type()->cast<ClassType>();
-  if (!class_type) {
-    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
-                           << value_->type()->repr_str() << " instead";
+  if (auto class_type = value_->type()->cast<ClassType>()) {
+    return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
+        class_type->hasConstant(field);
+  } else if (auto tuple_type = value_->type()->cast<TupleType>()) {
+    if (tuple_type->schema()) {
+      for (const auto& arg : tuple_type->schema()->arguments()) {
+        if (arg.name() == field) {
+          return true;
+        }
+      }
+      return false;
+    } else {
+      throw ErrorReport(loc) << "hasattr's first argument must be a object "
+                             << "or NamedTuple, but got a normal Tuple "
+                             << value_->type()->repr_str() << " instead";
+    }
   }
-
-  return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
-      class_type->hasConstant(field);
+  throw ErrorReport(loc) << "hasattr's first argument must be an object or "
+                         << "NamedTuple, got " << value_->type()->repr_str()
+                         << " instead";
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
@@ -120,6 +132,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
            {"is_mps", "prim"},
+           {"is_mtia", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
            {"is_ipu", "prim"},
@@ -238,6 +251,17 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (value_->type()->isSubtypeOf(*TensorType::get()) &&
       field == "__getitem__") {
     return SpecialFormValue::create(aten::index);
+  }
+
+  if (auto generator_type = value_->type()->cast<GeneratorType>()) {
+    // Handle access to Generator's `manual_seed`, `initial_seed` and `seed`
+    // attributes.
+    if (field == "manual_seed" || field == "initial_seed" || field == "seed") {
+      if (auto builtin = BuiltinFunction::tryCreate(
+              Symbol::aten(field), NamedValue(loc, "self", value_))) {
+        return builtin;
+      }
+    }
   }
 
   ErrorReport report(loc);
@@ -507,7 +531,7 @@ RangeValue::RangeValue(
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
           << "all inputs of range must be ints, found " << typ->repr_str()
-          << " in argument " << c10::guts::to_string(i);
+          << " in argument " << std::to_string(i);
     }
   }
 

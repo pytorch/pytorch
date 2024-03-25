@@ -236,10 +236,11 @@ class DistributedOptimizer:
         """
         dist_autograd._is_valid_context(context_id)
 
-        if self.is_functional_optim:
-            optimizer_step_func = _script_local_optimizer_step
-        else:
-            optimizer_step_func = _local_optimizer_step
+        optimizer_step_func = (
+            _script_local_optimizer_step
+            if self.is_functional_optim
+            else _local_optimizer_step
+        )
 
         rpc_futs = []
         for optimizer in self.remote_optimizers:

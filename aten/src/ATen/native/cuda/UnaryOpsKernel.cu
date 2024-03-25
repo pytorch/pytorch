@@ -208,30 +208,57 @@ void clamp_max_kernel_cuda(TensorIteratorBase& iter, const Scalar& max_value) {
   });
 }
 
+template<typename scalar_t>
+C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
+  return at::_isnan(a)
+    ? nan_replacement
+    : (a == std::numeric_limits<scalar_t>::infinity()
+      ? pos_inf_replacement
+      : (a == -std::numeric_limits<scalar_t>::infinity()
+        ? neg_inf_replacement
+        : a));
+}
+
 void nan_to_num_kernel_cuda(
     TensorIteratorBase& iter,
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "nan_to_num_cuda", [&]() {
-    scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-    scalar_t pos_inf_replacement = pos_inf.has_value()
-        ? static_cast<scalar_t>(pos_inf.value())
-        : std::numeric_limits<scalar_t>::max();
-    scalar_t neg_inf_replacement = neg_inf.has_value()
-        ? static_cast<scalar_t>(neg_inf.value())
-        : std::numeric_limits<scalar_t>::lowest();
-    gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return (
-          at::_isnan(a)
-              ? nan_replacement
-              : (a == std::numeric_limits<scalar_t>::infinity()
-                     ? pos_inf_replacement
-                     : (a == -std::numeric_limits<scalar_t>::infinity()
-                            ? neg_inf_replacement
-                            : a)));
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
+      using value_t = scalar_t::value_type;
+      value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
+      value_t pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<value_t>(pos_inf.value())
+          : std::numeric_limits<value_t>::max();
+      value_t neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<value_t>(neg_inf.value())
+          : std::numeric_limits<value_t>::lowest();
+
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+        value_t res_real = _nan_to_num_replace(
+          a.real(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
+        value_t res_imag = _nan_to_num_replace(
+          a.imag(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
+        return scalar_t(res_real, res_imag);
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "nan_to_num_cuda", [&]() {
+      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
+      scalar_t pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<scalar_t>(pos_inf.value())
+          : std::numeric_limits<scalar_t>::max();
+      scalar_t neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<scalar_t>(neg_inf.value())
+          : std::numeric_limits<scalar_t>::lowest();
+
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return _nan_to_num_replace(
+            a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
+      });
+    });
+  }
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {

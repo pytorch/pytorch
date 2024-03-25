@@ -8,6 +8,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/NamedTensorUtils.h>
@@ -100,8 +101,7 @@
 #include <string>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 void window_function_checks(
     const char* function_name,
@@ -214,8 +214,8 @@ Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(real)
-      .add_input(imag)
+      .add_const_input(real)
+      .add_const_input(imag)
       .check_all_same_dtype(false)
       .build();
   complex_stub(iter.device_type(), iter);
@@ -234,8 +234,8 @@ Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(abs)
-      .add_input(angle)
+      .add_const_input(abs)
+      .add_const_input(angle)
       .check_all_same_dtype(false)
       .build();
   polar_stub(iter.device_type(), iter);
@@ -255,7 +255,7 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   Tensor result = at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -327,7 +327,7 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -348,7 +348,7 @@ Tensor& empty_out(IntArrayRef size,
     result.resize_(size);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -574,7 +574,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBFloat16, kHalf, kBool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -706,6 +706,45 @@ Tensor linspace(
   return at::linspace_out(result, start, end, steps);
 }
 
+Tensor linspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
+  return at::linspace(start.item(), end.item(), steps, dtype, layout, device, pin_memory);
+}
+
+Tensor linspace(
+    const Tensor& start,
+    const Scalar& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::linspace(start.item(), end, steps, dtype, layout, device, pin_memory);
+}
+
+Tensor linspace(
+    const Scalar& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::linspace(start, end.item(), steps, dtype, layout, device, pin_memory);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
@@ -724,6 +763,48 @@ Tensor logspace(
   auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
   Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
+  return at::logspace(start.item(), end.item(), steps, base, dtype, layout, device, pin_memory);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Scalar& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::logspace(start.item(), end, steps, base, dtype, layout, device, pin_memory);
+}
+
+Tensor logspace(
+    const Scalar& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::logspace(start, end.item(), steps, base, dtype, layout, device, pin_memory);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -797,10 +878,10 @@ Tensor rand(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::rand(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::rand(size, static_cast<const std::optional<Generator>&>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
+Tensor rand(IntArrayRef size, const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -816,7 +897,7 @@ Tensor& rand_out(IntArrayRef size, Tensor& result) {
   return native::rand_out(size, c10::nullopt, result);
 }
 
-Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+Tensor& rand_out(IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
   result.resize_(size);
   return result.uniform_(0, 1, std::move(generator));
 }
@@ -848,7 +929,7 @@ Tensor randint(int64_t high, IntArrayRef size,
 Tensor randint(
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -871,7 +952,7 @@ Tensor randint(
     int64_t low,
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -889,7 +970,7 @@ Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
 
 Tensor& randint_out(int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     Tensor& result) {
   result.resize_(size);
   return result.random_(0, high, std::move(generator));
@@ -902,7 +983,7 @@ Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result)
 Tensor& randint_out(int64_t low,
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     Tensor& result) {
   result.resize_(size);
   return result.random_(low, high, std::move(generator));
@@ -946,10 +1027,10 @@ Tensor randn(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::randn(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::randn(size, static_cast<const std::optional<Generator>&>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
+Tensor randn(IntArrayRef size, const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -965,13 +1046,13 @@ Tensor& randn_out(IntArrayRef size, Tensor& result) {
   return native::randn_out(size, c10::nullopt, result);
 }
 
-Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+Tensor& randn_out(IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
-              c10::optional<Generator> generator,
+              const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -984,7 +1065,7 @@ Tensor normal(double mean, double std, IntArrayRef size,
 }
 
 Tensor& normal_out(double mean, double std,
-                   IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+                   IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, std::move(generator));
 }
@@ -1039,7 +1120,7 @@ Tensor randperm(int64_t n,
   return native::randperm(n, c10::nullopt, dtype, layout, device, pin_memory);
 }
 
-Tensor randperm(int64_t n, c10::optional<Generator> generator,
+Tensor randperm(int64_t n, const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1059,7 +1140,7 @@ Tensor& randperm_out(int64_t n, Tensor& result) {
   return at::randperm_out(result, n, c10::nullopt);
 }
 
-Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
+Tensor& randperm_out_cpu(int64_t n, const std::optional<Generator>& generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);
@@ -1196,14 +1277,51 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+static Tensor zeros_sparse_compressed_symint(c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    Layout layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  check_size_nonnegative(size);
+  TORCH_CHECK(size.size() >= 2, "torch.zeros: Only batched sparse compressed (non-block) tensors are supported, but got size ", size);
+  auto size_ = C10_AS_INTARRAYREF_SLOW(size);
+  // torch.zeros cannot be used to create blocked tensors because its
+  // API lacks a method to specify the block size.
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(layout, "zeros_sparse_compressed", [&]{});
+
+  int64_t nnz = 0;
+  auto compressed_indices_size = DimVector(size_.slice(0, size.size() - 2));
+  auto plain_indices_and_values_size = DimVector(size_.slice(0, size.size() - 2));
+  compressed_indices_size.push_back(size_[at::sparse_csr::compressedDimension(layout, size_)] + 1);
+  plain_indices_and_values_size.push_back(nnz);
+
+  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
+  auto compressed_indices = at::empty(compressed_indices_size, options);
+  compressed_indices.zero_();
+  auto plain_indices = at::empty(plain_indices_and_values_size, options);
+  auto values = at::empty(plain_indices_and_values_size, options.dtype(dtype));
+
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices,
+                                              plain_indices,
+                                              values,
+                                              size_,
+                                              dtype,
+                                              layout,
+                                              device,
+                                              pin_memory);
+}
+
 Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(Layout::Strided);
+  if (at::sparse_csr::is_sparse_compressed(layout_)) {
+    return zeros_sparse_compressed_symint(size, dtype, layout_, device, pin_memory);
+  }
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
   auto result = at::empty_symint(size, options);
   return result.zero_();
 }
@@ -1691,7 +1809,7 @@ Tensor randn(
 
 Tensor randn(
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -1716,7 +1834,7 @@ Tensor rand(
 
 Tensor rand(
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -1732,5 +1850,4 @@ Tensor rand(
 
 DEFINE_DISPATCH(kaiser_window_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

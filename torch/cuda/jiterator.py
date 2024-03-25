@@ -151,7 +151,6 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     .. warning::
         All input tensors must live in CUDA device
     """
-
     return _JittedFunction(code_string, return_by_ref=False, num_outputs=1, **kwargs)
 
 
@@ -181,7 +180,6 @@ def _create_multi_output_jit_fn(
     .. warning::
         This API only supports up to 8 inputs and 8 outputs
     """
-
     return _JittedFunction(
         code_string, return_by_ref=True, num_outputs=num_outputs, **kwargs
     )

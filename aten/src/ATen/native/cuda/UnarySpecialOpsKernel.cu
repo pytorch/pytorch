@@ -281,18 +281,19 @@ void erfc_kernel_cuda(TensorIteratorBase& iter) {
 CONSTEXPR_EXCEPT_WIN_CUDA char erfinv_name[] = "erfinv_kernel";
 void erfinv_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfinv_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "erfinv_cuda", [&]() {
       jitted_gpu_kernel</*name=*/erfinv_name,
                         /*return_dtype=*/ scalar_t,
                         /*common_dtype=*/ scalar_t,
                         /*arity=*/ 1>(iter, erfinv_string);
       });
   #else
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfinv_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::erfinv(a);
-      });
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+        iter.common_dtype(), "erfinv_cuda", [&]() {
+          gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return ::erfinv(a);
+          });
+        });
   #endif
 }
 

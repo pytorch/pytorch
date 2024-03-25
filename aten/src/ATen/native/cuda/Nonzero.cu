@@ -72,7 +72,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   int num_nonzeros_h;
   at::cuda::memcpy_and_sync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream);
   //expected output size is num_nonzeros x ndim
-  //we are producing output with size {num_nonzeros, ndim} and strides {num_nonzeros, 1} (that is, transposed ndim x num_nonzeros output)
+  //we are producing output with size {num_nonzeros, ndim} and strides {1, num_nonzeros} (that is, transposed ndim x num_nonzeros output)
   //we are able to directly use passed output with this size and strides, and we can also (per contract)
   //resize passed output with incorrect sizes anyway we want.
   //However, out with correct sizes and incorrect strides will have to be copied to from the intermediate we've produced.

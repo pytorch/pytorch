@@ -8,7 +8,7 @@ from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, skipIfTorchDynamo
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -487,7 +487,6 @@ class TestSaveLoad(JitTestCase):
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
-                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
@@ -527,7 +526,7 @@ class TestSaveLoad(JitTestCase):
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 3, device="meta")
                 self.bar = torch.nn.Linear(3, 4)
-                self.buffer = torch.nn.Buffer(torch.randn(4, device="meta"))
+                self.register_buffer("buffer", torch.randn(4, device="meta"))
 
             def forward(self, x):
                 x = self.foo(x)
@@ -710,6 +709,7 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
+    @skipIfTorchDynamo("too slow")
     def test_save_load_large_string_attribute(self):
         """
         Check if the model with string > 4GB can be loaded.
@@ -1151,7 +1151,6 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
-                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))

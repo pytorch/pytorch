@@ -2,7 +2,6 @@
 #include <ATen/core/NamedTensor.h>
 
 #include <ATen/core/TensorBase.h>
-#include <c10/util/C++17.h>
 
 namespace at {
 
@@ -86,6 +85,10 @@ void check_names_valid_for(TensorImpl* impl, DimnameList names) {
 }
 
 void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names, bool validate_names) {
+  TORCH_CHECK(impl->layout() == Layout::Strided,
+      "NYI: named tensors only support strided layout");
+  TORCH_CHECK(impl->device().is_cpu() || impl->device().is_cuda() || impl->device().is_privateuseone(),
+      "NYI: named tensors only support CPU, CUDA or ", c10::get_privateuse1_backend(), " tensors.");
   if (!names) {
     impl->set_named_tensor_meta(nullptr);
     return;
@@ -118,9 +121,9 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(NamedTensorMeta::HasNonWildcard, names));
+    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(NamedTensorMeta::HasNonWildcard, std::move(names)));
   } else {
-    meta->set_names(NamedTensorMeta::HasNonWildcard, names);
+    meta->set_names(NamedTensorMeta::HasNonWildcard, std::move(names));
   }
 }
 

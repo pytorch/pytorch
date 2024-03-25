@@ -7,7 +7,7 @@
 #include <torch/csrc/Export.h>
 
 #include <algorithm>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
 namespace torch {

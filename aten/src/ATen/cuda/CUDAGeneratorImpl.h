@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
-#include <ATen/cuda/detail/PhiloxCudaStateRaw.cuh>
+#include <ATen/cuda/PhiloxCudaState.h>
 #include <ATen/Context.h>
 #include <limits>
 #include <atomic>
@@ -128,13 +128,11 @@ private:
   std::atomic_flag no_reset_rnn_state_;
 };
 
-namespace cuda {
-namespace detail {
+namespace cuda::detail {
 
 TORCH_CUDA_CPP_API const Generator& getDefaultCUDAGenerator(
     DeviceIndex device_index = -1);
 TORCH_CUDA_CPP_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
-} // namespace detail
-} // namespace cuda
+} // namespace cuda::detail
 } // namespace at

@@ -104,6 +104,7 @@ static inline void check_scalar_type_device_layout_equal(const Tensor& out, cons
 
 static inline Tensor integer_upcast(const Tensor& self, c10::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
+  TORCH_CHECK(!isBarebonesUnsignedType(scalarType), "integer upcasting for uint16, uint32 and uint64 is not currently implemented");
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
 }
@@ -120,11 +121,11 @@ static DimVector make_dim_vector(OptionalIntArrayRef opt_dims, int64_t ndim) {
   }
 }
 
-static DimMask make_dim_mask(OptionalIntArrayRef opt_dims, int64_t ndim) {
+static DimMask make_dim_mask(OptionalIntArrayRef opt_dims, int64_t ndim, bool allow_empty_dims=false) {
   DimMask mask;
   if (opt_dims.has_value()) {
     auto dims = opt_dims.value();
-    if (dims.empty()) {
+    if (dims.empty() && !allow_empty_dims) {
       mask = DimMask().flip();
     } else {
       mask = at::dim_list_to_bitset(dims, ndim);
@@ -351,8 +352,9 @@ namespace at::meta {
 static C10_UNUSED DimVector get_reduction_shape(
     const Tensor& self,
     IntArrayRef dims,
-    bool keepdim) {
-  auto mask = native::make_dim_mask(dims, self.dim());
+    bool keepdim,
+    bool allow_empty_dims=false) {
+  auto mask = native::make_dim_mask(dims, self.dim(), allow_empty_dims);
   return native::shape_from_dim_mask(self, mask, keepdim);
 }
 
@@ -361,10 +363,11 @@ static void resize_reduction(
     const Tensor& self,
     OptionalIntArrayRef opt_dims,
     bool keepdim,
-    ScalarType out_dtype) {
+    ScalarType out_dtype,
+    bool allow_empty_dims=false) {
   DimVector dims_ = at::native::make_dim_vector(opt_dims, self.dim());
   maybe_wrap_dims(dims_, self.dim());
-  auto shape = get_reduction_shape(self, dims_, keepdim);
+  auto shape = get_reduction_shape(self, dims_, keepdim, allow_empty_dims);
   meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);

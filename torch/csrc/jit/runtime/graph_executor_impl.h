@@ -27,8 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
@@ -111,5 +110,4 @@ struct GraphExecutorImplBase {
   std::mutex compile_mutex;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
