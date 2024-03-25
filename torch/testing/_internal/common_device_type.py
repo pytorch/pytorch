@@ -699,7 +699,7 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
     # export PYTORCH_TESTING_DEVICE_FOR_CUSTOM=privateuse1
     env_custom_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, ''))
     if env_custom_only_for:
-        desired_device_type_test_bases += filter(lambda x: x.device_type in env_custom_only_for, test_cases)
+        desired_device_type_test_bases += filter(lambda x: x.device_type in env_custom_only_for, test_bases)
         desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
     # Filter out the device types based on environment variables if available
