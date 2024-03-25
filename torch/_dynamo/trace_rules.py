@@ -105,6 +105,7 @@ manual_torch_name_rule_map = {
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
+    "torch.to_dlpack": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored

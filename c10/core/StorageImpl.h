@@ -119,9 +119,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   }
 
+  const at::DataPtr& data_ptr() const;
+
   at::DataPtr& mutable_data_ptr();
 
-  const at::DataPtr& data_ptr() const;
+  // Returns the data_ptr. Bypasses all checks.
+  at::DataPtr& _mutable_data_ptr_no_checks() {
+    return data_ptr_;
+  }
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
@@ -238,7 +243,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   inline bool is_cow() const {
-    return data_ptr_.get_deleter() == impl::cow::cow_deleter;
+    return c10::impl::cow::is_cow_data_ptr(data_ptr_);
   }
 
   // Triggers a copy if this is a copy-on-write tensor.
