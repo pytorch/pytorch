@@ -8497,6 +8497,13 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
+    def test_pad_cast(self):
+        def fn(x):
+            return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
+
+        for dtype in [torch.int32, torch.int64]:
+            self.common(fn, (torch.ones(1, 1, 13, dtype=dtype),))
+
     @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
