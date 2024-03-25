@@ -695,6 +695,7 @@ class _ShapeEnvSettings:
     assume_static_by_default: bool
     specialize_zero_one: bool
     duck_shape: bool
+    prefer_deferred_runtime_asserts_over_guards: bool
 
     def __init__(self, env: "ShapeEnv"):
         # Initialize this way because the class is frozen (to enable hashing):
@@ -707,6 +708,11 @@ class _ShapeEnvSettings:
         )
         object.__setattr__(self, "specialize_zero_one", env.specialize_zero_one)
         object.__setattr__(self, "duck_shape", env.duck_shape)
+        object.__setattr__(
+            self,
+            "prefer_deferred_runtime_asserts_over_guards",
+            env.prefer_deferred_runtime_asserts_over_guards,
+        )
 
 
 class _DispatchCacheKey(list):
