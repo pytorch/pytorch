@@ -200,6 +200,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_cuda_trace",
+    "inductor/test_benchmark_fusion",
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
     "test_autograd_fallback",
@@ -242,7 +243,8 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
-    "inductor/test_max_autotune",  # Testing, probably revert later
+    "inductor/test_max_autotune",
+    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
     "inductor/test_torchinductor",  # OOM on test_large_block_sizes
     "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
     "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes

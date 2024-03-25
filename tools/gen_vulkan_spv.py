@@ -28,11 +28,74 @@ except ImportError:
 
 CPP_H_NAME = "spv.h"
 CPP_SRC_NAME = "spv.cpp"
-DEFAULT_ENV = {
+
+DEFAULT_ENV: Dict[str, Any] = {
     "PRECISION": "highp",
     "FLOAT_IMAGE_FORMAT": "rgba16f",
     "INT_IMAGE_FORMAT": "rgba32i",
     "UINT_IMAGE_FORMAT": "rgba32ui",
+}
+
+TYPES_ENV: Dict[str, Any] = {
+    "IMAGE_FORMAT": {
+        "float": "rgba32f",
+        "half": "rgba16f",
+        "int": "rgba32i",
+        "uint": "rgba32ui",
+        "int8": "rgba8i",
+        "uint8": "rgba8ui",
+    },
+    "IMAGE_T": {
+        3: {
+            "float": "image3D",
+            "half": "image3D",
+            "int": "iimage3D",
+            "uint": "uimage3D",
+        },
+        2: {
+            "float": "image2D",
+            "half": "image2D",
+            "int": "iimage2D",
+            "uint": "uimage2D",
+        },
+    },
+    "SAMPLER_T": {
+        3: {
+            "float": "sampler3D",
+            "half": "sampler3D",
+            "int": "isampler3D",
+            "uint": "usampler3D",
+        },
+        2: {
+            "float": "sampler2D",
+            "half": "sampler2D",
+            "int": "isampler2D",
+            "uint": "usampler2D",
+        },
+    },
+    "VEC4_T": {
+        "float": "vec4",
+        "half": "vec4",
+        "int": "ivec4",
+        "uint": "uvec4",
+        "int8": "vec4",
+        "uint8": "uvec4",
+    },
+    "T": {
+        "float": "float",
+        "half": "float",
+        "int": "int",
+        "uint": "uint",
+        "int8": "int",
+        "uint8": "uint8",
+    },
+}
+
+FUNCS_ENV: Dict[str, Any] = {
+    "GET_POS": {
+        3: lambda pos: pos,
+        2: lambda pos: f"{pos}.xy",
+    }
 }
 
 
@@ -671,7 +734,10 @@ def main(argv: List[str]) -> int:
     )
     options = parser.parse_args()
 
+    DEFAULT_ENV.update(TYPES_ENV)
+    DEFAULT_ENV.update(FUNCS_ENV)
     env = DEFAULT_ENV
+
     for key, value in parse_arg_env(options.env).items():
         env[key] = value
 

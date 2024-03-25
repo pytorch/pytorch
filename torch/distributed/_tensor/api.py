@@ -446,10 +446,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
 
-        # Early return the original DTensor if the placements are the same.
-        if self._spec.placements == placements:
-            return self
-
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(self, device_mesh, placements, async_op)
 
