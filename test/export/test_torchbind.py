@@ -5,6 +5,7 @@ import torch.testing._internal.torchbind_impls  # noqa: F401
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.export._trace import _export
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -12,7 +13,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
@@ -393,7 +393,7 @@ def forward(self, arg0_1, attr, arg1_1):
     return (getitem_3, add_1)""",  # noqa: B950
         )
 
-    def test_tensor_queue_aot_export_methods(self):
+    def test_make_fx_tensor_queue_methods(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -430,7 +430,9 @@ def forward(self, arg0_1, arg1_1):
     call_torchbind_5 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
     sub = torch.ops.aten.sub.Tensor(call_torchbind_4, 0);  call_torchbind_4 = None
     return (sub, add, arg0_1)
-    """)
+    """,
+            )
+
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestImplAbstractClass(TestCase):
