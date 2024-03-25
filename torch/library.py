@@ -110,6 +110,28 @@ class Library:
         _defs.add(qualname)
         return result
 
+    def _impl_t_c(self, op_name, fn, dispatch_key=''):
+        impl_fn_name = "impl_t_c"
+
+        assert isinstance(op_name, str)
+        assert self.m is not None
+        assert hasattr(self.m, impl_fn_name)
+        impl_fn = getattr(self.m, impl_fn_name)
+        assert callable(impl_fn)
+
+        key = self.ns + "/" + op_name.split("::")[-1] + "/" + dispatch_key
+        if key in _impls:
+            # TODO: in future, add more info about where the existing function is registered (this info is
+            # today already returned by the C++ warning when impl is called but we error out before that)
+            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
+                               "'s behavior for {} dispatch key and {} namespace.".
+                               format(op_name.split("::")[-1], dispatch_key, self.ns))
+
+        impl_fn(op_name, dispatch_key, fn)
+
+        _impls.add(key)
+        self._op_impls.add(key)
+
     def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
 

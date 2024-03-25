@@ -46,6 +46,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
@@ -717,6 +718,74 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
+
+    def test_torch_compile_override_registration(self):
+        dynamic = True
+        namespace_name = "aten"
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        # invoke_count is used to make sure we are calling the right function
+        global invoke_count
+        invoke_count = 0
+        unary_op_set = ["abs", "acos"]
+
+        x = torch.randn(3, 4, device=device)
+
+        def fn(x, op_name=""):
+            return getattr(torch, op_name)(x)
+
+        ref_array = []
+        # Invoke torch.compile directly to get referent results
+        for unary_op_name in unary_op_set:
+            opt_fn = torch.compile(functools.partial(fn, op_name=unary_op_name))
+            ref = opt_fn(x)
+            ref_array.append(ref)
+
+        class WrapperFn:
+            def __init__(self, op_name) -> None:
+                self.op_name = op_name
+
+            def __call__(self, *args, **kwargs):
+                global invoke_count
+                # Just to make sure we are calling the right function
+                invoke_count += 1
+                with torch._C._SetExcludeDispatchKeyGuard(
+                    torch._C.DispatchKey.Python, False
+                ):
+                    opt_fn = torch.compile(
+                        getattr(torch.ops.aten, self.op_name), dynamic=dynamic
+                    )
+                    return opt_fn(*args, **kwargs)
+
+        def make_elementwise(op_name):
+            return WrapperFn(op_name)
+
+        def register_ops(op_set, torch_compile_op_lib_impl):
+            for _op_name in op_set:
+                qualified_op_name = f"{namespace_name}::{_op_name}"
+                _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+                for overload_name in overload_names:
+                    try:
+                        schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        reg_name = schema.name
+                        if schema.overload_name:
+                            reg_name = f"{reg_name}.{schema.overload_name}"
+                        torch_compile_op_lib_impl._impl_t_c(  # noqa: F821
+                            reg_name, make_elementwise(_op_name), dispatch_key
+                        )
+                    except Exception as e:
+                        continue
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(unary_op_set, torch_compile_op_lib_impl)
+
+            res_array = []
+            for unary_op_name in unary_op_set:
+                res_array.append(getattr(torch, unary_op_name)(x))
+
+            self.assertEqual(invoke_count, unary_op_set.__len__())
+            for ref, res in zip(ref_array, res_array):
+                self.assertEqual(ref, res)
 
     def test_add_const_int(self):
         def fn(a):
