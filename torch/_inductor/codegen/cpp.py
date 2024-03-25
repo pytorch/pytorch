@@ -2271,7 +2271,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         self.stores.splice(
             self._get_store_line(value, var, index, V.graph.get_dtype(name)),
-            line_wrapper=lambda line: DeferredLine(name, line),
+            deferred_line_name=name,
         )
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -2383,9 +2383,7 @@ class CppVecKernel(CppKernel):
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
             code.splice(self._get_store_line(value, var, index, out_dtype))
-        self.reduction_suffix.splice(
-            code, line_wrapper=lambda line: DeferredLine(name, line)
-        )
+        self.reduction_suffix.splice(code, deferred_line_name=name)
 
     def broadcast(self, scalar_var: CppCSEVariable) -> CppCSEVariable:
         assert not scalar_var.is_vec
