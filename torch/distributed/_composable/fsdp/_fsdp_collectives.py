@@ -15,7 +15,13 @@ class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: Optional[torch.cuda.Event]
     all_gather_work: Optional[dist.distributed_c10d.Work]
-    all_gather_input_numels: List[int]
+    # For each parameter, the all-gather input dtype for each input
+    param_all_gather_input_dtypes: List[List[torch.dtype]]
+    # For each parameter, the all-gather input numel for each input
+    param_all_gather_input_numels: List[List[int]]
+    # 1D flattened version of `param_all_gather_input_numels` saved to avoid
+    # CPU overhead from recomputing
+    all_gather_input_split_sizes: List[int]
 
 
 @torch.no_grad()
@@ -30,15 +36,20 @@ def foreach_all_gather(
     world_size, rank = group.size(), group.rank()
     # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = [
-            fsdp_param.all_gather_input for fsdp_param in fsdp_params
+        param_all_gather_inputs: List[List[torch.Tensor]] = [
+            fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
         ]
-        dtype = param_all_gather_inputs[0].dtype
-        if not all(t.dtype == dtype for t in param_all_gather_inputs):
+        (
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+        dtype = param_all_gather_inputs[0][0].dtype
+        if not all(t.dtype == dtype for ts in param_all_gather_inputs for t in ts):
             raise NotImplementedError(
-                f"Mixed dtype not supported yet: {[t.dtype for t in param_all_gather_inputs]}"
+                f"Mixed dtype not supported yet: {param_all_gather_input_dtypes}"
             )
-        inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
+        all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
+        inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
@@ -47,7 +58,7 @@ def foreach_all_gather(
             0, all_gather_input_numel * rank, all_gather_input_numel
         )
         foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
-        torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
+        torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with torch.cuda.stream(all_gather_stream):
@@ -60,7 +71,12 @@ def foreach_all_gather(
         )
         all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
-            all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
+            all_gather_output,
+            all_gather_event,
+            all_gather_work,
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+            inp_split_sizes,
         )
 
 
@@ -74,25 +90,30 @@ def foreach_all_gather_copy_out(
         all_gather_output,
         all_gather_event,
         all_gather_work,
-        all_gather_input_numels,
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_input_split_sizes,
     ) = all_gather_result
     if all_gather_event is not None:  # sync op
         torch.cuda.current_stream().wait_event(all_gather_event)
     if all_gather_work is not None:  # async op
         all_gather_work.wait()
-    world_size = group.size()
-    dtype, device = all_gather_output.dtype, all_gather_output.device
-    for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
-        fsdp_param.init_all_gather_output(
-            all_gather_input_numel, world_size, dtype, device
+    world_size, device = group.size(), all_gather_output.device
+    for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
+        param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
+    ):
+        fsdp_param.init_all_gather_outputs(
+            all_gather_input_numels, all_gather_input_dtypes, world_size, device
         )  # no-op after 1st call
-        fsdp_param.alloc_all_gather_output()
+        fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    out = [
-        fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
+    out: List[torch.Tensor] = [
+        t.view(world_size, -1)
+        for fsdp_param in fsdp_params
+        for t in fsdp_param.all_gather_outputs
     ]
     torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_numels, dim=1, out=out
+        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
 
 
@@ -208,6 +229,17 @@ def foreach_reduce_scatter_copy_in(
     if padded_grad_slices:
         torch._foreach_copy_(padded_grad_slices, grads_to_copy)
     torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
+
+
+def _get_all_gather_input_metadatas(
+    param_all_gather_inputs: List[List[torch.Tensor]],
+) -> Tuple[List[List[torch.dtype]], List[List[int]]]:
+    param_all_gather_input_dtypes: List[List[torch.dtype]] = []
+    param_all_gather_input_numels: List[List[int]] = []
+    for all_gather_inputs in param_all_gather_inputs:
+        param_all_gather_input_dtypes.append([t.dtype for t in all_gather_inputs])
+        param_all_gather_input_numels.append([t.numel() for t in all_gather_inputs])
+    return param_all_gather_input_dtypes, param_all_gather_input_numels
 
 
 def _reduce_scatter(
