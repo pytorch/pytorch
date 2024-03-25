@@ -19,7 +19,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         int window_size_left,
         int window_size_right,
         const bool return_softmax,
-        const std::optional<at::Generator>& gen_);
+        c10::optional<at::Generator> gen_);
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
@@ -39,7 +39,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_left,
                int window_size_right,
                const bool return_softmax,
-               const std::optional<at::Generator>& gen_);
+               c10::optional<at::Generator> gen_);
 
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
