@@ -29,9 +29,9 @@ Some models accept various input formats (text, images, audio, etc.) and pre-pro
 
 ### Data privacy
 
-When training the model with sensitive data, use trusted models and expose your newly-trained model to tests to identify potential sensitive data leaks.  
-
-To protect sensitive data from potential leaks or unauthorized access, it is crucial to sandbox the model execution. This means running the model in a secure, isolated environment, which helps mitigate many attack vectors.
+**Take special security measures if your model if you train models with sensitive data**. Prioritize [sandboxing](https://developers.google.com/code-sandboxing) your models and:
+- Do not feed sensitive data to untrusted model (even if runs in a sandboxed environment)
+- If you consider publishing a model that was partially trained with sensitive data, be aware that data can potentially be recovered from the trained weights (especially if model overfits).
 
 ### Untrusted environments or networks
 
