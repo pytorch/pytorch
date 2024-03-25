@@ -58,10 +58,6 @@
 #include <ATen/ops/sqrt.h>
 #endif
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAContext.h>
-#endif
-
 #include <c10/core/SymIntArrayRef.h>
 #include <utility>
 #include <vector>
@@ -495,12 +491,7 @@ BatchNormBackend _select_batch_norm_backend(
   auto& ctx = at::globalContext();
   bool cudnn_enabled = ctx.userEnabledCuDNN();
 
-  #ifdef USE_CUDA
-  cudaDeviceProp* dprops = at::cuda::getCurrentDeviceProperties();
-  static bool support_bf16 = dprops->major >= 8;
-  #else
-  bool support_bf16 = false;
-  #endif
+  static bool support_bf16 = (detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8() && at::native::cudnnv8_enabled_check_debug());
 
   if (
       input.is_cuda()
