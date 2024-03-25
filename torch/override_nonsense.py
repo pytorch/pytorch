@@ -255,6 +255,20 @@ def _cat_backward_symbolic(g, out_grad, inputs, dim):
 torch.onnx.register_custom_op_symbolic('aten::cat_backward', _cat_backward_symbolic, 17)
 
 
+def _squeeze_symbolic(g, self, dim=None):
+    if dim is None:
+        return g.op("Squeeze", self)
+
+    # dim as a tensor
+    if not symbolic_helper._is_constant(dim):
+        return symbolic_helper._squeeze_helper(g, self, [dim])
+
+    dim = symbolic_helper._get_const(dim, "i", "dim")
+    return symbolic_helper._squeeze_helper(g, self, [dim])
+
+torch.onnx.register_custom_op_symbolic('aten::squeeze', _squeeze_symbolic, 17)
+
+
 def index_backward_native_symbolic(g, grad, self, indices):
 
     shape = g.op(
