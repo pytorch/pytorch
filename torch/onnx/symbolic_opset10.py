@@ -70,15 +70,6 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=10)
 
 
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
-
-
 @_onnx_symbolic("aten::div")
 @_beartype.beartype
 def div(g: jit_utils.GraphContext, self, other, *args):
@@ -276,20 +267,20 @@ def _aten_max_pool_with_indices_onnx(
 
 @_onnx_symbolic(
     "aten::max_pool1d",
-    decorate=[_apply_params("max_pool1d", 1, return_indices=False)],
+    decorate=[symbolic_helper._apply_params("max_pool1d", 1, return_indices=False)],
 )
 @_onnx_symbolic(
     "aten::max_pool2d",
-    decorate=[_apply_params("max_pool2d", 2, return_indices=False)],
+    decorate=[symbolic_helper._apply_params("max_pool2d", 2, return_indices=False)],
 )
 @_onnx_symbolic(
     "aten::max_pool3d",
-    decorate=[_apply_params("max_pool3d", 3, return_indices=False)],
+    decorate=[symbolic_helper._apply_params("max_pool3d", 3, return_indices=False)],
 )
 @_onnx_symbolic(
     "aten::max_pool1d_with_indices",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool1d_with_indices",
             1,
             return_indices=True,
@@ -299,7 +290,7 @@ def _aten_max_pool_with_indices_onnx(
 @_onnx_symbolic(
     "aten::max_pool2d_with_indices",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool2d_with_indices",
             2,
             return_indices=True,
@@ -309,7 +300,7 @@ def _aten_max_pool_with_indices_onnx(
 @_onnx_symbolic(
     "aten::max_pool3d_with_indices",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool3d_with_indices",
             3,
             return_indices=True,
@@ -397,15 +388,15 @@ def _adjust_attributes_of_avg_pool(
 
 @_onnx_symbolic(
     "aten::avg_pool1d",
-    decorate=[_apply_params("avg_pool1d", 1)],
+    decorate=[symbolic_helper._apply_params("avg_pool1d", 1)],
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
-    decorate=[_apply_params("avg_pool2d", 2)],
+    decorate=[symbolic_helper._apply_params("avg_pool2d", 2)],
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
-    decorate=[_apply_params("avg_pool3d", 3)],
+    decorate=[symbolic_helper._apply_params("avg_pool3d", 3)],
 )
 @_beartype.beartype
 def _avg_pool(name, expand_size):
@@ -443,27 +434,27 @@ def _avg_pool(name, expand_size):
 
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
-    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
-    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
-    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
-    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_linear1d", 3, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
-    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
-    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear")],
 )
 @_beartype.beartype
 def _interpolate(name, dim, interpolate_mode):
