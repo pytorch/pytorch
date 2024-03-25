@@ -298,6 +298,7 @@ def mps_ops_modifier(ops):
         'randn',
         'ravel',
         'real',
+        'repeat_interleave',
         'reshape_as',
         'reshape',
         'resolve_conj',
