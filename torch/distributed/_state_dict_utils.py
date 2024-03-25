@@ -305,12 +305,6 @@ def _create_cpu_state_dict(
     tensors can be placed on pin_memory or share_memory based on the provided arguments.
     """
 
-    if pin_memory and share_memory:
-        # raise ValueError(
-        #     "Cannot allocate both memory on both pin_memory and share_memory"
-        # ) # not anymore!
-        pass
-
     def tensor_func(
         obj: torch.Tensor,
         pg: Optional[dist.ProcessGroup],
