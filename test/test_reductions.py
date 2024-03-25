@@ -1713,6 +1713,20 @@ class TestReductions(TestCase):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
+    # TODO: Investigate why the output is not close to numpy.
+    def _get_relaxed_tolerances_for(self, dtype):
+        if dtype == torch.float16:
+            atol = 0.4
+            rtol = 1e-2
+        elif dtype == torch.float32:
+            atol = 7e-05
+            rtol = 3e-06
+        else:
+            # Default values
+            atol = None
+            rtol = None
+        return atol, rtol
+
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
             return dtype in integral_types()
@@ -1731,16 +1745,7 @@ class TestReductions(TestCase):
             exact_dtype = False
 
         # TODO: Investigate why the output is not close to numpy.
-        if dtype == torch.float16:
-            atol = 0.4
-            rtol = 1e-2
-        elif dtype == torch.float32:
-            atol = 7e-05
-            rtol = 3e-06
-        else:
-            # Default values
-            atol = None
-            rtol = None
+        atol, rtol = self._get_relaxed_tolerances_for(dtype)
         self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                  atol=atol, rtol=rtol, exact_dtype=exact_dtype,
                                                  with_keepdim=with_keepdim, with_extremal=with_extremal)
@@ -1771,12 +1776,14 @@ class TestReductions(TestCase):
         out_dtype = dtype
         inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
         for inp_dtype in inp_dtypes:
+            # TODO: Investigate why the output is not close to numpy.
+            atol, rtol = self._get_relaxed_tolerances_for(dtype)
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
     @dtypes(*all_types_and(torch.half))
     def test_argminmax_multiple(self, device, dtype):

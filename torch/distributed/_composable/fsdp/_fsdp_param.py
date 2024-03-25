@@ -115,7 +115,6 @@ class FSDPParam:
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
-    cpu_sharded_grad: torch.Tensor  # unpadded, ND, pinned memory
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
@@ -196,7 +195,10 @@ class FSDPParam:
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._global_mesh = self.mesh_info.mesh
-            self._global_placements = (Shard(0),)
+            if isinstance(self.mesh_info, HSDPMeshInfo):
+                self._global_placements = (Replicate(), Shard(0))
+            else:
+                self._global_placements = (Shard(0),)
             self._global_size = param.size()
             self._global_stride = param.stride()
             param_data = param
@@ -215,9 +217,6 @@ class FSDPParam:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
         if self.offload_to_cpu:
             padded_sharded_param = padded_sharded_param.cpu().pin_memory()
-            self.cpu_sharded_grad = sharded_param.new_zeros(
-                sharded_param.size(), device="cpu", pin_memory=True
-            )
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -507,7 +506,13 @@ class FSDPParam:
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
-            grad = cast(DTensor, grad)._local_tensor
+            assert isinstance(grad, DTensor), f"{type(grad)}"
+            if any(pl.is_partial() for pl in grad.placements):
+                placements = [
+                    Replicate() if pl.is_partial() else pl for pl in grad.placements
+                ]
+                grad = grad.redistribute(placements=placements)
+            grad = grad._local_tensor
         return grad
 
     def _assert_in_states(self, *states: ShardedState) -> None:

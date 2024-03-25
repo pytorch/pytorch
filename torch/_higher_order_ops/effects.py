@@ -67,6 +67,11 @@ def has_aliasing(op: torch._ops.OpOverload):
 
 
 def has_effects(op, args, kwargs) -> bool:
+    # Skip over the profiler's RecordFunction as they should not show up in the graph
+    _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
+    if op in _skip_ops:
+        return False
+
     return (
         isinstance(op, torch._ops.OpOverload)
         and not has_aliasing(op)
@@ -170,7 +175,9 @@ def handle_effects(
     key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
-        assert allow_token_discovery, f"Could not find a token for effect {key}"
+        assert (
+            allow_token_discovery
+        ), f"Could not find a token for effect {key} which came from the function {op}"
         tokens[key] = torch.tensor([])
     token = tokens[key]
 
