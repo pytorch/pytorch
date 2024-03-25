@@ -3234,6 +3234,7 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
+    @cache_on_self
     def get_default_sizes_body(self):
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"

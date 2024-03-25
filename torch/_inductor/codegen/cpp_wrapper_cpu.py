@@ -198,6 +198,22 @@ class CppWrapperCpu(WrapperCodeGen):
 
                 namespace py = pybind11;
                 using namespace torch::aot_inductor;
+
+                class RAIIPyObject {
+                public:
+                    RAIIPyObject(PyObject* obj) : obj_(obj) {}
+                    ~RAIIPyObject() {
+                        Py_XDECREF(obj_);
+                    }
+                    operator PyObject*() {
+                        return obj_;
+                    }
+                    PyObject* get() {
+                        return obj_;
+                    }
+                private:
+                    PyObject* obj_;
+                };
                 """
             )
 
@@ -1000,14 +1016,6 @@ class CppWrapperCpu(WrapperCodeGen):
             if V.graph.aot_mode:
                 result.writeline("} // AOTInductorModel::run_impl")
             else:
-                if self.custom_op_wrapper_loaded:
-                    with result.indent():
-                        result.splice(
-                            """
-                            Py_DECREF(codecache_module);
-                            Py_DECREF(custom_op_wrapper);
-                            """
-                        )
                 result.writeline("} // inductor_entry_impl")
 
     def generate_end(self, result):
@@ -1884,15 +1892,14 @@ class CppWrapperCpu(WrapperCodeGen):
             return
 
         lines = """
-    PyObject* codecache_module = PyImport_ImportModule("torch._inductor.codecache");
-    if (codecache_module == NULL) {
-        throw std::runtime_error("Failed to load torch._inductor.codecache");
-    }
-    PyObject* custom_op_wrapper = PyObject_GetAttrString(codecache_module, "custom_op_wrapper");
-    if (custom_op_wrapper == NULL) {
-        Py_DECREF(codecache_module);
-        throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
-    }"""
+RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache"));
+if (codecache_module.get() == NULL) {
+    throw std::runtime_error("Failed to load torch._inductor.codecache");
+}
+RAIIPyObject custom_op_wrapper(PyObject_GetAttrString(codecache_module, "custom_op_wrapper"));
+if (custom_op_wrapper.get() == NULL) {
+    throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
+}"""
         self.writelines(lines.split("\n"))
         self.custom_op_wrapper_loaded = True
 
@@ -1969,14 +1976,12 @@ class CppWrapperCpu(WrapperCodeGen):
             py_args_var = f"py_args_{next(self.arg_var_id)}"
             # First arg is always the python op name
             lines = f"""
-    PyObject* {py_args_var} = PyTuple_New({num_args+1});
-    if ({py_args_var} == NULL) {{
-        Py_DECREF(codecache_module);
-        Py_DECREF(custom_op_wrapper);
-        throw std::runtime_error("PyTuple_New {py_args_var} failed");
-    }}
-    PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
-    """
+RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+if ({py_args_var}.get() == NULL) {{
+    throw std::runtime_error("PyTuple_New {py_args_var} failed");
+}}
+PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
+"""
 
             assert op_overload is not None, "op_overload should not be None"
             for idx, (raw_arg, schema_arg) in enumerate(
@@ -1987,29 +1992,22 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
 
             lines += f"""
-    // Call the custom op in Python
-    PyObject* py_{buf_name} = PyObject_CallObject(custom_op_wrapper, {py_args_var});
-    if (py_{buf_name} == NULL) {{
-        Py_DECREF(codecache_module);
-        Py_DECREF(custom_op_wrapper);
-        Py_DECREF({py_args_var});
-        throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
-    }}
-    Py_DECREF({py_args_var});"""
+// Call the custom op in Python
+RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
+if (py_{buf_name}.get() == NULL) {{
+    throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
+}}"""
 
             if len(output_args) == 1:
                 # result is a single tensor
                 lines += f"""
-    RAIIAtenTensorHandle {output_args[0]}(reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}, NULL)));
-    Py_DECREF(py_{buf_name});"""
+RAIIAtenTensorHandle {output_args[0]}(reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL)));"""
             else:
                 # result is a tuple of tensors
                 for idx, output_arg in enumerate(output_args):
                     lines += f"""
-    RAIIAtenTensorHandle {output_arg}(
-        reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}, {idx}), NULL)));"""
-                lines += f"""
-    Py_DECREF(py_{buf_name});"""
+RAIIAtenTensorHandle {output_arg}(
+    reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL)));"""
 
             self.writelines(lines.split("\n"))
 
