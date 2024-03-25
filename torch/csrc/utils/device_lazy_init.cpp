@@ -1,4 +1,5 @@
 #include <torch/csrc/utils/device_lazy_init.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
