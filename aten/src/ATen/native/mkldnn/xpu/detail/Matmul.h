@@ -8,9 +8,8 @@
 
 #include <oneapi/dnnl/dnnl.hpp>
 
-namespace at{
-namespace native::xpu {
-namespace onednn {
+namespace at::native::onednn {
+
 static inline void matmul(
     at::Tensor& result,
     const at::Tensor& mat1,
@@ -32,13 +31,9 @@ static inline void matmul(
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  at::Tensor m1 =
-      xpu::onednn::is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
-  at::Tensor m2 =
-      xpu::onednn::is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
-  at::Tensor dst = xpu::onednn::is_onednn_matmul_strides(result, true)
-      ? result
-      : result.contiguous();
+  at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
+  at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
+  at::Tensor dst = is_onednn_matmul_strides(result, true) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);
@@ -179,6 +174,11 @@ static inline void matmul(
   dnnl::primitive_attr pattr;
   pattr.set_post_ops(po);
 
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
+
   // scratchpad
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
@@ -213,8 +213,6 @@ static inline void matmul(
   dnnl::memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
 
-  // TODO: hanld attr.with_sum()
-
   if (attr.with_binary())
     attr.construct_post_binary(matmul_pd, args);
 
@@ -239,6 +237,4 @@ static inline void matmul(
     result.copy_(dst);
 }
 
-} // namespace onednn
-} // namespace native::xpu
-} // namespace at
+} // namespace at::native::onednn
