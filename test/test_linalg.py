@@ -7975,7 +7975,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch.backends.cuda.preferred_blas_library('cublaslt')
         out1 = torch.nn.functional.linear(m1, m2)
 
-        torch.backends.cuda.preferred_blas_library('default')
+        torch.backends.cuda.preferred_blas_library('cublas')
         out2 = torch.nn.functional.linear(m1, m2)
 
         # Although blas preferred flags doesn't affect CPU currently,
