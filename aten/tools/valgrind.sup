@@ -1,0 +1,51 @@
+{
+   <startup>
+   Memcheck:Cond
+   fun:index
+   fun:expand_dynamic_string_token
+   fun:_dl_map_object
+   fun:map_doit
+   fun:_dl_catch_error
+   fun:handle_ld_preload
+   ...
+}
+
+{
+   Cond_cuda
+   Memcheck:Cond
+   obj:*libcuda.so*
+   ...
+}
+
+{
+   Value8_cuda
+   Memcheck:Value8
+   obj:*libcuda.so*
+   ...
+}
+
+{
+   ignore_cuda_ioctl_param_points_to_uninitialised_bytes
+   Memcheck:Param
+   ioctl(generic)
+   fun:ioctl
+   obj:*libcuda.so*
+   ...
+}
+
+{
+   ignore_libomp_setaffinity_check
+   Memcheck:Param
+   sched_setaffinity(mask)
+   fun:syscall
+   obj:*/lib*/libomp.so*
+   ...
+}
+
+{
+   ignore_memmove_source_destination_overlap
+   Memcheck:Overlap
+   fun:__memcpy_chk
+   fun:cpuinfo_linux_parse_cpulist
+   ...
+}
