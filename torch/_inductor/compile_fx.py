@@ -46,6 +46,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -174,7 +175,7 @@ def _unlift_graph(mod, gm, graph_signature):
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
     for out in outputs:
-        if out in graph_signature.buffers_to_mutate:
+        if out.name in graph_signature.buffers_to_mutate:
             mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
         else:
             mutated_outputs.append(None)
@@ -198,6 +199,11 @@ def _get_subgraph_names(gm):
             false_subgraph_name = node.args[2].name
             yield true_subgraph_name
             yield false_subgraph_name
+        elif node.target == torch.ops.higher_order.while_loop:
+            cond_subgraph_name = node.args[0].name
+            body_subgraph_name = node.args[1].name
+            yield cond_subgraph_name
+            yield body_subgraph_name
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
@@ -517,7 +523,7 @@ def compile_fx_inner(
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
             compiled_graph.current_callable = cudagraphify(
-                compiled_graph.get_current_callable(),
+                compiled_graph.current_callable,
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(compiled_graph.device_idxs)),
@@ -535,7 +541,7 @@ def compile_fx_inner(
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index is not None
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_callable = compiled_graph.get_current_callable()
+                compiled_graph_callable = compiled_graph.current_callable
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -562,9 +568,9 @@ def compile_fx_inner(
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
         new_callable = align_inputs(
-            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+            compiled_graph.current_callable, example_inputs, range(num_fixed)
         )
-        if new_callable is not compiled_graph.get_current_callable():
+        if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
 
     _step_logger()(
@@ -710,7 +716,10 @@ def fx_codegen_and_compile(
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
                 for out in graph.graph_outputs:
-                    if hasattr(out, "layout"):
+                    if (
+                        hasattr(out, "layout")
+                        and len(free_unbacked_symbols(out.layout.stride)) == 0
+                    ):
                         output_strides.append(
                             tuple(
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
@@ -800,7 +809,10 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    if config.assume_aligned_inputs:
+        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    else:
+        inputs_to_check = []
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 

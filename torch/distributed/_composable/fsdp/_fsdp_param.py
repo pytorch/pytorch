@@ -184,7 +184,10 @@ class FSDPParam:
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._global_mesh = self.mesh_info.mesh
-            self._global_placements = (Shard(0),)
+            if isinstance(self.mesh_info, HSDPMeshInfo):
+                self._global_placements = (Replicate(), Shard(0))
+            else:
+                self._global_placements = (Shard(0),)
             self._global_size = param.size()
             self._global_stride = param.stride()
             param_data = param

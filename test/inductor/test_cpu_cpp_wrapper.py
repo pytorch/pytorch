@@ -5,14 +5,11 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    IS_MACOS,
-    slowTest,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -47,11 +44,11 @@ class CppWrapperTemplate:
     pass
 
 
-class TestCppWrapper(TorchTestCase):
+class TestCppWrapper(InductorTestCase):
     device = "cpu"
 
 
-class DynamicShapesCppWrapperCpuTests(TorchTestCase):
+class DynamicShapesCppWrapperCpuTests(InductorTestCase):
     device = "cpu"
 
 
@@ -172,7 +169,7 @@ if RUN_CPU:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cpu"
-        tests: TorchTestCase = test_torchinductor.CpuTests()
+        tests: InductorTestCase = test_torchinductor.CpuTests()
         condition: bool = True
         slow: bool = False
         func_inputs: list = None
@@ -373,7 +370,7 @@ if RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if RUN_CPU:
         run_tests(needs="filelock")
