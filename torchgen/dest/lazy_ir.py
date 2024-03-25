@@ -122,12 +122,8 @@ def gen_fallback_code(
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
-    or_has_generator = ""
-    if schema.generator_arg:
-        # generators are always optional and there is never more than one, at least currently
-        or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
-        if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
+        if (force_eager_fallback({aten_symbol(schema)})) {{
             return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
@@ -246,7 +242,6 @@ class GenLazyIR(ABC):
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         all_args = schema.filtered_args()
-        value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
@@ -290,9 +285,12 @@ class GenLazyIR(ABC):
         members_to_string = []
         for arg in scalar_args:
             if isinstance(arg.lazy_type, OptionalCType):
+                value = f"{arg.name}.value()"
+                if arg.is_generator:
+                    value = '"torch.Generator()"'
                 members_to_string.append(
                     f"""if ({arg.name}.has_value()) {{
-      ss << ", {arg.name}=" << {arg.name}.value();
+      ss << ", {arg.name}=" << {value};
     }} else {{
       ss << ", {arg.name}=null";
     }}"""
@@ -673,7 +671,6 @@ class GenLazyShapeInferenceDefinition:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> List[str]:
-        sig = kernel_signature(f, self.backend_index)
         metadata = self.backend_index.get_kernel(f)
         assert metadata is not None
 

@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _capturable_doc, _differentiable_doc, _foreach_doc, _default_to_fused_or_foreach, _view_as_real)
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
+                        _stack_if_compiling, _get_scalar_dtype, _default_to_fused_or_foreach,
+                        _view_as_real, _capturable_doc, _differentiable_doc, _foreach_doc,)
 from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
@@ -36,15 +37,18 @@ class NAdam(Optimizer):
             group.setdefault('capturable', False)
             group.setdefault('differentiable', False)
             group.setdefault('decoupled_weight_decay', False)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
-        if not step_is_tensor:
-            for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
-        mu_product_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['mu_product'])
-        if not mu_product_is_tensor:
-            for s in state_values:
-                s['mu_product'] = torch.tensor(s['mu_product'])
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0:
+                    if not torch.is_tensor(p_state['step']):
+                        step_val = float(p_state["step"])
+                        p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
+                                           if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype()))
+                    if not torch.is_tensor(p_state['mu_product']):
+                        mu_prod_val = p_state["mu_product"]
+                        p_state["mu_product"] = (torch.tensor(mu_prod_val, dtype=_get_scalar_dtype(), device=p.device)
+                                                 if group['capturable'] else torch.tensor(mu_prod_val, dtype=_get_scalar_dtype()))
+
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
         has_complex = False
@@ -63,12 +67,12 @@ class NAdam(Optimizer):
                     # Deliberately host `step` and `mu_product` on CPU if capturable is False.
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
-                        torch.zeros((), dtype=torch.float, device=p.device)
-                        if group['capturable'] else torch.tensor(0.)
+                        torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                        if group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     state['mu_product'] = (
-                        torch.ones((), dtype=torch.float, device=p.device)
-                        if group['capturable'] else torch.tensor(1.)
+                        torch.ones((), dtype=_get_scalar_dtype(), device=p.device)
+                        if group['capturable'] else torch.tensor(1.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)

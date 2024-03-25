@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import copy
 import random
 import torch

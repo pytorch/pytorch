@@ -134,33 +134,6 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   std::vector<std::int32_t> axes_;
 };
 
-#if !CUDNN_VERSION_MIN(6, 0, 0)
-
-// CuDNN 5.1 does not have int support yet.
-template <>
-bool CuDNNTransposeOp::DoRunWithType<int>() {
-  const auto& X = Input(0);
-  const int ndim = X.dim();
-  if (axes_.empty()) {
-    axes_.resize(ndim);
-    std::iota(axes_.rbegin(), axes_.rend(), 0);
-  } else {
-    CAFFE_ENFORCE_EQ(axes_.size(), ndim);
-  }
-  std::vector<std::int64_t> X_dims = X.sizes().vec();
-  std::vector<std::int64_t> Y_dims(ndim);
-  for (int i = 0; i < ndim; ++i) {
-    Y_dims[i] = X_dims[axes_[i]];
-  }
-  auto* Y = Output(0, Y_dims, at::dtype<T>());
-  const T* X_data = X.template data<T>();
-  T* Y_data = Y->template mutable_data<T>();
-  math::Transpose<std::int64_t, T, CUDAContext>(
-      ndim, X_dims.data(), axes_.data(), X_data, Y_data, &context_);
-  return true;
-}
-
-#endif // !CUDNN_VERSION_MIN(6, 0, 0)
 
 } // namespace
 

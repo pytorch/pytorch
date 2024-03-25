@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/api/api.h>
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -14,7 +16,7 @@ void record_nchw_to_image_op(
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle);
+    VkFence fence_handle);
 
 bool record_image_to_nchw_op(
     api::Context* const context,
@@ -22,21 +24,21 @@ bool record_image_to_nchw_op(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle);
+    VkFence fence_handle);
 
 void record_nchw_to_buffer_op(
     api::Context* const context,
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle);
+    VkFence fence_handle);
 
 bool record_buffer_to_nchw_op(
     api::Context* const context,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle);
+    VkFence fence_handle);
 
 vTensor convert_image_channels_packed_to_height_packed(const vTensor& v_input);
 

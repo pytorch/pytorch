@@ -48,7 +48,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # CompositeExplicitAutograd and the meta function (which could
     # hypothetically be SymInt), but for simplicity we plan for these to just
     # be handled in Python
-    r = cpp.valuetype_type(t, symint=False, binds=binds)
+    r = cpp.valuetype_type(t, symint=False, binds=binds, mutable=mutable)
     if r is not None:
         return r
 
@@ -129,8 +129,7 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
                 # that should replace it onto non_out_args_replaced.
-                for replacement in g.out.precomputed.replace[a.name]:
-                    non_out_args_replaced.append(replacement)
+                non_out_args_replaced.extend(g.out.precomputed.replace[a.name])
             else:
                 # If not, push a as it is.
                 non_out_args_replaced.append(a)

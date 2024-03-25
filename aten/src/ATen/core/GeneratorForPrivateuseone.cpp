@@ -26,6 +26,7 @@ at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index) {
       "Please register a generator to the PrivateUse1 dispatch key, \
       using the REGISTER_GENERATOR_PRIVATEUSE1 macro.");
 
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return GetGeneratorPrivate().value()(device_index);
 }
 

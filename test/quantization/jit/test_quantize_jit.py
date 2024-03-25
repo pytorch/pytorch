@@ -666,7 +666,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         assert len(activation_dtypes) == 1, "Expected to have 1 activation dtype"
         assert len(weight_dtypes) == 1, "Expected to have 1 weight dtype"
         assert (
-            list(activation_dtypes)[0] != list(weight_dtypes)[0]
+            next(iter(activation_dtypes)) != next(iter(weight_dtypes))
         ), "Expected activation dtype to "
         " be different from wegiht dtype"
 

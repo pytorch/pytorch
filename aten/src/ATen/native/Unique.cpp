@@ -25,8 +25,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native{
+namespace at::native {
 
 namespace {
 
@@ -38,7 +37,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
     const bool return_inverse,
     const bool return_counts) {
   const Tensor& input = self.contiguous();
-  bool* input_data = input.data_ptr<bool>();
+  const bool* input_data = input.const_data_ptr<bool>();
 
   int64_t numel = input.numel();
   Tensor output = at::empty({0}, self.options());
@@ -271,7 +270,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     const bool return_inverse,
     const bool return_counts) {
   const Tensor& input = self.contiguous();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   int64_t numel = input.numel();
   Tensor output = at::empty({numel}, input.options());
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
@@ -391,7 +390,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   std::vector<int64_t> indices(input_flat.size(0));
   std::iota(indices.begin(), indices.end(), 0);
   int64_t numel = input_flat.size(1);
-  scalar_t* input_flat_ptr = ((scalar_t*)input_flat.data_ptr());
+  const scalar_t* input_flat_ptr = ((const scalar_t*)input_flat.const_data_ptr());
 
   // sort indices using data
   if (!consecutive) {
@@ -443,16 +442,14 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   if (self.scalar_type() == kBool) {
-    Tensor output, inverse;
-    std::tie(output, inverse, std::ignore) = unique_cpu_bool_template(
+    auto [output, inverse, _] = unique_cpu_bool_template(
         self, return_inverse, /* return_counts */false);
     return std::make_tuple(output, inverse);
   }
   return AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "unique", [&] {
-    Tensor output, inverse;
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
-    std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(
+    auto [output, inverse, _] = unique_cpu_sorted_template<scalar_t>(
         self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
     return std::make_tuple(output, inverse);
   });
@@ -496,5 +493,4 @@ unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool
   return unique_dim_consecutive_cpu(self, dim.value(), return_inverse, return_counts);
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

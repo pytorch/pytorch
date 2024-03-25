@@ -23,8 +23,7 @@
 
 constexpr int64_t CONV3D_GRAIN_SALT = 20;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -431,12 +430,12 @@ void slow_conv3d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+    auto grad_input_a = grad_input.accessor<scalar_t, 5>();
+    auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
+    auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
+    auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
     at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
                     [&](int64_t start, int64_t end) {
-        auto grad_input_a = grad_input.accessor<scalar_t, 5>();
-        auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
-        auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
-        auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
 
         for (const auto t : c10::irange(start, end)) {
           auto grad_input_t = grad_input_a[t];
@@ -803,5 +802,4 @@ Tensor slow_conv3d(
   return at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

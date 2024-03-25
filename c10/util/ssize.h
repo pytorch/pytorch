@@ -38,6 +38,7 @@ constexpr auto ssize(const C& c) -> std::
 }
 
 template <typename T, std::ptrdiff_t N>
+// NOLINTNEXTLINE(*-c-arrays)
 constexpr auto ssize(const T (&array)[N]) noexcept -> std::ptrdiff_t {
   return N;
 }

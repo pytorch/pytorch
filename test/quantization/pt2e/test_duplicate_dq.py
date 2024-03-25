@@ -1,9 +1,11 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import sys
 import unittest
+from typing import Any, Dict
 
 import torch
-import torch._export as export
+from torch._export import capture_pre_autograd_graph
 
 from torch.ao.quantization.observer import (
     HistogramObserver,
@@ -90,6 +92,9 @@ _DEQUANTIZE_OPS = [
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestDuplicateDQPass(QuantizationTestCase):
     def _test_duplicate_dq(
         self,
@@ -101,7 +106,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export.capture_pre_autograd_graph(
+        m = capture_pre_autograd_graph(
             m,
             example_inputs,
         )
@@ -249,7 +254,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     eps=2**-12
                 ),
             )
-            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 MinMaxObserver
             )
 
@@ -266,7 +271,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 ),
             )
 
-            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 PlaceholderObserver
             )
             bias_quantization_spec = QuantizationSpec(

@@ -237,6 +237,9 @@ COMMON_HIP_FLAGS = [
     '-DUSE_ROCM=1',
 ]
 
+if ROCM_VERSION is not None and ROCM_VERSION >= (6, 0):
+    COMMON_HIP_FLAGS.append('-DHIPBLAS_V2')
+
 COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
@@ -445,10 +448,6 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'than the maximum required version by CUDA {cuda_str_version}. '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
-
-
-# See below for why we inherit BuildExtension from object.
-# https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
 
 
 class BuildExtension(build_ext):
@@ -932,7 +931,8 @@ def CppExtension(name, sources, *args, **kwargs):
     bare minimum (but often sufficient) arguments to build a C++ extension.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    constructor. Full list arguments can be found at
+    https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
     Example:
         >>> # xdoctest: +SKIP
@@ -945,7 +945,8 @@ def CppExtension(name, sources, *args, **kwargs):
         ...         CppExtension(
         ...             name='extension',
         ...             sources=['extension.cpp'],
-        ...             extra_compile_args=['-g']),
+        ...             extra_compile_args=['-g'],
+        ...             extra_link_flags=['-Wl,--no-as-needed', '-lm'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -980,7 +981,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     library.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    constructor. Full list arguments can be found at
+    https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
     Example:
         >>> # xdoctest: +SKIP
@@ -994,7 +996,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...                 name='cuda_extension',
         ...                 sources=['extension.cpp', 'extension_kernel.cu'],
         ...                 extra_compile_args={'cxx': ['-g'],
-        ...                                     'nvcc': ['-O2']})
+        ...                                     'nvcc': ['-O2']},
+        ...                 extra_link_flags=['-Wl,--no-as-needed', '-lcuda'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -1347,7 +1350,13 @@ def check_compiler_is_gcc(compiler):
 
     env = os.environ.copy()
     env['LC_ALL'] = 'C'  # Don't localize output
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    try:
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
     results = re.findall(pattern, version_string)
@@ -1844,8 +1853,7 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
@@ -1956,6 +1964,9 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
+        warnings.warn(
+            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2336,7 +2347,8 @@ def _write_ninja_file(path,
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
         # --generate-dependencies-with-compile is not supported by ROCm
-        if torch.version.cuda is not None:
+        # Nvcc flag `--generate-dependencies-with-compile` is not supported by sccache, which may increase build time.
+        if torch.version.cuda is not None and os.getenv('TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES', '0') != '1':
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
@@ -2389,7 +2401,7 @@ def _write_ninja_file(path,
     # 'Blocks' should be separated by newlines, for visual benefit.
     blocks = [config, flags, compile_rule]
     if with_cuda:
-        blocks.append(cuda_compile_rule)
+        blocks.append(cuda_compile_rule)  # type: ignore[possibly-undefined]
     blocks += [devlink_rule, link_rule, build, devlink, link, default]
     content = "\n\n".join("\n".join(b) for b in blocks)
     # Ninja requires a new lines at the end of the .ninja file

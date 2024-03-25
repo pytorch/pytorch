@@ -13,6 +13,7 @@ from typing import Type
 import torch
 
 from torch._C import (
+    _GeneratorType,
     AnyType,
     AwaitType,
     BoolType,
@@ -479,6 +480,8 @@ def try_ann_to_type(ann, loc, rcb=None):
         return InterfaceType(ann.__torch_script_interface__)
     if ann is torch.device:
         return DeviceObjType.get()
+    if ann is torch.Generator:
+        return _GeneratorType.get()
     if ann is torch.Stream:
         return StreamObjType.get()
     if ann is torch.dtype:

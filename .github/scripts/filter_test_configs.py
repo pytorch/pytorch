@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -8,6 +9,7 @@ import sys
 import warnings
 from enum import Enum
 from functools import lru_cache
+from logging import info
 from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
@@ -17,33 +19,7 @@ REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://gi
 
 PREFIX = "test-config/"
 
-# Same as shard names
-VALID_TEST_CONFIG_LABELS = {
-    f"{PREFIX}{label}"
-    for label in {
-        "backwards_compat",
-        "crossref",
-        "default",
-        "deploy",
-        "distributed",
-        "docs_tests",
-        "dynamo",
-        "force_on_cpu",
-        "functorch",
-        "inductor",
-        "inductor_distributed",
-        "inductor_huggingface",
-        "inductor_timm",
-        "inductor_torchbench",
-        "jit_legacy",
-        "multigpu",
-        "nogpu_AVX512",
-        "nogpu_NO_AVX2",
-        "slow",
-        "tsan",
-        "xla",
-    }
-}
+logging.basicConfig(level=logging.INFO)
 
 
 def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
@@ -155,19 +131,25 @@ def get_labels(pr_number: int) -> Set[str]:
     }
 
 
+def filter_labels(labels: Set[str], label_regex: Any) -> Set[str]:
+    """
+    Return the list of matching labels
+    """
+    return {l for l in labels if re.match(label_regex, l)}
+
+
 def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, List[Any]]:
     """
     Select the list of test config to run from the test matrix. The logic works
     as follows:
 
-    If the PR has one or more labels as specified in the VALID_TEST_CONFIG_LABELS set, only
-    these test configs will be selected.  This also works with ciflow labels, for example,
-    if a PR has both ciflow/trunk and test-config/functorch, only trunk functorch builds
-    and tests will be run
+    If the PR has one or more test-config labels as specified, only these test configs
+    will be selected.  This also works with ciflow labels, for example, if a PR has both
+    ciflow/trunk and test-config/functorch, only trunk functorch builds and tests will
+    be run.
 
     If the PR has none of the test-config label, all tests are run as usual.
     """
-
     filtered_test_matrix: Dict[str, List[Any]] = {"include": []}
 
     for entry in test_matrix.get("include", []):
@@ -177,18 +159,19 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
         label = f"{PREFIX}{config_name.strip()}"
         if label in labels:
-            print(
-                f"Select {config_name} because label {label} is presented in the pull request by the time the test starts"
-            )
+            msg = f"Select {config_name} because label {label} is present in the pull request by the time the test starts"
+            info(msg)
             filtered_test_matrix["include"].append(entry)
 
-    valid_test_config_labels = labels.intersection(VALID_TEST_CONFIG_LABELS)
-
-    if not filtered_test_matrix["include"] and not valid_test_config_labels:
-        # Found no valid label and the filtered test matrix is empty, return the same
+    test_config_labels = filter_labels(labels, re.compile(f"{PREFIX}.+"))
+    if not filtered_test_matrix["include"] and not test_config_labels:
+        info("Found no test-config label on the PR, so all test configs are included")
+        # Found no test-config label and the filtered test matrix is empty, return the same
         # test matrix as before so that all tests can be run normally
         return test_matrix
     else:
+        msg = f"Found {test_config_labels} on the PR so only these test configs are run"
+        info(msg)
         # When the filter test matrix contain matches or if a valid test config label
         # is found in the PR, return the filtered test matrix
         return filtered_test_matrix
@@ -374,30 +357,33 @@ def process_jobs(
         # - If the target record has the job (config) name, only that test config
         #   will be skipped or marked as unstable
         if not target_job_cfg:
-            print(
+            msg = (
                 f"Issue {target_url} created by {author} has {issue_type.value} "
                 + f"all CI jobs for {workflow} / {job_name}"
             )
+            info(msg)
             return _filter_jobs(
                 test_matrix=test_matrix,
                 issue_type=issue_type,
             )
 
         if target_job_cfg == BUILD_JOB_NAME:
-            print(
+            msg = (
                 f"Issue {target_url} created by {author} has {issue_type.value} "
                 + f"the build job for {workflow} / {job_name}"
             )
+            info(msg)
             return _filter_jobs(
                 test_matrix=test_matrix,
                 issue_type=issue_type,
             )
 
         if target_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
-            print(
+            msg = (
                 f"Issue {target_url} created by {author} has {issue_type.value} "
                 + f"all the test jobs for {workflow} / {job_name}"
             )
+            info(msg)
             return _filter_jobs(
                 test_matrix=test_matrix,
                 issue_type=issue_type,
@@ -474,6 +460,10 @@ def get_reenabled_issues(pr_body: str = "") -> List[str]:
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
 
 
+def check_for_setting(labels: Set[str], body: str, setting: str) -> bool:
+    return setting in labels or f"[{setting}]" in body
+
+
 def perform_misc_tasks(
     labels: Set[str], test_matrix: Dict[str, List[Any]], job_name: str, pr_body: str
 ) -> None:
@@ -481,11 +471,19 @@ def perform_misc_tasks(
     In addition to apply the filter logic, the script also does the following
     misc tasks to set keep-going and is-unstable variables
     """
-    set_output("keep-going", "keep-going" in labels)
+    set_output("keep-going", check_for_setting(labels, pr_body, "keep-going"))
+    set_output(
+        "ci-verbose-test-logs",
+        check_for_setting(labels, pr_body, "ci-verbose-test-logs"),
+    )
+    set_output(
+        "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
+    )
+    set_output("ci-no-td", check_for_setting(labels, pr_body, "ci-no-td"))
 
     # Obviously, if the job name includes unstable, then this is an unstable job
     is_unstable = job_name and IssueType.UNSTABLE.value in job_name
-    if not is_unstable and test_matrix:
+    if not is_unstable and test_matrix and test_matrix.get("include"):
         # Even when the job name doesn't mention unstable, we will also mark it as
         # unstable when the test matrix only includes unstable jobs. Basically, this
         # logic allows build or build-and-test jobs to be marked as unstable too.
@@ -577,7 +575,7 @@ def main() -> None:
         labels=labels,
         test_matrix=filtered_test_matrix,
         job_name=args.job_name,
-        pr_body=pr_body,
+        pr_body=pr_body if pr_body else "",
     )
 
     # Set the filtered test matrix as the output

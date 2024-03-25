@@ -194,8 +194,8 @@ class TORCH_API Reducer {
   void update_process_group(
       c10::intrusive_ptr<c10d::ProcessGroup> new_process_group);
 
-  // Forces a rebuild of buckets on next iteration.
-  void force_bucket_rebuild();
+  // Resets reducer state.
+  void reset_state();
 
  protected:
   // Forward declaration.

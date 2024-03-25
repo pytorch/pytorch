@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
+import operator
 
 
 class TestIndexing(TestCase):
@@ -138,7 +139,7 @@ class TestIndexing(TestCase):
         def consec(size, start=1):
             # Creates the sequence in float since CPU half doesn't support the
             # needed operations. Converts to dtype before returning.
-            numel = reduce(lambda x, y: x * y, size, 1)
+            numel = reduce(operator.mul, size, 1)
             sequence = torch.ones(numel, dtype=torch.float, device=device).cumsum(0)
             sequence.add_(start - 1)
             return sequence.view(*size).to(dtype=dtype)
@@ -534,7 +535,7 @@ class TestIndexing(TestCase):
             [[[2]], [[0, 3], [4, 1]], slice(None)],
             # non-contiguous indexing subspace
             [[0, 2, 3], slice(None), [1, 3, 4]],
-
+            # [...]
             # less dim, ellipsis
             [[0, 2], ],
             [[0, 2], slice(None)],
@@ -1394,6 +1395,15 @@ class TestIndexing(TestCase):
             tensor_a[6] = 1.0
             tensor_b[6] = 1.0
             self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+    def test_index_limits(self, device):
+        #  Regression test for https://github.com/pytorch/pytorch/issues/115415
+        t = torch.tensor([], device=device)
+        idx_min = torch.iinfo(torch.int64).min
+        idx_max = torch.iinfo(torch.int64).max
+        self.assertRaises(IndexError, lambda: t[idx_min])
+        self.assertRaises(IndexError, lambda: t[idx_max])
+
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to

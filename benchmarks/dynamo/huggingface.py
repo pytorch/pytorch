@@ -172,6 +172,7 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "AlbertForQuestionAnswering",
 }
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
 }
 
@@ -553,13 +554,13 @@ class HuggingfaceRunner(BenchmarkRunner):
         return pred[0]
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(**inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()

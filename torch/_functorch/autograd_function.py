@@ -188,7 +188,7 @@ def wrap_outputs_maintaining_identity(
                 f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
                 f"but output has structure {spec}. "
                 f"For more details, please see "
-                f"https://pytorch.org/docs/master/notes/extending.func.html"
+                f"https://pytorch.org/docs/main/notes/extending.func.html"
             )
 
     for i, output in enumerate(flat_outputs):
@@ -199,7 +199,7 @@ def wrap_outputs_maintaining_identity(
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
         if out_dims_specified:
-            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[index]
+            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[possibly-undefined, index]
         else:
             result.append(wrap_fn(output))
 
@@ -279,7 +279,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
                 f"staticmethod. Please set generate_vmap_rule=False or delete "
                 f"the overriden vmap staticmethod to avoid ambiguity. "
                 f"For more details, please see "
-                f"https://pytorch.org/docs/master/notes/extending.func.html")
+                f"https://pytorch.org/docs/main/notes/extending.func.html")
         return custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands)
 
     if not has_overriden_vmap_rule(autograd_function):
@@ -290,7 +290,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"it does not have vmap support. Please override and implement the "
             f"vmap staticmethod or set generate_vmap_rule=True. "
             f"For more details, please see "
-            f"https://pytorch.org/docs/master/notes/extending.func.html")
+            f"https://pytorch.org/docs/main/notes/extending.func.html")
 
     current_level = interpreter.level()
     info = VmapInfo(
@@ -633,3 +633,27 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
     return grad_input
+
+
+class AutogradFunctionApply(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("autograd_function_apply")
+
+    def __call__(self, fwd, bwd, *fwd_args):
+        saved_values = None
+
+        class ApplyTemplate(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, *args):
+                nonlocal saved_values
+                output, saved_values = fwd(None, *args)
+                return output
+
+            @staticmethod
+            def backward(ctx, *grad):
+                return bwd(None, *grad, *saved_values)
+
+        return ApplyTemplate.apply(*fwd_args)
+
+
+autograd_function_apply = AutogradFunctionApply()

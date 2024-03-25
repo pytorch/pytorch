@@ -4,7 +4,7 @@ from torch._export.db.case import export_case
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 4),),
+    example_inputs=(torch.randn(3, 4),),
 )
 class ClassMethod(torch.nn.Module):
     """

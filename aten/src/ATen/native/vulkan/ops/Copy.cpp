@@ -66,7 +66,8 @@ void transfer_cpu_to_vulkan(const Tensor& src, vTensor& v_dst) {
   // Convert to dtype corresponding to the image format of the texture to
   // ensure that byte alignment is consistent when copying. In some cases
   // a 16 bit format will be used for at::kFloat.
-  Tensor src_nc4hw = utils::nchw_to_nc4hw(src).to(v_dst.texture_dtype());
+  Tensor src_nc4hw =
+      utils::nchw_to_nc4hw(src).to(convert_dtype(v_dst.texture_dtype()));
 
   api::StorageBuffer staging(context, v_dst.texture_dtype(), v_dst.gpu_numel());
   // Copy data into the staging buffer
@@ -118,7 +119,8 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
 
   context->fences().return_fence(fence);
 
-  dst = utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.dtype());
+  dst = utils::nc4hw_to_nchw(dst_tmp, v_src.sizes())
+            .to(convert_dtype(v_src.dtype()));
 }
 
 void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
@@ -159,7 +161,7 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   // of floats as input. GLSL/Vulkan does not natively support 16 bit arithmetic
   // types, so for now storage buffers created for compute shaders must define
   // floats as their base data type.
-  api::StorageBuffer staging(context, at::kFloat, dst.gpu_numel());
+  api::StorageBuffer staging(context, api::kFloat, dst.gpu_numel());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -184,7 +186,7 @@ void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
 
   // Refer to the comment in pack_cpu_to_vulkan for why at::kFloat is specified
   // for the storage buffer below.
-  api::StorageBuffer staging(context, at::kFloat, src.gpu_numel());
+  api::StorageBuffer staging(context, api::kFloat, src.gpu_numel());
 
   api::VulkanFence fence = context->fences().get_fence();
 
@@ -277,10 +279,10 @@ vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
 
   vTensor v_ret{
       api::context(),
-      src.sizes(),
-      src.scalar_type(),
+      src.sizes().vec(),
+      convert_dtype(src.scalar_type()),
       storage_type,
-      src.suggest_memory_format(),
+      get_gpu_memory_layout(storage_type, src.suggest_memory_format()),
   };
 
   ops::pack_cpu_to_vulkan(src, v_ret);
@@ -290,7 +292,7 @@ vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
 
 at::Tensor from_vulkan(vTensor& v_src) {
   at::TensorOptions opt(at::kCPU);
-  opt = opt.dtype(v_src.dtype());
+  opt = opt.dtype(convert_dtype(v_src.dtype()));
 
   c10::MemoryFormat v_src_memory_format;
 

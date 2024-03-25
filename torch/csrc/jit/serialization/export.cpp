@@ -91,7 +91,7 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
-const static int kMainOpsetVersion = 19;
+const static int kMainOpsetVersion = 20;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
 constexpr static std::array<int64_t, kMainOpsetVersion + 1>
@@ -116,6 +116,7 @@ constexpr static std::array<int64_t, kMainOpsetVersion + 1>
         8, // opset 17
         8, // opset 18
         9, // opset 19
+        9, // opset 20
 };
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -469,6 +470,10 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx_torch::TensorProto_DataType_FLOAT8E4M3FN;
     case at::kFloat8_e5m2:
       return onnx_torch::TensorProto_DataType_FLOAT8E5M2;
+    case at::kFloat8_e4m3fnuz:
+      return onnx_torch::TensorProto_DataType_FLOAT8E4M3FNUZ;
+    case at::kFloat8_e5m2fnuz:
+      return onnx_torch::TensorProto_DataType_FLOAT8E5M2FNUZ;
     default:
       TORCH_CHECK(
           false,

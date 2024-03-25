@@ -38,8 +38,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -140,9 +139,9 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   auto lpp  = log_probs.permute({1,0,2});
-  auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
+  auto log_probs_a_global = lpp.accessor<const scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
-  auto targets_data = targets.data_ptr<target_t>();
+  auto targets_data = targets.const_data_ptr<target_t>();
   auto neg_log_likelihood_a = neg_log_likelihood.accessor<scalar_t, 1>();
 
   // alpha calculation for the first row, the three equations for alpha_1 above eq (6)
@@ -261,6 +260,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   auto gp = grad.permute({1,0,2});
   auto grad_a_global = gp.accessor<scalar_t, 3>();
   auto targets_data = targets.data_ptr<target_t>();
+  auto grad_out_a = grad_out.accessor<scalar_t, 1>();
 
   auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
     return TensorIteratorConfig()
@@ -367,7 +367,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // now we wrap up the calculation by adding in the remaining items of eq (16)
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-      scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
+      scalar_t gr = grad_out_a[b];
       for (const auto t : c10::irange(input_length)) { // or go for the full thing?
         for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
@@ -423,8 +423,8 @@ std::tuple<Tensor, Tensor> ctc_loss_tensor(const Tensor& log_probs, const Tensor
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
 
   return at::_ctc_loss(log_probs, targets, il, tl, BLANK, zero_infinity);
 }
@@ -537,9 +537,9 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 
-} } // at::native
+} // at::native

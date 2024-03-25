@@ -9,12 +9,12 @@ import torch._dynamo
 import torch.utils.cpp_extension
 
 try:
-    from extension_backends.extension_codegen_backend import (
+    from extension_backends.cpp.extension_codegen_backend import (
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
 except ImportError:
-    from .extension_backends.extension_codegen_backend import (
+    from .extension_backends.cpp.extension_codegen_backend import (
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
@@ -64,7 +64,7 @@ class ExtensionBackendTests(TestCase):
         remove_build_path()
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
-            source_file_path, "extension_backends/extension_device.cpp"
+            source_file_path, "extension_backends/cpp/extension_device.cpp"
         )
         cls.module = torch.utils.cpp_extension.load(
             name="extension_device",
@@ -140,7 +140,7 @@ class ExtensionBackendTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
     # cpp_extension doesn't work in fbcode right now

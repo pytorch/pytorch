@@ -1,11 +1,15 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/flat_hash_map.h>
+
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -14,10 +18,7 @@ namespace api {
 
 class DescriptorSet final {
  public:
-  explicit DescriptorSet(
-      const VkDevice,
-      const VkDescriptorSet,
-      const ShaderLayout::Signature&);
+  explicit DescriptorSet(VkDevice, VkDescriptorSet, ShaderLayout::Signature);
 
   DescriptorSet(const DescriptorSet&) = delete;
   DescriptorSet& operator=(const DescriptorSet&) = delete;
@@ -42,7 +43,7 @@ class DescriptorSet final {
   VkDevice device_;
   VkDescriptorSet handle_;
   ShaderLayout::Signature shader_layout_signature_;
-  c10::SmallVector<ResourceBinding, 6u> bindings_;
+  std::vector<ResourceBinding> bindings_;
 
  public:
   DescriptorSet& bind(const uint32_t, const VulkanBuffer&);
@@ -58,9 +59,9 @@ class DescriptorSetPile final {
  public:
   DescriptorSetPile(
       const uint32_t,
-      const VkDescriptorSetLayout,
-      const VkDevice,
-      const VkDescriptorPool);
+      VkDescriptorSetLayout,
+      VkDevice,
+      VkDescriptorPool);
 
   DescriptorSetPile(const DescriptorSetPile&) = delete;
   DescriptorSetPile& operator=(const DescriptorSetPile&) = delete;
@@ -99,7 +100,7 @@ struct DescriptorPoolConfig final {
 
 class DescriptorPool final {
  public:
-  explicit DescriptorPool(const VkDevice, const DescriptorPoolConfig&);
+  explicit DescriptorPool(VkDevice, const DescriptorPoolConfig&);
 
   DescriptorPool(const DescriptorPool&) = delete;
   DescriptorPool& operator=(const DescriptorPool&) = delete;
@@ -115,11 +116,17 @@ class DescriptorPool final {
   DescriptorPoolConfig config_;
   // New Descriptors
   std::mutex mutex_;
-  ska::flat_hash_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
+  std::unordered_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
 
  public:
+  operator bool() const {
+    return (pool_ != VK_NULL_HANDLE);
+  }
+
+  void init(const DescriptorPoolConfig& config);
+
   DescriptorSet get_descriptor_set(
-      const VkDescriptorSetLayout handle,
+      VkDescriptorSetLayout handle,
       const ShaderLayout::Signature& signature);
 
   void flush();

@@ -177,8 +177,7 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
-                for module in config["module"]:
-                    modules.append(module)
+                modules.extend(config["module"])
             else:
                 module = config["module"]
                 modules.append(module)
@@ -190,8 +189,7 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
-                for module in config["module"]:
-                    modules.append(module)
+                modules.extend(config["module"])
             else:
                 module = config["module"]
                 modules.append(module)
@@ -206,7 +204,7 @@ class TestBaseStructuredSparsifier(TestCase):
     def _test_constructor_on_device(self, model, device):
         self.assertRaisesRegex(
             TypeError,
-            "BaseStructuredSparsifier.* update_mask",
+            "BaseStructuredSparsifier.*update_mask",
             BaseStructuredSparsifier,
         )
         model1 = copy.deepcopy(model).to(device)
@@ -983,7 +981,7 @@ class TestFPGMPruner(TestCase):
         pruner.prepare(model, config)
         pruner.enable_mask_update = True
         pruner.step()
-        assert pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is not False,\
+        assert pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is not False, \
             "do not prune the least-norm filter"
 
         # fusion step

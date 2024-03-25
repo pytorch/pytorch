@@ -6,6 +6,7 @@ import io
 import itertools
 import pickle
 import sys
+from typing import List
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
@@ -49,6 +50,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_CUDA
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -113,7 +115,7 @@ class TestShardedTensorMetadata(TestCase):
             self.assertEqual(expected_st_metadata, st_metadata)
 
 class TestCreateTensorFromParams(TestCase):
-    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, 'CUDA GPU is needed')
     def test_empty(self):
         expected_dtype = torch.double
         tensor_properties = TensorProperties(
@@ -259,6 +261,11 @@ class TestShardTensor(ShardedTensorTestBase):
 
         # Verify.
         self.assertTrue(isinstance(st, sharded_tensor.ShardedTensor))
+        sms = st.metadata().shards_metadata
+        self.assertEqual(len(sms), 4)
+        for sm in sms:
+            self.assertTrue(sm.shard_offsets[0] + sm.shard_sizes[0] <= tensor.size(0))
+
         local_shard = st.local_tensor()
         self.assertEqual(1, len(st.local_shards()))
         if dist.get_rank() < 3:

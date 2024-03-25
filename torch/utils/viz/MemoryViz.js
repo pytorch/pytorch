@@ -901,6 +901,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     current_data.push(e);
     data.push(e);
     total_mem += size;
+    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
   }
 
   for (const elem of initially_allocated) {
@@ -969,9 +970,11 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     elements_length: elements.length,
     context_for_id: id => {
       const elem = elements[id];
-      let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
-        elem.size
-      } bytes)`;
+      let text = `Addr: ${formatAddr(elem)}`;
+      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+      text = `${text}, Total memory used after allocation: ${formatSize(
+        elem.max_allocated_mem,
+      )}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }
@@ -1402,17 +1405,42 @@ function unpickle(buffer) {
       case LONG1:
         {
           const s = bytebuffer[offset++];
-          if (s > 8) {
-            throw new Error(`Unsupported number bigger than 8 bytes ${s}`);
+          if (s <= 8) {
+            for (let i = 0; i < s; i++) {
+              scratch_bytes[i] = bytebuffer[offset++];
+            }
+            const fill = scratch_bytes[s - 1] >= 128 ? 0xff : 0x0;
+            for (let i = s; i < 8; i++) {
+              scratch_bytes[i] = fill;
+            }
+            stack.push(Number(big[0]));
+          } else { // BigInt
+            let scratch_bytes_unbounded = [];
+            for (let i = 0; i < s; i++) {
+              scratch_bytes_unbounded.push(bytebuffer[offset++]);
+            }
+
+            // BigInt can only convert from unsigned hex, thus we need to
+            // convert from twos-complement if negative
+            const negative = scratch_bytes_unbounded[s - 1] >= 128;
+            if (negative) {
+              // implements scratch_bytes_unbounded = ~scratch_bytes_unbounded + 1
+              // byte-by-byte.
+              let carry = 1;
+              for (let i = 0; i < s; i++) {
+                const twos_complement = (0xff ^ scratch_bytes_unbounded[i]) + carry;
+                carry = twos_complement > 0xff ? 1 : 0;
+                scratch_bytes_unbounded[i] = 0xff & twos_complement;
+              }
+            }
+
+            const hex_str = Array.from(scratch_bytes_unbounded.reverse(), byte => {
+              return byte.toString(16).padStart(2, '0');
+            }).join('');
+
+            const big_int = negative ? -BigInt(`0x${hex_str}`) : BigInt(`0x${hex_str}`);
+            stack.push(big_int);
           }
-          for (let i = 0; i < s; i++) {
-            scratch_bytes[i] = bytebuffer[offset++];
-          }
-          const fill = scratch_bytes[s - 1] >= 128 ? 0xff : 0x0;
-          for (let i = s; i < 8; i++) {
-            scratch_bytes[i] = fill;
-          }
-          stack.push(Number(big[0]));
         }
         break;
       case LONG_BINGET:

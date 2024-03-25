@@ -37,18 +37,7 @@ struct TORCH_API GraphFunction : public Function {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    auto& optimized_graph = optimized_graphs_[currentSpecialization()];
-    if (optimized_graph) {
-      return *optimized_graph;
-    }
-    optimized_graph = graph_->copy();
-    if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph, force_no_amp_);
-    }
-    return *optimized_graph;
-  }
+  std::shared_ptr<Graph> optimized_graph() const;
 
   const c10::QualifiedName& qualname() const override {
     return name_;
@@ -126,7 +115,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   void clear_optimized_graphs() {
-    optimized_graphs_.fill(c10::nullopt);
+    optimized_graphs_.fill(nullptr);
   }
 
  private:
@@ -156,9 +145,7 @@ struct TORCH_API GraphFunction : public Function {
   // don't invoke amp pass
   mutable bool force_no_amp_ = false;
   // Optimized graph, computed lazily. Used for inlining.
-  mutable std::array<
-      c10::optional<std::shared_ptr<Graph>>,
-      SpecializationKey::TotalCount>
+  mutable std::array<std::shared_ptr<Graph>, SpecializationKey::TotalCount>
       optimized_graphs_;
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to

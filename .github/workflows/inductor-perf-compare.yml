@@ -10,6 +10,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm80

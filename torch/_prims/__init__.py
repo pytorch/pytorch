@@ -113,6 +113,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "frexp",
     "gcd",
     "ge",
     "gt",
@@ -246,10 +247,10 @@ def TensorMeta(
         assert dtype is not None
         assert device is not None
 
-    shape = inferred_shape if shape is None else tuple(shape)
-    strides = inferred_strides if strides is None else tuple(strides)
-    dtype = inferred_dtype if dtype is None else dtype
-    device = inferred_device if device is None else device
+    shape = inferred_shape if shape is None else tuple(shape)  # type: ignore[possibly-undefined]
+    strides = inferred_strides if strides is None else tuple(strides)  # type: ignore[possibly-undefined]
+    dtype = inferred_dtype if dtype is None else dtype  # type: ignore[possibly-undefined]
+    device = inferred_device if device is None else device  # type: ignore[possibly-undefined]
 
     if isinstance(device, str):
         device = torch.device(device)
@@ -1210,6 +1211,8 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Type checks
     assert isinstance(a, TensorLike)
     assert isinstance(shape, Sequence)
@@ -1235,7 +1238,11 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
+        if not guard_size_oblivious(a.shape[idx] == 1):
+            torch._check(
+                a.shape[idx] == shape[new_idx],
+                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+            )
 
     new_strides = []
     original_idx = 0
@@ -1243,13 +1250,13 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if a.shape[original_idx] != shape[idx]:
+            if guard_size_oblivious(a.shape[original_idx] != shape[idx]):
                 new_strides.append(0)
             else:
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            if shape[idx] != 1:
+            if guard_size_oblivious(shape[idx] != 1):
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -1325,6 +1332,8 @@ def _collapse_view_helper(
 ) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     _validate_collapse_args(a, start, end)
 
     # Special-case for zero dimensional tensors
@@ -1341,21 +1350,25 @@ def _collapse_view_helper(
     length = shape[end]
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if shape[idx] == 0 or shape[idx + 1] == 0:
+        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
+            shape[idx + 1] == 0
+        ):
             length = 0
             stride = 0
             break
 
-        if shape[idx] == 1:
+        if guard_size_oblivious(shape[idx] == 1):
             continue
 
         length = length * shape[idx]
         stride = min(stride, strides[idx])
 
         if (
-            a.numel() > 0
-            and shape[idx + 1] != 1
-            and not (strides[idx] == strides[idx + 1] * shape[idx + 1])
+            guard_size_oblivious(a.numel() > 0)
+            and guard_size_oblivious(shape[idx + 1] != 1)
+            and not guard_size_oblivious(
+                strides[idx] == strides[idx + 1] * shape[idx + 1]
+            )
         ):
             return None, None
 
@@ -1363,7 +1376,7 @@ def _collapse_view_helper(
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
-    if a.numel() == 0:
+    if guard_size_oblivious(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
@@ -1888,11 +1901,15 @@ collapse = _make_prim(
 
 
 # TODO: review stride logic
+# NB: unlike torch.cat, this is more strict about empty tensors and dim is
+# never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
+    assert dim >= 0
     shape = tensors[0].shape
     concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
+        assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
@@ -2765,8 +2782,6 @@ svd = _make_prim(
 #
 
 
-# TODO: add generator support
-# NOTE: there is currently no way of acquiring the "default" torch generator
 def _normal_meta(
     shape: ShapeType,
     *,
@@ -2775,6 +2790,7 @@ def _normal_meta(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     torch._check(
         std >= 0.0,
@@ -2798,11 +2814,12 @@ def _normal_aten(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     with torch.no_grad():
         # NOTE: normal_ is incorrectly annotated to expect mean to be a float
-        a.normal_(mean, std)  # type: ignore[arg-type]
+        a.normal_(mean, std, generator=generator)  # type: ignore[arg-type]
     return a
 
 
@@ -2815,7 +2832,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"  # noqa: B950
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2831,6 +2848,7 @@ def _uniform_meta(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
@@ -2843,9 +2861,10 @@ def _uniform_aten(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device)
-    a.uniform_(low, high)
+    a.uniform_(low, high, generator=generator)
     return a
 
 
@@ -2856,7 +2875,7 @@ _uniform_doc = """
 # TODO: we should more seriously review randomness modeling and prims
 _uniform_helper = _make_prim(
     schema=(
-        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
+        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device, Generator? generator=None) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_uniform_meta,
@@ -2989,6 +3008,23 @@ fft_c2r = _make_prim(
     impl_aten=_fft_c2r_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
+)
+
+
+def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: "torch.frexp() only supports floating-point dtypes",
+    )
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int32)
+
+
+frexp = _make_prim(
+    schema="frexp(Tensor self) -> (Tensor mantissa, Tensor exponent)",
+    meta=_frexp_meta,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    impl_aten=torch.frexp,
+    doc="",
 )
 
 register_rng_prims()
