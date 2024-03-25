@@ -95,6 +95,15 @@ def log_export_usage(**kwargs):
     pass
 
 
+def log_torchscript_usage(api: str):
+    _ = api
+    return
+
+
+def export_api_rollout_check() -> bool:
+    return False
+
+
 def justknobs_check(name: str) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
@@ -119,6 +128,13 @@ def justknobs_check(name: str) -> bool:
     hits JK again.
     """
     return True
+
+
+def justknobs_getval_int(name: str) -> int:
+    """
+    Read warning on justknobs_check
+    """
+    return 0
 
 
 @functools.lru_cache(None)

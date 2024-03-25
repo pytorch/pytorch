@@ -21,3 +21,4 @@ retryable_workflows:
 - trunk
 - linux-binary
 - windows-binary
+labeler_config: labeler.yml
