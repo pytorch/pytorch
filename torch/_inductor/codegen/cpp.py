@@ -2229,11 +2229,8 @@ class CppVecKernel(CppKernel):
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
-            tmp_bufsize = (
-                f"{self.tiling_factor}*sizeof(float)/sizeof({DTYPE_TO_CPP[dtype]})"
-            )
             line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line} "
+                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{self.tiling_factor}]; {line} "
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
