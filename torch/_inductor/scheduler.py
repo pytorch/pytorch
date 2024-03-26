@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -1680,22 +1681,54 @@ class Scheduler:
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
         """
-        for i in range(10):
-            old_len = len(self.nodes)
-            fusion_log.debug(
-                "===== attempting fusion (%d/10): %d nodes =====", i + 1, old_len
+        # Only check outer loop fusion on CPU
+        all_node_in_cpu = all(
+            _node.get_device() == torch.device("cpu") for _node in self.nodes
+        )
+        check_outer_loop_fusion_list = (
+            [False, True]
+            if (
+                all_node_in_cpu
+                and getattr(
+                    self.get_backend(torch.device("cpu")),
+                    "enable_outer_loop_fusion",
+                    None,
+                )
             )
-            self.fuse_nodes_once()
-            new_len = len(self.nodes)
-            fusion_log.debug(
-                "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
-                i + 1,
-                old_len,
-                new_len,
+            else [
+                False,
+            ]
+        )
+
+        for _check_outer_loop_fusion in check_outer_loop_fusion_list:
+            # Full loop fusion should be prioritized in the fusion process, as it typically leads to better performance.
+            # Perform outer loop fusion for the left nodes with lower priority when backend support is available.
+            ctx_manager = (
+                self.get_backend(torch.device("cpu")).enable_outer_loop_fusion()
+                if _check_outer_loop_fusion
+                else contextlib.nullcontext()
             )
-            if new_len == old_len or new_len == 1:
-                fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
-                break
+            with ctx_manager:
+                for i in range(10):
+                    old_len = len(self.nodes)
+                    fusion_log.debug(
+                        "===== attempting fusion (%d/10): %d nodes =====",
+                        i + 1,
+                        old_len,
+                    )
+                    self.fuse_nodes_once()
+                    new_len = len(self.nodes)
+                    fusion_log.debug(
+                        "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
+                        i + 1,
+                        old_len,
+                        new_len,
+                    )
+                    if new_len == old_len or new_len == 1:
+                        fusion_log.debug(
+                            "===== fusion complete (%d iterations) =====", i + 1
+                        )
+                        break
 
     def benchmark_fused_nodes(self, nodes) -> Tuple[float, str]:
         """
@@ -2426,7 +2459,7 @@ class Scheduler:
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)  # type: ignore[possibly-undefined]
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                self.get_backend(device).codegen_nodes(node.get_nodes())  # type: ignore[possibly-undefined]
+                self.get_backend(device).codegen_node(node)  # type: ignore[possibly-undefined]
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2504,7 +2537,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
+    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
