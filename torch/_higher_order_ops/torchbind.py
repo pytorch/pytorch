@@ -48,7 +48,7 @@ def _need_python_dispatch():
 
 def _is_torch_bind_operator(op, args, kwargs):
     return any(
-        isinstance(arg, (torch.ScriptObject, AbstractScriptObject))
+        isinstance(arg, AbstractScriptObject)
         for arg in list(args) + list(kwargs.values())
     )
 
@@ -88,10 +88,9 @@ def OpOverloadPacket_torchbind_redispatch(orig_call):
 
 
 # We want to skip C++ dispatcher for torchbind operator when there're dispatch mode on the
-# stack. The reason is that 1. the abstract class (similar to fake tensor for tensor) of torch bind object
+# stack. The reason is that the abstract class (similar to fake tensor for tensor) of torch bind object
 # resides in Python and we cannot pass the Python object created from it to C++ dispatcher
-# due to schema mismatch. 2. we expect torchbind operators to implement CPU/GPU/Meta keys so it's safe to.
-# skip the C++ dispatcher in the case of tracing.
+# due to schema mismatch.
 #
 # Implementation-wise, we need to handle two cases: If there are dispatch keys on pre-dispatch mode stack,
 # we'll let pre-dispatch handle the operator. If pre-dispatch mode is off but there are
@@ -99,10 +98,16 @@ def OpOverloadPacket_torchbind_redispatch(orig_call):
 # Otherwise, we'll fallback to the original call.
 def OpOverload_torchbind_redispatch(orig_call):
     def wrapped(self_, *args, **kwargs):
-        if _is_torch_bind_operator(self_, args, kwargs) and _can_skip_cpp_dispatcher(
-            self_, args, kwargs
-        ):
-            return _create_skipping_cpp_hanlder(self_)(*args, **kwargs)
+        if _is_torch_bind_operator(self_, args, kwargs):
+            if _can_skip_cpp_dispatcher(self_, args, kwargs):
+                return _create_skipping_cpp_hanlder(self_)(*args, **kwargs)
+            else:
+                raise RuntimeError(
+                    f"Some inputs of operartor {self_} are abstract, which indicates"
+                    f" we're under tracing/exporting but"
+                    " there's no torch_dispatch mode on the stack. This is likely"
+                    " caused by creating abstract custom classes without tracing."
+                )
         return orig_call(self_, *args, **kwargs)
 
     return wrapped
@@ -175,8 +180,6 @@ def inner(mode, *args, **kwargs):
         return call_torchbind(*args, **kwargs)
 
 
-# TODO: currently we just run the C++ implementation with fake tensors.
-# But we should make it possible to register a fake torchbind implementation.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:
