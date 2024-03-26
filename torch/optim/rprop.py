@@ -67,10 +67,9 @@ class Rprop(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                if group["capturable"]:
-                    state["step"] = torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                else:
-                    state["step"] = torch.zeros((), dtype=_get_scalar_dtype())
+                state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                                 if group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
+
                 state["prev"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -97,6 +96,8 @@ class Rprop(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -129,6 +130,7 @@ class Rprop(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=group["differentiable"],
+                capturable=group["capturable"],
                 has_complex=has_complex,
             )
 
@@ -194,8 +196,8 @@ def rprop(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    capturable: bool = False,
     foreach: Optional[bool] = None,
+    capturable: bool = False,
     maximize: bool = False,
     differentiable: bool = False,
     has_complex: bool = False,
@@ -209,11 +211,6 @@ def rprop(
 
     See :class:`~torch.optim.Rprop` for details.
     """
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
-
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
     if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
@@ -240,6 +237,7 @@ def rprop(
         step_size_max=step_size_max,
         etaminus=etaminus,
         etaplus=etaplus,
+        capturable=capturable,
         maximize=maximize,
         differentiable=differentiable,
         has_complex=has_complex,
@@ -258,9 +256,14 @@ def _single_tensor_rprop(
     etaminus: float,
     etaplus: float,
     maximize: bool,
+    capturable: bool,
     differentiable: bool,
     has_complex: bool,
 ):
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -280,9 +283,15 @@ def _single_tensor_rprop(
             sign = grad.mul(prev.clone()).sign()
         else:
             sign = grad.mul(prev).sign()
-        sign[sign.gt(0)] = etaplus
-        sign[sign.lt(0)] = etaminus
-        sign[sign.eq(0)] = 1
+
+        if capturable:
+            sign.copy_(torch.where(sign.gt(0), etaplus, sign))
+            sign.copy_(torch.where(sign.lt(0), etaminus, sign))
+            sign.copy_(torch.where(sign.eq(0), 1, sign))
+        else:
+            sign[sign.gt(0)] = etaplus
+            sign[sign.lt(0)] = etaminus
+            sign[sign.eq(0)] = 1
 
         # update stepsizes with step size updates
         step_size.mul_(sign).clamp_(step_size_min, step_size_max)
@@ -290,7 +299,10 @@ def _single_tensor_rprop(
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
         grad = grad.clone(memory_format=torch.preserve_format)
-        grad[sign.eq(etaminus)] = 0
+        if capturable:
+            grad.copy_(torch.where(sign.eq(etaminus), 0, grad))
+        else:
+            grad[sign.eq(etaminus)] = 0
 
         # update parameters
         param.addcmul_(grad.sign(), step_size, value=-1)
@@ -309,6 +321,7 @@ def _multi_tensor_rprop(
     etaminus: float,
     etaplus: float,
     maximize: bool,
+    capturable: bool,
     differentiable: bool,
     has_complex: bool,
 ):
@@ -317,6 +330,11 @@ def _multi_tensor_rprop(
         return
 
     assert not differentiable, "_foreach ops don't support autograd"
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes, state_steps])
     for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes, grouped_state_steps), _) in grouped_tensors.values():
@@ -347,10 +365,16 @@ def _multi_tensor_rprop(
         grouped_grads = grouped_prevs
 
         torch._foreach_sign_(signs)
-        for sign in signs:
-            sign[sign.gt(0)] = etaplus
-            sign[sign.lt(0)] = etaminus
-            sign[sign.eq(0)] = 1
+        if capturable:
+            for sign in signs:
+                sign.copy_(torch.where(sign.gt(0), etaplus, sign))
+                sign.copy_(torch.where(sign.lt(0), etaminus, sign))
+                sign.copy_(torch.where(sign.eq(0), 1, sign))
+        else:
+            for sign in signs:
+                sign[sign.gt(0)] = etaplus
+                sign[sign.lt(0)] = etaminus
+                sign[sign.eq(0)] = 1
 
         # update stepsizes with step size updates
         torch._foreach_mul_(grouped_step_sizes, signs)
@@ -361,7 +385,7 @@ def _multi_tensor_rprop(
         # for dir>=0 dfdx=dfdx
         grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i][signs[i].eq(etaminus)] = 0
+            grouped_grads[i].copy_(torch.where(signs[i].eq(etaminus), 0, grouped_grads[i]))
 
         # explicitly del signs as it's not used after here to save memory
         del signs
