@@ -4319,6 +4319,56 @@ class CommonTemplate:
             ),
         )
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_unbacked_refinement(self):
+        def fn(x):
+            z = x.nonzero()
+            torch._check(z.size(0) == 4)
+            return z + 3
+
+        self.common(
+            fn,
+            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+        )
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        self.common(
+            fn,
+            (
+                torch.randn(6),
+                torch.tensor([6]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn(7),
+                torch.tensor([7]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify_errors(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        # This is a little suboptimal: we actually fail /in the compiler/ but
+        # not in a way that causes Dynamo to graph break
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.randn(8), torch.tensor(8))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):
@@ -4527,6 +4577,14 @@ class CommonTemplate:
                 torch.randn(8, dtype=torch.float32),
             ),
         )
+
+    def test_remove_noop_clone(self):
+        def fn(x):
+            y = x.clone().reshape(-1, 4)
+            y[:, [2, 0]] = y[:, [0, 2]]
+            return y + x
+
+        self.common(fn, (torch.randn(2, 4),))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -6724,6 +6782,35 @@ class CommonTemplate:
         check(torch.ones(3, device=self.device, dtype=torch.float32))
         self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
 
+    # Already on by default, just want to make sure
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_reuse_buffers_with_aliasing(self):
+        def f(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
+
+        code = run_and_get_triton_code(torch.compile(f), torch.zeros((4, 2)))
+        # Make sure that we haven't added complex support and made this test
+        # invalid. If we've added complex support please update the test to use
+        # a different set of view ops we don't lower
+        self.assertTrue("aten.view_as_real" in code)
+
+        def f2(x):
+            z = x + 1
+            z = torch.view_as_complex(z)
+            z = torch.view_as_real(z)
+            z = torch.view_as_complex(z)
+            a = torch.view_as_real(z)
+            out = a + 1
+            return out, torch.view_as_real(z + 1)
+
+        self.common(f, (torch.zeros((4, 2)),))
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -7794,6 +7881,13 @@ class CommonTemplate:
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
 
+    def test_diagonal_copy(self):
+        def fn(x):
+            return torch.diagonal_copy(x)
+
+        for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
+            self.common(fn, (x,))
+
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
@@ -8020,6 +8114,18 @@ class CommonTemplate:
         assert any(
             "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         )
+
+    def test_insignificant_strides(self):
+        def f(x):
+            tmp = x + 1
+            return tmp.view(-1, 1, 2)
+
+        x = torch.arange(8, device=self.device, dtype=torch.float32)
+        out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(out.stride(), compiled_out.stride())
+        self.assertEqual(out, compiled_out)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
@@ -8390,6 +8496,13 @@ class CommonTemplate:
 
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
+
+    def test_pad_cast(self):
+        def fn(x):
+            return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
+
+        for dtype in [torch.int32, torch.int64]:
+            self.common(fn, (torch.ones(1, 1, 13, dtype=dtype),))
 
     @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
@@ -9175,6 +9288,40 @@ class CommonTemplate:
 
         self.common(fn, args, check_lowp=check_lowp)
 
+    # codegen test fails with no dynamic for loop in dynamic shape tests
+    @expectedFailureCodegenDynamic
+    def test_view_uint8_through_differing_bitwidths(self):
+        # https://github.com/pytorch/pytorch/issues/120998
+        def fn(x, view_dtype):
+            return x.view(view_dtype).view(torch.uint8)
+
+        view_dtypes = [torch.int16, torch.int32, torch.int64]
+        for dtype in view_dtypes:
+            x = torch.randint(0, 2**4, [4096, 4096], dtype=torch.uint8)
+            self.common(
+                fn,
+                (
+                    x,
+                    dtype,
+                ),
+            )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_with_sizes_with_unbacked_symints(self):
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.aten.split_with_sizes.default(x, [s0, s1])
+            return torch.ops.aten.sort.default(r1)
+
+        N = 7312
+        S0 = 420
+        S1 = N - S0
+
+        result = f(torch.tensor([S0, S1]), torch.randn(N))
+
+        self.assertTrue(len(result) == 2)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -9216,7 +9363,7 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
+if HAS_CPU and RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -9333,6 +9480,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @config.patch(assume_aligned_inputs=False)
+        def test_config_option_dont_assume_alignment(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin() + x.cos()
+
+            for offset in (0, 1, 2):
+                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
+                inps = torch.as_strided(base, (64, 64), (64, 1), offset)
+                torch._dynamo.reset()
+                kernels = self.get_kernels(fn, [inps])
+                arguments_that_are_divisible_by_16 = (
+                    kernels[0].triton_meta["configs"][0].divisible_by_16
+                )
+
+                #             NO_ALIGN ALIGN     ALIGN
+                # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
+
+                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
@@ -10010,7 +10176,7 @@ if HAS_CPU and RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

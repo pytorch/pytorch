@@ -12,6 +12,7 @@ import torch
 
 from torch import nn
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -25,7 +26,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -48,7 +48,7 @@ prims = torch.ops.prims
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -661,7 +661,7 @@ del OptimizeForInferenceTemplate
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
