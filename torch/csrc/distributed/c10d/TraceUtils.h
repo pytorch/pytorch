@@ -506,6 +506,10 @@ struct NCCLTraceBuffer {
         r.time_discovered_completed_ = c10::getTime();
       }
     }
+    if (r.start_ && r.end_ && r.time_discovered_completed_.has_value() &&
+        !r.duration_.has_value()) {
+      r.duration_ = getDurationFromEvent(*r.start_, *r.end_);
+    }
   }
 
   std::vector<Entry> dump_entries() {
@@ -528,59 +532,18 @@ struct NCCLTraceBuffer {
   This is called by the watchdog thread, and is asynchronous from the
   perspective of the main thread.
 
-  compute_duration defaults to true since retire_id is only called in the
-  watchdog thread, which is currently a place we call cuda APIs which may hang,
-  but care should be taken to avoid computing duration in any function that must
-  never hang. (timing must also be enabled for compute_duration - see
-  TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
+  void retire_id(c10::optional<size_t> id) {
     if (!enabled_ || !id) {
       return;
     }
-
-    bool can_compute_duration = false;
-    Event* startEvent = nullptr;
-    Event* endEvent = nullptr;
-    c10::optional<float> duration = c10::nullopt;
-
     std::unique_lock<std::mutex> guard(mutex_);
-
     Entry* entry = &entries_.at(*id % max_entries_);
     if (entry->id_ == *id) {
       update_state(*entry);
-
-      if (compute_duration) {
-        can_compute_duration = entry->time_discovered_completed_.has_value() &&
-            entry->start_ && entry->end_;
-        startEvent = entry->start_;
-        endEvent = entry->end_;
-      }
+      entry->retired_ = true;
+      entry->start_ = entry->end_ = nullptr;
     }
-
-    if (can_compute_duration) {
-      // Compute duration without without holding the lock, because
-      // cudaEventDuration() can hang, and we need to acquire the lock before we
-      // can dump(), which we never want to block.
-      guard.unlock();
-      duration = getDurationFromEvent(*startEvent, *endEvent);
-      guard.lock();
-
-      // Refresh the entry pointer, see if the entry has been overwritten
-      entry = &entries_.at(*id % max_entries_);
-      if (entry->id_ != *id) {
-        LOG(INFO)
-            << "retire_id abandoned for id " << *id
-            << ", event was overwritten while waiting to compute duration.";
-        return;
-      }
-      if (duration.has_value()) {
-        entry->duration_ = duration.value();
-      }
-    }
-
-    entry->retired_ = true;
-    entry->start_ = entry->end_ = nullptr;
   }
 
   std::string dump(
