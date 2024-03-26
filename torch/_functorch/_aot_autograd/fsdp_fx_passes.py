@@ -19,6 +19,17 @@ _view_ops = [
     torch.ops.aten.as_strided.default,
 ]
 
+# TODO(yf225): if user model has these existing ops without FSDP, how to accommodate them?
+must_not_appear_ops_after_fsdp_fx_passes = [
+    "torch.ops.aten.full.",
+    "torch.ops.aten.clone.",
+    "torch.ops.aten.slice_scatter.",
+    "torch.ops.aten.as_strided_scatter.",
+    "torch.ops.aten.foreach_copy.",
+    "torch.ops.aten.foreach_copy_.",
+    "torch.ops.aten.copy.",
+]
+
 
 def _input_is_used_in_view_ops(ops, inp_n):
     for n in ops:
@@ -344,16 +355,28 @@ def replace_foreach_all_gather_copy_out_pattern(mod):
 
 
 
-def undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(mod):
+def replace_foreach_all_gather_pattern(mod):
     """
     NOTE: replace this pattern in `foreach_all_gather()` in _fsdp_collectives.py:
     ```
+    all_gather_output = torch.empty(
+        (all_gather_input_numel * world_size,), dtype=dtype, device=device
+    )
+    all_gather_input = all_gather_output.narrow(
+        0, all_gather_input_numel * rank, all_gather_input_numel
+    )
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
         torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
     ```
     """
     """
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:47 in foreach_all_gather, code: all_gather_output = torch.empty(
+    empty: "f32[3047980]" = torch.ops.aten.empty.memory_format([3047980], dtype = torch.float32, device = device(type='cuda', index=1), pin_memory = False)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:50 in foreach_all_gather, code: all_gather_input = all_gather_output.narrow(
+    slice_1: "f32[1523990]" = torch.ops.aten.slice.Tensor(empty, 0, 1523990, 3047980)
+
     # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:53 in foreach_all_gather, code: foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [761378, 617, 761378, 617]);  slice_1 = None
     getitem: "f32[761378]" = split_with_sizes[0]
@@ -383,8 +406,14 @@ def undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(mod):
 
     ... (uses slice_10)
 
+    ... (another _foreach_copy op writing into [getitem, getitem_1, getitem_2, getitem_3], followed by a list of slice and slice_scatter ops, ends with slice_20 that is the same range as slice_1)
+
+    ... (uses slice_20)
+
     ->
 
+    empty: "f32[3047980]" = torch.ops.aten.empty.memory_format([3047980], dtype = torch.float32, device = device(type='cuda', index=1), pin_memory = False)
+    slice_1: "f32[1523990]" = torch.ops.aten.slice.Tensor(empty, 0, 1523990, 3047980)
     split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [761378, 617, 761378, 617]);  slice_1 = None
     getitem: "f32[761378]" = split_with_sizes[0]
     getitem_1: "f32[617]" = split_with_sizes[1]
@@ -395,42 +424,51 @@ def undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(mod):
     _foreach_copy = torch.ops.aten._foreach_copy_.default([getitem, getitem_1, getitem_2, getitem_3], [primals_2, primals_3, primals_4, primals_5]);  primals_2 = primals_3 = primals_4 = primals_5 = None
 
     ... (uses slice_1)
+
+    ... (another _foreach_copy op writing into [getitem, getitem_1, getitem_2, getitem_3])
+
+    ... (uses slice_1)
     """
     node_list = list(mod.graph.nodes)
     for i in range(len(node_list)):
         n = node_list[i]
         if (
-            n.target is torch.ops.aten.split_with_sizes.default \
-            and node_list[i+len(n.args[1])+1].target is torch.ops.aten._foreach_copy_.default
+            n.target is torch.ops.aten.empty.memory_format
+            and (node_list[i+1].target is torch.ops.aten.slice.Tensor and node_list[i+1].args[0] == n)
+            and (node_list[i+2].target is torch.ops.aten.split_with_sizes.default and node_list[i+2].args[0] == node_list[i+1])
         ):
-            split_with_sizes_node = n
-            # s -> ss -> ss -> s
+            slice_after_empty_node = node_list[i+1]
+            split_with_sizes_node_idx = i+2
+            split_with_sizes_node = node_list[split_with_sizes_node_idx]
             num_blocks = len(split_with_sizes_node.args[1])
-            if i + 2 + num_blocks * 4 >= len(node_list):  # each pattern block contains: split_with_sizes * 1 + _foreach_copy_ * 1 + (getitem + slice + slice_scatter + slice_scatter) * num_block + slice * 1
-                continue
-            getitem_start_index = i + 1
+            getitem_start_index = split_with_sizes_node_idx + 1
             if not all(
                 node.target is operator.getitem and node.args[0] == split_with_sizes_node
                 for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
             ):
                 continue
-            block_start_index = i+len(n.args[1])+2
-            if not all(
-                oc[0].target is torch.ops.aten.slice.Tensor \
-                and oc[1].target is torch.ops.aten.slice_scatter.default \
-                and oc[2].target is torch.ops.aten.slice_scatter.default \
-                for oc in _get_chunks(node_list[block_start_index:block_start_index+num_blocks*3], 3)
-            ):
-                continue
-            last_slice_start_index = block_start_index + num_blocks * 3
-            last_slice_node = node_list[last_slice_start_index]
-            assert last_slice_node.target is torch.ops.aten.slice.Tensor, f"Expected torch.ops.aten.slice.Tensor but got {last_slice_node.target}"
-            last_slice_node.replace_all_uses_with(split_with_sizes_node.args[0])
-            mod.graph.erase_node(last_slice_node)
-            for node in reversed(node_list[block_start_index:block_start_index+num_blocks*3]):
-                mod.graph.erase_node(node)
-            mod.graph.lint()
-            mod.recompile()
+            getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
+            for j in range(getitem_start_index + num_blocks, len(node_list)):
+                nj = node_list[j]
+                if nj.target is torch.ops.aten._foreach_copy_.default and all(arg == getitem_node for arg, getitem_node in zip(nj.args[0], getitem_nodes)):
+                    block_start_index = j+1
+                    if not all(
+                        oc[0].target is torch.ops.aten.slice.Tensor \
+                        and oc[1].target is torch.ops.aten.slice_scatter.default \
+                        and oc[2].target is torch.ops.aten.slice_scatter.default \
+                        for oc in _get_chunks(node_list[block_start_index:block_start_index+num_blocks*3], 3)
+                    ):
+                        continue
+                    last_slice_start_index = block_start_index + num_blocks * 3
+                    last_slice_node = node_list[last_slice_start_index]
+                    if not last_slice_node.target is torch.ops.aten.slice.Tensor or last_slice_node.args[1:] != slice_after_empty_node.args[1:]:
+                        continue
+                    last_slice_node.replace_all_uses_with(slice_after_empty_node)
+                    mod.graph.erase_node(last_slice_node)
+                    for node in reversed(node_list[block_start_index:block_start_index+num_blocks*3]):
+                        mod.graph.erase_node(node)
+    mod.graph.lint()
+    mod.recompile()
 
 
 def replace_inplace_foreach_copy_with_inplace_copy(mod):
@@ -560,7 +598,7 @@ def _collect_node_types_and_indices(mod):
     return node_type_to_node_set, node_to_node_index
 
 
-def replace_empty_then_slice_then_compute_then_foreach_copy_then_slice_scatter_pattern(mod):
+def replace_foreach_reduce_scatter_copy_in_pattern(mod):
     """
     NOTE: pattern from `foreach_reduce_scatter_copy_in`:
     ```
