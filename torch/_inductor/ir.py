@@ -6991,7 +6991,11 @@ def disable_register_buffer():
 
 
 def is_register_buffer_disabled() -> bool:
-    return disable_register_buffer_flag.value
+    return (
+        disable_register_buffer_flag.value
+        if hasattr(disable_register_buffer_flag, "value")
+        else False
+    )
 
 
 class StorageBox(MutableBox):
