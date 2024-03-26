@@ -4,6 +4,7 @@ import weakref
 from typing import Dict, List
 
 import torch
+from torch.utils._pytree import tree_map_only
 
 from ..exc import unimplemented, Unsupported
 
@@ -150,6 +151,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return new_args, new_kwargs
 
     def map_sources_and_install_guards(self, tx):
+        from ..decorators import mark_static_address
+        from .builder import VariableBuilder
+        from .lazy import LazyVariableTracker
+
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
@@ -158,16 +163,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # guards. We also want to mark all the tensors inside the state dict to
         # be static address.
 
-        # Mark all the tensors in the state dict to be static address.
-        from ..decorators import mark_static_address
-        from .builder import VariableBuilder
-        from .lazy import LazyVariableTracker
+        # Mark all the tensors in the state dict to be static address. This has
+        # to be done first because the variable builder relies on the static
+        # address annotation.
+        def mark_static(x):
+            mark_static_address(x, guard=False)
 
-        for param, value in self.value.state.items():
-            mark_static_address(param, guard=False)
-            for hyper_param in value.values():
-                if isinstance(hyper_param, torch.Tensor):
-                    mark_static_address(hyper_param, guard=False)
+        tree_map_only(torch.Tensor, mark_static, self.value.state)
 
         # Recursively realize the variable trackers for optim.state and
         # optim.param_groups, which recursively install the necessary guards.
