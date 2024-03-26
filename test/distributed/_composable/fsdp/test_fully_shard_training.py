@@ -675,7 +675,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         offload_policy: OffloadPolicy,
         recurse: bool,
     ):
-        if offload_policy.offload_type == "cpu" and reshard_after_forward is not True:
+        if (
+            isinstance(offload_policy, CPUOffloadPolicy)
+            and reshard_after_forward is not True
+        ):
             return  # save CI time
         torch.manual_seed(42)
         local_batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
