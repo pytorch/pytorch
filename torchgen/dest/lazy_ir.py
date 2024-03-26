@@ -16,6 +16,7 @@ from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
+    ConstRefCType,
     deviceT,
     DispatcherSignature,
     kernel_signature,
@@ -242,10 +243,11 @@ class GenLazyIR(ABC):
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         all_args = schema.filtered_args()
-        value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
-        ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
+        ctor_args = [
+            f"{ConstRefCType(i.lazy_type).cpp_type()} {i.name}" for i in all_args
+        ]
         reuse_ctor_args = ", ".join(ctor_args)
         if self.use_lazy_shape and schema.properties.ShapePrecompute:
             ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
@@ -672,7 +674,6 @@ class GenLazyShapeInferenceDefinition:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> List[str]:
-        sig = kernel_signature(f, self.backend_index)
         metadata = self.backend_index.get_kernel(f)
         assert metadata is not None
 
