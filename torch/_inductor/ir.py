@@ -6784,7 +6784,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         self.cpp_kernel_overload_name = (
             "binary_tensor" if x_scale_zp_are_tensors else "binary"
         )
-        self.cpp_kernel_key = "qlinear_pointwise"
+        self.cpp_kernel_key = "qlinear_pointwise_binary"
         x_scale_type_str, x_zp_type_str = (
             ("at::Tensor", "at::Tensor")
             if x_scale_zp_are_tensors
