@@ -413,19 +413,26 @@ def jagged_from_tensor_and_lengths(
 # for _nested_view_from_values_offsets(). Sizes don't matter much, but they shouldn't be
 # 0/1 because the dummy can be fake-ified and we want to avoid specializing.
 # This arg is otherwise unused.
-_nt_view_dummy = NestedTensor(
-    values=torch.randn(3, 3, device="meta"),
-    offsets=torch.randint(3, (2,), device="meta", dtype=torch.int64),
-).detach()
+_dummy_instance: Optional[torch.Tensor] = None
+
+
+def _nt_view_dummy() -> torch.Tensor:
+    global _dummy_instance
+    if _dummy_instance is None:
+        _dummy_instance = NestedTensor(
+            values=torch.randn(3, 3, device="meta"),
+            offsets=torch.randint(3, (2,), device="meta", dtype=torch.int64),
+        ).detach()
+    return _dummy_instance
 
 
 def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
     return torch._nested_view_from_jagged(
-        values, offsets, _nt_view_dummy, None, ragged_idx
+        values, offsets, _nt_view_dummy(), None, ragged_idx
     )  # type: ignore[return-value]
 
 
 def nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=1):
     return torch._nested_view_from_jagged(
-        values, offsets, _nt_view_dummy, lengths, ragged_idx
+        values, offsets, _nt_view_dummy(), lengths, ragged_idx
     )  # type: ignore[return-value]
