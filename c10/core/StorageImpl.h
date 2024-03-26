@@ -16,6 +16,8 @@
 
 namespace c10 {
 
+C10_API void throwNullDataPtrError();
+
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
 // codebase; we'd kind of like to get rid of the concept
@@ -119,9 +121,19 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   }
 
-  const at::DataPtr& data_ptr() const;
+  const at::DataPtr& data_ptr() const {
+    return data_ptr_;
+  }
 
-  at::DataPtr& mutable_data_ptr();
+  at::DataPtr& mutable_data_ptr() {
+    if (C10_UNLIKELY(has_data_ptr_check_)) {
+      if (throw_on_mutable_data_ptr_) {
+        throwNullDataPtrError();
+      }
+      maybe_materialize_cow();
+    }
+    return data_ptr_;
+  }
 
   // Returns the data_ptr. Bypasses all checks.
   at::DataPtr& _mutable_data_ptr_no_checks() {
@@ -141,9 +153,19 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     refresh_has_data_ptr_check();
   }
 
-  const void* data() const;
+  const void* data() const {
+    return data_ptr_.get();
+  }
 
-  void* mutable_data();
+  void* mutable_data() {
+    if (C10_UNLIKELY(has_data_ptr_check_)) {
+      if (throw_on_mutable_data_ptr_) {
+        throwNullDataPtrError();
+      }
+      maybe_materialize_cow();
+    }
+    return data_ptr_.mutable_get();
+  }
 
   at::DeviceType device_type() const {
     return data_ptr_.device().type();
@@ -289,7 +311,5 @@ C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     c10::Allocator* allocator,
     bool resizable,
     c10::optional<at::Device> device_opt);
-
-C10_API void throwNullDataPtrError();
 
 } // namespace c10
