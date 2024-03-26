@@ -673,6 +673,13 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 def record_compilation_metrics(compilation_metrics: CompilationMetrics):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
+    torch._logging.trace_structured(
+        "compilation_metrics",
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
 
