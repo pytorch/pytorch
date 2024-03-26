@@ -2726,7 +2726,7 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Shares the same storage as another tensor"""
+    """Is a view into the storage of another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -3234,6 +3234,7 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
+    @cache_on_self
     def get_default_sizes_body(self):
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
@@ -7604,11 +7605,11 @@ class Wait(ExternKernelAlloc):
 
     def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
     def get_mutation_names(self):
         # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
 
 class CollectiveKernel(ExternKernel):
