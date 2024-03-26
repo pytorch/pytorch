@@ -33,7 +33,7 @@ class TestBwdGradients(TestGradients):
     #     self._skip_helper(op, device, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
-    @_gradcheck_ops(op_db + hop_db + custom_op_db)
+    @_gradcheck_ops(op_db + custom_op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant:

@@ -452,8 +452,22 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        out = do_bench(fn)
-        torch.cuda.synchronize()  # shake out any CUDA errors
+        device_idx_set = {
+            tensor.device.index
+            for tensor in [*input_tensors, output_tensor]
+            if isinstance(tensor, torch.Tensor)
+            and tensor.is_cuda
+            and tensor.device.index is not None
+        }
+        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
+        if len(device_idx_set) == 1:
+            device_idx = next(iter(device_idx_set))
+        else:
+            device_idx = torch.cuda.current_device()
+
+        with torch.cuda.device(device_idx):
+            out = do_bench(fn)
+            torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -541,7 +555,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 grid=self.grid,
                 **warmup_arg,
                 stream=get_raw_stream(self.output_tensor_meta.device.index),
-                matrix_instr_nonkdim=self.matrix_instr_nonkdim,
             )
         else:
             return functools.partial(

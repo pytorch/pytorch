@@ -2028,10 +2028,11 @@ def skipIfNameMatches(pattern):
         return wrapper
     return decorator
 
+# Auto functionalize shouldn't work with make_fx directly
+filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 class TestProxyTensorOpInfo(TestCase):
-    @skipIfNameMatches("auto_functionalize")
-    @ops(op_db + hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
