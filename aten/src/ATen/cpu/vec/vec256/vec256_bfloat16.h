@@ -1025,7 +1025,6 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 }
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_VECTORIZED_INIT(Half, half);
-
 #else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
@@ -1049,7 +1048,35 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   return Vectorized<type>::loadu(arr2); \
 }
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
+  constexpr int64_t K = Vectorized<Half>::size();
+  __at_align__ float16_t arr2[K];
+  a.store(arr2);
+  float16x8_t x = vld1q_f16(arr2);
+  float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
+  float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
+  float16x8_t y = vld1q_f16(arr2 + Vectorized<float>::size());
+  float32x4_t y1 = vcvt_f32_f16(vget_low_f16(y));
+  float32x4_t y2 = vcvt_f32_f16(vget_high_f16(y));
+  return { Vectorized<float>(x1, x2), Vectorized<float>(y1, y2) };
+}
+inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vectorized<float>& b) {
+  constexpr int64_t K = Vectorized<Half>::size();
+  __at_align__ float16_t arr2[K];
+  float32x4x2_t x = a;
+  float32x4x2_t y = b;
+  float16x4_t x1 = vcvt_f16_f32(x.val[0]);
+  float16x4_t x2 = vcvt_f16_f32(x.val[1]);
+  float16x4_t y1 = vcvt_f16_f32(y.val[0]);
+  float16x4_t y2 = vcvt_f16_f32(y.val[1]);
+  vst1q_f16(arr2, vcombine_f16(x1, x2));
+  vst1q_f16(arr2 + Vectorized<float>::size(), vcombine_f16(y1, y2));
+  return Vectorized<Half>::loadu(arr2);
+}
+#else
 CONVERT_NON_VECTORIZED_INIT(Half, half);
+#endif
 
 #endif // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
