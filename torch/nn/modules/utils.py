@@ -1,8 +1,10 @@
 import collections
 from itertools import repeat
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-__all__ = ['consume_prefix_in_state_dict_if_present']
+from .module import Module
+
+__all__ = ["consume_prefix_in_state_dict_if_present"]
 
 
 def _ntuple(n, name="parse"):
@@ -77,3 +79,16 @@ def consume_prefix_in_state_dict_if_present(
             if key == prefix.replace('.', '') or key.startswith(prefix):
                 newkey = key[len(prefix) :]
                 state_dict._metadata[newkey] = state_dict._metadata.pop(key)
+
+
+def _set_module_training_mode(module: Module, mode: bool):
+    import torch
+    if torch.ao.quantization.pt2e.export_utils.model_is_exported(module):
+        if mode:
+            module = torch.ao.quantization.move_exported_model_to_train(module)
+        else:
+            module = torch.ao.quantization.move_exported_model_to_eval(module)
+    else:
+        module.train(mode)
+
+    return module

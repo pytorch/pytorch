@@ -2422,7 +2422,8 @@ class Module:
             raise ValueError("training mode is expected to be boolean")
         self.training = mode
         for module in self.children():
-            module.train(mode)
+            module = torch.nn.modules.utils._set_module_training_mode(module, mode)
+
         return self
 
     def eval(self: T) -> T:
