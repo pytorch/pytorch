@@ -849,7 +849,8 @@ def min_cut_rematerialization_partition(
     banned_nodes = set()
 
     def ban_recomputation_if_allowed(node):
-        if "recompute" in node.meta:
+        # NB: "recompute" == 0 means it's not banned from recomputing
+        if node.meta.get("recompute", 0) > 0:
             return False
         banned_nodes.add(node)
         # A node will only ever be recomputed if there is a path from an
