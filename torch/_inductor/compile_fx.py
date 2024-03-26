@@ -112,6 +112,8 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
         indices = list(range(len(strides)))
         indices = [x for _, x in sorted(zip(strides, indices))]
         for i in range(len(strides)):
+            if sizes[i] <= 1:
+                continue
             prev_stride = 1 if i == 0 else strides[indices[i - 1]]
             prev_size = 1 if i == 0 else sizes[indices[i - 1]]
             if strides[indices[i]] < prev_stride * prev_size:
