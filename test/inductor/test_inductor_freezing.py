@@ -591,7 +591,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return (out1, out2, out3)
 
         func = Model().to(device).eval()
-        x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]).cuda()
+        x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=device)
 
         with torch.no_grad():
             out_eager = func(x.clone())
