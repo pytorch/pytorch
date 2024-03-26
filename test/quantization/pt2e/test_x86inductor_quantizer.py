@@ -50,12 +50,14 @@ class TestHelperModules:
             self.post_op = post_op
             self.bn = torch.nn.BatchNorm2d(6)
             self.with_bn = with_bn
+            self.maxpool = torch.nn.MaxPool2d((3, 3))
 
         def forward(self, x):
             x = self.conv(x)
             if self.with_bn:
                 x = self.bn(x)
             x = self.post_op(x)
+            x = self.maxpool(x)
             return x
 
     class Conv2dAddModule(torch.nn.Module):
@@ -390,7 +392,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
             "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
             "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
-            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default],
+            "swish": [torch.nn.SiLU(inplace=False), torch.ops.aten.silu.default],
+            "swish_inplace": [torch.nn.SiLU(inplace=True), torch.ops.aten.silu_.default],
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
@@ -402,8 +406,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     # one for input and weight of the conv
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                     # note: quantize op for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -1104,7 +1108,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
             "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
             "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
-            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default],
+            "swish": [torch.nn.SiLU(inplace=False), torch.ops.aten.silu.default],
+            "swish_inplace": [torch.nn.SiLU(inplace=True), torch.ops.aten.silu_.default],
         }
 
         with override_quantized_engine("x86"):
@@ -1116,8 +1122,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     # one for input and weight of the conv, one for output for the relu
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                     # note: quantize op for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
