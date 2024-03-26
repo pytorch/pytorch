@@ -615,6 +615,46 @@ class TestUnflatten(TestCase):
 
         torch.export.unflatten(ep)
 
+    def test_unflatten_submodule_ordering(self):
+        class Module2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.rand(3, 4))
+                self.register_parameter("param", torch.nn.Parameter(torch.rand(3, 4)))
+
+            def forward(self, x):
+                return x + self.buffer + self.param
+
+        class Module1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.rand(3, 4))
+                self.register_parameter("param", torch.nn.Parameter(torch.rand(3, 4)))
+
+            def forward(self, x):
+                return x + self.buffer + self.param
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod2 = Module2()
+                self.mod3 = self.mod2
+                self.mod1 = Module1()
+
+            def forward(self, x):
+                return self.mod3(self.mod2(self.mod1(x)))
+
+        mod = Module()
+
+        ep = torch.export.export(mod, (torch.randn(3, 4),))
+
+        unflattened = torch.export.unflatten(ep)
+        fqn_list = [x for x, _ in unflattened.named_modules(remove_duplicate=False)]
+        self.assertEqual(len(fqn_list), 4)
+        self.assertEqual(
+            [x for x, _ in mod.named_modules(remove_duplicate=False)],
+            fqn_list,
+        )
 
 if __name__ == "__main__":
     run_tests()
