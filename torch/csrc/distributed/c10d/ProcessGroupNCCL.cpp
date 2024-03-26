@@ -2516,6 +2516,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    coalescedComm_ = ncclComm;
+  }
+
   // Used many times below, so we stash the unordered_map lookup
   auto ncclStream = ncclStreams_.at(key);
 
