@@ -236,10 +236,16 @@ if RUN_CUDA:
         #     device=None,
         #     tests=test_select_algorithm.TestSelectAlgorithm(),
         # ),
-        BaseTest(
-            "test_mm_plus_mm2",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
+        # TODO: Re-enable this test after fixing cpp wrapper for mm_plus_mm2.
+        # This test is unstable: it succeeds when an Triton kernel is used, and fails when a Aten kernel is used.
+        # The current state is that it's unstable, depending on the autotune result.
+        # The failing code generates aoti_torch_cuda__mm_plus_mm (likely some bug when generating ExternKernel)
+        # More information check:
+        # https://hud.pytorch.org/pytorch/pytorch/commit/b6982bf2b25d2d3ba5d82488a39721d6013a838f?fbclid=IwAR23OCV2rCALsGQk6kmkOqT8DfgQedYDt_Gs2R-t9ejSJNjRskkS1rzncDE
+        # BaseTest(
+        #     "test_mm_plus_mm2",
+        #     tests=test_select_algorithm.TestSelectAlgorithm(),
+        # ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
     ]:
