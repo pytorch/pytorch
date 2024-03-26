@@ -1,7 +1,7 @@
 """
 TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_train_parity_single_group >test_output1.txt 2>&1
 
-TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_train_parity_multi_group_compile_trace_through_fsdp >test_output1.txt 2>&1
+TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_train_parity_multi_group_full_graph_compile >test_output1.txt 2>&1
 
 TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_multi_forward_module >test_output1.txt 2>&1
 
@@ -15,7 +15,7 @@ import copy
 import functools
 import unittest
 import logging
-from typing import Iterable, List, Tuple, Union
+from typing import Dict, Iterable, List, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -48,7 +48,7 @@ from torch.testing._internal.common_fsdp import (
     MLP,
     patch_all_gather,
     patch_reduce_scatter,
-    test_compiled_fsdp,
+    test_graph_break_fsdp,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -63,9 +63,40 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch._dynamo import compiled_autograd
 from torch.testing._internal.common_distributed import _dynamo_dist_per_rank_init
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+from torch.testing._internal.logging_utils import logs_to_string
+from torch._functorch._aot_autograd.fsdp_fx_passes import must_not_appear_ops_after_fsdp_fx_passes
 
 
 torch_log = logging.getLogger("torch")
+
+def prepare_capture_post_grad_graph_from_log():
+    log_stream, ctx = logs_to_string(
+        "torch._inductor.compile_fx", "post_grad_graphs"
+    )
+    return log_stream, ctx
+
+def extract_graph_str(log_stream):
+    lines = log_stream.getvalue().strip().split("\n")[3:]
+    return "\n".join(lines).strip()
+
+def remove_comments_from_graph_str(graph_str):
+    lines = graph_str.split("\n")
+    return "\n".join([line for line in lines if not line.strip().startswith("#")]).strip()
+
+def check_expected_ops_in_graphs(unittest, log_stream_for_fwd_graph, log_stream_for_bwd_graph, compile_expected_ops, compile_expected_ops_count):
+    post_grad_fwd_graph_str = extract_graph_str(log_stream_for_fwd_graph)
+    post_grad_bwd_graph_str = extract_graph_str(log_stream_for_bwd_graph)
+    post_grad_fwd_graph_str_no_comment = remove_comments_from_graph_str(post_grad_fwd_graph_str)
+    post_grad_bwd_graph_str_no_comment = remove_comments_from_graph_str(post_grad_bwd_graph_str)
+    for op_str in must_not_appear_ops_after_fsdp_fx_passes:
+        unittest.assertEqual(post_grad_fwd_graph_str_no_comment.count(op_str), 0, msg=f"'{op_str}' should not appear in graph. Graph: {post_grad_fwd_graph_str}")
+        unittest.assertEqual(post_grad_bwd_graph_str_no_comment.count(op_str), 0, msg=f"'{op_str}' should not appear in graph. Graph: {post_grad_bwd_graph_str}")
+    for op_str, expected_count_fwd, expected_count_bwd in zip(compile_expected_ops, compile_expected_ops_count[0], compile_expected_ops_count[1]):
+        count_fwd = post_grad_fwd_graph_str_no_comment.count(op_str)
+        count_bwd = post_grad_bwd_graph_str_no_comment.count(op_str)
+        unittest.assertEqual(count_fwd, expected_count_fwd, msg=f"'{op_str}' should appear {expected_count_fwd} times in graph, but it appears {count_fwd} times. Graph: {post_grad_fwd_graph_str}")
+        unittest.assertEqual(count_bwd, expected_count_bwd, msg=f"'{op_str}' should appear {expected_count_bwd} times in graph, but it appears {count_bwd} times. Graph: {post_grad_bwd_graph_str}")
+
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
     @property
@@ -73,7 +104,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @test_compiled_fsdp()
+    @test_graph_break_fsdp()
     def test_root_move_forward_input_to_device(self):
         device = torch.device("cuda", 0)
 
@@ -252,19 +283,32 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
+    @test_graph_break_fsdp()
     def test_train_parity_single_group(self):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
             {
-                "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
-                "test_compile": [True, True],
+                "lin_shapes_dict": [{0: [(16, 15), (15, 8)]}, {1: [(7, 15), (15, 3)]}],
+                "compile_expected_ops": [[
+                    "torch.ops.aten.empty.",
+                    "torch.ops.aten.copy_.",
+                    "torch.ops._c10d_functional.all_gather_into_tensor.",
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.",
+                ]],
+                "compile_expected_ops_count_dict": [{
+                    0: ([1, 4, 1, 0], [3, 6, 1, 1]),
+                    1: ([1, 4, 1, 0], [5, 8, 1, 1]),
+                }],
             },
             self._test_train_parity_single_group,
         )
 
-    def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]], test_compile=False):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=test_compile):
+    def _test_train_parity_single_group(self, lin_shapes_dict: Dict[int, List[Tuple[int, int]]], compile_expected_ops: List[str]=None, compile_expected_ops_count_dict: Dict[int, Tuple[List[int], List[int]]]=None):
+        full_graph_compile = True
+        test_case_id = list(lin_shapes_dict.keys())[0]
+        lin_shapes = list(lin_shapes_dict.values())[0]
+        compile_expected_ops_count = compile_expected_ops_count_dict[test_case_id]
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=full_graph_compile):
             torch.manual_seed(42)
             model = nn.Sequential(
                 nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
@@ -280,7 +324,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             torch.manual_seed(42 + self.rank + 1)
             inp = (torch.randn((4, lin_shapes[0][0]), device="cuda"),)
 
-            if test_compile:
+            if full_graph_compile:
+                # NOTE(yf225): we can't use the `post_grad_custom_post_pass` hook for checking graph, because the hook runs before the FSDP FX passes.
+                log_stream_for_fwd_graph, ctx_for_fwd_graph = prepare_capture_post_grad_graph_from_log()
+                log_stream_for_bwd_graph, ctx_for_bwd_graph = prepare_capture_post_grad_graph_from_log()
                 def compiler_fn(gm):
                     return torch.compile(gm, backend="inductor", fullgraph=True)
                 torch._dynamo.config.trace_distributed = True
@@ -290,7 +337,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
             def get_compiled_model_and_optim(iter_idx):
-                if not test_compile:
+                if not full_graph_compile:
                     return None, None, False
                 if iter_idx > 0:
                     compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
@@ -303,19 +350,25 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
                     if _model is None:
                         continue
-                    # TODO(yf225): under compile, if we set `set_to_none=False`, compile numerical result is not correct. We need to fix it.
-                    _optim.zero_grad(iter_idx % 2 == 0 if not _is_compile else True)
+                    # TODO(yf225): under compile, if we set `set_to_none=False`, compile numerical result is not correct in some cases. We need to fix it.
+                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0) if not _is_compile else True)
                     if _is_compile:
                         ctx = compiled_autograd.enable(compiler_fn)
                     else:
                         ctx = contextlib.nullcontext()
                     with ctx:
-                        loss = _model(*inp).sum()
+                        # Assume compilation process to happen only on iter_idx=1
+                        with (ctx_for_fwd_graph() if _is_compile and iter_idx == 1 else contextlib.nullcontext()):
+                            loss = _model(*inp).sum()
                         losses.append(loss.item())
-                        loss.backward()
+                        with (ctx_for_bwd_graph() if _is_compile and iter_idx == 1 else contextlib.nullcontext()):
+                            loss.backward()
                     _optim.step()
                 losses_tensors = [torch.tensor(x) for x in losses]
                 self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
+
+            if full_graph_compile:
+                check_expected_ops_in_graphs(self, log_stream_for_fwd_graph, log_stream_for_bwd_graph, compile_expected_ops, compile_expected_ops_count)
 
     @skip_if_lt_x_gpu(2)
     def test_train_parity_multi_group_eager(self):
@@ -337,8 +390,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
-    def test_train_parity_multi_group_compile(self):
+    @test_graph_break_fsdp()
+    def test_train_parity_multi_group_graph_break_compile(self):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False],
@@ -352,9 +405,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_multi_group_compile_trace_through_fsdp(self):
-        # TODO(yf225): rename this test and `test_train_parity_multi_group_compile`
-        # to differentiate between "trace_through_fsdp" and "graph-break fsdp".
+    def test_train_parity_multi_group_full_graph_compile(self):
         self.run_subtests(
             {
                 "reshard_after_forward": [True],
@@ -363,7 +414,16 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_all_gather": [False],
                 "delay_before_reduce_scatter": [False],
                 "delay_before_optim": [False, True],
-                "trace_through_fsdp": [True],
+                "full_graph_compile": [True],
+                "compile_expected_ops": [[
+                    "torch.ops.aten.empty.",
+                    "torch.ops.aten.copy_.",
+                    "torch.ops._c10d_functional.all_gather_into_tensor.",
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.",
+                ]],
+                "compile_expected_ops_count": [
+                    ([1, 12, 3, 0], [3, 12, 3, 3]),
+                ],
             },
             self._test_train_parity_multi_group,
         )
@@ -376,7 +436,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
         delay_before_optim: bool,
-        trace_through_fsdp: bool=False,
+        full_graph_compile: bool=False,
+        compile_expected_ops: List[str]=None,
+        compile_expected_ops_count: Tuple[List[int], List[int]]=None,
     ):
         # Only test individual delays or all four delays to save test time
         if (
@@ -387,7 +449,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=trace_through_fsdp):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=full_graph_compile):
             assert device_type in ("cuda", "cpu"), f"{device_type}"
             torch.manual_seed(42)
             lin_dim = 32
@@ -402,11 +464,14 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             mesh = init_device_mesh(device_type, (self.world_size,))
             model_for_eager = copy.deepcopy(model)
             for mlp in model_for_eager:
-                fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward, _reshard_after_forward_root=reshard_after_forward if trace_through_fsdp else False)
-            fully_shard(model_for_eager, mesh=mesh, reshard_after_forward=reshard_after_forward, _reshard_after_forward_root=reshard_after_forward if trace_through_fsdp else False)
+                fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward, _reshard_after_forward_root=reshard_after_forward if full_graph_compile else False)
+            fully_shard(model_for_eager, mesh=mesh, reshard_after_forward=reshard_after_forward, _reshard_after_forward_root=reshard_after_forward if full_graph_compile else False)
             optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
 
-            if trace_through_fsdp:
+            if full_graph_compile:
+                # NOTE(yf225): we can't use the `post_grad_custom_post_pass` hook for checking graph, because the hook runs before the FSDP FX passes.
+                log_stream_for_fwd_graph, ctx_for_fwd_graph = prepare_capture_post_grad_graph_from_log()
+                log_stream_for_bwd_graph, ctx_for_bwd_graph = prepare_capture_post_grad_graph_from_log()
                 def compiler_fn(gm):
                     return torch.compile(gm, backend="inductor", fullgraph=True)
                 torch._dynamo.config.trace_distributed = True
@@ -418,7 +483,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
             def get_compiled_model_and_optim(iter_idx):
-                if not trace_through_fsdp:
+                if not full_graph_compile:
                     return None, None, False
                 if iter_idx > 0:
                     compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
@@ -456,25 +521,31 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
                         if _model is None:
                             continue
-                        _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                        # TODO(yf225): under compile, if we set `set_to_none=False`, compile numerical result is not correct in some cases. We need to fix it.
+                        _optim.zero_grad(set_to_none=(iter_idx % 2 == 0) if not _is_compile else True)
                         if _is_compile:
                             ctx = compiled_autograd.enable(compiler_fn)
                         else:
                             ctx = contextlib.nullcontext()
                         with ctx:
-                            loss = _model(inp).sum()
+                            # Assume compilation process to happen only on iter_idx=1
+                            with (ctx_for_fwd_graph() if _is_compile and iter_idx == 1 else contextlib.nullcontext()):
+                                loss = _model(inp).sum()
                             losses.append(loss.item())
                             if _model is model_for_eager and delay_after_forward:
                                 torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
-                            loss.backward()
+                            with (ctx_for_bwd_graph() if _is_compile and iter_idx == 1 else contextlib.nullcontext()):
+                                loss.backward()
                         if _model is model_for_eager and delay_before_optim:
                             torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
                         _optim.step()
                     losses_tensors = [torch.tensor(x) for x in losses]
                     self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
 
+                check_expected_ops_in_graphs(self, log_stream_for_fwd_graph, log_stream_for_bwd_graph, compile_expected_ops, compile_expected_ops_count)
+
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
+    @test_graph_break_fsdp()
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -521,7 +592,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
+    @test_graph_break_fsdp()
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
@@ -529,15 +600,24 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """
         self.run_subtests(
             {
-                # "reshard_after_forward": [True, False, 2],
-                # "test_compile": [True, False, False],
-                "reshard_after_forward": [True],
-                "test_compile": [True],
+                "reshard_after_forward": [True, False, 2],
+                "compile_expected_ops": [[
+                    "torch.ops.aten.empty.",
+                    "torch.ops.aten.copy_.",
+                    "torch.ops._c10d_functional.all_gather_into_tensor.",
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.",
+                ]],
+                "compile_expected_ops_count": [
+                    ([2, 4, 2, 0], [3, 4, 1, 2]),
+                ],
             },
             self._test_multi_forward_module,
         )
 
-    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int], test_compile: bool):
+    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int], compile_expected_ops: List[str]=None, compile_expected_ops_count: Tuple[List[int], List[int]]=None):
+        full_graph_compile = False
+        if reshard_after_forward is True:
+            full_graph_compile = True
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):
                 super().__init__()
@@ -549,7 +629,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 j = self.inner(x)
                 return self.outer(i + j)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=test_compile):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size, init_pg=False, enabled=full_graph_compile):
             torch.manual_seed(42)
             model = MultiForwardModule(device="cuda")
             ref_model = copy.deepcopy(model)
@@ -560,7 +640,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             fully_shard(model_for_eager)
             optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
 
-            if test_compile:
+            if full_graph_compile:
+                # NOTE(yf225): we can't use the `post_grad_custom_post_pass` hook for checking graph, because the hook runs before the FSDP FX passes.
+                log_stream_for_fwd_graph, ctx_for_fwd_graph = prepare_capture_post_grad_graph_from_log()
+                log_stream_for_bwd_graph, ctx_for_bwd_graph = prepare_capture_post_grad_graph_from_log()
                 def compiler_fn(gm):
                     return torch.compile(gm, backend="inductor", fullgraph=True)
                 torch._dynamo.config.trace_distributed = True
@@ -571,7 +654,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
             def get_compiled_model_and_optim(iter_idx):
-                if not test_compile:
+                if not full_graph_compile:
                     return None, None, False
                 if iter_idx > 0:
                     compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
@@ -586,18 +669,25 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
                     if _model is None:
                         continue
-                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                    # TODO(yf225): under compile, if we set `set_to_none=False`, compile numerical result is not correct in some cases. We need to fix it.
+                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0) if not _is_compile else True)
                     if _is_compile:
                         ctx = compiled_autograd.enable(compiler_fn)
                     else:
                         ctx = contextlib.nullcontext()
                     with ctx:
-                        loss = _model(inp).sum()
+                        # Assume compilation process to happen only on iter_idx=1
+                        with (ctx_for_fwd_graph() if _is_compile and iter_idx == 1 else contextlib.nullcontext()):
+                            loss = _model(inp).sum()
                         losses.append(loss.item())
-                        loss.backward()
+                        with (ctx_for_bwd_graph() if _is_compile and iter_idx == 1 else contextlib.nullcontext()):
+                            loss.backward()
                     _optim.step()
                 losses_tensors = [torch.tensor(x) for x in losses]
                 self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
+
+            if full_graph_compile:
+                check_expected_ops_in_graphs(self, log_stream_for_fwd_graph, log_stream_for_bwd_graph, compile_expected_ops, compile_expected_ops_count)
 
 
 class TestFullyShard1DTrainingCompose(FSDPTest):
@@ -694,7 +784,7 @@ class TestFullyShardSharedParams(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=TransformerBlock)
+    @test_graph_break_fsdp(compile_compute_on_module=TransformerBlock)
     def test_train_parity_with_shared_params_no_ac(self):
         self.run_subtests(
             {
@@ -867,7 +957,7 @@ class TestFullyShard2DTraining(FSDPTest):
                 "reshard_after_forward": [True],
                 "use_activation_checkpointing": [False],
                 "mlp_dim": [3, 16, 17],
-                "test_compile": [True],
+                "full_graph_compile": [True],
             },
             functools.partial(self._test_train_parity_2d_mlp, global_mesh),
         )
@@ -878,7 +968,7 @@ class TestFullyShard2DTraining(FSDPTest):
         reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
-        test_compile: bool,
+        full_graph_compile: bool,
     ):
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         dp_pg = dp_mesh.get_group()  # used for `replicate()`
@@ -918,7 +1008,7 @@ class TestFullyShard2DTraining(FSDPTest):
         fully_shard(model_for_eager, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
         optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
 
-        if test_compile:
+        if full_graph_compile:
             def compiler_fn(gm):
                 return torch.compile(gm, backend="inductor", fullgraph=True)
             model_to_be_compiled = copy.deepcopy(model).cuda()
@@ -945,7 +1035,7 @@ class TestFullyShard2DTraining(FSDPTest):
             optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
         def get_compiled_model_and_optim(iter_idx):
-            if not test_compile:
+            if not full_graph_compile:
                 return None, None, False
             if iter_idx > 0:
                 compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
