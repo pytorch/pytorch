@@ -2267,11 +2267,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   TORCH_CHECK(
       coalescedComm_ != nullptr,
       "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
+
+  // `coalescedComm_` should have same set of comms across collectives
+  auto comm = coalescedComm_;
+  // `coalescedDevice_` should have same set of devices across collectives
   auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
-  auto comm = coalescedComm_;
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
@@ -2354,11 +2357,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     coalescing_state_ |= CoalColl;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
-      coalescedComm_ = ncclComm;
     } else {
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
     }
+    coalescedComm_ = ncclComm;
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2722,11 +2725,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     coalescing_state_ |= CoalP2P;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
-      coalescedComm_ = ncclComm;
     } else {
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
     }
+    coalescedComm_ = ncclComm;
   }
 
   // Used many times below, so we stash the unordered_map lookup
