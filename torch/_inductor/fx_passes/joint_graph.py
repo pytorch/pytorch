@@ -1,7 +1,7 @@
 import logging
 import typing
 from collections import Counter
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Union
 
 import torch
 import torch._guards
@@ -37,11 +37,17 @@ def lazy_init():
 
 @torch.utils._python_dispatch._disable_current_modes()
 def remove_no_ops(
-    gm: torch.fx.GraphModule, zeros: Set[torch.fx.Node], ones: Set[torch.fx.Node]
+    gm: torch.fx.GraphModule,
+    zeros: Set[Union[torch.fx.Node, int]],
+    ones: Set[Union[torch.fx.Node, int]],
 ):
     "Removes no-ops: (+ 0, - 0, * 1, / 1)"
     aten = torch.ops.aten
     graph = gm.graph
+
+    # Add python builtins 0 and 1 to be able to remove from the graph the following ops: x * 1 + 0 -> x
+    zeros.add(0)
+    ones.add(1)
 
     def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
         if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
@@ -57,7 +63,9 @@ def remove_no_ops(
         # https://github.com/pytorch/pytorch/issues/86128 causes
         # non-Tensor inputs even for ops with only Tensor inputs.
         # TODO - decompose/type promote to avoid this
-        if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+        if not isinstance(replacement, torch.fx.Node):
+            return
+        if not all(isinstance(arg, (torch.fx.Node, int, float)) for arg in node.args):
             return
 
         if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
@@ -253,7 +261,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 torch._check(runtime_size == compile_time_size)
 
-            # zeros, and ones just get traced into full, so we insert those
+            # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
                 args=(node_replacements_shapes[node], value),
