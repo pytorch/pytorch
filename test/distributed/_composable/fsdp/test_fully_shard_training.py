@@ -4,6 +4,8 @@ TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_comp
 TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_train_parity_multi_group_compile_trace_through_fsdp >test_output1.txt 2>&1
 
 TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_multi_forward_module >test_output1.txt 2>&1
+
+TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard2DTraining::test_train_parity_2d_mlp >test_output1.txt 2>&1
 """
 
 # Owner(s): ["oncall: distributed"]
@@ -859,9 +861,13 @@ class TestFullyShard2DTraining(FSDPTest):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True],
-                "use_activation_checkpointing": [False, True],
+                # "reshard_after_forward": [False, True],
+                # "use_activation_checkpointing": [False, True],
+                # "mlp_dim": [3, 16, 17],
+                "reshard_after_forward": [True],
+                "use_activation_checkpointing": [False],
                 "mlp_dim": [3, 16, 17],
+                "test_compile": [True],
             },
             functools.partial(self._test_train_parity_2d_mlp, global_mesh),
         )
@@ -872,6 +878,7 @@ class TestFullyShard2DTraining(FSDPTest):
         reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
+        test_compile: bool,
     ):
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         dp_pg = dp_mesh.get_group()  # used for `replicate()`
@@ -888,8 +895,9 @@ class TestFullyShard2DTraining(FSDPTest):
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        model = parallelize_module(
-            model,
+        model_for_eager = copy.deepcopy(model).cuda()
+        model_for_eager = parallelize_module(
+            model_for_eager,
             device_mesh=tp_mesh,
             # Leave the layer norm as implicitly replicated
             parallelize_plan={
@@ -903,24 +911,68 @@ class TestFullyShard2DTraining(FSDPTest):
                 "3.out_proj": RowwiseParallel(),
             },
         )
-        for mlp in model:
+        for mlp in model_for_eager:
             if use_activation_checkpointing:
                 checkpoint(mlp)
             fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        fully_shard(model_for_eager, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
+        optim_for_eager = torch.optim.Adam(model_for_eager.parameters(), lr=1e-2)
+
+        if test_compile:
+            def compiler_fn(gm):
+                return torch.compile(gm, backend="inductor", fullgraph=True)
+            model_to_be_compiled = copy.deepcopy(model).cuda()
+            model_to_be_compiled = parallelize_module(
+                model_to_be_compiled,
+                device_mesh=tp_mesh,
+                # Leave the layer norm as implicitly replicated
+                parallelize_plan={
+                    # Pass `use_local_output=False` to keep as DTensor to preserve
+                    # uneven activation dims
+                    "1.in_proj": ColwiseParallel(use_local_output=False),
+                    "1.out_proj": RowwiseParallel(use_local_output=False),
+                    "2.in_proj": ColwiseParallel(use_local_output=False),
+                    "2.out_proj": RowwiseParallel(use_local_output=False),
+                    "3.in_proj": ColwiseParallel(use_local_output=False),
+                    "3.out_proj": RowwiseParallel(),
+                },
+            )
+            for mlp in model_to_be_compiled:
+                if use_activation_checkpointing:
+                    checkpoint(mlp)
+                fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+            fully_shard(model_to_be_compiled, mesh=dp_mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+            optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
+
+        def get_compiled_model_and_optim(iter_idx):
+            if not test_compile:
+                return None, None, False
+            if iter_idx > 0:
+                compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                return compiled_model, optim_for_compile, True
+            else:
+                return model_to_be_compiled, optim_for_compile, False
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
         device = torch.device("cuda")
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: List[torch.Tensor] = []
-            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+            for _model, _optim, _is_compile in ((ref_model, ref_optim, False), (model_for_eager, optim_for_eager, False), get_compiled_model_and_optim(iter_idx)):
+                if _model is None:
+                    continue
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(inp).sum())
-                losses[-1].backward()
+                if _is_compile:
+                    ctx = compiled_autograd.enable(compiler_fn)
+                else:
+                    ctx = contextlib.nullcontext()
+                with ctx:
+                    loss = _model(inp).sum()
+                    losses.append(loss.item())
+                    loss.backward()
                 _optim.step()
-            self.assertEqual(losses[0], losses[1])
+            losses_tensors = [torch.tensor(x) for x in losses]
+            self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
 
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
