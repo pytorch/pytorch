@@ -19,6 +19,7 @@ from torch.utils._pytree import (
     keystr,
     MappingKey,
     SequenceKey,
+    GetAttrKey,
     ToDumpableContextFn,
     tree_flatten_with_path,
     UnflattenFunc,
@@ -472,7 +473,7 @@ def run_placeholder_naming_pass(
                 }
             gets you nodes x_a, x_b_0, x_b_1.
         - Parameters/buffers/constants/custom objects:
-            These follow the FQN of the object, prefixed by "p", "b", "c", "o" respectively.
+            These follow the FQN of the object, prefixed by "p", "b", "c", "obj" respectively.
                 e.g. self.bar.l0.weight gets you "p_bar_l0_weight".
     """
 
@@ -485,23 +486,40 @@ def run_placeholder_naming_pass(
         InputKind.PARAMETER: "p",
         InputKind.BUFFER: "b",
         InputKind.CONSTANT_TENSOR: "c",
+        InputKind.CUSTOM_OBJ: "obj",
     }
     placeholder_name_mapping = {}
 
     # use graph signature input specs to map param/buffer/constant names
+    # name effect tokens as token_1, token_2, ... (these aren't visible to user)
+    num_params_buffers_objs = 0
+    num_tokens = 0
     for spec in export_graph_signature.input_specs:
         if spec.kind in [
             InputKind.PARAMETER,
             InputKind.BUFFER,
             InputKind.CONSTANT_TENSOR,
+            InputKind.CUSTOM_OBJ,
         ]:
+            num_params_buffers_objs += 1
             placeholder_name_mapping[
                 spec.arg.name
             ] = f"{prefixes[spec.kind]}_{prettify_name(spec.target)}"
-
-    num_params_buffers = len(placeholder_name_mapping)
+        elif spec.kind == InputKind.TOKEN:
+            num_tokens += 1
+            placeholder_name_mapping[spec.arg.name] = f"token_{num_tokens}"
 
     # use mod.forward signature to map user input names
+    def _extract_pytree_key(x):
+        if isinstance(x, MappingKey):
+            return str(x.key).replace(".", "_")
+        elif isinstance(x, SequenceKey):
+            return str(x.idx)
+        elif isinstance(x, GetAttrKey):
+            return x.name
+        else:
+            raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
+
     combined_args = (
         inspect.signature(mod.forward).bind(*fake_args, **fake_kwargs).arguments
     )
@@ -509,13 +527,10 @@ def run_placeholder_naming_pass(
     user_input_names = [
         node.name
         for i, node in enumerate(gm.graph.nodes)
-        if i >= num_params_buffers and node.op == "placeholder"
+        if i >= num_params_buffers_objs + num_tokens and node.op == "placeholder"
     ]
     for (arg_path, arg), user_input_name in zip(flat_args_with_path, user_input_names):
-        placeholder_name_mapping[user_input_name] = "_".join(
-            (str(x.key).replace(".", "_") if isinstance(x, MappingKey) else str(x.idx))
-            for x in arg_path
-        )
+        placeholder_name_mapping[user_input_name] = "_".join(_extract_pytree_key(x) for x in arg_path)
 
     # assign placeholder names for root module
     for node in gm.graph.nodes:

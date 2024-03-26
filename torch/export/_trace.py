@@ -437,7 +437,7 @@ def _verify_placeholder_node_names(
     """
     Performs a sanity check on the placeholder node names.
     - User input nodes: no restrictions, should match the original forward() signature
-    - Params/buffers/constants/custom_obj nodes: should start with "p", "b", "c", "o"
+    - Params/buffers/constants/custom_obj nodes: should start with "p", "b", "c", "obj"
     """
     name_to_kind = {
         spec.arg.name: spec.kind
@@ -448,7 +448,8 @@ def _verify_placeholder_node_names(
         InputKind.PARAMETER: "p",
         InputKind.BUFFER: "b",
         InputKind.CONSTANT_TENSOR: "c",
-        InputKind.CUSTOM_OBJ: "o",
+        InputKind.CUSTOM_OBJ: "obj",
+        InputKind.TOKEN: "token"
     }
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -1006,7 +1007,6 @@ def _export(
             ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
-            from_export=True,
         )
 
     gm_torch_level = _export_to_torch_ir(
@@ -1207,7 +1207,6 @@ def _export(
         ),
         example_inputs=(args, kwargs),
         constants=constants,
-        from_export=True,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
