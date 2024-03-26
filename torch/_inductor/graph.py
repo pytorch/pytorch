@@ -1074,6 +1074,22 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
+            if isinstance(result, TensorBox):
+                # if str(n) == "mul_6":
+                #     breakpoint()
+                #     result.realize()
+                for user in n.users:
+                    if n.target == torch.ops.aten.mul.Tensor and user.target == torch.ops.prims.convert_element_type.default:
+                        result.realize()
+                    if isinstance(user.meta['val'], torch.Tensor):
+                        if user.meta['val'].numel() > n.meta['val'].numel():
+                            result.realize()
+                        if user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize and user.target == torch.ops.prims.convert_element_type.default:
+                            result.realize()
+                        elif user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize and user.target != torch.ops.prims.convert_element_type.default:
+                            # print(user, user.meta['val'], n.meta['val'])
+                            pass
+
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
