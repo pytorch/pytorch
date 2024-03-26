@@ -467,24 +467,9 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
 
             return True
 
-        def _get_parallel_depth(cpp_proxy_kernel):
-            return cpp_proxy_kernel.decide_parallel_depth(
-                cpp_proxy_kernel.call_ranges[
-                    : cpp_proxy_kernel.loop_nest.max_parallel_depth()
-                ],
-                parallel_num_threads(),
-            )
-
         for idx in range(len(cpp_kernel_proxy_list) - 1):
             left_loop_nest = cpp_kernel_proxy_list[idx].loop_nest
             right_loop_nest = cpp_kernel_proxy_list[idx + 1].loop_nest
-            if _get_parallel_depth(cpp_kernel_proxy_list[idx]) != _get_parallel_depth(
-                cpp_kernel_proxy_list[idx + 1]
-            ):
-                # Ensure same parallel depth.
-                # Refer to poolformer_m36 in timm_models:
-                # Node1 has loop collapsed(2), Node2 can't be loop collapsed due to it's reduction.
-                return False
             if any(
                 # Assume no main/tail loop split at any outer loop fusion depth
                 len(loop_nest.root) != 1
@@ -527,16 +512,14 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
                     outer_loop_fusion_depth,
                 )
             else:
-                # This is the last looplevel to do outer loop fusion
                 outer_loop_fused_kernel = OuterLoopFusedKernel(kernel_group)
                 loop_level_of_first_kernel = loop_level_nested_list[0][0]
                 for kernel_idx in range(len(loop_level_nested_list)):
-                    # Append each LoopLevel into OuterLoopFusedKernel.inner
                     outer_loop_fused_kernel.inner.append(
                         deepcopy(loop_level_nested_list[kernel_idx][0]),
                     )
                 loop_level_of_first_kernel.inner = []
-                loop_level_of_first_kernel.kernel = outer_loop_fused_kernel  # type: ignore[assignment]
+                loop_level_of_first_kernel.kernel = outer_loop_fused_kernel
 
         # Merge the List[LoopNestWithSplit] from cpp_kernel_proxy_list
         # into cpp_kernel_proxy_list[0].loop_nest
@@ -4081,9 +4064,9 @@ class KernelGroup:
         return cls(self.args, parallel_num_threads(), *args)
 
     def finalize_kernel(self, new_kernel, nodes):
+        self.scheduled_nodes += nodes
         code = self.loops_code
         ws = self.ws
-        self.scheduled_nodes += nodes
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
