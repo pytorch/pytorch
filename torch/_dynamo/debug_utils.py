@@ -456,21 +456,23 @@ def cast_to_fp64(model, inputs):
 
 def backend_accuracy_fails(
     gm,
-    example_inputs,
+    real_inputs,
     compiler_fn,
     only_fwd=False,
     *,
+    example_inputs=None,
     require_fp64=False,
     ignore_non_fp=False,
 ):
+    if example_inputs is None:
+        example_inputs = clone_inputs_retaining_gradness(real_inputs)
+
     try:
-        compiled_gm = compiler_fn(
-            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
-        )
+        compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
         return not same_two_models(
             gm,
             compiled_gm,
-            example_inputs,
+            real_inputs,
             only_fwd,
             require_fp64=require_fp64,
             ignore_non_fp=ignore_non_fp,
@@ -539,7 +541,16 @@ class InputReader:
         if save_dir is None:
             log.warning("no save_dir specified, will generate random data")
         self.store = ContentStoreReader(save_dir) if save_dir is not None else None
-        self.args = []
+        self.shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        self.fake_mode = torch._subclasses.FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=self.shape_env,
+        )
+        self.tracing_context = torch._guards.TracingContext(self.fake_mode)
+        # Real tensors and real values
+        self.real_args = []
+        # Fake tensors and symbolic values
+        self.example_args = []
         self.pbar = pbar
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
@@ -574,6 +585,7 @@ class InputReader:
         dtype=None,
         requires_grad=None,
         is_leaf=None,
+        dynamic_sizes=None,
         **metadata,
     ):
         stride = _stride_or_default(stride, shape=shape)
@@ -594,11 +606,32 @@ class InputReader:
                 t.set_(storage, storage_offset, shape, stride)
         assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
         torch._utils.set_tensor_metadata(t, metadata)
-        self.args.append(t)
+        self.real_args.append(t)
+
+        if dynamic_sizes is not None:
+            symbolic_context = torch.fx.experimental.symbolic_shapes.StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes
+            )
+            self.tracing_context.tensor_to_context[t] = symbolic_context
+        else:
+            symbolic_context = None
+
+        fake_val = self.fake_mode.fake_tensor_converter(
+            self.fake_mode,
+            t,
+            symbolic_context=symbolic_context,
+            shape_env=self.shape_env,
+        )
+        self.example_args.append(fake_val)
         return t  # for BC
 
     def symint(self, val):
-        self.args.append(val)
+        from torch._dynamo.source import LocalSource
+
+        symbol = self.shape_env.create_symbol(val, source=LocalSource("_symval"))
+        sym_node = self.shape_env.create_symintnode(symbol, hint=val)
+        self.real_args.append(val)
+        self.example_args.append(sym_node)
         return val  # for BC
 
 
@@ -670,7 +703,7 @@ class InputWriter:
         self.seen_storages[ws] = v
         return v
 
-    def tensor(self, name, t) -> None:
+    def tensor(self, name, t, dynamic_sizes=None) -> None:
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
@@ -690,6 +723,10 @@ class InputWriter:
         is_leaf = torch._subclasses.meta_utils.safe_is_leaf(t)
         if _is_leaf_or_default(None) != is_leaf:
             args.append(f"is_leaf={is_leaf!r}")
+        if dynamic_sizes is not None:
+            args.append(
+                "dynamic_sizes=[" + ",".join(str(d) for d in dynamic_sizes) + "]"
+            )
         self._lines.append(
             "reader.tensor("
             + ", ".join([storage, str(tuple(t.shape)), *args])

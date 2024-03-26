@@ -168,6 +168,7 @@ import torch.fx as fx
 import torch._dynamo
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+from torch.fx.experimental.symbolic_shapes import DimDynamic
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -381,13 +382,12 @@ def run_load_args(options, mod, load_args):
     with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
         input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
         load_args(input_reader)
-        args = input_reader.args
 
-    return args
+    return input_reader
 
 
 def repro_minify(options, mod, load_args):
-    args = run_load_args(options, mod, load_args)
+    reader = run_load_args(options, mod, load_args)
 
     # Setup debug minifier compiler
     if not options.accuracy:
@@ -409,35 +409,39 @@ def repro_minify(options, mod, load_args):
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
-    with torch.cuda.amp.autocast(enabled=options.autocast):
-        opt_mod(*args)
+    with torch.cuda.amp.autocast(enabled=options.autocast), \
+         torch._guards.tracing(reader.tracing_context):
+        opt_mod(*reader.real_args)
 
 
 def repro_run(options, mod, load_args):
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
+    reader = run_load_args(options, mod, load_args)
+    args = reader.real_args
 
     if options.accuracy != "":
         mod.eval()
         opt_mod.eval()
 
-        with torch.cuda.amp.autocast(enabled=options.autocast):
-            # TODO: disable clone
-            args = run_load_args(options, mod, load_args)
-            assert same_two_models(mod, mod, args), "Eager itself failed"
+        # TODO: disable clone
+        assert same_two_models(mod, mod, args), "Eager itself failed"
+
+        with torch.cuda.amp.autocast(enabled=options.autocast), \
+             torch._guards.tracing(reader.tracing_context):
             if not same_two_models(mod, opt_mod, args):
                 raise AccuracyError("Dynamo failed")
     else:
         with torch.cuda.amp.autocast(enabled=options.autocast):
-            args = run_load_args(options, mod, load_args)
             ref = run_fwd_maybe_bwd(
-                mod, args, only_fwd=options.only_fwd, disable_clone=True
+                mod, reader.real_args, only_fwd=options.only_fwd, disable_clone=True
             )
             del args
 
-            args = run_load_args(options, mod, load_args)
-            res = run_fwd_maybe_bwd(
-                opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
-            )
+            reader = run_load_args(options, mod, load_args)
+            with torch._guards.tracing(reader.tracing_context):
+                res = run_fwd_maybe_bwd(
+                    opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
+                )
 
 
 def run_repro(
