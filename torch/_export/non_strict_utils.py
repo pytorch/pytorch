@@ -260,7 +260,6 @@ def make_constraints(
         if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
     }
 
-    range_constraints = {}
     input_dims = defaultdict(list)
     free_symbols = set()
     input_index = 0
