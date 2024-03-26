@@ -175,6 +175,5 @@ except ImportError as e:
     logging.warning(e)
 
 if __name__ == '__main__':
-    from torch._dynamo import config
-    config.use_single_step_graph = False
+    # config.use_single_step_graph = False
     run_tests()

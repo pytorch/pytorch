@@ -117,6 +117,10 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
                 fake_value_args, fake_value_kwargs
             )
 
+    # Perform a dead code elimination
+    fx_g.graph.eliminate_dead_code()
+    fx_g.compile()
+
     # print("\nfx code")
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
     # in case this is `_lazy_graph_module`. This will aovid us trying to inline the
