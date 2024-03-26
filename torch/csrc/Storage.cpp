@@ -355,6 +355,8 @@ static PyObject* THPStorage_pynew(
     } else if (device.type() == at::DeviceType::PrivateUse1) {
       at::globalContext().lazyInitPrivateUse1();
       allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::ORT) {
+      allocator = c10::GetAllocator(device.type());
     } else {
       // NOLINTEND(bugprone-branch-clone)
       TORCH_CHECK(

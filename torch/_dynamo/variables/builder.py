@@ -40,7 +40,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, trace_rules
@@ -107,6 +106,7 @@ from .distributed import (
     PlacementClassVariable,
     PlacementVariable,
     ProcessGroupVariable,
+    WorldMetaClassVariable,
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
@@ -665,6 +665,8 @@ class VariableBuilder:
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
+        elif WorldMetaClassVariable.is_group_member_type(value):
+            return WorldMetaClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return ProcessGroupVariable(value, source=self.source)
@@ -1068,7 +1070,7 @@ class VariableBuilder:
         if (
             isinstance(value, torch.Tensor)
             and value.is_nested
-            and not isinstance(value, NestedTensor)
+            and not isinstance(value, torch.nested._internal.nested_tensor.NestedTensor)
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
@@ -1564,11 +1566,7 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
-        torch._C._functorch._vmap_increment_nesting,
-        torch._C._functorch._vmap_decrement_nesting,
         torch._functorch.vmap._validate_and_get_batch_size,
-        torch._C._functorch._grad_increment_nesting,
-        torch._C._functorch._grad_decrement_nesting,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
