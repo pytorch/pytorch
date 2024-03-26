@@ -2940,9 +2940,13 @@ class GraphModule(torch.nn.Module):
         """
         # Python 3.10 and 3.11 produces slightly different graphs
         if sys.version_info[:2] > (3, 10):
-            expected += "return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)\n"
+            expected += (
+                "return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)\n"
+            )
         else:
-            expected += "return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)\n"
+            expected += (
+                "return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)\n"
+            )
         self.assertExpectedInline(actual, expected)
 
     @config.patch(capture_func_transforms=True)
