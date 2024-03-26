@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import collections
 import contextlib
 import copy
 import functools
@@ -1001,6 +1002,34 @@ class TestFullyShardHSDPTraining(FSDPTest):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardPostAccGradHook(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_post_acc_grad_hook_runs(self):
+        param_name_to_hook_count = collections.defaultdict(int)
+
+        def hook(param_name: str, param: torch.Tensor) -> None:
+            nonlocal param_name_to_hook_count
+            param_name_to_hook_count[param_name] += 1
+
+        model = MLP(8)
+        for module in (model.in_proj, model.out_proj, model):
+            fully_shard(module)
+        for param_name, param in model.named_parameters():
+            param_hook = functools.partial(hook, param_name)
+            param.register_post_accumulate_grad_hook(param_hook)
+
+        inp = torch.randn((2, 8), device="cuda")
+        model(inp).sum().backward()
+        param_names = {param_name for param_name, _ in model.named_parameters()}
+        self.assertEqual(param_names, set(param_name_to_hook_count.keys()))
+        for param_name, count in param_name_to_hook_count.items():
+            self.assertEqual(count, 1)
 
 
 if __name__ == "__main__":
