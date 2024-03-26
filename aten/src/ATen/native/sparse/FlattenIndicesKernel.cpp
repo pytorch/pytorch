@@ -25,6 +25,7 @@ Tensor flatten_indices_cpu_kernel(const Tensor& indices, IntArrayRef size) {
 REGISTER_ARCH_DISPATCH(flatten_indices_stub, DEFAULT, &flatten_indices_cpu_kernel);
 REGISTER_AVX512_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel);
 REGISTER_AVX2_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel);
+REGISTER_NEON_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel);
 REGISTER_VSX_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel);
 

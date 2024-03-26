@@ -463,6 +463,7 @@ REGISTER_ARCH_DISPATCH(
     DEFAULT,
     &_segment_reduce_lengths_cpu_kernel);
 REGISTER_AVX2_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_NEON_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
 REGISTER_AVX512_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
@@ -473,6 +474,7 @@ REGISTER_ARCH_DISPATCH(
     DEFAULT,
     &_segment_reduce_offsets_cpu_kernel);
 REGISTER_AVX2_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel);
+REGISTER_NEON_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel);
 REGISTER_AVX512_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel);
@@ -540,6 +542,9 @@ REGISTER_AVX512_DISPATCH(
 REGISTER_AVX2_DISPATCH(
     _segment_reduce_lengths_backward_stub,
     &_segment_reduce_cpu_lengths_backward_kernel);
+REGISTER_NEON_DISPATCH(
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_VSX_DISPATCH(
     _segment_reduce_lengths_backward_stub,
     &_segment_reduce_cpu_lengths_backward_kernel);
@@ -555,6 +560,9 @@ REGISTER_AVX512_DISPATCH(
     _segment_reduce_offsets_backward_stub,
     &_segment_reduce_cpu_offsets_backward_kernel);
 REGISTER_AVX2_DISPATCH(
+    _segment_reduce_offsets_backward_stub,
+    &_segment_reduce_cpu_offsets_backward_kernel);
+REGISTER_NEON_DISPATCH(
     _segment_reduce_offsets_backward_stub,
     &_segment_reduce_cpu_offsets_backward_kernel);
 REGISTER_VSX_DISPATCH(

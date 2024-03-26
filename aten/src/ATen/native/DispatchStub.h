@@ -48,6 +48,8 @@ enum class CPUCapability {
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
+#elif defined(HAVE_NEON_CPU_DEFINITION)
+  NEON = 1,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -76,6 +78,9 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , void *AVX2
 #endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+      , void *NEON
+#endif
 #ifdef HAVE_VSX_CPU_DEFINITION
       , void *VSX
 #endif
@@ -96,6 +101,9 @@ struct TORCH_API DispatchStubImpl {
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
     , void *AVX2
+#endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+    , void *NEON
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
     , void *VSX
@@ -141,6 +149,9 @@ private:
 #ifdef HAVE_AVX2_CPU_DEFINITION
       , reinterpret_cast<void*>(AVX2)
 #endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+      , reinterpret_cast<void*>(NEON)
+#endif
 #ifdef HAVE_VSX_CPU_DEFINITION
       , reinterpret_cast<void*>(VSX)
 #endif
@@ -180,6 +191,9 @@ public:
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static TORCH_API FnPtr AVX2;
+#endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+  static TORCH_API FnPtr NEON;
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   static TORCH_API FnPtr VSX;
@@ -252,6 +266,12 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_AVX2_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_NEON_CPU_DEFINITION
+#define REGISTER_NEON_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, NEON, fn)
+#else
+#define REGISTER_NEON_DISPATCH(name, fn)
+#endif
+
 #ifdef HAVE_VSX_CPU_DEFINITION
 #define REGISTER_VSX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, VSX, fn)
 #else
@@ -270,6 +290,7 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_ARCH_DISPATCH(name, DEFAULT, fn)                                    \
   REGISTER_AVX512_DISPATCH(name, fn)                                           \
   REGISTER_AVX2_DISPATCH(name, fn)                                             \
+  REGISTER_NEON_DISPATCH(name, fn)                                             \
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)
 
