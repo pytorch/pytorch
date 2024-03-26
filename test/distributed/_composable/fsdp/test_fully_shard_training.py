@@ -1,3 +1,11 @@
+"""
+TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_train_parity_single_group >test_output1.txt 2>&1
+
+TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_train_parity_multi_group_compile_trace_through_fsdp >test_output1.txt 2>&1
+
+TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 pytest -rx test/distributed/_composable/fsdp/test_fully_shard_training.py::TestFullyShard1DTrainingCore::test_multi_forward_module >test_output1.txt 2>&1
+"""
+
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
@@ -54,6 +62,8 @@ from torch._dynamo import compiled_autograd
 from torch.testing._internal.common_distributed import _dynamo_dist_per_rank_init
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
+
+torch_log = logging.getLogger("torch")
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
     @property
@@ -400,7 +410,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 torch._dynamo.config.trace_distributed = True
                 torch._inductor.config.triton.unique_kernel_names = True
                 model_to_be_compiled = copy.deepcopy(model).cuda()
-                fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
+                for mlp in model_to_be_compiled:
+                    fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+                fully_shard(model_to_be_compiled, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
             def get_compiled_model_and_optim(iter_idx):
