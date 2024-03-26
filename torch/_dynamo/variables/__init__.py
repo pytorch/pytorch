@@ -7,10 +7,13 @@ from .ctx_manager import (
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
+    DualLevelContextManager,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
+    JvpIncrementNestingCtxManagerVariable,
+    SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
     VmapIncrementNestingCtxManagerVariable,
@@ -23,7 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable
+from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
