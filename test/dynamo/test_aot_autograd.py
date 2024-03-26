@@ -1108,7 +1108,7 @@ SeqNr|OrigAten|SrcFn
         self.assertEqual(z.grad, z_opt.grad)
 
     def test_data_ptr_access_copy(self):
-        with FakeTensorMode(allow_unsafe_data_ptr_access=False):
+        with FakeTensorMode(_allow_unsafe_data_ptr_access=False):
             x = torch.randn(3)
             y = copy.copy(x)
         self.assertEqual(y.shape, x.shape)
