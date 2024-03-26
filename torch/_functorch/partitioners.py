@@ -852,9 +852,15 @@ def min_cut_rematerialization_partition(
     banned_nodes = set()
 
     def ban_recomputation_if_allowed(node):
+        # This bans recomputation of the node unless we've been forced not to by
+        # user annotation
         # NB: "recompute" == 0 means it's not banned from recomputing
         if node.meta.get("recompute", 0) > 0:
             return False
+
+        if isinstance(node.meta['val'], torch.SymFloat):
+            return False
+
         banned_nodes.add(node)
         # A node will only ever be recomputed if there is a path from an
         # ancestor of this node to the backwards path through this node that
@@ -936,10 +942,10 @@ def min_cut_rematerialization_partition(
             _, node, node_is_fusible = heapq.heappop(sorted_nodes)
             if not node_is_fusible:
                 return node.fw_order
-            if node.fw_order > max_range:
-                continue
             for user in node.users:
                 if user in required_fw_nodes:
+                    if user.fw_order > max_range:
+                        continue
                     heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
         return max_range
 
@@ -965,7 +971,11 @@ def min_cut_rematerialization_partition(
     # where we have a long chain of pointwise ops from the beginning to the end
     # of the model (like say, residual connections)
 
-    # It's possible this heuristic is obsoleted by the below one - checking that now
+    # todo: I'm not totally sure why this heuristic matters. It's possible that this is
+    # working around Inductor fusion decisions, or that it's a patch over
+    # suboptimal partitioning decisions
+
+    # Some models it improves perf on are cait_m36_384, mixer_b16_224, poolformer_m36
 
     if BAN_IF_LONG_FUSIBLE_CHAINS:
         visited = set()
