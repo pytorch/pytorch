@@ -16,6 +16,7 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
@@ -837,6 +838,9 @@ void initDispatchBindings(PyObject* module) {
   m.def("_non_sym_sizes", [](const at::Tensor& a) {
     return a.sizes(); // NB: NOT sym_size
   });
+
+  m.def("_get_lift_then_h2d", &torch::utils::get_lift_then_h2d);
+  m.def("_set_lift_then_h2d", &torch::utils::set_lift_then_h2d);
 
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
