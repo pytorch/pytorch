@@ -411,6 +411,7 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_qat_conv2d_fusion_pattern(model, config)
 
         self._annotate_conv2d_fusion_pattern(model, config)
+        self._annotate_linear_fusion_pattern(model, config)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -654,10 +655,6 @@ class X86InductorQuantizer(Quantizer):
         self._annotate_conv2d_binary(model, config)
         self._annotate_conv2d_unary(model, config)
         self._annotate_conv2d(model, config)
-        self._annotate_linear_binary_unary(model, config)
-        self._annotate_linear_binary(model, config)
-        self._annotate_linear_unary(model, config)
-        self._annotate_linear(model, config)
 
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
@@ -956,6 +953,14 @@ class X86InductorQuantizer(Quantizer):
                 self._annotate_output_share_observer_as_input(input_node, node)
         return
 
+    def _annotate_linear_fusion_pattern(
+        self, model: torch.fx.GraphModule, config: QuantizationConfig
+    ):
+        self._annotate_linear_binary_unary(model, config)
+        self._annotate_linear_binary(model, config)
+        self._annotate_linear_unary(model, config)
+        self._annotate_linear(model, config)
+
     def _annotate_linear(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
@@ -1044,11 +1049,9 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([binary_node, linear_node]):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            binary_node_input_qspec_map: Dict[Node, Any] = {}
             # We don't insert q-dq before the binary input node due to accuracy issues
-            binary_node_input_qspec_map[extra_input_node] = None
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                input_qspec_map=binary_node_input_qspec_map,
+                input_qspec_map={},
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -1085,11 +1088,9 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([unary_node, binary_node, linear_node]):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            binary_node_input_qspec_map: Dict[Node, Any] = {}
             # We don't insert q-dq before the binary input node due to accuracy issues
-            binary_node_input_qspec_map[extra_input_node] = None
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                input_qspec_map=binary_node_input_qspec_map,
+                input_qspec_map={},
                 _annotated=True,
             )
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
