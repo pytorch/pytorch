@@ -1062,17 +1062,17 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const
 }
 inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vectorized<float>& b) {
   static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-  constexpr int64_t K = Vectorized<Half>::size();
-  __at_align__ float16_t arr2[K];
   float32x4x2_t x = a;
   float32x4x2_t y = b;
   float16x4_t x1 = vcvt_f16_f32(x.val[0]);
   float16x4_t x2 = vcvt_f16_f32(x.val[1]);
   float16x4_t y1 = vcvt_f16_f32(y.val[0]);
   float16x4_t y2 = vcvt_f16_f32(y.val[1]);
-  vst1q_f16(arr2, vcombine_f16(x1, x2));
-  vst1q_f16(arr2 + Vectorized<float>::size(), vcombine_f16(y1, y2));
-  return Vectorized<Half>::loadu(arr2);
+  Vectorized<Half> rc;
+  auto arr = reinterpret_cast<float16_t*>(rc.operator Half*());
+  vst1q_f16(arr, vcombine_f16(x1, x2));
+  vst1q_f16(arr + Vectorized<float>::size(), vcombine_f16(y1, y2));
+  return rc;
 }
 #else
 CONVERT_NON_VECTORIZED_INIT(Half, half);
