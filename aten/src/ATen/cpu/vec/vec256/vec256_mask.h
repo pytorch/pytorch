@@ -9,13 +9,25 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-template <typename mask_t>
-struct VecMaskLoad<float, 1, mask_t, 1> {
-  static inline VectorizedN<float, 1> apply(
-      const float* ptr,
+template <typename T, typename mask_t>
+struct VecMaskLoad<
+    T,
+    1,
+    mask_t,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+            std::is_same_v<T, uint32_t>,
+        void>> {
+  static inline VectorizedN<T, 1> apply(
+      const T* ptr,
       const VecMask<mask_t, 1>& vec_mask) {
     auto int_mask = vec_mask.template cast<int, 1>()[0];
-    return Vectorized<float>(_mm256_maskload_ps(ptr, int_mask));
+    if constexpr (std::is_same_v<T, float>) {
+      return Vectorized<T>(_mm256_maskload_ps(ptr, int_mask));
+    } else {
+      return Vectorized<T>(_mm256_maskload_epi32(ptr, int_mask));
+    }
   }
 };
 

@@ -19,7 +19,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -223,19 +223,19 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if<!std::is_reduced_floating_point<T>::value, T>::type
+typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if<std::is_reduced_floating_point<T>::value, T>::type
+typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
 
 template <typename T>
-typename std::enable_if<!std::is_integral<T>::value>::type
+typename std::enable_if_t<!std::is_integral_v<T>>
 atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
@@ -259,7 +259,7 @@ atomic_add(volatile T *addr, T offset) {
 // better than compare_exchange_weak, which can be checked by microbenchmark
 // inductor_cpu_atomic.py
 template <typename T>
-typename std::enable_if<std::is_integral<T>::value>::type
+typename std::enable_if_t<std::is_integral_v<T>>
 atomic_add(volatile T *addr, T offset) {
   static_assert(sizeof(std::atomic<T>) == sizeof(T),
                 "std::atomic issue");
