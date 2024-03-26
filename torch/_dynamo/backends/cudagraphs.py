@@ -6,7 +6,6 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 
 import torch
-from torch._dynamo.backends.debugging import boxed_nop
 from torch._inductor.cudagraph_trees import cudagraphify_impl
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -115,6 +114,9 @@ def get_stack_traces(gm) -> List[Optional[str]]:
 def cudagraphs(dynamo_model, dynamo_inputs):
     do_cudagraphs = BoxedBool(True)
     boxed_device_index = BoxedDeviceIndex(None)
+
+    # NB: importing boxed_nop at top level causes bad interaction
+    from torch._dynamo.backends.debugging import boxed_nop
 
     def forward_cudagraphs(aot_model, aot_inputs, is_inference=False):
         interp = boxed_nop(aot_model, aot_inputs)
