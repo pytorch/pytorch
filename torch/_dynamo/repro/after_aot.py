@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Union
 import torch
 import torch.fx as fx
 import torch.nn as nn
+import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -72,6 +73,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
         from torch._functorch.aot_autograd import get_aot_graph_name
 
         graph_name = get_aot_graph_name()
+        tracing_context = torch._guards.TracingContext.get()
 
         # TODO: why do we need to deepcopy the original graph?
         orig_graph = copy.deepcopy(gm.graph)
@@ -89,12 +91,14 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
                         example_inputs,
+                        tracing_context,
                         compiler_name,
                     )
                 elif config.repro_level == 2:
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         example_inputs,
+                        tracing_context,
                         compiler_name,
                     )
                 log.error("CompilerError")
@@ -130,7 +134,10 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
-                    fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                    fx.GraphModule(gm, orig_graph),
+                    real_inputs,
+                    tracing_context,
+                    compiler_name
                 )
 
             if config.repro_level == 4:
@@ -138,18 +145,29 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                failed = not same_two_models(
+                    gm,
+                    inner_compiled_fn,
+                    real_inputs,
+                    only_fwd=True,
+                    ignore_non_fp=config.repro_ignore_non_fp,
+                )
+
+                if failed:
                     log.warning(
                         "Accuracy failed for the AOT Autograd graph %s", graph_name
                     )
+
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
+                        tracing_context,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
+                        tracing_context,
                         f"{compiler_name}_accuracy",
                     )
                     raise AccuracyError("Bad accuracy detected")
@@ -171,12 +189,14 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
+                            tracing_context,
                             compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
+                            tracing_context,
                             compiler_name,
                         )
                     raise
@@ -196,13 +216,14 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(gm, args, *, stable_output=False, save_dir=None):
+def generate_compiler_repro_string(gm, args, tracing_context, *, stable_output=False, save_dir=None):
     model_str = textwrap.dedent(
         f"""
 import torch
 from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
+from torch.fx.experimental.symbolic_shapes import DimDynamic
 from math import inf
 import torch._inductor.inductor_prims
 
@@ -234,7 +255,13 @@ isolate_fails_code_str = None
             writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
-            writer.tensor(placeholder, arg)
+            dynamic_sizes = None
+            if symbolic_context := tracing_context.tensor_to_context.get(arg):
+                dynamic_sizes = symbolic_context.dynamic_sizes
+            else:
+                print("No symbolic context")
+
+            writer.tensor(placeholder, arg, dynamic_sizes=dynamic_sizes)
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
@@ -248,6 +275,7 @@ def save_graph_repro(
     fd,
     gm,
     args,
+    tracing_context,
     compiler_name,
     *,
     stable_output=False,
@@ -261,6 +289,7 @@ def save_graph_repro(
         generate_compiler_repro_string(
             gm,
             args,
+            tracing_context,
             stable_output=stable_output,
             save_dir=save_dir,
         )
@@ -285,7 +314,7 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
+def dump_compiler_graph_state(gm, args, tracing_context, compiler_name, *, accuracy=None):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -295,7 +324,7 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
     )
     with open(file_name, "w") as fd:
         save_graph_repro(
-            fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
+            fd, gm, args, tracing_context, compiler_name, save_dir=subdir, accuracy=accuracy
         )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
@@ -314,19 +343,20 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def dump_to_minify(gm, args, compiler_name: str):
+def dump_to_minify(gm, args, tracing_context, compiler_name: str):
     out = io.StringIO()
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro(out, gm, args, compiler_name, save_dir=subdir, command="minify")
+    save_graph_repro(out, gm, args, tracing_context, compiler_name, save_dir=subdir, command="minify")
     return helper_for_dump_minify(out.getvalue())
 
 
 def isolate_fails(
     fx_g,
     args,
+    example_args,
     compiler_name: str,
     env=None,
     save_dir=None,
@@ -345,6 +375,7 @@ def isolate_fails(
             fd,
             fx_g,
             args,
+            torch._guards.TracingContext.try_get(),
             compiler_name,
             save_dir=save_dir,
             command="minifier-query",
@@ -425,14 +456,15 @@ def inductor_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(
-    fx_g, args, check_str=None, *, require_fp64=False, ignore_non_fp=False
+    fx_g, real_args, example_args, check_str=None, *, require_fp64=False, ignore_non_fp=False
 ):
     from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(
         fx_g,
-        args,
-        compile_fx_inner,
+        real_inputs=real_args,
+        example_inputs=example_args,
+        compiler_fn=compile_fx_inner,
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -478,15 +510,15 @@ def repro_common(options, mod, load_args):
     with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
         input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
         load_args(input_reader)
-        args = input_reader.args
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
-    mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
+    with torch._guards.tracing(input_reader.tracing_context):
+        mod = make_fx(mod, tracing_mode=options.tracing_mode)(*input_reader.real_args)
 
     torch._inductor.config.generate_intermediate_hooks = True
 
-    return mod, args
+    return mod, input_reader
 
 
 ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
@@ -503,20 +535,21 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 
 
 def repro_minifier_query(options, mod, load_args):
-    mod, args = repro_common(options, mod, load_args)
+    mod, reader = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
         ACCURACY_FAILS[options.accuracy], check_str=options.check_str
     )
-    if fail_fn(mod, args):
-        sys.exit(1)
-    else:
-        sys.exit(0)
+    with torch._guards.tracing(reader.tracing_context):
+        if fail_fn(mod, reader.real_args, reader.example_args):
+            sys.exit(1)
+        else:
+            sys.exit(0)
 
 
 def repro_minify(options, mod, load_args):
     from functorch.compile import minifier
 
-    mod, args = repro_common(options, mod, load_args)
+    mod, reader = repro_common(options, mod, load_args)
     compiler_name = "inductor_accuracy" if options.accuracy != "" else "inductor"
 
     favored_device = 1 if torch.cuda.device_count() >= 2 else 0
@@ -535,26 +568,50 @@ def repro_minify(options, mod, load_args):
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
 
-    minifier(
-        mod,
-        args,
-        module_fails=functools.partial(module_fails, check_str=options.check_str),
-        dump_state=functools.partial(
-            dump_compiler_graph_state, compiler_name=compiler_name
-        ),
-        save_dir=options.save_dir,
-        offload_to_disk=options.offload_to_disk,
-        skip_offload=options.skip_saving_eager_intermediates,
-        skip_sanity=options.skip_sanity,
-        max_granularity=options.max_granularity,
-    )
+    real_arg_to_example = {
+        real: example for real, example in zip(reader.real_args, reader.example_args)
+    }
+
+    def wrap_module_fails(gm, args):
+        def get_example(arg):
+            example_arg = real_arg_to_example.get(arg)
+            if example_arg is not None:
+                return example_arg
+
+            # TODO: minimizer should really give use the fake value
+            return reader.fake_mode.fake_tensor_converter(
+                reader.fake_mode,
+                arg,
+                shape_env=reader.shape_env,
+            )
+
+        example_args = [get_example(a) for a in args]
+        return module_fails(gm, args, example_args, check_str=options.check_str)
+
+    with torch._guards.tracing(reader.tracing_context):
+        minifier(
+            mod,
+            reader.real_args,
+            module_fails=wrap_module_fails,
+            dump_state=functools.partial(
+                dump_compiler_graph_state,
+                compiler_name=compiler_name,
+                tracing_context=reader.tracing_context,
+            ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
+            max_granularity=options.max_granularity,
+        )
 
 
 def repro_analyze(options, mod, load_args):
     from torch._inductor.compile_fx import compile_fx_inner
     from torch._inductor.hooks import intermediate_hook
 
-    mod, args = repro_common(options, mod, load_args)
+    mod, repro_reader = repro_common(options, mod, load_args)
+    args = repro_reader.real_args
 
     # TODO: The logic for cloning inputs/models here is intentionally
     # modeled off of run_fwd_maybe_bwd, but arguably it is better not to
@@ -562,8 +619,8 @@ def repro_analyze(options, mod, load_args):
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
-    with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, args)
+    with tqdm(desc="Compiling"), torch._guards.tracing(repro_reader.tracing_context):
+        compiled = compile_fx_inner(mod, repro_reader.example_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -687,23 +744,24 @@ def repro_analyze(options, mod, load_args):
 
 
 def repro_get_args(options, mod, load_args):
-    mod, args = repro_common(options, mod, load_args)
+    mod, args, _ = repro_common(options, mod, load_args)
     return mod, args
 
 
 def repro_run(options, mod, load_args):
     from torch._inductor.compile_fx import compile_fx_inner
 
-    mod, args = repro_common(options, mod, load_args)
+    mod, reader = repro_common(options, mod, load_args)
 
     from torch.cuda import synchronize
 
-    compiled = compile_fx_inner(mod, args)
+    with torch._guards.tracing(reader.tracing_context):
+        compiled = compile_fx_inner(mod, reader.example_args)
 
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
         # seems counterintuitive
-        if not same_two_models(mod, compiled, args, only_fwd=True):
+        if not same_two_models(mod, compiled, reader.real_args, only_fwd=True):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False

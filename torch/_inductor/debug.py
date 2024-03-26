@@ -447,7 +447,7 @@ class DebugFormatter:
 
     def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
         with self.fopen("fx_graph_runnable.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            save_graph_repro(fd, gm, inputs, torch._guards.TracingContext.try_get(), "inductor")
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
