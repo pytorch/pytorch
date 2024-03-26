@@ -250,7 +250,7 @@ class FSDP:
                     padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
                     padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
                     local_tensor = padded_local_tensor
-                if fsdp_param.offload_to_cpu and not local_tensor.is_pinned():
+                if fsdp_param.pin_memory and not local_tensor.is_pinned():
                     local_tensor = local_tensor.cpu().pin_memory()
                 fsdp_param._sharded_param_data = local_tensor.view(-1)
                 assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
