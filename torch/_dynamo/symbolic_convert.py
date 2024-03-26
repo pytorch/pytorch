@@ -1099,7 +1099,7 @@ class InstructionTranslatorBase(
 
     def IMPORT_FROM(self, inst):
         self.DUP_TOP(inst)
-        self.LOAD_ATTR(inst)
+        self._load_attr(inst)
 
     def load_builtin(self, inst):
         if inst.argval not in self.f_builtins:
@@ -1263,7 +1263,7 @@ class InstructionTranslatorBase(
         arg = inst.argval[0]
         argval = self.code_options["co_names"][arg]
         if sys.version_info < (3, 11):
-            self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
+            self._load_attr(dataclasses.replace(inst, argval=argval))
         else:
             self.LOAD_METHOD(dataclasses.replace(inst, argval=argval))
 
@@ -1271,10 +1271,10 @@ class InstructionTranslatorBase(
         self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         arg = inst.argval[0]
         argval = self.code_options["co_names"][arg]
-        self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
+        self._load_attr(dataclasses.replace(inst, argval=argval))
 
     def LOAD_METHOD(self, inst):
-        self.LOAD_ATTR(inst)
+        self._load_attr(inst)
         obj = self.pop()
         if sys.version_info >= (3, 11):
             # always follow the NULL + fn convention, since if obj
@@ -1293,12 +1293,19 @@ class InstructionTranslatorBase(
         fn = self.pop()
         self.call_function(fn, args, {})
 
-    def LOAD_ATTR(self, inst):
+    def _load_attr(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
             self, [obj, ConstantVariable.create(inst.argval)], {}
         )
         self.push(result)
+
+    def LOAD_ATTR(self, inst):
+        if sys.version_info >= (3, 12):
+            if inst.arg % 2:
+                self.LOAD_METHOD(inst)
+                return
+        self._load_attr(inst)
 
     def STORE_ATTR(self, inst):
         speculation = self.speculate()
