@@ -215,8 +215,9 @@ def foreach_reduce(
                 fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
             else:
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            for hook in getattr(
-                fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {}
+            for hook in (
+                getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
+                or {}
             ).values():
                 hook(fsdp_param.sharded_param)
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
