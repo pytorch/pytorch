@@ -64,7 +64,12 @@ def _inplace_generalized_scatter(
             (view.args, view.kwargs),
         )
         tmp = view.target(tmp, *fake_args, **fake_kwargs)
-    tmp.copy_(src)
+    try:
+        tmp.copy_(src)
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"shape error in scatter op, can not broadcast {src.shape} to {tmp.shape}"
+        ) from e
     return inp
 
 
