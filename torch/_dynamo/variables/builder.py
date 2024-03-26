@@ -1552,13 +1552,18 @@ def wrap_fx_proxy_cls(
                 )
             else:
                 proxy_i = proxy.tracer.create_proxy(
-                    kind="call_function", target=operator.getitem, args=(proxy, i), kwargs={}
+                    kind="call_function",
+                    target=operator.getitem,
+                    args=(proxy, i),
+                    kwargs={},
                 )
 
                 if "source" in options:
                     source = options["source"]
                     options_i = options.copy()
-                    options_i["source"] = GetItemSource(base=source, index=i, index_is_slice=False)
+                    options_i["source"] = GetItemSource(
+                        base=source, index=i, index_is_slice=False
+                    )
                 else:
                     # use the same options object as parent
                     options_i = options
