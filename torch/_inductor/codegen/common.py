@@ -77,8 +77,9 @@ class SizeArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: type
+    scheduling: Any
     wrapper_codegen: type
+    cpp_wrapper_codegen: type = type(None)
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
@@ -125,19 +126,30 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # This backend can be used as a reference:
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
-    device: str, device_scheduling: type, device_wrapper_codegen: type
+    device: str,
+    device_scheduling: type,
+    device_wrapper_codegen: type,
+    device_cpp_wrapper_codegen: type = type(None),
 ):
-    device_codegens[device] = DeviceCodegen(device_scheduling, device_wrapper_codegen)
+    device_codegens[device] = DeviceCodegen(
+        device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
+    )
 
 
 def get_scheduling_for_device(device: str):
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
-def get_wrapper_codegen_for_device(device: str):
-    return (
-        device_codegens[device].wrapper_codegen if device in device_codegens else None
-    )
+def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
+    if device in device_codegens:
+        wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
+        return (
+            wrapper_codegen_obj.cpp_wrapper_codegen
+            if cpp_wrapper
+            else wrapper_codegen_obj.wrapper_codegen
+        )
+    else:
+        return None
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
