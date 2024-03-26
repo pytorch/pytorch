@@ -72,7 +72,7 @@ from .guards import (
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .symbolic_convert import InstructionTranslator, SpeculationLog, tls, instance_bound_nn_method_stack_to_str_list
 from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (
@@ -500,6 +500,21 @@ def _compile(
 
         try:
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
+                if "self" in locals.keys() and isinstance(locals["self"], torch.nn.Module) and not code.co_name.startswith('resume_in_'):
+                    module = locals["self"]
+                    method_name = code.co_name
+                    instance_bound_nn_method = getattr(module, method_name)
+                    # Store current NN method being traced into.
+                    # Root can append NN method to stack only if the stack is empty.
+                    if len(tls.instance_bound_nn_method_stack) == 0:
+                        tls.instance_bound_nn_method_stack.append(instance_bound_nn_method)
+                        print(f"Root: appended to tls.instance_bound_nn_method_stack, now it is {instance_bound_nn_method_stack_to_str_list()}")
+                else:
+                    # NOTE: we need this stack otherwise returning from func1 to forward doesn't track that we are still in forward
+                    if len(tls.instance_bound_nn_method_stack) > 0:
+                        print(f"Root: Use previously set tls.instance_bound_nn_method_stack, stack: {instance_bound_nn_method_stack_to_str_list()}")
+                    else:
+                        print(f"Root: tls.instance_bound_nn_method_stack is empty")
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
@@ -916,6 +931,16 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
+
+        if config.lazy_scheduler_compile_fn:
+            assert hasattr(
+                callback, "_clone_with_backend"
+            ), "LazyScheduler only supports callback fns that know how to clone themselves."
+            hijacked_callback = callback._clone_with_backend(
+                functools.partial(config.lazy_scheduler_compile_fn, backend_compile_fn=callback._torchdynamo_orig_callable),
+            )
+            return hijacked_callback(frame, cache_entry, hooks, frame_state)
+
         if config._get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
