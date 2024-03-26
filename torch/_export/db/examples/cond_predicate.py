@@ -5,7 +5,7 @@ from functorch.experimental.control_flow import cond
 
 
 @export_case(
-    example_inputs=(torch.ones(6, 4, 3),),
+    example_inputs=(torch.randn(6, 4, 3),),
     tags={
         "torch.cond",
         "torch.dynamic-shape",
