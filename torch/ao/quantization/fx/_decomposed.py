@@ -4,7 +4,6 @@ from typing import Optional, Tuple
 import torch
 from torch.library import Library, impl
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
-from typing import Tuple
 from torch._refs import _unsqueeze_multiple
 
 
