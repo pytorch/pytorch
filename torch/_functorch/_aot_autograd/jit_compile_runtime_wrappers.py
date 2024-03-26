@@ -192,6 +192,12 @@ def aot_dispatch_base(
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
 
+    # HACK: Inductor wil not include the tokens as input/outputs so we want to
+    # remove them here. I'm not sure what's the proper way for AOTAutograd to
+    # tell if compiler is inductor.
+    if fwd_output_strides:
+        fw_metadata.tokens = {}
+
     compiled_fn = create_runtime_wrapper(
         compiled_fw_func,
         runtime_metadata=fw_metadata,
