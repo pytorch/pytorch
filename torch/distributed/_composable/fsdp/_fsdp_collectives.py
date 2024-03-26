@@ -42,13 +42,14 @@ def foreach_all_gather(
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
+            dtype,
         ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        dtype = param_all_gather_inputs[0][0].dtype
-        if not all(t.dtype == dtype for ts in param_all_gather_inputs for t in ts):
-            raise NotImplementedError(
-                f"Mixed dtype not supported yet: {param_all_gather_input_dtypes}"
-            )
-        all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
+        if dtype == torch.uint8:
+            all_gather_inputs = [
+                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+            ]
+        else:
+            all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
@@ -107,11 +108,11 @@ def foreach_all_gather_copy_out(
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    out: List[torch.Tensor] = [
-        t.view(world_size, -1)
-        for fsdp_param in fsdp_params
-        for t in fsdp_param.all_gather_outputs
-    ]
+    gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
+    if all_gather_output.dtype == torch.uint8:
+        out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
+    else:
+        out = [t.view(world_size, -1) for t in gen]
     torch.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
@@ -233,13 +234,25 @@ def foreach_reduce_scatter_copy_in(
 
 def _get_all_gather_input_metadatas(
     param_all_gather_inputs: List[List[torch.Tensor]],
-) -> Tuple[List[List[torch.dtype]], List[List[int]]]:
+) -> Tuple[List[List[torch.dtype]], List[List[int]], torch.dtype]:
     param_all_gather_input_dtypes: List[List[torch.dtype]] = []
     param_all_gather_input_numels: List[List[int]] = []
+    all_gather_dtype = param_all_gather_inputs[0][0].dtype
     for all_gather_inputs in param_all_gather_inputs:
-        param_all_gather_input_dtypes.append([t.dtype for t in all_gather_inputs])
-        param_all_gather_input_numels.append([t.numel() for t in all_gather_inputs])
-    return param_all_gather_input_dtypes, param_all_gather_input_numels
+        input_dtypes: List[torch.dtype] = []
+        input_numels: List[int] = []
+        for all_gather_input in all_gather_inputs:
+            if all_gather_input.dtype != all_gather_dtype:
+                all_gather_dtype = torch.uint8
+            input_dtypes.append(all_gather_input.dtype)
+            input_numels.append(all_gather_input.numel())
+        param_all_gather_input_dtypes.append(input_dtypes)
+        param_all_gather_input_numels.append(input_numels)
+    return (
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_dtype,
+    )
 
 
 def _reduce_scatter(

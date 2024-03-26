@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import cast, List, Optional, Tuple
+from typing import Any, cast, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,6 +10,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
+
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
@@ -119,6 +120,10 @@ class FSDPParam:
     _global_stride: Tuple[int, ...]
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
+    # All-gather extension attributes
+    _use_all_gather_extensions: bool
+    _all_gather_metadata: Optional[Any]
+    _unsharded_inner_tensors: List[torch.Tensor]
 
     def __init__(
         self,
@@ -136,6 +141,7 @@ class FSDPParam:
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
+        self._init_extensions()
         self.all_gather_outputs: List[torch.Tensor] = []
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
@@ -238,6 +244,36 @@ class FSDPParam:
         self.reduce_dtype = reduce_dtype
         # None indicates that the mixed precision is not enabled
 
+    def _init_extensions(self) -> None:
+        module, param_name = self._module_info.module, self._module_info.param_name
+        fsdp_extensions = {}
+        if hasattr(module, "fsdp_extensions"):
+            if not callable(module.fsdp_extensions):
+                raise AssertionError(
+                    f"Expects fsdp_extensions to be callable but got {module.fsdp_extensions}"
+                )
+            fsdp_extensions = module.fsdp_extensions()
+            if not isinstance(fsdp_extensions, dict):
+                raise ValueError(
+                    "Expects fsdp_extensions to return a dict mapping parameter name "
+                    f"to FSDPTensorExtension but got {fsdp_extensions}"
+                )
+        if (extensions := fsdp_extensions.get(param_name)) is not None:
+            self._fsdp_pre_all_gather = extensions.fsdp_pre_all_gather
+            self._fsdp_post_all_gather = extensions.fsdp_post_all_gather
+            if not callable(self._fsdp_pre_all_gather) or not callable(
+                self._fsdp_post_all_gather
+            ):
+                raise ValueError(
+                    "Expects fsdp_pre_all_gather and fsdp_post_all_gather to be "
+                    f"callables but got {self._fsdp_pre_all_gather} and {self._fsdp_post_all_gather}"
+                )
+            self._all_gather_metadata: Optional[Any] = None
+            self._unsharded_inner_tensors: List[torch.Tensor] = []
+        else:
+            self._fsdp_pre_all_gather = None
+            self._fsdp_post_all_gather = None
+
     def init_all_gather_outputs(
         self,
         all_gather_input_numels: List[int],
@@ -254,12 +290,37 @@ class FSDPParam:
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
-            return  # already initialized
-        # For the default path (no post-all-gather), the all-gather output
-        # gives the unsharded parameter data directly
-        assert len(self.all_gather_outputs) == 1
+            if not self._fsdp_post_all_gather:
+                return  # already initialized
+            for tensor in self._unsharded_inner_tensors:
+                if (storage := tensor.untyped_storage()).size() == 0:
+                    storage.resize_(tensor.numel() * tensor.itemsize)
+            self._fsdp_post_all_gather(
+                tuple(self.all_gather_outputs),
+                self._all_gather_metadata,
+                self.param_dtype or self.orig_dtype,
+                out=self._unsharded_param,
+            )
+            self._all_gather_metadata = None
+            return
+        if self._fsdp_post_all_gather:
+            param_dtype = self.param_dtype or self.orig_dtype
+            (
+                unsharded_tensor,
+                self._unsharded_inner_tensors,
+            ) = self._fsdp_post_all_gather(
+                self.all_gather_outputs,
+                self._all_gather_metadata,
+                param_dtype,
+            )
+            self._all_gather_metadata = None
+        else:
+            # For the default path (no post-all-gather), the all-gather output
+            # gives the unsharded parameter data directly
+            assert len(self.all_gather_outputs) == 1
+            unsharded_tensor = self.all_gather_outputs[0]
         unsharded_param = torch.as_strided(
-            self.all_gather_outputs[0],
+            unsharded_tensor,
             self._orig_size,
             self._contiguous_orig_stride,
             storage_offset=0,
@@ -277,7 +338,7 @@ class FSDPParam:
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_all_gather_outputs()
+        self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
@@ -311,7 +372,7 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_all_gather_outputs()
+        self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
@@ -325,6 +386,7 @@ class FSDPParam:
             # is ensured without further synchronization.
             self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
+        self.free_all_gather_outputs()
         self.sharded_state = ShardedState.UNSHARDED
 
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
@@ -370,18 +432,46 @@ class FSDPParam:
         )
 
     def alloc_all_gather_outputs(self) -> None:
-        unsafe_alloc_storage(self.all_gather_outputs[0])
+        for tensor in self.all_gather_outputs:
+            unsafe_alloc_storage(tensor)
 
     def free_all_gather_outputs(self) -> None:
-        unsafe_free_storage(self.all_gather_outputs[0])
+        if not self._fsdp_pre_all_gather:
+            # Do not free since all-gather output and unsharded parameter alias
+            return
+        inner_tensor_ptrs = {
+            t.untyped_storage().data_ptr() for t in self._unsharded_inner_tensors
+        }
+        for all_gather_output in self.all_gather_outputs:
+            if (
+                storage := all_gather_output.untyped_storage()
+            ).data_ptr() in inner_tensor_ptrs:
+                # Do not free since all-gather output and inner tensor alias
+                continue
+            storage.resize_(0)
+
+    def free_unsharded_param(self) -> None:
+        if not self._fsdp_pre_all_gather:
+            for tensor in self.all_gather_outputs:
+                unsafe_free_storage(tensor)
+            return
+        for tensor in self._unsharded_inner_tensors:
+            unsafe_free_storage(tensor)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             sharded_param_data = self._sharded_param_data
+            if self._fsdp_pre_all_gather:
+                (
+                    all_gather_inputs,
+                    self._all_gather_metadata,
+                ) = self._fsdp_pre_all_gather(sharded_param_data)
+                return [t.view(-1) for t in all_gather_inputs]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
+            # TODO: Add extensions path.
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,
