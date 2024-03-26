@@ -24,6 +24,7 @@ def compiler_fn(gm):
     def inner_compiler(gm_, example_inputs_):
         counters["compiled_autograd"]["compiles"] += 1
         return inductor.compile(gm_, example_inputs_)
+        # return torch._dynamo.backends.debugging.eager(gm_, example_inputs_)
 
     return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
 
