@@ -8,8 +8,8 @@ from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
     fwd_only,
+    gen_register_replacement,
     joint_fwd_bwd,
-    register_replacement,
 )
 
 log = logging.getLogger(__name__)
@@ -845,10 +845,5 @@ def _get_sfdp_patterns():
 
 @functools.lru_cache(None)
 def _sfdp_init():
-    from .serialized_patterns.central_index import get_serialized_pattern
-
     for key, register_replacement_kwargs in _get_sfdp_patterns():
-        search_fn_pattern = get_serialized_pattern(key)
-        register_replacement(
-            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
-        )
+        gen_register_replacement(key, **register_replacement_kwargs)
