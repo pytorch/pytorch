@@ -403,6 +403,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 self.is_inv_factor = is_inv_factor
 
             def forward(self, query, key, value, scale_factor) -> torch.Tensor:
+                # Dividing by scale_factor makes scale_factor gradients very
+                # unstable
+                scale_factor = scale_factor.detach()
                 y = torch.matmul(query, key.transpose(-2, -1))
                 if self.is_inv_factor:
                     y = y.div(scale_factor)
