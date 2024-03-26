@@ -503,8 +503,8 @@ class TestCheckpoint(TestCase):
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
             in warning_msg
         )
-        self.assertTrue("first device type: cuda" in warning_msg)
         self.assertTrue("Device types: [\'cuda\', \'meta\']" in warning_msg)
+        self.assertTrue("first device type: cuda" in warning_msg)
 
 
 class TestDataLoaderUtils(TestCase):
