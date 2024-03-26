@@ -165,8 +165,16 @@ Tensor& baddbmm_out(
   std::vector<int64_t> result_shape = {
       batch1.size(0), batch1.size(1), batch2.size(2)};
   result.resize_(result_shape);
-  if (result.numel() == 0)
+  if (result.numel() == 0){
     return result;
+  } else if (batch1.size(2) == 0){
+    if (beta.to<c10::complex<double>>() == 0.0){
+      return result.zero_();
+    }else{
+      result = input.mul_(beta);
+      return result;
+    }
+  }
 
   TORCH_CHECK(
       are_expandable(input.sizes(), result_shape),
