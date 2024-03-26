@@ -59,7 +59,12 @@ KERNEL_COUNT_OVERRIDES = {
     "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
     "test_adamw_amsgrad_capturable_foreach_cuda": 3,
     "test_adamw_amsgrad_capturable_cuda": 6,
+    "test_adamw_tensor_lr_amsgrad_capturable_foreach_cuda": 3,
+    "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
+    "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adam_amsgrad_capturable_cuda": 6,
+    "test_adadelta_tensor_lr_capturable_cuda": 6,
+    "test_adadelta_tensor_lr_capturable_foreach_cuda": 4,
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
     "test_adadelta_foreach_weight_decay_cpu": 12,
@@ -67,6 +72,12 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_momentum_dampening_foreach_cuda": 5,
     "test_sgd_momentum_foreach_cuda": 5,
+    "test_sgd_weight_decay_maximize_cuda": 4,
+    "test_sgd_weight_decay_maximize_cpu": 4,
+    "test_sgd_momentum_weight_decay_foreach_cuda": 2,
+    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
+    "test_sgd_cuda": 4,
+    "test_sgd_cpu": 4,
 }
 
 # also tracks currently supported optimizers
@@ -76,10 +87,10 @@ KERNEL_COUNTS = {
     NAdam: KernelCounts(multitensor=2, singletensor=8),
     Rprop: KernelCounts(multitensor=1, singletensor=4),
     RMSprop: KernelCounts(multitensor=1, singletensor=4),
-    Adadelta: KernelCounts(multitensor=1, singletensor=4),
+    Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=8),
-    SGD: KernelCounts(multitensor=2, singletensor=8),
+    SGD: KernelCounts(multitensor=1, singletensor=8),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -103,6 +114,9 @@ def build_opt_kwarg_db():
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
+
+                    if key == "lr" and isinstance(kwargs["lr"], torch.Tensor):
+                        name += "_tensor_lr"
 
                 name += f"_{device}"
 
@@ -193,7 +207,7 @@ def check_optim(
 
     # currently we don't mutate step properly until we resolve
     # https://github.com/pytorch/pytorch/issues/115679
-    if optim_cls not in (Rprop, RMSprop, Adadelta):
+    if optim_cls not in (Rprop, RMSprop):
         for p_eager, p_compiled in zip(params_eager, params_compiled):
             self.assertEqual(
                 state_eager[p_eager],
@@ -301,16 +315,11 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             compiled_step()
 
         if self.check_kernel_count:
-            if optim_cls is SGD:
-                # SGD triggers an additional recompile
-                # because of momentum buffer list mutation in step()
-                multiplier = 3
-            else:
-                # currently, we compile the step and the rest of the computation
-                # separately because the step is a single element tensor
-                # hence, the usual kernel count is 2
-                # multiply by 2 to account for the recompile
-                multiplier = 2
+            # currently, we compile the step and the rest of the computation
+            # separately because the step is a single element tensor
+            # hence, the usual kernel count is 2
+            # multiply by 2 to account for the recompile
+            multiplier = 2
 
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count,
@@ -417,7 +426,7 @@ class CompiledOptimizerTests(TestCase):
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
-    test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
+    test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
