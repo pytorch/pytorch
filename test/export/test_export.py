@@ -972,7 +972,6 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
-    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -1463,7 +1462,6 @@ class TestExport(TestCase):
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -1835,7 +1833,6 @@ def forward(self, arg_0):
         )
 
     @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
-    @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -1891,7 +1888,6 @@ def forward(self, arg_0):
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2253,7 +2249,6 @@ def forward(self, arg_0):
             )
 
     @testing.expectedFailureSerDer  # We don't preserve metadata on graph module
-    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -2484,7 +2479,6 @@ def forward(self, arg_0):
         ):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
-    @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3058,7 +3052,6 @@ def forward(self, arg_0):
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerPreDispatch  # symfloat nyi
     @testing.expectedFailureRetraceability
     def test_sym_sqrt(self):
         import math
