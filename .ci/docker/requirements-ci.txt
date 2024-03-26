@@ -310,4 +310,7 @@ pywavelets==1.5.0 ; python_version >= "3.12"
 lxml==5.0.0.
 #Description: This is a requirement of unittest-xml-reporting
 
+mpmath==1.2.1
+#Description: Building PyTorch fails with the newer mpmath-1.4.0a0
+
 # Python-3.9 binaries
