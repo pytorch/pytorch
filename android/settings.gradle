@@ -1,0 +1,6 @@
+include ':app', ':pytorch_android', ':pytorch_android_torchvision', ':pytorch_host', ':test_app'
+
+project(':pytorch_android_torchvision').projectDir = file('pytorch_android_torchvision')
+
+project(':pytorch_host').projectDir = file('pytorch_android/host')
+project(':test_app').projectDir = file('test_app/app')
