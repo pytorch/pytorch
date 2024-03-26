@@ -19,7 +19,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -223,19 +223,19 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if<!std::is_reduced_floating_point<T>::value, T>::type
+typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if<std::is_reduced_floating_point<T>::value, T>::type
+typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
 
 template <typename T>
-typename std::enable_if<!std::is_integral<T>::value>::type
+typename std::enable_if_t<!std::is_integral_v<T>>
 atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
@@ -259,7 +259,7 @@ atomic_add(volatile T *addr, T offset) {
 // better than compare_exchange_weak, which can be checked by microbenchmark
 // inductor_cpu_atomic.py
 template <typename T>
-typename std::enable_if<std::is_integral<T>::value>::type
+typename std::enable_if_t<std::is_integral_v<T>>
 atomic_add(volatile T *addr, T offset) {
   static_assert(sizeof(std::atomic<T>) == sizeof(T),
                 "std::atomic issue");
@@ -267,7 +267,7 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 
 template <typename scalar_t>
 inline at::vec::Vectorized<float> cvt_lowp_fp_to_fp32(
@@ -321,43 +321,6 @@ inline at::vec::VectorizedN<int64_t,2> cvt_fp32_to_int64(at::vec::Vectorized<flo
   result[1] = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(int32_vec, 1));
 # else
   constexpr int float_vec_size = at::vec::Vectorized<float>::size();
-  constexpr int int64_vec_size = at::vec::Vectorized<int64_t>::size();
-  __at_align__ float src_buf[float_vec_size];
-  __at_align__ int64_t result_buf[int64_vec_size];
-  src.store(src_buf);
-  for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < int64_vec_size; j++) {
-      result_buf[j] = static_cast<int64_t>(src_buf[i * int64_vec_size + j]);
-    }
-    result[i] = at::vec::Vectorized<int64_t>::loadu(result_buf);
-  }
-# endif
-  return result;
-}
-
-inline at::vec::Vectorized<int32_t> cvt_int64_to_int32(at::vec::VectorizedN<int64_t,2> src) {
-# if defined(CPU_CAPABILITY_AVX512)
-  auto low = _mm512_cvtepi64_epi32(src[0]);
-  auto high = _mm512_cvtepi64_epi32(src[1]);
-  return _mm512_inserti32x8(_mm512_castsi256_si512(low), high, 1);
-# elif defined(CPU_CAPABILITY_AVX2)
-  auto low = _mm256_shuffle_epi32(src[0], _MM_SHUFFLE(2, 0, 2, 0));
-  auto high = _mm256_shuffle_epi32(src[1], _MM_SHUFFLE(2, 0, 2, 0));
-  auto low_perm = _mm256_permute4x64_epi64(low, _MM_SHUFFLE(3, 1, 2, 0));
-  auto high_perm = _mm256_permute4x64_epi64(high, _MM_SHUFFLE(3, 1, 2, 0));
-  return _mm256_blend_epi32(low_perm, high_perm, 0xF0);
-# else
-  constexpr int int32_vec_size = at::vec::Vectorized<int32_t>::size();
-  constexpr int int64_vec_size = at::vec::Vectorized<int64_t>::size();
-  __at_align__ int32_t result[int32_vec_size];
-  __at_align__ int64_t src_buf[int64_vec_size];
-  for (int i = 0; i < 2; i++) {
-    src[i].store(src_buf);
-    for (int j = 0; j < int64_vec_size; j++) {
-      result[i * int64_vec_size + j] = static_cast<int32_t>(src_buf[j]);
-    }
-  }
-  return at::vec::Vectorized<int32_t>::loadu(result);
 # endif
 }
 
@@ -385,4 +348,21 @@ inline at::vec::VectorizedN<int64_t,2> cvt_int32_to_int64(at::vec::Vectorized<in
   return result;
 }
 
+#endif
+
+#ifdef CPU_CAPABILITY_NEON
+namespace at::vec {
+template <typename T>
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
+inline convert_int8_to_float(at::vec::Vectorized<T> src) {
+  // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
+  T data[at::vec::Vectorized<T>::size()];
+  float rc[at::vec::Vectorized<float>::size()];
+  src.store(data);
+  for(auto i = 0; i < at::vec::Vectorized<float>::size(); ++i) {
+          rc[i] = static_cast<float>(data[i]);
+  }
+  return at::vec::Vectorized<float>::loadu(rc);
+}
+}
 #endif

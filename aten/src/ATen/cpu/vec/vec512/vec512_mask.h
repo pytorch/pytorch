@@ -9,16 +9,28 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
-template <typename mask_t>
-struct VecMaskLoad<float, 1, mask_t, 1> {
-  static inline VectorizedN<float, 1> apply(
-      const float* ptr,
+template <typename T, typename mask_t>
+struct VecMaskLoad<
+    T,
+    1,
+    mask_t,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+            std::is_same_v<T, uint32_t>,
+        void>> {
+  static inline VectorizedN<T, 1> apply(
+      const T* ptr,
       const VecMask<mask_t, 1>& vec_mask) {
-    at::vec::Vectorized<float> zero_vec(0);
+    at::vec::Vectorized<T> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     auto int_mask = vec_mask.template cast<int, 1>()[0];
     auto mmask = _mm512_cmp_epi32_mask(int_mask, all_ones, _MM_CMPINT_EQ);
-    return Vectorized<float>(_mm512_mask_loadu_ps(zero_vec, mmask, ptr));
+    if constexpr (std::is_same_v<T, float>) {
+      return Vectorized<T>(_mm512_mask_loadu_ps(zero_vec, mmask, ptr));
+    } else {
+      return Vectorized<T>(_mm512_mask_loadu_epi32(zero_vec, mmask, ptr));
+    }
   }
 };
 
