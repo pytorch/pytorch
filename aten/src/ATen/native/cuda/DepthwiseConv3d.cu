@@ -26,9 +26,9 @@ template <typename scalar_t, typename accscalar_t,
     int kKnownKernelT, int kKnownKernelH, int kKnownKernelW,
     int kKnownDilationT, int kKnownDilationH, int kKnownDilationW>
 __global__ void conv_depthwise3d_cuda_kernel(
-    const PackedTensorAccessor32<scalar_t, 5> input,
+    const PackedTensorAccessor32<const scalar_t, 5> input,
     PackedTensorAccessor32<scalar_t, 5> output,
-    const PackedTensorAccessor32<scalar_t, 5> kernel,
+    const PackedTensorAccessor32<const scalar_t, 5> kernel,
     const scalar_t* bias,
     int strideT, int strideH, int strideW,
     int paddingT, int paddingH, int paddingW,
@@ -361,9 +361,9 @@ void conv_depthwise_shape_check(
     conv_depthwise3d_cuda_kernel                                            \
     <scalar_t, accscalar_t, (kt), (kh), (kw), (dilt), (dilh), (dilw)>       \
       <<<grid, block, (smem), at::cuda::getCurrentCUDAStream()>>>(          \
-        input_.packed_accessor32<scalar_t, 5>(),                            \
+        input_.packed_accessor32<const scalar_t, 5>(),                      \
         output_.packed_accessor32<scalar_t, 5>(),                           \
-        weight_.packed_accessor32<scalar_t, 5>(),                           \
+        weight_.packed_accessor32<const scalar_t, 5>(),                     \
         bias_ptr,                                                           \
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
@@ -377,9 +377,9 @@ void conv_depthwise_shape_check(
     conv_depthwise3d_cuda_kernel                                            \
     <scalar_t,accscalar_t, -1, -1, -1, -1, -1, -1>                          \
       <<<grid, block, (smem), at::cuda::getCurrentCUDAStream()>>>(          \
-        input_.packed_accessor32<scalar_t, 5>(),                            \
+        input_.packed_accessor32<const scalar_t, 5>(),                      \
         output_.packed_accessor32<scalar_t, 5>(),                           \
-        weight_.packed_accessor32<scalar_t, 5>(),                           \
+        weight_.packed_accessor32<const scalar_t, 5>(),                     \
         bias_ptr,                                                           \
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
