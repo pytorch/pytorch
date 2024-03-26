@@ -3333,8 +3333,7 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = tuple()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
-                                     .format(self.get_name(), name))
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 

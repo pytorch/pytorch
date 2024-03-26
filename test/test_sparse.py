@@ -4350,8 +4350,7 @@ class TestSparseMeta(TestCase):
             )
 
         printed = []
-        printed.append("########## {}/{}/size={}+{}+{}+{} ##########".format(
-            dtype, index_dtype, batchsize, sparsesize, blocksize, densesize))
+        printed.append(f"########## {dtype}/{index_dtype}/size={batchsize}+{sparsesize}+{blocksize}+{densesize} ##########")
         printed.append("# sparse meta tensor")
         printed.append(str(x))
 

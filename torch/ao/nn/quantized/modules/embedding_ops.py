@@ -125,9 +125,7 @@ class Embedding(torch.nn.Module):
         return _hide_packed_params_repr(self, EmbeddingPackedParams)
 
     def extra_repr(self):
-        extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(
-            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.weight().qscheme()
-        )
+        extra_repr_str = f'num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}, dtype={self._packed_params.dtype}, qscheme={self.weight().qscheme()}'
 
         return extra_repr_str
 

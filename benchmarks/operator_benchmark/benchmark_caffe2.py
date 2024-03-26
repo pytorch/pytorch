@@ -185,9 +185,7 @@ def generate_c2_test_from_ops(ops_metadata, bench_op, tags):
         op = bench_op()
         op.init(**test_attrs)
         test_name = op.test_name("short")
-        input_config = "Shapes: {}, Type: {}, Args: {}".format(
-            op_metadata.input_dims, op_metadata.input_types, str(op_metadata.args)
-        )
+        input_config = f"Shapes: {op_metadata.input_dims}, Type: {op_metadata.input_types}, Args: {str(op_metadata.args)}"
         test_config = TestConfig(test_name, input_config, tags, run_backward=False)
         if op is not None:
             create_caffe2_op_test_case(op, test_config)
