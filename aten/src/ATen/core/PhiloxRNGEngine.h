@@ -11,7 +11,7 @@
 #include <cuda.h>
 #endif
 
-#include <ATen/core/Array.h>
+#include <array>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
@@ -23,10 +23,10 @@ namespace at {
 // typedefs for holding vector data
 namespace detail {
 
-typedef at::detail::Array<uint32_t, 4> UINT4;
-typedef at::detail::Array<uint32_t, 2> UINT2;
-typedef at::detail::Array<double, 2> DOUBLE2;
-typedef at::detail::Array<float, 2> FLOAT2;
+typedef std::array<uint32_t, 4> UINT4;
+typedef std::array<uint32_t, 2> UINT2;
+typedef std::array<double, 2> DOUBLE2;
+typedef std::array<float, 2> FLOAT2;
 
 } // namespace detail
 
@@ -81,7 +81,7 @@ public:
                                  uint64_t subsequence = 0) {
     key_[0] = static_cast<uint32_t>(seed);
     key_[1] = static_cast<uint32_t>(seed >> 32);
-    counter_ = detail::UINT4(0);
+    counter_ = detail::UINT4{};
     counter_[2] = static_cast<uint32_t>(subsequence);
     counter_[3] = static_cast<uint32_t>(subsequence >> 32);
     STATE = 0;
