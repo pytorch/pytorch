@@ -174,6 +174,10 @@ static void deconvolution(
   dnnl::primitive_attr pattr;
   dnnl::post_ops po = attr.extract_post_ops(dst);
   pattr.set_post_ops(po);
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
@@ -251,6 +255,10 @@ static void deconvolution_backward_data(
   // create fwd primitive desc hint
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
 
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding = padding.vec();
@@ -341,7 +349,10 @@ static void deconvolution_backward_weights(
   dnnl::memory::dims _dilation = deconv_compatible_dilation(dilation);
   dnnl::primitive_attr pattr;
 
-
+  #if ONEDNN_SUPPORT_DETERMINISTIC
+    if(at::globalContext().deterministicAlgorithms())
+        pattr.set_deterministic(true);
+  #endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
