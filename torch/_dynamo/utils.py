@@ -1268,6 +1268,8 @@ def same(
             res.keys()
         ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         for k in sorted(ref.keys()):
+            if k == "loss":
+                print(f"loss: {ref[k]} vs {res[k]}")
             if not (
                 same(
                     ref[k],
