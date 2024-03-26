@@ -305,11 +305,6 @@ def _create_cpu_state_dict(
     tensors can be placed on pin_memory or share_memory based on the provided arguments.
     """
 
-    if pin_memory and share_memory:
-        raise ValueError(
-            "Cannot allocate both memory on both pin_memory and share_memory"
-        )
-
     def tensor_func(
         obj: torch.Tensor,
         pg: Optional[dist.ProcessGroup],
@@ -320,13 +315,25 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            return torch.empty(
+            t = torch.empty(
                 *tuple(companion_obj.size()), dtype=companion_obj.dtype
             ).share_memory_()
-        else:
+            if pin_memory:
+                succ = torch.cuda.cudart().cudaHostRegister(
+                    t.data_ptr(),
+                    t.numel() * t.element_size(),
+                    1 # lines up with 'cudaHostRegisterPortable'
+                )
+                assert succ == 0, f"Pinning shared memory failed with {succ}"
+            return t
+        elif pin_memory:
             return torch.empty(
                 *tuple(companion_obj.size()), dtype=companion_obj.dtype
             ).pin_memory()
+        else:
+            return torch.empty(
+                *tuple(companion_obj.size()), dtype=companion_obj.dtype
+            )
 
     ret = _iterate_state_dict(
         state_dict,
@@ -383,3 +390,48 @@ def _check_state_dict_similarity(
         return False
 
     return True
+
+def test_async_issue_repro():
+    # from torch.distributed.checkpoint._state_dict_utils import (
+    #     _offload_state_dict_to_cpu,
+    #     _create_cpu_state_dict,
+    # )
+
+    import timeit
+    import torch
+    from torch.profiler import profile, record_function, ProfilerActivity
+
+    # warm up
+    torch.zeros(50000, 50000, device="cuda")
+
+    for use_shared, use_pinned in ([(True, False), (False, True), (True, True), (False, False)]):
+
+        print(f"{use_shared=} {use_pinned=}")
+        # with record_function("torch_zeros"):
+        tensor = torch.zeros(50000, 50000, device="cuda")
+        state_dict = {"a": tensor}
+        cache = _create_cpu_state_dict(state_dict, share_memory=use_shared, pin_memory=use_pinned)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            # with record_function("torch_zeros"):
+            #     tensor = torch.zeros(50000, 50000, device="cuda")
+            # state_dict = {"a": tensor}
+            # with record_function("_create_cpu_state_dict"):
+            #     cache = _create_cpu_state_dict(state_dict, share_memory=use_shared, pin_memory=use_pinned)
+            with record_function("_offload_state_dict_to_cpu-sync-1st"):
+                copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache)
+            with record_function("_offload_state_dict_to_cpu-sync-2nd"):
+                copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache)
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                with record_function("_offload_state_dict_to_cpu-async-1st"):
+                    copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache, cpu_offload_sync=False)
+            with record_function("stream.synchronize-1st"):
+                stream.synchronize()
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                with record_function("_offload_state_dict_to_cpu-async-2nd"):
+                    copy = _offload_state_dict_to_cpu(state_dict, cpu_offload_state_dict=cache, cpu_offload_sync=False)
+            with record_function("stream.synchronize-2nd"):
+                stream.synchronize()
+
+        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=100))
