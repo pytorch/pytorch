@@ -1,4 +1,4 @@
-from ..common import DeviceOpOverrides
+from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
 class XPUDeviceOpOverrides(DeviceOpOverrides):
@@ -13,3 +13,6 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def device_guard(self, device_idx):
         return f"torch.xpu._DeviceGuard({device_idx})"
+
+
+register_device_op_overrides("xpu", XPUDeviceOpOverrides())
