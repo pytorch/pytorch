@@ -858,7 +858,7 @@ def min_cut_rematerialization_partition(
         if node.meta.get("recompute", 0) > 0:
             return False
 
-        if isinstance(node.meta['val'], torch.SymFloat):
+        if 'val' in node.meta and isinstance(node.meta['val'], torch.SymFloat):
             return False
 
         banned_nodes.add(node)
