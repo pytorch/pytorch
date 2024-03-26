@@ -27,3 +27,7 @@ void THP_PyThreadState_PopFrame(
     _PyInterpreterFrame* frame);
 
 #endif
+
+// pointers to _PyOpcode_Caches for C++
+extern const uint8_t* THP_PyOpcode_Caches;
+extern const int THP_PyOpcode_Caches_size;
