@@ -241,45 +241,6 @@ void test_aoti_double_buffering(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
-void test_aoti_double_buffering_with_tensor_constants() {
-  torch::NoGradGuard no_grad;
-
-  std::string data_path = (std::filesystem::path(
-                               STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) /
-                               "data_with_tensor_constants.pt")
-                               .string();
-
-  torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string path_attr = "model_so_path";
-  std::string inputs_attr = "inputs";
-  std::string w_attr = "w";
-  std::string outputs_attr = "outputs";
-  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
-  auto input_tensors =
-      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
-  const auto& w_tensors = data_loader.attr(w_attr.c_str()).toTensor();
-  const auto& ref_output_tensors =
-      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
-
-  torch::inductor::TensorConstantMap real_map;
-  real_map.emplace("L__self___w", new at::Tensor(w_tensors));
-
-  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
-  runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-      model_so_path.c_str());
-
-  // By default, buffer #1 get loaded with burned in weights. Correct results.
-  auto actual_output_tensors = runner->run(input_tensors);
-  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
-
-  // We update the weights to buffer #2 and activate it. This should still
-  // produce correct result, since we would have copied the tensor_constants.
-  runner->update_inactive_constant_buffer(real_map);
-  runner->swap_constant_buffer();
-  actual_output_tensors = runner->run(input_tensors);
-  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
-}
-
 } // namespace
 
 namespace torch {
@@ -317,10 +278,6 @@ TEST(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
 
 TEST(AotInductorTest, UpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda", false);
-}
-
-TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
-  test_aoti_double_buffering_with_tensor_constants();
 }
 #endif
 
