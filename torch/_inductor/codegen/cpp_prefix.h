@@ -19,7 +19,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -278,7 +278,7 @@ inline float flag_to_float_scalar(T src) {
   return ret;
 }
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 
 template<typename T>
 typename std::enable_if_t<std::is_same_v<T, float> ||  std::is_same_v<T, int32_t> || std::is_same_v<T, uint32_t>, at::vec::Vectorized<T>>
@@ -301,7 +301,7 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
     } else {
         return _mm256_maskload_epi32(src, mmask);
     }
-# elif defined(CPU_CAPABILITY_ZVECTOR)
+# elif defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
     auto result = at::vec::Vectorized<T>::loadu(src);
     if constexpr (std::is_same_v<T, float>) {
         return result & mask;
@@ -334,7 +334,7 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
     result[i] = mmask[i] == 0xFFFFFFFF ? src[i].x: uint16_t(0);
   }
   return at::vec::Vectorized<T>::loadu(result);
-# elif defined(CPU_CAPABILITY_ZVECTOR)
+# elif defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
   auto result = at::vec::Vectorized<T>::loadu(src, 8);
   uint32_t maskdata[8] = { 0 };
   uint16_t maskdata_dest[16] = { 0 };
@@ -368,7 +368,7 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
       result[i] = mmask[i] == 0xFFFFFFFF ? src[i]: T(0);
     }
     return at::vec::Vectorized<T>::loadu(result);
-# elif defined(CPU_CAPABILITY_ZVECTOR)
+# elif defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
     auto result = at::vec::Vectorized<T>::loadu(src, 8);
     uint32_t maskdata[8];
     T maskdata_dest[32] = { 0 };
@@ -625,4 +625,21 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::VectorizedN<int64_t,2> 
   return to_float_mask(cvt_int64_to_int32(src));
 }
 
+#endif
+
+#ifdef CPU_CAPABILITY_NEON
+namespace at::vec {
+template <typename T>
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
+inline convert_int8_to_float(at::vec::Vectorized<T> src) {
+  // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
+  T data[at::vec::Vectorized<T>::size()];
+  float rc[at::vec::Vectorized<float>::size()];
+  src.store(data);
+  for(auto i = 0; i < at::vec::Vectorized<float>::size(); ++i) {
+          rc[i] = static_cast<float>(data[i]);
+  }
+  return at::vec::Vectorized<float>::loadu(rc);
+}
+}
 #endif
