@@ -956,6 +956,7 @@ class OutputGraph:
             )
             self.codegen_suffix(tx, stack_values, pass2)
 
+            stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -964,6 +965,7 @@ class OutputGraph:
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
+                    stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
@@ -973,9 +975,11 @@ class OutputGraph:
             self.add_output_instructions(
                 [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
             )
-            self.add_output_instructions(
-                [PyCodegen(tx).create_delete(graph_output_var)]
-            )
+
+            if stored_graph_output_var:
+                self.add_output_instructions(
+                    [PyCodegen(tx).create_delete(graph_output_var)]
+                )
 
     def codegen_suffix(self, tx, stack_values, cg):
         if self.backward_state:
