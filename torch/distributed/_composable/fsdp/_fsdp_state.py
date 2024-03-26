@@ -95,7 +95,7 @@ def _fsdp_state_pre_backward_compile_only(self, forward_grad_fns: Tuple[Node, ..
     as such, the bool to guard whether the pre-backward hook is a no-op or not needs to be per call to register_multi_grad_hook, not something global to the entire backward
     """
     if self._training_state == TrainingState.PRE_BACKWARD:
-        return
+        return grad
     self._training_state = TrainingState.PRE_BACKWARD
     self._register_root_post_backward_final_callback()
     if self._fsdp_param_group:
