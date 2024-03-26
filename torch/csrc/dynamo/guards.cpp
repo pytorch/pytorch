@@ -573,6 +573,44 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   }
 }
 
+#if IS_PYTHON_3_12_PLUS
+
+static std::unordered_map<PyObject*, uint64_t> dict_version_map;
+static int dict_version_watcher_id;
+static uint64_t global_dict_version_id = 0;
+static int dict_version_watch_callback(
+    PyDict_WatchEvent event,
+    PyObject* dict,
+    PyObject* key,
+    PyObject* new_value) noexcept {
+  if (event == PyDict_EVENT_DEALLOCATED) {
+    dict_version_map.erase(dict);
+  } else if (event != PyDict_EVENT_CLONED) {
+    dict_version_map[dict] = global_dict_version_id++;
+  }
+  return 0;
+}
+
+#endif
+
+static uint64_t get_dict_version_unchecked(PyObject* dict) {
+#if IS_PYTHON_3_12_PLUS
+
+  if (PyDict_Watch(dict_version_watcher_id, dict)) {
+    throw std::runtime_error("failed to add version watcher to dict!");
+  }
+  if (!dict_version_map.count(dict)) {
+    dict_version_map[dict] = global_dict_version_id++;
+  }
+  return dict_version_map[dict];
+
+#else
+
+  return ((PyDictObject*)dict)->ma_version_tag;
+
+#endif
+}
+
 static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   // Retrieves the version of a dictionary.
   PyObject* obj = nullptr;
@@ -582,16 +620,7 @@ static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   if (!PyDict_Check(obj)) {
     return nullptr;
   }
-#if IS_PYTHON_3_12_PLUS
-  TORCH_CHECK(false, "Dynamo does not support CPython 3.12 yet.");
-  return nullptr;
-#else
-  // ma_version_tag is deprecated since 3.12. We will need to transition
-  // to use the appropriate API for later versions.
-  // This warning is an error on some clang builds, so we have to ifdef it
-  // away for now.
-  return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
-#endif
+  return THPUtils_packUInt64(get_dict_version_unchecked(obj));
 }
 
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
@@ -1301,23 +1330,10 @@ class DICT_VERSION : public LeafGuard {
     if (!PyDict_Check(value.ptr())) {
       throw py::type_error("DICT_VERSION expects a dict");
     }
-    _tag = get_dict_version(value.ptr());
+    _tag = get_dict_version_unchecked(value.ptr());
   }
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyDict_Check(value) && get_dict_version(value) == _tag;
-  }
-
- private:
-  uint64_t get_dict_version(PyObject* dict) {
-#if IS_PYTHON_3_12_PLUS
-    throw std::runtime_error("Dynamo does not support CPython 3.12 yet.");
-#else
-    // ma_version_tag is deprecated since 3.12. We will need to transition
-    // to use the appropriate API for later versions.
-    // This warning is an error on some clang builds, so we have to ifdef it
-    // away for now.
-    return ((PyDictObject*)dict)->ma_version_tag;
-#endif
+    return PyDict_Check(value) && get_dict_version_unchecked(value) == _tag;
   }
 
   // Saved dict version.
@@ -3292,6 +3308,16 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+
+// initialize dict_version_map watcher for 3.12
+#if IS_PYTHON_3_12_PLUS
+
+  dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);
+  if (dict_version_watcher_id == -1) {
+    throw std::runtime_error("Failed to install dict_version_watch_callback");
+  }
+
+#endif
 
   return m;
 }
