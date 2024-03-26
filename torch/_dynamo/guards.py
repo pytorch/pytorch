@@ -1767,24 +1767,22 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names and not config.enable_cpp_guard_manager:
+            tensor_check_guards = builder.tensor_check_guards
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
 
-            dynamic_dims_sizes = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
+            dynamic_dims_sizes = []
+            dynamic_dims_strides = []
+            for t, g in zip(tensor_check_examples, tensor_check_guards):
+                metadata = self.output_graph.input_source_to_sizes_strides[
+                    g.originating_source
+                ]
+                dynamic_dims_sizes.append(convert_to_concrete_values(metadata["size"]))
+                dynamic_dims_strides.append(
+                    convert_to_concrete_values(metadata["stride"])
                 )
-                for t in tensor_check_examples
-            ]
-
-            dynamic_dims_strides = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
-                )
-                for t in tensor_check_examples
-            ]
 
             tensor_guards = TensorGuards(
                 *tensor_check_examples,
@@ -1799,7 +1797,6 @@ class CheckFunctionManager:
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
             verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
                 # This is a copy of what guards.cpp checks against
