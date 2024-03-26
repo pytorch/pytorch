@@ -702,7 +702,9 @@ class CleanupHook:
     name: str
 
     def __call__(self, *args):
-        CleanupManager.count -= 1
+        # Make sure we're not shutting down
+        if CleanupManager is not None:
+            CleanupManager.count -= 1
         del self.scope[self.name]
 
     @staticmethod

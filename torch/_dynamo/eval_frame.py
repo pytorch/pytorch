@@ -689,20 +689,6 @@ def explain(f, *extra_args, **extra_kwargs):
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
-
-        # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
-        deduped_reasons = {}
-        for reason in break_reasons:
-            innermost_frame = reason.user_stack[-1]
-            # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
-            deduped_reasons[repr(innermost_frame)] = reason
-
-        formatted_list = ""
-        for idx, break_reason in enumerate(deduped_reasons.values()):
-            formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-            msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
-            formatted_list += msg
-
         graph_break_count = graph_count - 1
         compile_time = compile_times(repr="str")
 
