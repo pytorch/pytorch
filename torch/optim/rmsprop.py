@@ -207,7 +207,6 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
-        {_capturable_doc}
         {_maximize_doc}
         {_capturable_doc}
         {_differentiable_doc}
@@ -247,7 +246,6 @@ def rmsprop(
 
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
-
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -297,16 +295,18 @@ def _single_tensor_rmsprop(
     has_complex: bool,
 ):
 
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
-
     for i, param in enumerate(params):
+        step = state_steps[i]
+
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            assert (
+                (param.is_cuda and step.is_cuda) or (param.is_xla and step.is_xla)
+            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+
         grad = grads[i]
         grad = grad if not maximize else -grad
         square_avg = square_avgs[i]
-        step = state_steps[i]
 
         step += 1
 
@@ -371,7 +371,7 @@ def _multi_tensor_rmsprop(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+        assert all((p.is_cuda and step.is_cuda) or (p.is_xla and step.is_xla) for p, step in zip(params, state_steps)), \
             "If capturable=True, params and state_steps must be CUDA tensors."
 
 
@@ -421,6 +421,14 @@ def _multi_tensor_rmsprop(
         if momentum > 0:
             torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
             torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
-            torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)
+            if capturable:
+                momentum_lr = torch._foreach_mul(grouped_momentum_buffer_list, -lr)
+                torch._foreach_add_(grouped_params, momentum_lr)
+            else:
+                torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)
         else:
-            torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)
+            if capturable:
+                torch._foreach_div_(avg, -lr)
+                torch._foreach_addcdiv_(grouped_params, grouped_grads, avg)
+            else:
+                torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)
