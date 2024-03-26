@@ -1104,39 +1104,61 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
-    @skipIfNoX86
-    def test_linear_unary(self):
+
+    def _test_linear_unary_helper(
+            self,
+            post_op_module,
+            post_op_aten,
+            post_op_aten_inplace,
+            post_op_algo_list=None,
+            is_qat=False,
+            is_dynamic=False,
+    ):
         """
         Test pattern of linear with unary post ops (e.g. relu) with X86InductorQuantizer.
         """
         use_bias_list = [True, False]
         inplace_list = [True, False]
-        postop_list = [nn.ReLU, nn.LeakyReLU]  # only test two to save time
-        cases = itertools.product(use_bias_list, inplace_list, postop_list)
-        post_op_map = {
-            nn.ReLU: [torch.ops.aten.relu_.default, torch.ops.aten.relu.default],
-            nn.LeakyReLU: [torch.ops.aten.leaky_relu_.default, torch.ops.aten.leaky_relu.default],
-        }
+        if post_op_algo_list is None:
+            post_op_algo_list = [None]
+        cases = itertools.product(use_bias_list, inplace_list, post_op_algo_list)
         with override_quantized_engine("x86"), torch.no_grad():
-            for use_bias, inplace, postop in cases:
-                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, inplace_postop=inplace).eval()
+            for use_bias, inplace, post_op_algo in cases:
+                if inplace and post_op_aten_inplace is None:
+                    continue
+                m = TestHelperModules.LinearUnaryModule(
+                    use_bias=use_bias, postop=post_op_module, inplace_postop=inplace, post_op_algo=post_op_algo
+                ).eval()
                 example_inputs = (torch.randn(2, 4),)
                 quantizer = X86InductorQuantizer().set_global(
-                    xiq.get_default_x86_inductor_quantization_config()
+                    xiq.get_default_x86_inductor_quantization_config(
+                        is_qat=is_qat,
+                        is_dynamic=is_dynamic,
+                    )
+                )
+                quantize_per_tensor_op = (
+                    torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                    if is_dynamic
+                    else torch.ops.quantized_decomposed.quantize_per_tensor.default
+                )
+                dequantize_per_tensor_op = (
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                    if is_dynamic
+                    else torch.ops.quantized_decomposed.dequantize_per_tensor.default
                 )
                 node_occurrence = {
-                    # one for input and weight of the conv, one for output for the relu
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    # one for input of the linear
+                    quantize_per_tensor_op: 1,
+                    dequantize_per_tensor_op: 1,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                 }
                 node_list = [
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    quantize_per_tensor_op,
+                    dequantize_per_tensor_op,
                     torch.ops.aten.linear.default,
-                    post_op_map[postop][0 if inplace else 1],
+                    post_op_aten_inplace if inplace else post_op_aten,
                 ]
                 self._test_quantizer(
                     m,
@@ -1144,45 +1166,61 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     quantizer,
                     node_occurrence,
                     node_list,
+                    is_qat=is_qat,
                 )
 
+
     @skipIfNoX86
-    def test_linear_unary_gelu(self):
-        """
-        Test pattern of linear with unary post ops (e.g. gelu) with X86InductorQuantizer.
-        """
-        use_bias_list = [True, False]
-        postop = nn.GELU
-        post_op_algorithm = ['none', 'tanh']
-        cases = itertools.product(use_bias_list, post_op_algorithm)
-        with override_quantized_engine("x86"), torch.no_grad():
-            for use_bias, post_op_algo in cases:
-                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, post_op_algo=post_op_algo).eval()
-                example_inputs = (torch.randn(2, 4),)
-                quantizer = X86InductorQuantizer().set_global(
-                    xiq.get_default_x86_inductor_quantization_config()
-                )
-                node_occurrence = {
-                    # one for input and weight of the conv, one for output for the gelu
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
-                    # quantize_per_channel for weights are const propagated
-                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
-                }
-                node_list = [
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.linear.default,
-                    torch.ops.aten.gelu.default,
-                ]
-                self._test_quantizer(
-                    m,
-                    example_inputs,
-                    quantizer,
-                    node_occurrence,
-                    node_list,
-                )
+    def test_linear_unary(self):
+        aten = torch.ops.aten
+        self._test_linear_unary_helper(nn.ReLU, aten.relu.default, aten.relu_.default)
+        self._test_linear_unary_helper(
+            nn.LeakyReLU, aten.leaky_relu.default, aten.leaky_relu_.default
+        )
+        self._test_linear_unary_helper(nn.GELU, aten.gelu.default, None, ['none', 'tanh'])
+
+
+    @skipIfNoX86
+    def test_linear_unary_qat(self):
+        aten = torch.ops.aten
+        self._test_linear_unary_helper(
+            nn.ReLU, aten.relu.default, aten.relu_.default, is_qat=True
+        )
+        self._test_linear_unary_helper(
+            nn.LeakyReLU, aten.leaky_relu.default, aten.leaky_relu_.default, is_qat=True
+        )
+        self._test_linear_unary_helper(
+            nn.GELU, aten.gelu.default, None, ['none', 'tanh'], is_qat=True
+        )
+
+
+    @skipIfNoX86
+    def test_linear_unary_dynamic(self):
+        aten = torch.ops.aten
+        self._test_linear_unary_helper(
+            nn.ReLU, aten.relu.default, aten.relu_.default, is_dynamic=True
+        )
+        self._test_linear_unary_helper(
+            nn.LeakyReLU, aten.leaky_relu.default, aten.leaky_relu_.default, is_dynamic=True
+        )
+        self._test_linear_unary_helper(
+            nn.GELU, aten.gelu.default, None, ['none', 'tanh'], is_dynamic=True
+        )
+
+
+    @skipIfNoX86
+    def test_linear_unary_dynamic_qat(self):
+        aten = torch.ops.aten
+        self._test_linear_unary_helper(
+            nn.ReLU, aten.relu.default, aten.relu_.default, is_qat=True, is_dynamic=True
+        )
+        self._test_linear_unary_helper(
+            nn.LeakyReLU, aten.leaky_relu.default, aten.leaky_relu_.default, is_qat=True, is_dynamic=True
+        )
+        self._test_linear_unary_helper(
+            nn.GELU, aten.gelu.default, None, ['none', 'tanh'], is_qat=True, is_dynamic=True
+        )
+
 
     def _check_annotation(self, node, is_quant_out):
         annot = node.meta.get(QUANT_ANNOTATION_KEY, None)
