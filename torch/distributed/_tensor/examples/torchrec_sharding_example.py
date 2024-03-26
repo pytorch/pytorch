@@ -5,8 +5,7 @@ sharding with the DTensor API.
 import argparse
 import os
 from dataclasses import dataclass
-from functools import reduce
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import torch
 
@@ -30,36 +29,34 @@ def get_device_type():
 
 
 @dataclass
-class DTensorMetadata(object):
+class DTensorMetadata:
     device_mesh: DeviceMesh
     placements: List[Placement]
     # tensor property can be stored as TensorProperties
 
 
+# we reuse the Shard from caffe2/torch/distributed/_shard/sharded_tensor/shard.py
+@dataclass
+class TensorShard:
+    __slots__ = ["tensor", "shard_size", "shard_offset"]
+    tensor: torch.Tensor
+    shard_size: torch.Size
+    shard_offset: Tuple[int, ...]
+
+
 # this torch.Tensor subclass is a wrapper around all local shards associated
 # with a single sharded embedding table.
 class LocalShardsWrapper(torch.Tensor):
-    _local_shards: List[torch.Tensor]
-    _shard_offsets: List[Tuple[int, ...]]
-    _shard_sizes: List[torch.Size]
+    local_shards: List[TensorShard]
 
     @staticmethod
-    def __new__(
-        cls,
-        local_shards: List[torch.Tensor],
-        shard_offsets: Optional[List[Tuple[int, ...]]] = None,
-        shard_sizes: Optional[List[torch.Size]] = None,
-    ) -> "LocalShardsWrapper":
-        # if shard_offsets/shard_sizes are None, rely on DTensor offset and shape
-        # calculation
-        # create a new object and fill it with the local shards
+    def __new__(cls, local_shards: List[TensorShard]) -> "LocalShardsWrapper":
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            local_shards[0].shape,  # do we really this?
+            local_shards[0].tensor.shape,
+            # this seems necessary for subclass but can we avoid?
         )
-        r._local_shards = local_shards
-        r._shard_offsets = shard_offsets
-        r._shard_sizes = shard_sizes
+        r.local_shards = local_shards
 
         return r
 
@@ -68,12 +65,15 @@ class LocalShardsWrapper(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
-        res_tensor_list = [func(t, *args[1:], **kwargs) for t in args[0]._local_shards]
-        return LocalShardsWrapper(
-            res_tensor_list,
-            args[0]._shard_offsets,
-            args[0]._shard_sizes,
-        )  # identical to "return args[0]"
+        res_shards_list = [
+            TensorShard(
+                func(shard.tensor, *args[1:], **kwargs),
+                shard.shard_size,
+                shard.shard_offset,
+            )
+            for shard in args[0].local_shards
+        ]
+        return LocalShardsWrapper(res_shards_list)
 
 
 def run_torchrec_row_wise_even_sharding_example(rank, world_size):
@@ -192,50 +192,57 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     num_embeddings = 8
     embedding_dim = 16
     emb_table_shape = torch.Size([num_embeddings, embedding_dim])
-    local_shard_shape_list = [
-        torch.Size([1, embedding_dim]),
-        torch.Size([3, embedding_dim]),
-    ]
-    local_shards = [
-        torch.randn(local_shard_shape_list[i % 2], device=device)
-        for i in range(world_size)
-    ]
+    # tensor shape
+    local_shard_shape = (
+        torch.Size([1, embedding_dim])
+        if rank % 2 == 0
+        else torch.Size([3, embedding_dim])
+    )
+    # tensor offset
+    local_shard_offset = (rank // 2 * 4 + rank % 2 * 1, embedding_dim)
+    # tensor
+    local_tensor = torch.randn(local_shard_shape, device=device)
+    # local shards
     # row-wise sharding: one shard per rank
-    local_shard = local_shards[rank]
+    local_shards = [TensorShard(local_tensor, local_shard_shape, local_shard_offset)]
 
     ###########################################################################
     # example 1: transform local_shards into DTensor
-    row_wise_sharding_placements = [Shard(0)]
+    # create the DTensorMetadata which torchrec should provide
+    row_wise_sharding_placements: List[Placement] = [Shard(0)]
+    dtensor_metadata = DTensorMetadata(device_mesh, row_wise_sharding_placements)
+
     # create the local shards wrapper
-    local_shard_offset = (
-        reduce(lambda x, y: x + y[0], local_shard_shape_list[:rank], 0),
-        embedding_dim,
-    )
-    local_shard_wrapper = LocalShardsWrapper(
-        [local_shard], [local_shard_offset], [local_shard.shape]
-    )
+    local_shard_wrapper = LocalShardsWrapper(local_shards)
+
     # note: for uneven sharding, we need to specify the shape and stride because
     # DTensor would assume even sharding and compute shape/stride based on the
     # assumption. Torchrec needs to pass in this information explicitely.
+    # shape/stride are global tensor's shape and stride
     dtensor = DTensor.from_local(
-        local_shard_wrapper,
-        device_mesh,
-        row_wise_sharding_placements,
+        local_shard_wrapper,  # a torch.Tensor subclass
+        dtensor_metadata.device_mesh,  # DeviceMesh
+        dtensor_metadata.placements,  # List[Placement]
         run_check=False,
         shape=emb_table_shape,  # this is required for uneven sharding
         stride=(embedding_dim, 1),
     )
-    # TODO (xilunwu): so far visualize_sharding() cannot print correctly for uneven
-    # sharded DTensor because it relies on offset computation which assumes even sharding
+    # so far visualize_sharding() cannot print correctly for unevenly sharded DTensor
+    # because it relies on offset computation which assumes even sharding.
     visualize_sharding(dtensor, header="Row-wise uneven sharding example in DTensor")
     # check the dtensor has the correct shape and stride on all ranks
     assert dtensor.shape == emb_table_shape
     assert dtensor.stride() == (embedding_dim, 1)
-    assert dtensor.to_local().shape == local_shard.shape
 
     ###########################################################################
     # example 2: transform DTensor into local_shards
-    assert torch.equal(dtensor.to_local()._local_shards[0], local_shard)
+    # note: DTensor.to_local() always returns a LocalShardsWrapper
+    dtensor_local_shards = dtensor.to_local()
+    assert isinstance(dtensor_local_shards, LocalShardsWrapper)
+    dtensor_shard = dtensor_local_shards.local_shards[0]
+    assert torch.equal(dtensor_shard.tensor, local_tensor)  # unwrap tensor
+    assert dtensor_shard.shard_size == local_shard_shape  # unwrap shape
+    assert dtensor_shard.shard_offset == local_shard_offset  # unwrap offset
 
 
 def run_torchrec_table_wise_sharding_example(rank, world_size):
