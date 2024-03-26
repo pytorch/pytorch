@@ -20,14 +20,14 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "torchbench_smoketest", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "torchbench_gcp_smoketest", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-torchbench-test-gcp:
     name: cuda12.1-py3.10-gcc9-sm80
-    uses: ./.github/workflows/_torchbench-test.yml
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
