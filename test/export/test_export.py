@@ -220,7 +220,6 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureRetraceability
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
@@ -750,6 +749,55 @@ class TestExport(TestCase):
             6,
         )
 
+    def test_static_dim_constraints(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(6,4)
+            def forward(self, x, y, z):
+                x0 = self.l(x) + y[1:]
+                return x0, z * 2.0
+
+        foo = Foo()
+        inputs = (torch.randn(4, 6), torch.randn(5, 4), torch.randn(3, 3))
+        dx = Dim("dx", min=3, max=6)
+        dy = dx + 1
+        dz = Dim("dz", min=3, max=6)
+
+        # all of these should be fine
+        for dynamic_shapes in [
+            ({0: dx, 1: 6}, {0: dy, 1: 4}, {0: dz, 1: 3}),
+            ((dx, None), (dy, 4), (dz, 3)),
+            ((None, 6), (5, None), (None, None)),
+            ((4, 6), {0: None, 1: 4}, {0: None, 1: 3})
+        ]:
+            ep = export(foo, inputs, dynamic_shapes=dynamic_shapes)
+            self.assertEqual(foo(*inputs), ep.module()(*inputs))
+
+        # check range_constraints - static dims shouldn't be present
+        ep = export(foo, inputs, dynamic_shapes=((dx, None), (dy, 4), (dz, 3)))
+        self.assertEqual(len(ep.range_constraints), 3)
+        for vr in ep.range_constraints.values():
+            self.assertTrue(vr.lower < vr.upper)
+
+        # check raised errors
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError
+            ),
+            "Static shape constraint of 5 does not match input size of 4, for .*"
+        ):
+            _ = export(foo, inputs, dynamic_shapes=((5, None), None, None))
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError
+            ),
+            "Static shape constraint of 9 does not match input size of 6, for .*"
+        ):
+            _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
+
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -895,7 +943,7 @@ class TestExport(TestCase):
         ):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
-    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceability  # T183144629
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -1916,7 +1964,7 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775807\]"):
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]"):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2443,7 +2491,7 @@ def forward(self, arg_0):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
-    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2477,7 +2525,7 @@ def forward(self, arg_0):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceability  # T183144788
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -2586,7 +2634,6 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
-    @testing.expectedFailureRetraceability
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3131,7 +3178,6 @@ def forward(self, arg_0):
 
     @testing.expectedFailureSerDer  # symfloat nyi
     @testing.expectedFailureSerDerPreDispatch  # symfloat nyi
-    @testing.expectedFailureRetraceability
     def test_sym_sqrt(self):
         import math
 
