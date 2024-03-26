@@ -5,11 +5,7 @@ import io
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, Union
-
-import fsspec
-from fsspec import AbstractFileSystem
-from fsspec.core import url_to_fs
+from typing import Generator, Optional, Union, TYPE_CHECKING
 
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
@@ -17,20 +13,38 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemWriter,
 )
 
+if TYPE_CHECKING:
+    from fsspec import AbstractFileSystem
+
+
 __all__ = [
     "FsspecWriter",
     "FsspecReader",
 ]
 
+FSSPEC_MISSING_ERROR = "fsspec needs to be installed"
+
+
+def _url_to_fs(url: str):
+    try:
+        from fsspec.core import url_to_fs
+        return url_to_fs(url)
+    except ImportError as ie:
+        raise RuntimeError(FSSPEC_MISSING_ERROR) from ie
+
 
 class FileSystem(FileSystemBase):
     def __init__(self) -> None:
-        self.fs: Optional[AbstractFileSystem] = None
+        self.fs: Optional["AbstractFileSystem"] = None
 
     @contextmanager
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
+        try:
+            import fsspec
+        except ImportError as ie:
+            raise RuntimeError(FSSPEC_MISSING_ERROR) from ie
         assert self.fs is not None
         with self.fs.transaction:
             with fsspec.open(str(path), mode) as stream:
@@ -42,7 +56,7 @@ class FileSystem(FileSystemBase):
         return os.path.join(path, suffix)
 
     def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
-        self.fs, _ = url_to_fs(path)
+        self.fs, _ = _url_to_fs(path)
         return path
 
     def rename(
@@ -59,7 +73,7 @@ class FileSystem(FileSystemBase):
             return False
 
         try:
-            url_to_fs(checkpoint_id)
+            _url_to_fs(checkpoint_id)
         except ValueError as e:
             return False
 
@@ -68,7 +82,7 @@ class FileSystem(FileSystemBase):
 
 class FsspecWriter(FileSystemWriter):
     """
-    Basic implementation of StorageWriter using FFspec.
+    Basic implementation of StorageWriter using Fsspec.
 
     This implementation makes the following assumptions and simplifications:
 

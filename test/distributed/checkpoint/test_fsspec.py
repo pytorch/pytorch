@@ -5,6 +5,8 @@ import tempfile
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import pytest
+
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
@@ -19,6 +21,8 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
+pytest.importorskip("fsspec")
 
 
 def with_temp_dir(
