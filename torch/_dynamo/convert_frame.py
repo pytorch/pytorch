@@ -687,8 +687,39 @@ def _compile(
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
+        except Unsupported as e:
+            # This is a soft failure. In the sense, the code path reaches here
+            # when we do not support graph breaks on bytecodes like LOAD_ATTR,
+            # BUILD_SET etc. In such case, we can fallback to eager without
+            # scaring users.
+            if graph_break_log.isEnabledFor(logging.DEBUG):
+                # Log this message in the graph break. Also use the string
+                # "skip: " to tell that the whole frame is falling back to
+                # eager.
+                user_stack = e.real_stack
+                user_stack_formatted = "".join(traceback.format_list(user_stack))
+                graph_break_log.debug(
+                    "Graph break: skip: from user code at:\n%s",
+                    user_stack_formatted,
+                    exc_info=True,
+                )
+
+            # Log the information
+            record_filename = getattr(e, "record_filename", None)
+            code = frame.f_code  # type: ignore[union-attr]
+            error_msg = format_error_msg(e, code, record_filename, frame)
+            log.info(error_msg, exc_info=True)
+
+            # Collect the failure info to log later.
+            fail_type = str(type(e))
+            fail_reason = str(e)
+            exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[union-attr, attr-defined]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr, attr-defined]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr, attr-defined]
+            # Dont raise the exception, just return None to fallback to eager
+            return None
         except (
-            Unsupported,
             TorchRuntimeError,
             BackendCompilerFailed,
             AssertionError,
@@ -698,18 +729,6 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
-            if isinstance(e, Unsupported):
-                # Log this message in graph break logger because this can happen
-                # when we dont support a particular bytecode like LOAD_ATTR.
-                if graph_break_log.isEnabledFor(logging.DEBUG):
-                    user_stack = e.real_stack
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    graph_break_log.debug(
-                        "Graph break: skip: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
-
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
@@ -819,25 +838,11 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
-            # These two exception types are "soft" failure, in the sense that
-            # we know this is due to something we didn't implement all the
-            # way, scare the user less about it.  That being said, if you
-            # are trying to understand why a graph break happened, it's still
-            # important to have this information, so offer it.
-            #
-            # NB: NotImplementedError used to be on this list, but actually
-            # it is impossible for it to reach here, as it is converted into
-            # InternalTorchDynamoError.  This behavior seemed reasonable
-            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
-            # someone wanted these to also get suppressed.  If so, you'll
-            # need to make these exceptions not get wrapped
-
             # We intentionally don't want to suppress error here.
             if isinstance(e, UncapturedHigherOrderOpError):
                 raise
 
-            soft_fail = isinstance(e, Unsupported)
-            if not config.suppress_errors and not soft_fail:
+            if not config.suppress_errors:
                 raise
 
             # Suppress the error.  NB: It's very important to do the
@@ -847,11 +852,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             record_filename = getattr(e, "record_filename", None)
             code = frame.f_code
             error_msg = format_error_msg(e, code, record_filename, frame)
-
-            if soft_fail:
-                log.info(error_msg, exc_info=True)
-            else:
-                log.warning(error_msg, exc_info=True)
+            log.warning(error_msg, exc_info=True)
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
