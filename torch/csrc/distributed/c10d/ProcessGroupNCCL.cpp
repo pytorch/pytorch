@@ -2261,7 +2261,7 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
-  TORCH_CHECK(coalescedDevice_.index() >= 1, MULTI_DEVICE_ERROR_MSG);
+  TORCH_CHECK(coalescedDevice_.index() >= 0, MULTI_DEVICE_ERROR_MSG);
   auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
