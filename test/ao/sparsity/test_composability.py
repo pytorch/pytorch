@@ -8,6 +8,7 @@ import torch.ao.quantization as tq
 from torch import nn
 from torch.ao import pruning
 from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx, convert_to_reference_fx, prepare_qat_fx
 from torch.ao.pruning import fqn_to_module
 
@@ -61,6 +62,7 @@ def _calculate_sparsity(tensor):
 # This series of tests are to check the composability goals for sparsity and quantization. Namely
 # that performing quantization and sparsity model manipulations in various orderings
 # does not cause problems
+@skipIfNoFBGEMM
 class TestComposability(TestCase):
     # This test checks whether performing quantization prepare before sparse prepare
     # causes any issues and verifies that the correct observers are inserted and that
