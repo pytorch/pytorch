@@ -378,6 +378,15 @@ class LoadPlanner:
         """
         pass
 
+
+    def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
+        """
+        Return the BytesIO to be used by the StorageReader to load `read_item`.
+
+        The BytesIO should alias with one on the underlying state_dict as StorageReader will replace its contents.
+        """
+        raise NotImplementedError("LoadPlanner.resolve_bytes is not implemented")
+
     @abc.abstractmethod
     def resolve_tensor(self, read_item: ReadItem) -> torch.Tensor:
         """
