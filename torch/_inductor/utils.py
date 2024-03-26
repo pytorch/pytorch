@@ -727,6 +727,22 @@ else:
     )
 
 
+_registered_caches: List[Any] = []
+
+
+def clear_on_fresh_inductor_cache(obj: Any):
+    """
+    Use this decorator to register any caches that should be cache_clear'd
+    with fresh_inductor_cache().
+    """
+    if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
+        raise AttributeError(f"{obj} does not have a cache_clear method")
+
+    _registered_caches.append(obj)
+    return obj
+
+
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
@@ -748,6 +764,9 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
     with tempfile.TemporaryDirectory() as inductor_cache_dir:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
