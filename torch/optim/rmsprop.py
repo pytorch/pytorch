@@ -248,10 +248,6 @@ def rmsprop(
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -300,6 +296,11 @@ def _single_tensor_rmsprop(
     capturable: bool,
     has_complex: bool,
 ):
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -367,6 +368,12 @@ def _multi_tensor_rmsprop(
         return
 
     assert not differentiable, "_foreach ops don't support autograd"
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
+
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs,
                                                                     momentum_buffer_list, state_steps])
