@@ -800,12 +800,15 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
         if "_NONE" in inst.opname:
             is_op = create_instruction("IS_OP", arg=int("NOT" in inst.opname))
             is_op.argval = is_op.arg
-            jump_op = create_instruction(
-                "POP_JUMP_FORWARD_IF_TRUE"
-                if "FORWARD" in inst.opname
-                else "POP_JUMP_BACKWARD_IF_TRUE",
-                target=inst.target,
-            )
+            if sys.version_info < (3, 12):
+                jump_op = create_instruction(
+                    "POP_JUMP_FORWARD_IF_TRUE"
+                    if "FORWARD" in inst.opname
+                    else "POP_JUMP_BACKWARD_IF_TRUE",
+                    target=inst.target,
+                )
+            else:
+                jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
             # modify inst in-place to preserve jump target
             inst.opcode = dis.opmap["LOAD_CONST"]
             inst.opname = "LOAD_CONST"
