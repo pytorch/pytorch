@@ -1687,7 +1687,14 @@ class Scheduler:
         )
         check_outer_loop_fusion_list = (
             [False, True]
-            if all_node_in_cpu
+            if (
+                all_node_in_cpu
+                and getattr(
+                    self.get_backend(torch.device("cpu")),
+                    "enable_outer_loop_fusion",
+                    None,
+                )
+            )
             else [
                 False,
             ]

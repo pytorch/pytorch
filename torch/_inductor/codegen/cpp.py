@@ -453,13 +453,18 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
                     left_loop_level.kernel is None and right_loop_level.kernel is None
                 )
                 # Check next loop level attr
-                if len(left_loop_level.inner) != len(right_loop_level.inner) or any(
-                    not _inner(left_inner, right_inner, loop_fusion_depth)
-                    for left_inner, right_inner in zip(
-                        left_loop_level.inner, right_loop_level.inner
-                    )
+                if any(
+                    # Assume no main/tail loop split at any outer loop fusion depth
+                    # Given no clear performance benefit for this complex case
+                    len(loop_level.inner) != 1
+                    for loop_level in [left_loop_level, right_loop_level]
+                ) or not _inner(
+                    left_loop_level.inner[0],
+                    right_loop_level.inner[0],
+                    loop_fusion_depth,
                 ):
                     return False
+
             return True
 
         def _get_parallel_depth(cpp_proxy_kernel):
@@ -480,11 +485,12 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
                 # Refer to poolformer_m36 in timm_models:
                 # Node1 has loop collapsed(2), Node2 can't be loop collapsed due to it's reduction.
                 return False
-            if len(left_loop_nest.root) != len(right_loop_nest.root) or any(  # type: ignore[union-attr]
-                not _inner(left_root, right_root, outer_loop_fusion_depth)
-                for left_root, right_root in zip(
-                    left_loop_nest.root, right_loop_nest.root  # type: ignore[union-attr]
-                )
+            if any(
+                # Assume no main/tail loop split at any outer loop fusion depth
+                len(loop_nest.root) != 1
+                for loop_nest in [left_loop_nest, right_loop_nest]
+            ) or not _inner(
+                left_loop_nest.root[0], right_loop_nest.root[0], outer_loop_fusion_depth
             ):
                 return False
 
@@ -504,41 +510,31 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             outer_loop_fusion_depth,
         ):
             assert outer_loop_fusion_depth >= 1
+            # Assume no main/tail loop split at any outer loop fusion depth
+            assert all(
+                len(loop_level_list) == 1 for loop_level_list in loop_level_nested_list
+            )
             if (outer_loop_fusion_depth := outer_loop_fusion_depth - 1) >= 1:
                 # Further merge the next loop level
-                # In certain outer loop fusion depth, still may have the
-                # splits of main loop and tile loop (refer to test_outer_loop_fusion_log_softmax in test_cpu_repro.py).
-                # We assume for each kernel, same loop split at certain outer loop fusion depth.
-                loop_level_split_num = len(loop_level_nested_list[0])
-                for loop_level_split_idx in range(loop_level_split_num):
-                    # Deal main loop and tail loop seperately
-                    next_loop_level_nested_list = [
-                        loop_level_list[loop_level_split_idx].inner
-                        for loop_level_list in loop_level_nested_list
-                    ]
-                    _merge_outer_fusion_loop_levels(
-                        next_loop_level_nested_list,
-                        outer_loop_fusion_depth,
-                    )
+                next_loop_level_nested_list = [
+                    loop_level_list[0].inner
+                    for loop_level_list in loop_level_nested_list
+                ]
+                _merge_outer_fusion_loop_levels(
+                    next_loop_level_nested_list,
+                    outer_loop_fusion_depth,
+                )
             else:
                 # This is the last looplevel to do outer loop fusion
-                loop_level_split_num = len(loop_level_nested_list[0])
-                for loop_level_split_idx in range(loop_level_split_num):
-                    # If at any outer loop fusion depth, we have split loop into main loop and tail loop,
-                    # The main loop and tail loop should have different OuterLoopFusedKernel.
-                    outer_loop_fused_kernel = OuterLoopFusedKernel()
-                    loop_level_of_first_kernel = loop_level_nested_list[0][
-                        loop_level_split_idx
-                    ]
-                    for kernel_idx in range(len(loop_level_nested_list)):
-                        # Append each LoopLevel into OuterLoopFusedKernel.inner
-                        outer_loop_fused_kernel.inner.append(
-                            deepcopy(
-                                loop_level_nested_list[kernel_idx][loop_level_split_idx]
-                            ),
-                        )
-                    loop_level_of_first_kernel.inner = []
-                    loop_level_of_first_kernel.kernel = outer_loop_fused_kernel  # type: ignore[assignment]
+                outer_loop_fused_kernel = OuterLoopFusedKernel()
+                loop_level_of_first_kernel = loop_level_nested_list[0][0]
+                for kernel_idx in range(len(loop_level_nested_list)):
+                    # Append each LoopLevel into OuterLoopFusedKernel.inner
+                    outer_loop_fused_kernel.inner.append(
+                        deepcopy(loop_level_nested_list[kernel_idx][0]),
+                    )
+                loop_level_of_first_kernel.inner = []
+                loop_level_of_first_kernel.kernel = outer_loop_fused_kernel  # type: ignore[assignment]
 
         # Merge the List[LoopNestWithSplit] from cpp_kernel_proxy_list
         # into cpp_kernel_proxy_list[0].loop_nest
