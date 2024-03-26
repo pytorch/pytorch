@@ -11,6 +11,16 @@ C10_API std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
 static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
     DeviceType::PrivateUse1};
 
+void throwNullDataPtrError() {
+  TORCH_CHECK(
+      false,
+      "Cannot access data pointer of Tensor (e.g. FakeTensor, FunctionalTensor). "
+      "If you're using torch.compile/export/fx, it is likely that we are erroneously "
+      "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
+      "an opaque custom op. Please see the following for details: "
+      "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ");
+}
+
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   // Allowlist verification.
   // Only if the devicetype is in the allowlist,
