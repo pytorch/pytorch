@@ -1902,6 +1902,16 @@ class InstructionTranslatorBase(
         else:
             self._load_attr(inst)
 
+    def CALL_INTRINSIC_1(self, inst):
+        if inst.argval == 5:
+            # INTRINSIC_UNARY_POSITIVE
+            self.UNARY_POSITIVE(inst)
+        elif inst.argval == 6:
+            # INTRINSIC_LIST_TO_TUPLE
+            self.push(TupleVariable(self.pop().unpack_var_sequence(self)))
+        else:
+            unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
