@@ -53,8 +53,6 @@ class IncorrectAliasTensor(torch.Tensor):
 
     __slots__ = ['elem']
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
         # The wrapping tensor (IncorrectAliasTensor) shouldn't hold any

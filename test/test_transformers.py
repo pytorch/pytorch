@@ -1434,7 +1434,7 @@ class TestSDPAFailureModes(NNTestCase):
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
-            # Passing in a q,k,v with 0 length sequences will error
+            # Passing in a q,k,v with last dim stride not equal to 1 will error
             dtype = torch.float16
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 8, 8)
@@ -1613,6 +1613,18 @@ class TestSDPAFailureModes(NNTestCase):
             with self.assertWarnsRegex(UserWarning, "Expected query, key and value to all be of dtype: {Half, Float}"):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
+    def test_flash_atteention_large_bf16_nan_values(self, device):
+        query = torch.full((1, 1, 1, 64), 133120.0, dtype=torch.bfloat16, device="cuda")
+        key = torch.full((1, 1, 1, 64), 133120.0, dtype=torch.bfloat16, device="cuda")
+        value = torch.full((1, 1, 1, 64), 133120.0, dtype=torch.bfloat16, device="cuda")
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
+
+        self.assertFalse(torch.isnan(out).any(), "Output should not contain NaNs!")
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
