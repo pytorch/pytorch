@@ -20,8 +20,12 @@ from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
-
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_symbols,
+    ShapeEnv,
+    SymTypes,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -915,7 +919,9 @@ class GraphLowering(torch.fx.Interpreter):
             value = value.data
             if not isinstance(value, InputBuffer) or value.get_name() != name:
                 # one of our inputs was mutated, need to turn that into a copy
-                ir.MutationLayout.realize_into(value, self.graph_inputs_original[name])
+                ir.MutationLayoutSHOULDREMOVE.realize_into(
+                    value, self.graph_inputs_original[name]
+                )
                 # replace output with mutated input
                 try:
                     ind = self.graph_outputs.index(value_storage_box)
@@ -1056,9 +1062,10 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if not unbacked_symbols_in_strides and dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
                     if (
                         len(result.get_size()) == 4
@@ -1276,8 +1283,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
+        self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
-        return self.wrapper_code.generate(self.is_inference)
+        result = self.wrapper_code.generate(self.is_inference)
+        self.wrapper_code.pop_codegened_graph()
+        return result
 
     def codegen_subgraph(self, parent_graph):
         """
