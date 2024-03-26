@@ -4,11 +4,12 @@ from typing import Any, cast, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
+from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.stateful import Stateful
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
-from .planner import LoadPlanner
+from .planner import LoadPlan, LoadPlanner
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
@@ -41,6 +42,7 @@ def load_state_dict(
         )
 
 
+@_dcp_method_logger(log_exceptions=True)
 @_api_bc_check
 def load(
     state_dict: Dict[str, Any],
@@ -188,6 +190,11 @@ def _load_state_dict(
     if planner is None:
         planner = DefaultLoadPlanner()
 
+    ckpt_kwargs = {}
+    if (ckpt_id := getattr(storage_reader, "checkpoint_id", None)) is not None:
+        ckpt_kwargs["checkpoint_id"] = ckpt_id
+
+    @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
         metadata = storage_reader.read_metadata()
@@ -198,14 +205,16 @@ def _load_state_dict(
         local_plan = storage_reader.prepare_local_plan(local_plan)
         return local_plan
 
+    @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
         assert planner is not None
         all_local_plans = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan = distW.reduce_scatter("plan", local_step, global_step)
+    central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
 
+    @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
         assert planner is not None
         final_local_plan = planner.finish_plan(central_plan)

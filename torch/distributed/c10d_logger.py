@@ -19,9 +19,11 @@ from torch.distributed.logging_handlers import _log_handlers
 
 __all__: List[str] = []
 
+_DEFAULT_DESTINATION = "default"
 
-def _get_or_create_logger() -> logging.Logger:
-    logging_handler, log_handler_name = _get_logging_handler()
+
+def _get_or_create_logger(destination: str = _DEFAULT_DESTINATION) -> logging.Logger:
+    logging_handler, log_handler_name = _get_logging_handler(destination)
     logger = logging.getLogger(f"c10d-{log_handler_name}")
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter(
@@ -33,7 +35,7 @@ def _get_or_create_logger() -> logging.Logger:
     return logger
 
 
-def _get_logging_handler(destination: str = "default") -> Tuple[logging.Handler, str]:
+def _get_logging_handler(destination: str = _DEFAULT_DESTINATION) -> Tuple[logging.Handler, str]:
     log_handler = _log_handlers[destination]
     log_handler_name = type(log_handler).__name__
     return (log_handler, log_handler_name)

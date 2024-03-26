@@ -538,6 +538,13 @@ class FileSystemWriter(StorageWriter):
 
         self.fs.rename(tmp_path, meta_path)
 
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
+
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
@@ -612,6 +619,13 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
