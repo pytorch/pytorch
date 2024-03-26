@@ -9315,6 +9315,14 @@ class CommonTemplate:
 
         self.assertTrue(len(result) == 2)
 
+    def test_random_from(self):
+        # https://github.com/pytorch/pytorch/issues/121621
+        def fn(x):
+            x.random_(-10, 10)
+            return x
+
+        x = torch.randn([4, 4, 3])
+        self.common(fn, (x,))
 
 @dataclasses.dataclass
 class TestFailure:
