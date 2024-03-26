@@ -438,6 +438,9 @@ def pad_bmm(
 
 @functools.lru_cache(None)
 def _pad_mm_init():
+    print("ignoring _pad_mm_init")
+    return
+
     from .joint_graph import patterns
 
     if torch.cuda.is_available():

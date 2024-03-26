@@ -76,21 +76,15 @@ def create_runtime_wrapper(
 
     def runtime_wrapper(args):
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        import sys
-        print(f"runtime_wrappers refcount={sys.getrefcount(args[0])}")
-        print(f"before unpacking args={args}")
         old_args = args
         args = [*[torch.tensor([])] * num_tokens, *old_args]
+        old_args.clear()
 
         # keep an extra ref around, we need these later
         stashed_args = {}
         for output_info in runtime_metadata.output_info:
             if output_info.base_idx is not None:
                 stashed_args[output_info.base_idx] = args[output_info.base_idx]
-
-        old_args.clear()
-        print(f"after unpacking args={args}")
-        print(f"runtime_wrappers refcount={sys.getrefcount(args[0])}")
 
         if trace_joint:
             args_ = list(args)
@@ -121,8 +115,6 @@ def create_runtime_wrapper(
                         disable_amp=disable_amp,
                         steal_args=steal_args,
                     )
-                    # we should only ever steal args from compiled autograd graph
-                    # otherwise will add another
             else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,

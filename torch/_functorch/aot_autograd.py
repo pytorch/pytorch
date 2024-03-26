@@ -912,20 +912,11 @@ def aot_module_simplified(
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
-    def forward(*runtime_args):
-        if len(runtime_args) == 1 and all([isinstance(t, torch.Tensor) for t in runtime_args[0]]):
-            # TODO: only for compiled autograd? or always?
-            full_args = []
-            full_args.extend(params_flat)
-            full_args.extend(runtime_args[0])
-            runtime_args[0].clear()
-            # breakpoint()
-            return compiled_fn(full_args)
-
-        # breakpoint()  # this will somehow prevent frees
+    def forward(runtime_args):
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
+        runtime_args.clear()
         return compiled_fn(full_args)
 
     # Just for convenience
