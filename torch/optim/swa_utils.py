@@ -41,7 +41,7 @@ def get_ema_multi_avg_fn(decay=0.999):
 
 def get_swa_multi_avg_fn():
     @torch.no_grad()
-    def swa_update(averaged_param_list: PARAM_LIST, current_param_list: PARAM_LIST, num_averaged: Tensor):
+    def swa_update(averaged_param_list: PARAM_LIST, current_param_list: PARAM_LIST, num_averaged: Union[Tensor, int]):
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(averaged_param_list[0]):
             torch._foreach_lerp_(averaged_param_list, current_param_list, 1 / (num_averaged + 1))
@@ -62,7 +62,7 @@ def get_ema_avg_fn(decay=0.999):
 
 def get_swa_avg_fn():
     @torch.no_grad()
-    def swa_update(averaged_param: Tensor, current_param: Tensor, num_averaged: Tensor):
+    def swa_update(averaged_param: Tensor, current_param: Tensor, num_averaged: Union[Tensor, int]):
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
     return swa_update
@@ -172,10 +172,10 @@ class AveragedModel(Module):
         self,
         model: Module,
         device: Optional[Union[int, torch.device]] = None,
-        avg_fn: Optional[Callable[[Tensor, Tensor, Tensor], Tensor]] = None,
-        multi_avg_fn: Optional[
-            Callable[[List[Optional[Tensor]], List[Optional[Tensor]], Tensor],
-                     Tensor]] = None,
+        avg_fn: Optional[Callable[[Tensor, Tensor, Union[Tensor, int]],
+                                  Tensor]] = None,
+        multi_avg_fn: Optional[Callable[
+            [PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]] = None,
         use_buffers=False,
     ):
         super().__init__()
@@ -374,9 +374,8 @@ class SWALR(LRScheduler):
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, " "please use `get_last_lr()`.", UserWarning
-            )
+            warnings.warn("To get the last learning rate computed by the scheduler, "
+                          "please use `get_last_lr()`.", UserWarning)
         step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
