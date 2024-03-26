@@ -12,6 +12,9 @@ from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
+import torch._logging.structured
+from torch.utils._traceback import CapturedTraceback
+
 log = logging.getLogger(__name__)
 
 # This is a synthetic logger which doesn't correspond to an actual logger,
@@ -1063,6 +1066,12 @@ def trace_structured(
                 record["frame_id"] = trace_id.compile_id.frame_id
                 record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
                 record["attempt"] = trace_id.attempt
+            else:
+                # Record the stack of the log call to better diagnose why we
+                # don't have a frame id for it
+                record["stack"] = torch._logging.structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                )
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):
