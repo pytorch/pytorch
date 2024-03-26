@@ -168,6 +168,7 @@ log = logging.getLogger(__name__)
 
 
 DimList = List
+BYPASS = []
 
 
 class _missing:
@@ -851,18 +852,25 @@ class VariableBuilder:
         for item in value:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
-            if all_tensors and not isinstance(item, torch.Tensor):
-                all_tensors = False
 
         output = [
             LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
             for i, item in enumerate(value)
         ]
 
-        might_contain_activations = (
-            torch._dynamo.compiled_autograd.compiled_autograd_enabled and all_tensors
-        )
-        if might_contain_activations:
+        use_boxed_call = False
+        maybe_gm = self.tx.output.local_scope.get('self')
+        if maybe_gm and isinstance(maybe_gm, torch.fx.GraphModule):
+            locals_to_steal = maybe_gm.meta.get('locals_to_steal', [])
+            if self.source.local_name in locals_to_steal:
+                use_boxed_call = True
+
+        # TODO: remove, only for my script
+        if BYPASS:
+            if self.source.local_name in BYPASS:
+                use_boxed_call = True
+
+        if use_boxed_call:
             # The input tensor list to dynamo from compiled autograd may contain activations
             # which are freed as they are used in inductor. Dynamo's default behavior is to
             # lift all tensors to the graph inputs, but this will cause dynamo to hold an
@@ -876,7 +884,8 @@ class VariableBuilder:
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
             )
 
-            list_variable = wrap_fx_proxy(
+            list_variable = wrap_fx_proxy_cls(
+                target_cls=TensorVariable,
                 tx=self.tx,
                 proxy=tensor_list_proxy,
                 example_value=value,
@@ -1542,15 +1551,26 @@ def wrap_fx_proxy_cls(
                     ConstantVariable.create(None, **options),
                 )
             else:
+                proxy_i = proxy.tracer.create_proxy(
+                    kind="call_function", target=operator.getitem, args=(proxy, i), kwargs={}
+                )
+
+                if "source" in options:
+                    source = options["source"]
+                    options_i = options.copy()
+                    options_i["source"] = GetItemSource(base=source, index=i, index_is_slice=False)
+                else:
+                    # use the same options object as parent
+                    options_i = options
+
+                # WARNING: this assumes the same target_cls as this tuple/list call
                 unpacked.append(
                     wrap_fx_proxy_cls(
-                        target_cls,
-                        tx,
-                        proxy.tracer.create_proxy(
-                            "call_function", operator.getitem, (proxy, i), {}
-                        ),
+                        target_cls=target_cls,
+                        tx=tx,
+                        proxy=proxy_i,
                         example_value=val,
-                        **options,
+                        **options_i,
                     )
                 )
         if isinstance(example_value, torch.Size):
