@@ -1069,7 +1069,9 @@ def trace_structured(
             else:
                 # Record the stack of the log call to better diagnose why we
                 # don't have a frame id for it
-                record["stack"] = torch._logging.structured.from_traceback(CapturedTraceback.extract(skip=1).summary())
+                record["stack"] = torch._logging.structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                )
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):
