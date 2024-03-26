@@ -3348,8 +3348,8 @@ def scatter_fallback(
         fn,
         reduce,
         self.get_dtype(),
-        src_is_tensor and src.get_dtype(),
-        src_is_tensor and src.get_device().type,
+        src.get_dtype() if src_is_tensor else type(src),
+        src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
         ir.ScatterFallback(
