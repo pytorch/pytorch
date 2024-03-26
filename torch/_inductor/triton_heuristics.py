@@ -833,6 +833,8 @@ def should_use_remote_autotune_cache():
         return True
     if not config.is_fbcode():
         return False
+    if torch.version.hip is not None:
+        return False
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
 
