@@ -34,13 +34,13 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
     const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
-  const param_t* weight_data = weight.defined() ? weight.data_ptr<param_t>() : nullptr;
-  const param_t* bias_data = bias.defined() ? bias.data_ptr<param_t>() : nullptr;
+  const param_t* weight_data = weight.defined() ? weight.const_data_ptr<param_t>() : nullptr;
+  const param_t* bias_data = bias.defined() ? bias.const_data_ptr<param_t>() : nullptr;
 
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   /// Collect the linear and constant terms regarding the input.
   /// output(n, c, h, w)
@@ -91,7 +91,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
      save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -143,7 +143,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
       save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -185,7 +185,7 @@ batch_norm_cpu_collect_stats_contiguous_impl(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* mean_data = mean.data_ptr<scalar_t>();
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
@@ -229,7 +229,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* mean_data = mean.data_ptr<scalar_t>();
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
