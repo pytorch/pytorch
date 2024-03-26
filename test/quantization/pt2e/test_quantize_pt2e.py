@@ -641,7 +641,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return torch.sigmoid(x) + y
 
             def example_inputs(self):
-                return (torch.randn(1, 3, 5, 5),torch.randn(1, 3, 5, 5),)
+                return (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5),)
 
         m = M().eval()
         example_inputs = m.example_inputs()
