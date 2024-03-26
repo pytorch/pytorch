@@ -32,7 +32,8 @@ static Tensor compute_columns3d(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef kernel_size,
-    const int64_t groups) {
+    const int64_t groups,
+    bool is_channels_last) {
   const Tensor input = input_.contiguous();
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
@@ -64,13 +65,18 @@ static Tensor compute_columns3d(
       (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
       (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
     // Columns are just a view on the input for this special case.
-    columns = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+    if (is_channels_last) {
+      columns = input.as_strided({batch_size, output_height * output_width * output_depth, n_input_plane},
+          {output_height * output_width * output_depth * n_input_plane, n_input_plane, 1}).detach();
+    } else {
+      columns = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+    }
   } else {
-    columns = at::empty({batch_size,
-                        n_input_plane * kernel_depth * kernel_height * kernel_width,
-                        output_depth * output_height * output_width},
-                        input.options());
-
+    int64_t row = is_channels_last ?
+        output_height * output_width * output_depth : n_input_plane * kernel_height * kernel_width * kernel_depth;
+    int64_t col = is_channels_last ?
+        kernel_height * kernel_width * kernel_depth * n_input_plane : output_height * output_width * output_depth;
+    columns = at::empty({batch_size, row, col}, input.options());
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "compute_columns3d", [&] {
       auto input_a = input.accessor<scalar_t, 5>();
       auto columns_a = columns.accessor<scalar_t, 3>();
@@ -79,6 +85,7 @@ static Tensor compute_columns3d(
         for (const auto t : c10::irange(start, end)) {
           auto input_t = input_a[t];
           auto columns_t = columns_a[t];
+          TODO add is_channels_last
           Unfold3dCopyCPU(
             c10::CppTypeToScalarType<scalar_t>::value,
             input_t.data(),
@@ -369,9 +376,9 @@ void slow_conv3d_backward_update_grad_input_frame(
 
 void slow_conv3d_backward_out_cpu_template(
     Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& weight,
+    const Tensor& grad_output_,
+    const Tensor& input_,
+    const Tensor& weight_,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -386,9 +393,12 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t stride_height = stride[1];
   const int64_t stride_width = stride[2];
 
+  bool use_channels_last = thnn_conv_use_channels_last(input_, weight_);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  const Tensor weight = view_weight_2d(weight_, memory_format);
   slow_conv3d_shape_check(
-      input,
-      grad_output,
+      input_,
+      grad_output_,
       weight,
       Tensor(),
       kernel_depth,
@@ -402,6 +412,8 @@ void slow_conv3d_backward_out_cpu_template(
       pad_width,
       groups,
       false);
+
+  const Tensor input = input_.contiguous(memory_format);
 
   const Tensor weight2d = view_weight_2d(weight);
   const Tensor grad_output_contiguous = grad_output.contiguous();
@@ -427,6 +439,11 @@ void slow_conv3d_backward_out_cpu_template(
   Tensor fgrad_input = at::empty({batch_size,
       n_input_plane * kernel_depth * kernel_height * kernel_width,
       output_depth * output_height * output_width}, input.options());
+
+  const Tensor grad_output = grad_output_.contiguous(memory_format);
+  grad_input.resize_as_(input, memory_format);
+  grad_input.zero_();
+  TORCH_CHECK(grad_input.is_contiguous(memory_format), "slow_conv3d: grad_input must be contiguous");
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
@@ -552,7 +569,7 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
 } // namespace
 
 Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
-    const Tensor& weight,
+    const Tensor& weight_,
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -571,14 +588,22 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
   const int64_t stride_height = stride[1];
   const int64_t stride_width = stride[2];
 
+  bool use_channels_last = thnn_conv_use_channels_last(self, weight_);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::Contiguous;
+
+  const Tensor weight_2d = view_weight_2d(weight_, memory_format);
+
+
   // TODO: hacky way of deciding the groups
   // Assuming the group size is checked in upstream functions
   const int64_t groups = weight.size(1) > 0 ? self.size(1) / weight.size(1) : 0;
 
+
+
   slow_conv3d_shape_check(
       self,
       Tensor(),
-      weight,
+      weight_2d,
       bias,
       kernel_depth,
       kernel_height,
@@ -592,8 +617,7 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
       groups,
       false);
 
-  const Tensor input = self.contiguous();
-  const Tensor weight_2d = view_weight_2d(weight);
+  const Tensor input = self.contiguous(memory_format);
 
   const int64_t dim_planes = 1;
   const int64_t dim_depth = 2;
@@ -612,7 +636,7 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
   const int64_t output_width =
       (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
 
-  Tensor finput = compute_columns3d(input, stride, padding, kernel_size, groups);
+  Tensor finput = compute_columns3d(input, stride, padding, kernel_size, groups, use_channels_last);
   const int64_t batch_size = input.size(0);
   output.resize_(
       {batch_size, n_output_plane, output_depth, output_height, output_width});
