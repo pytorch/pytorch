@@ -445,7 +445,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 # @skip_grad_layout_contract()
-@maybe_cprofile
+# @maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],

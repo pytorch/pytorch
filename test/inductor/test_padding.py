@@ -5,10 +5,12 @@ import os
 import torch
 from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import rand_strided
 from torch._inductor import config, ir
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.utils import do_bench, run_and_get_code
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch._dynamo.utils import maybe_cprofile
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -51,17 +53,21 @@ def forward_and_backward_pass(m, inputs):
     {
         "benchmark_kernel": True,
         "triton.unique_kernel_names": True,
+        "triton.cudagraphs": True,
     }
 )
 class PaddingTest(TestCase):
-    def common_numeric_check(self, f, *args):
-        opt_f = torch.compile(f)
-        ref = f(*args)
-        act = opt_f(*args)
+    def check_close(self, ref, act):
         tol = 1e-3
         self.assertTrue(
             torch.allclose(ref, act, atol=tol, rtol=tol), f"ref:\n{ref}\nact:\n{act}"
         )
+
+    def common_numeric_check(self, f, *args):
+        opt_f = torch.compile(f)
+        ref = f(*args)
+        act = opt_f(*args)
+        self.check_close(ref, act)
 
     def test_mm_perf(self):
         def naive_mm(a, b):
@@ -229,6 +235,106 @@ class PaddingTest(TestCase):
         y = torch.randn(127, 127)
         self.common_numeric_check(f, x, y)
 
+    @maybe_cprofile
+    def run_acc_and_perf_test(self, model, inputs, perf_inputs=None):
+        if not isinstance(inputs, (tuple, list)):
+            inputs = [inputs]
+        if perf_inputs is None:
+            perf_inputs = inputs
+
+        model.eval()
+        self.common_numeric_check(model, *inputs)
+        model.train()
+
+        if DO_PERF_TEST:
+            print("Do performance test")
+
+            def get_optim(m):
+                return torch.optim.Adam(
+                    m.parameters(), lr=0.01, capturable=True, foreach=True
+                )
+
+
+            def get_f(m, optim):
+                def f(*x):
+                    optim.zero_grad(True)
+                    with torch.cuda.amp.autocast():
+                        pred = m(*x)
+                        loss = pred.sum()
+                    loss.backward()
+                    optim.step()
+
+                return f
+
+            latency_with_padding = None
+            print("Benchmark with padding")
+            with config.patch(
+                comprehensive_padding=True
+            ), torch.autograd.skip_grad_layout_contract():
+                m_copy_with_padding = copy.deepcopy(model)
+                optim_with_padding = get_optim(m_copy_with_padding)
+                opt_f_with_padding = torch.compile(
+                    get_f(m_copy_with_padding, optim_with_padding)
+                )
+                latency_with_padding = do_bench(lambda: opt_f_with_padding(*perf_inputs))
+            latency_without_padding = None
+            print("bencmark without padding")
+            with config.patch(comprehensive_padding=False):
+                m_copy_without_padding = copy.deepcopy(model)
+                optim_without_padding = get_optim(m_copy_without_padding)
+                opt_f_without_padding = torch.compile(
+                    get_f(m_copy_without_padding, optim_without_padding)
+                )
+                latency_without_padding = do_bench(
+                    lambda: opt_f_without_padding(*perf_inputs)
+                )
+            print(
+                f"Latency with and without padding: {latency_with_padding:.3f} v.s. {latency_without_padding:.3f}"
+            )
+
+            # profiling
+            self.do_profiling(opt_f_with_padding, opt_f_without_padding, perf_inputs)
+
+    def do_profiling(self, f_with_padding, f_without_padding, inputs=()):
+       torch.cuda.synchronize()
+       with torch.profiler.profile() as p:
+           niter = 3
+           for _ in range(niter):
+               with torch.profiler.record_function(
+                   "With padding"
+               ), torch.autograd.skip_grad_layout_contract():
+                   f_with_padding(*inputs)
+
+               with torch.profiler.record_function("Without padding"):
+                   f_without_padding(*inputs)
+           torch.cuda.synchronize()
+
+       profile_path = "/tmp/chrome.json"
+       p.export_chrome_trace(profile_path)
+       print(f"Chrome trace is written to {profile_path}")
+
+    def test_pytorch_unet(self):
+        """
+        Use adam as the optimizer.
+        """
+        import sys
+        sys.path.append("/home/shunting/ws/pytorch/torchbenchmark/torchbenchmark/models/pytorch_unet/pytorch_unet/unet/")  # XXX hack, will cleanup
+        from unet_model import UNet
+        model = UNet(n_channels=3, n_classes=2, bilinear=True)
+        if os.environ.get("SVAR") == "1":
+            inputs = (
+                torch.randn(1, 3, 640, 959), # x
+                torch.randn(1, 64, 640, 959), # x1
+                torch.randn(1, 128, 320, 479), # x2
+                torch.randn(1, 256, 160, 239), # x3
+                torch.randn(1, 512, 80, 119), # x4 
+                torch.randn(1, 512, 40, 59), # x5
+            )
+        else:
+            inputs = torch.randn(1, 3, 640, 959)
+
+        self.run_acc_and_perf_test(model, inputs)
+        
     def test_nvidia_deeprecommender(self):
         # SELU
         use_variant = True
@@ -265,75 +371,35 @@ class PaddingTest(TestCase):
                 return self.seq(x)
 
         m = Model(use_variant=use_variant)
-        m.eval()
-        self.common_numeric_check(m, x)
-        m.train()
 
+        perf_inputs = torch.randn(256, layer_sizes[0])
+        self.run_acc_and_perf_test(m, x, perf_inputs)
+
+    def test_conv(self):
+        x_shape = (1, 128, 640, 959)
+        x1 = torch.randn(*x_shape)
+        padded_stride = ir.Layout._pad_strides(x1.stride(), x1.shape)
+
+        x2 = rand_strided(x_shape, padded_stride, device="cuda")
+        x2.copy_(x1)
+
+        weight = torch.randn(64, 128, 3, 3)
+
+        def fun(x, weight):
+            return torch.convolution(x, weight, stride=(1, 1), padding=(1, 1), dilation=(1, 1), transposed=False, output_padding=(0, 0), groups=1, bias=None)
+        ref = fun(x1, weight)
+        act = fun(x2, weight)
+        self.check_close(ref, act)
         if DO_PERF_TEST:
-            print("Do performance test")
-
-            def get_optim(m):
-                return torch.optim.Adam(
-                    m.parameters(), lr=0.01, capturable=True, foreach=True
-                )
-
-            perf_input = torch.randn(256, layer_sizes[0])
-
-            def get_f(m, optim):
-                def f(x):
-                    optim.zero_grad(True)
-                    with torch.cuda.amp.autocast():
-                        pred = m(x)
-                        loss = pred.sum()
-                    loss.backward()
-                    optim.step()
-
-                return f
-
-            latency_with_padding = None
-            print("Benchmark with padding")
-            with config.patch(
-                comprehensive_padding=True
-            ), torch.autograd.skip_grad_layout_contract():
-                m_copy_with_padding = copy.deepcopy(m)
-                optim_with_padding = get_optim(m_copy_with_padding)
-                opt_f_with_padding = torch.compile(
-                    get_f(m_copy_with_padding, optim_with_padding)
-                )
-                latency_with_padding = do_bench(lambda: opt_f_with_padding(perf_input))
-            latency_without_padding = None
-            print("bencmark without padding")
-            with config.patch(comprehensive_padding=False):
-                m_copy_without_padding = copy.deepcopy(m)
-                optim_without_padding = get_optim(m_copy_without_padding)
-                opt_f_without_padding = torch.compile(
-                    get_f(m_copy_without_padding, optim_without_padding)
-                )
-                latency_without_padding = do_bench(
-                    lambda: opt_f_without_padding(perf_input)
-                )
+            latency_with_padding = do_bench(lambda: fun(x2, weight))
+            latency_without_padding = do_bench(lambda: fun(x1, weight))
             print(
                 f"Latency with and without padding: {latency_with_padding:.3f} v.s. {latency_without_padding:.3f}"
             )
 
-            # profiling
-            torch.cuda.synchronize()
-            with torch.profiler.profile() as p:
-                niter = 3
-                for _ in range(niter):
-                    with torch.profiler.record_function(
-                        "With padding"
-                    ), torch.autograd.skip_grad_layout_contract():
-                        opt_f_with_padding(perf_input)
-
-                    with torch.profiler.record_function("Without padding"):
-                        opt_f_without_padding(perf_input)
-                torch.cuda.synchronize()
-
-            profile_path = "/tmp/chrome.json"
-            p.export_chrome_trace(profile_path)
-            print(f"Chrome trace is written to {profile_path}")
-
+            # According to this chrome trace: https://gist.github.com/shunting314/ce45398f7d51a63ce05fc8d411faddb3
+            # An extra kernel is called if we pad x1 here. That cuase perf loss.
+            self.do_profiling(lambda: fun(x2, weight), lambda: fun(x1, weight))
 
 if __name__ == "__main__":
     if HAS_CUDA:
