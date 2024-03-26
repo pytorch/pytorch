@@ -200,13 +200,16 @@ def create_call_function(nargs, push_null) -> List[Instruction]:
         if push_null:
             output.append(create_instruction("PUSH_NULL"))
             output.extend(create_rot_n(nargs + 2))
-        output.append(create_instruction("PRECALL", arg=nargs))
+        if sys.version_info < (3, 12):
+            output.append(create_instruction("PRECALL", arg=nargs))
         output.append(create_instruction("CALL", arg=nargs))
         return output
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
 def create_call_method(nargs) -> List[Instruction]:
+    if sys.version_info >= (3, 12):
+        return [create_instruction("CALL", arg=nargs)]
     if sys.version_info >= (3, 11):
         return [
             create_instruction("PRECALL", arg=nargs),
@@ -800,7 +803,15 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> Non
         output.append(inst)
         if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
             nexti = instructions[idx + 1]
-            if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
+            if nexti.arg == 0 and (
+                (sys.version_info >= (3, 12) and nexti.opname == "CALL")
+                or (
+                    sys.version_info >= (3, 11)
+                    and sys.version_info < (3, 12)
+                    and nexti.opname == "PRECALL"
+                )
+                or (sys.version_info < (3, 11) and nexti.opname == "CALL_FUNCTION")
+            ):
                 assert "__class__" in cell_and_free
                 output.append(create_instruction("LOAD_DEREF", argval="__class__"))
                 first_var = code.co_varnames[0]

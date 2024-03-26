@@ -388,9 +388,15 @@ class PyCodegen:
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
-            assert output[-2].opname == "PRECALL"
+            if sys.version_info >= (3, 12):
+                idx = -1
+                expected_inst = "CALL"
+            else:
+                idx = -2
+                expected_inst = "PRECALL"
+            assert output[idx].opname == expected_inst
             kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
-            output.insert(-2, kw_names_inst)
+            output.insert(idx, kw_names_inst)
             return output
         return [
             self.create_load_const(kw_names),
