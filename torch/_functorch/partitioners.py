@@ -973,13 +973,13 @@ def min_cut_rematerialization_partition(
             if start_node not in required_fw_nodes:
                 continue
             fusible = [(start_node.fw_order, start_node)]
-            start_pos = start_node.fw_order
             start_order = start_node.fw_order
             while len(fusible) > 0:
                 _, cur = heapq.heappop(fusible)
                 if cur in visited:
                     continue
                 visited.add(cur)
+                # 100 is arbitrary choice to try and prevent degenerate cases
                 if cur.fw_order > start_order + 100 and len(fusible) == 0:
                     log.info("too long %s %s %s %s", cur, start_node, cur.fw_order, start_node.fw_order)
                     ban_recomputation_if_allowed(cur)
