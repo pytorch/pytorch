@@ -334,6 +334,12 @@ use_numpy_random_stream = False
 # Use C++ guard manager
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
 
+# Inline inbuilt nn modules
+# TODO - SET THE DEFAULT TO FALSE BEFORE MERGING
+inline_inbuilt_nn_modules = (
+    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "1") == "1"
+)
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
