@@ -700,10 +700,15 @@ def index_reduce(
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
-    scatter_index = index.repeat_interleave(repeats).reshape(index_shape).permute(perm)
+    scatter_index = (
+        index.to(torch.int64)
+        .repeat_interleave(repeats)
+        .reshape(index_shape)
+        .permute(perm)
+    )
     return self.scatter_reduce(
         dim,
-        scatter_index.to(torch.int64),
+        scatter_index,
         src,
         reduction_type,
         include_self=include_self,

@@ -2460,6 +2460,9 @@ make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
+# index_reduce requires fallback when use_scatter_fallback(...) returns True
+make_fallback(aten.index_reduce)
+
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
@@ -3340,13 +3343,14 @@ def scatter_fallback(
     reduce: Optional[str] = None,
     include_self: bool = True,
 ):
+    src_is_tensor = isinstance(src, TensorBox)
     if use_scatter_fallback(
         fn,
         reduce,
         self.get_dtype(),
-        src.get_dtype(),
-        src.get_device().type,
-        isinstance(src, TensorBox),
+        src_is_tensor and src.get_dtype(),
+        src_is_tensor and src.get_device().type,
+        src_is_tensor,
     ):
         ir.ScatterFallback(
             V.graph.current_node.target,
