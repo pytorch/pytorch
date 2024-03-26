@@ -48,7 +48,7 @@ Tensor cartesian_prod(TensorList tensors) {
     TORCH_CHECK(t.dim() == 1, "Expect a 1D vector, but got shape ", t.sizes());
   }
   if (tensors.size() == 1) {
-    return tensors[0];
+    return tensors[0].unsqueeze(-1);
   }
   std::vector<Tensor> grids = at::meshgrid(tensors, "ij");
   for(Tensor &t : grids) {
