@@ -1894,6 +1894,14 @@ class InstructionTranslatorBase(
             self.LOAD_FAST(inst)
         self.symbolic_locals[inst.argval] = NullVariable()
 
+    def LOAD_SUPER_ATTR(self, inst):
+        super_vt, cls_vt, self_vt = self.popn(3)
+        self.call_function(super_vt, [cls_vt, self_vt], {})
+        if inst.arg & 1:
+            self.LOAD_METHOD(inst)
+        else:
+            self._load_attr(inst)
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only

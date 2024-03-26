@@ -97,8 +97,12 @@ def create_instruction(
     `argval` or `target`.
 
     Do not use for LOAD_GLOBAL - use create_load_global instead.
+    Do not use for LOAD_ATTR - use create_load_attr instead.
+    Do not use for LOAD_SUPER_ATTR - if you need to create this instruction,
+        implement a create_load_super_attr function.
     """
-    assert name != "LOAD_GLOBAL"
+    if name in ("LOAD_GLOBAL", "LOAD_ATTR", "LOAD_SUPER_ATTR"):
+        raise RuntimeError(f"cannot create_instruction with {name}")
     cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
     if cnt > 1:
         raise RuntimeError(
@@ -191,7 +195,7 @@ def create_call_function(nargs, push_null) -> List[Instruction]:
     (assume `math` is available in the global scope),
 
     create_load_global("math", True)  # pushes a null
-    create_instruction("LOAD_ATTR", argval="sqrt")
+    create_load_attr("sqrt")
     create_instruction("LOAD_CONST", argval=25)
     create_call_function(1, False)
     """
@@ -999,6 +1003,12 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 )
             else:
                 instructions[i].arg = names[instructions[i].argval]
+        elif instructions[i].opname == "LOAD_SUPER_ATTR":
+            assert instructions[i].arg is not None
+            assert instructions[i].argval is not _NotProvided
+            instructions[i].arg = (names[instructions[i].argval] << 2) + (
+                cast(int, instructions[i].arg) % 4
+            )
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
                 instructions[i].arg = varnames[instructions[i].argval]
@@ -1130,7 +1140,8 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
             remove_jump_if_none(instructions)
             update_offsets(instructions)
             devirtualize_jumps(instructions)
-        explicit_super(code, instructions)
+        if sys.version_info < (3, 12):
+            explicit_super(code, instructions)
     return instructions
 
 
