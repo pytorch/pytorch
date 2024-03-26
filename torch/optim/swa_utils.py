@@ -12,13 +12,13 @@ from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 from .optimizer import Optimizer
 
 __all__ = [
-    "AveragedModel",
-    "update_bn",
-    "SWALR",
-    "get_ema_multi_avg_fn",
-    "get_swa_multi_avg_fn",
-    "get_ema_avg_fn",
-    "get_swa_avg_fn",
+    'AveragedModel',
+    'update_bn',
+    'SWALR',
+    'get_ema_multi_avg_fn',
+    'get_swa_multi_avg_fn',
+    'get_ema_avg_fn',
+    'get_swa_avg_fn'
 ]
 
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
@@ -179,11 +179,12 @@ class AveragedModel(Module):
         use_buffers=False,
     ):
         super().__init__()
-        assert avg_fn is None or multi_avg_fn is None, "Only one of avg_fn and multi_avg_fn should be provided"
+        assert avg_fn is None or multi_avg_fn is None, 'Only one of avg_fn and multi_avg_fn should be provided'
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
-        self.register_buffer("n_averaged", torch.tensor(0, dtype=torch.long, device=device))
+        self.register_buffer('n_averaged',
+                             torch.tensor(0, dtype=torch.long, device=device))
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
@@ -193,9 +194,13 @@ class AveragedModel(Module):
 
     def update_parameters(self, model: Module):
         self_param = (
-            itertools.chain(self.module.parameters(), self.module.buffers()) if self.use_buffers else self.parameters()
+            itertools.chain(self.module.parameters(), self.module.buffers())
+            if self.use_buffers else self.parameters()
         )
-        model_param = itertools.chain(model.parameters(), model.buffers()) if self.use_buffers else model.parameters()
+        model_param = (
+            itertools.chain(model.parameters(), model.buffers())
+            if self.use_buffers else model.parameters()
+        )
         self_param_detached = []
         model_param_detached = []
         for p_averaged, p_model in zip(self_param, model_param):
@@ -208,7 +213,7 @@ class AveragedModel(Module):
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
                 grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])
-                for (device, _), ([self_params, model_params], _) in grouped_tensors.items():
+                for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
                     elif device.type in _get_foreach_kernels_supported_devices():
@@ -329,16 +334,16 @@ class SWALR(LRScheduler):
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     """
-
-    def __init__(self, optimizer: Optimizer, swa_lr: float, anneal_epochs=10, anneal_strategy="cos", last_epoch=-1):
+    def __init__(self, optimizer: Optimizer, swa_lr: float, anneal_epochs=10, anneal_strategy='cos', last_epoch=-1):
         swa_lrs = self._format_param(optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
-            group["swa_lr"] = swa_lr
-        if anneal_strategy not in ["cos", "linear"]:
-            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', " f"instead got {anneal_strategy}")
-        elif anneal_strategy == "cos":
+            group['swa_lr'] = swa_lr
+        if anneal_strategy not in ['cos', 'linear']:
+            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', "
+                             f"instead got {anneal_strategy}")
+        elif anneal_strategy == 'cos':
             self.anneal_func = self._cosine_anneal
-        elif anneal_strategy == "linear":
+        elif anneal_strategy == 'linear':
             self.anneal_func = self._linear_anneal
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}")
@@ -349,11 +354,9 @@ class SWALR(LRScheduler):
     def _format_param(optimizer, swa_lrs):
         if isinstance(swa_lrs, (list, tuple)):
             if len(swa_lrs) != len(optimizer.param_groups):
-                raise ValueError(
-                    "swa_lr must have the same length as "
-                    f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
-                    f"optimizer.param_groups has {len(optimizer.param_groups)}"
-                )
+                raise ValueError("swa_lr must have the same length as "
+                                 f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
+                                 f"optimizer.param_groups has {len(optimizer.param_groups)}")
             return swa_lrs
         else:
             return [swa_lrs] * len(optimizer.param_groups)
@@ -381,9 +384,9 @@ class SWALR(LRScheduler):
             step = max(1, step)
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
-        prev_lrs = [
-            self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha) for group in self.optimizer.param_groups
-        ]
+        prev_lrs = [self._get_initial_lr(group['lr'], group['swa_lr'], prev_alpha)
+                    for group in self.optimizer.param_groups]
         t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
-        return [group["swa_lr"] * alpha + lr * (1 - alpha) for group, lr in zip(self.optimizer.param_groups, prev_lrs)]
+        return [group['swa_lr'] * alpha + lr * (1 - alpha)
+                for group, lr in zip(self.optimizer.param_groups, prev_lrs)]
