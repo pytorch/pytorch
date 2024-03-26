@@ -10,6 +10,7 @@ import torch
 import torch.fx as fx
 import operator
 import math
+import heapq
 import torch.utils._pytree as pytree
 import copy
 import os
@@ -21,9 +22,11 @@ from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+import logging
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
+log = logging.getLogger(__name__)
 
 
 def must_recompute(node):
@@ -379,31 +382,6 @@ def pointwise_ops():
 
     return ops
 
-def get_depth(node, depth_map):
-    if node in depth_map:
-        return depth_map[node]
-
-    # Base case
-    if node.op == "placeholder":
-        depth_map[node] = 0
-        return depth_map[node]
-
-    # Handle output node
-    if node.op == "output":
-        args = node.args[0]
-        for arg in args:
-            if isinstance(arg, torch.fx.node.Node):
-                get_depth(arg, depth_map)
-        return
-
-    # Get the depth of args and set the depth of this node
-    arg_depths = [get_depth(arg, depth_map) for arg in node.all_input_nodes if isinstance(arg, torch.fx.node.Node)]
-    # factory ops like full, rand might not have any input args
-    if len(arg_depths) == 0:
-        arg_depths = [0]
-    depth_map[node] = max(arg_depths) + 1
-    return depth_map[node]
-
 
 def sort_depths(args, depth_map):
     arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
@@ -439,11 +417,7 @@ def reordering_to_mimic_autograd_engine(gm):
     # Add new placeholder nodes in the order specified by the inputs
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            new_node = new_graph.placeholder(node.name)
-            # Can't use node_copy here as we may be turning previous call_function into placeholders
-            new_node.meta = node.meta
-            env[node] = new_node
-
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     order = {}
     for idx, node in enumerate(gm.graph.nodes):
@@ -452,7 +426,11 @@ def reordering_to_mimic_autograd_engine(gm):
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
     output_node = next(node for node in gm.graph.nodes if node.op == "output")
-    get_depth(output_node, depths)
+    for node in gm.graph.nodes:
+        if node.op == 'placeholder':
+            depths[node] = 0
+        else:
+            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
 
     def insert_node_in_graph(node):
         if node in env:
@@ -474,7 +452,10 @@ def reordering_to_mimic_autograd_engine(gm):
             if order[user] < minimum_order:
                 minimum_order = order[user]
                 first_node_in_bwd = user
-    assert first_node_in_bwd is not None
+
+    # If gradInp does not depend upon gradOut, we may not find any nodes in the "backwards pass"
+    if first_node_in_bwd is None:
+        return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
     for node in list(gm.graph.nodes)[order[first_node_in_bwd]:]:
@@ -678,7 +659,7 @@ def min_cut_rematerialization_partition(
     if config.cse:
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
-    full_bw_graph = joint_module.graph
+    joint_graph = joint_module.graph
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
@@ -702,7 +683,7 @@ def min_cut_rematerialization_partition(
         fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
         inputs = primal_inputs + fwd_seed_offset_inputs
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-        required_bw_nodes.update(o for o in bwd_outputs if o is not None)
+        required_bw_nodes.update(o for o in bwd_outputs if o is not None and o.op != 'output')
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -717,6 +698,19 @@ def min_cut_rematerialization_partition(
     # this case, send our graph over to the default partitioner.
     if len(required_bw_nodes) == 0:
         return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+
+    def is_fusible(a, b):
+        # We can perform "memory fusion" into a cat, but cat cannot be a
+        # producer to a fusion
+        if get_aten_target(b) == aten.cat:
+            return True
+        return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
+
+    fw_order = 0
+    for node in joint_module.graph.nodes:
+        if node in required_fw_nodes:
+            node.fw_order = fw_order
+            fw_order += 1
 
     for node in reversed(joint_module.graph.nodes):
         if node not in required_fw_nodes:
@@ -733,10 +727,10 @@ def min_cut_rematerialization_partition(
     default_recomputable_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax, aten.to, aten.type_as, operator.getitem, aten.squeeze, aten.unsqueeze, aten.rsub, aten._to_copy]  # noqa: E501,B950
     view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
     if compiler == "inductor":
-        default_recomputable_ops += [prims.div, prims.convert_element_type, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.arange, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum]  # noqa: E501,B950
-        view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided]
+        default_recomputable_ops += [prims.div, prims.convert_element_type, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.arange, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum, prims.iota]  # noqa: E501,B950
+        view_ops += [aten.view, aten.slice, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided, aten.permute]
         # Natalia said that we should allow recomputing indexing :)
-        default_recomputable_ops += [aten.index]
+        default_recomputable_ops += [aten.index, aten.gather]
     default_recomputable_ops += view_ops
 
     default_recomputable_ops += pointwise_ops()
@@ -749,11 +743,10 @@ def min_cut_rematerialization_partition(
         method_to_operator(m)
         for m in magic_methods
     ]
-
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit, aten._batch_norm_with_update, aten.batch_norm_backward]  # noqa: E501,B950
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten._scaled_dot_product_efficient_attention, aten.upsample_bilinear2d]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
@@ -766,64 +759,77 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
+    BAN_IF_USED_FAR_APART = config.ban_recompute_used_far_apart
+    BAN_IF_LONG_FUSIBLE_CHAINS = config.ban_recompute_long_fusible_chains
+    BAN_IF_MATERIALIZED_BACKWARDS = config.ban_recompute_materialized_backward
+    BAN_IF_NOT_IN_ALLOWLIST = config.ban_recompute_not_in_allowlist
+    BAN_IF_REDUCTION = config.ban_recompute_reductions
+
+    if config.aggressive_recomputation:
+        BAN_IF_MATERIALIZED_BACKWARDS = False
+        BAN_IF_USED_FAR_APART = False
+        BAN_IF_LONG_FUSIBLE_CHAINS = False
+        BAN_IF_NOT_IN_ALLOWLIST = False
+
     def is_materialized_backwards(node):
+        if get_aten_target(node) in view_ops:
+            return False
         cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
             for user in cur.users:
                 if user not in required_fw_nodes and not is_fusible(cur, user):
                     return True
-                if user not in required_fw_nodes and get_aten_target(user) in view_ops:
+                if get_aten_target(user) in view_ops:
                     cur_nodes.add(user)
 
         return False
 
-    def ban_recomputation(node):
-        if "recompute" in node.meta:
-            return node.meta["recompute"] == 0
-        elif config.aggressive_recomputation:
-            ignored_ops = random_ops + compute_intensive_ops
-            return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
-        else:
-            if node.op != 'call_function':
-                return False
+    def should_ban_recomputation(node):
+        if node.op != 'call_function':
+            return False
+        if node.target == operator.getitem:
+            return False
+        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+            return False
+
+        if BAN_IF_NOT_IN_ALLOWLIST:
             if get_aten_target(node) not in recomputable_ops:
                 return True
-            if node.target == operator.getitem:
-                return False
-            if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
-                return False
-
-            # If a node *must* be materialized in the backwards pass, then we
-            # should never recompute it. This is a pretty subtle point.  In
-            # general, the assumption we make is that recomputing a node in the
-            # backwards pass is "free". However, if a node must be materialized
-            # in the backwards pass, then recomputing it is never free.
-            if is_materialized_backwards(node):
+        else:
+            ignored_ops = random_ops + compute_intensive_ops
+            if get_aten_target(node) in ignored_ops:
                 return True
 
-            # Arbitrary hack that sometimes seems to help things. The above
-            # modification appears to have made this heuristic a lot less critical
-            # for performance.
-            # TODO: Investigate why this hack helps.
-            # TODO: Investigate the interaction with compiler assisted
-            # activation checkpointing. Removing the heuristic improves both
-            # memory footprint and speedup.
-            if not graph_has_recomputable_ops:
-                if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
-                    return True
-            # If the output of an op is 4x smaller (arbitrary choice),
-            # then we don't allow recomputation.
+
+        # If a node *must* be materialized in the backwards pass, then we
+        # should never recompute it. This is a pretty subtle point.  In
+        # general, the assumption we make is that recomputing a node in the
+        # backwards pass is "free". However, if a node must be materialized
+        # in the backwards pass, then recomputing it is never free.
+        if is_materialized_backwards(node) and BAN_IF_MATERIALIZED_BACKWARDS:
+            log.info("materialized backwards: %s %s", node, tuple(node.users))
+            return True
+
+        # Arbitrary hack that sometimes seems to help things. The above
+        # modification appears to have made this heuristic a lot less critical
+        # for performance.
+        # NB: As of PR #121692, this hack no longer seems necessary.
+        if not graph_has_recomputable_ops:
+            if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
+                return True
+
+        # If the output of an op is 4x smaller (arbitrary choice),
+        # then we don't allow recomputation. The idea here is that for
+        # things like reductions, saving the output of the reduction is very
+        # cheap/small, and it makes sure we don't do things like recompute
+        # normalizations in the backwards.
+        if BAN_IF_REDUCTION:
             input_tensors_size = sum(_size_of(i) for i in node.args if isinstance(i, fx.Node))
             output_size = _size_of(node)
             return (output_size * 4 < input_tensors_size)
+        return False
 
-    def is_fusible(a, b):
-        # We can perform "memory fusion" into a cat, but cat cannot be a
-        # producer to a fusion
-        if get_aten_target(b) == aten.cat:
-            return True
-        return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
         if node.op == 'placeholder':
@@ -837,15 +843,33 @@ def min_cut_rematerialization_partition(
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
-        # mem_sz = int(mem_sz + node.dist_from_bw)
-
         if is_materialized(node):
             return mem_sz
         else:
             return mem_sz * 2
 
     nx_graph = nx.DiGraph()
-    for node in full_bw_graph.nodes:
+    banned_nodes = set()
+
+    def ban_recomputation_if_allowed(node):
+        # This bans recomputation of the node unless we've been forced not to by
+        # user annotation
+        # NB: "recompute" == 0 means it's not banned from recomputing
+        if node.meta.get("recompute", 0) > 0:
+            return False
+
+        if 'val' in node.meta and isinstance(node.meta['val'], torch.SymFloat):
+            return False
+
+        banned_nodes.add(node)
+        # A node will only ever be recomputed if there is a path from an
+        # ancestor of this node to the backwards path through this node that
+        # doesn't go through any saved value. If this node is saved, then that
+        # condition is not possible.
+        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        return True
+
+    for node in joint_graph.nodes:
         if node.op == 'output':
             continue
 
@@ -864,13 +888,13 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
-            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+            ban_recomputation_if_allowed(node)
 
         # If a node can't be recomputed (too expensive or involves randomness),
         # we prevent it from being recomputed by adding an inf edge to the source
         # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
-        if ban_recomputation(node) and node in required_fw_nodes:
-            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        if node in required_fw_nodes and should_ban_recomputation(node):
+            ban_recomputation_if_allowed(node)
 
         # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
@@ -887,6 +911,93 @@ def min_cut_rematerialization_partition(
         nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
         for user in node.users:
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
+
+    # todo(chilli): This is the most questionable of the 3 heuristics for banning recompute.
+    # Some example models to look at where this helps perf: poolformer_m36,
+    # mixer_b16_224, cait_m36_384
+
+    # The "rough" idea here is that if you have some node that is used by both a
+    # node nearby downstream as well as a node far downstream, if we recompute
+    # both of the downstream nodes, we're unlikely to be able to fuse both
+    # downstream nodes together.
+
+    # Thus, we shouldn't aim to recompute far downstream nodes that depend on
+    # this node. That intuition of "far downstream" is captured by whether
+    # there's an unfusible op along the chain somewhere
+
+    # It could probably be improved by properly analyzing what's going on in the
+    # backwards pass instead of only relying on whether it's unfusible in the
+    # forwards.
+
+    def find_first_unfusible(start_nodes: List[fx.Node], max_range: int) -> int:
+        """
+        Finds the first unfusible node in the chain of nodes starting from
+        `start_nodes` and returns its position.
+        """
+        sorted_nodes = []
+        for n in start_nodes:
+            heapq.heappush(sorted_nodes, (n.fw_order, n, True))
+
+        while len(sorted_nodes) > 0:
+            _, node, node_is_fusible = heapq.heappop(sorted_nodes)
+            if not node_is_fusible:
+                return node.fw_order
+            for user in node.users:
+                if user in required_fw_nodes:
+                    if user.fw_order > max_range:
+                        continue
+                    heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
+        return max_range
+
+    if BAN_IF_USED_FAR_APART:
+        for used_node in required_fw_nodes:
+            orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
+            fw_users = [user for user in used_node.users if user in required_fw_nodes]
+            if len(orders) > 0:
+                first_unfusible_use = find_first_unfusible(fw_users, max(orders))
+                for user in tuple(used_node.users):
+                    if user in required_fw_nodes and user.fw_order > first_unfusible_use and is_fusible(used_node, user):
+                        if user in banned_nodes:
+                            continue
+                        log.info(
+                            "used above/below fusible %s:(%s) -> %s -> %s:(%s)",
+                            used_node, used_node.fw_order, first_unfusible_use, user, user.fw_order
+                        )
+                        ban_recomputation_if_allowed(user)
+
+
+    # This heuristic is fairly straightforward. The idea is that although it is
+    # cheap to recompute bandwidth-bound ops, we don't want to end up in a situation
+    # where we have a long chain of pointwise ops from the beginning to the end
+    # of the model (like say, residual connections)
+
+    # todo: I'm not totally sure why this heuristic matters. It's possible that this is
+    # working around Inductor fusion decisions, or that it's a patch over
+    # suboptimal partitioning decisions
+
+    # Some models it improves perf on are cait_m36_384, mixer_b16_224, poolformer_m36
+
+    if BAN_IF_LONG_FUSIBLE_CHAINS:
+        visited = set()
+        for start_node in joint_graph.nodes:
+            if start_node not in required_fw_nodes:
+                continue
+            fusible = [(start_node.fw_order, start_node)]
+            start_order = start_node.fw_order
+            while len(fusible) > 0:
+                _, cur = heapq.heappop(fusible)
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                # 100 is arbitrary choice to try and prevent degenerate cases
+                if cur.fw_order > start_order + 100 and len(fusible) == 0:
+                    log.info("too long %s %s %s %s", cur, start_node, cur.fw_order, start_node.fw_order)
+                    ban_recomputation_if_allowed(cur)
+                    break
+
+                for user in cur.users:
+                    if user in required_fw_nodes and is_fusible(cur, user) and user not in banned_nodes:
+                        heapq.heappush(fusible, (user.fw_order, user))
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
@@ -921,10 +1032,13 @@ def min_cut_rematerialization_partition(
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
-        bw_module = reordering_to_mimic_autograd_engine(bw_module)
+    bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
+        from torch._inductor.fx_utils import get_node_storage
+        storages = {get_node_storage(node) for node in saved_values}
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
+        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
         bw_module_nodes = {node.name for node in bw_module.graph.nodes if node.op == 'call_function'}
         remat_nodes = fw_module_nodes & bw_module_nodes
