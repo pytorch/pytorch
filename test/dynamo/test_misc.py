@@ -6962,6 +6962,8 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
+    # NOTE this test can be removed once multiline errors are in Python.
+    # See https://github.com/python/cpython/issues/106922
     @skipIfNotPy311
     def test_get_instruction_source_311(self):
         def f():
@@ -7012,7 +7014,11 @@ def fn():
 
         from torch._dynamo.utils import get_instruction_source_311
 
-        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
+        if sys.version_info >= (3, 12):
+            # Offsets changed in 3.12, e.g. due to removal of PRECALL inst
+            offsets = (3, 11, 15, 19, 23, 29, 35, 44, 53, 65)
+        else:
+            offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
         insts = list(dis.get_instructions(f))
         # uncomment to determine offsets
         # print(*enumerate(insts), sep="\n")
@@ -7092,8 +7098,9 @@ def fn():
 """,
         )
         # test unicode (since assertExpectedInline doesn't support unicode)
+        op_offset = 74 if sys.version_info >= (3, 12) else 84
         self.assertEqual(
-            get_instruction_source_311(f.__code__, insts[84]),
+            get_instruction_source_311(f.__code__, insts[op_offset]),
             """\
             a = ("🔥🔥🔥" +
                 ~~~~~~~~
