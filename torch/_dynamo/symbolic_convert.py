@@ -17,12 +17,12 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, tracing, TracingContext
+from torch._guards import tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -45,7 +45,7 @@ from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
-from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
+from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
@@ -99,17 +99,11 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import (
-    supported_const_comparison_ops,
-    supported_tensor_comparison_ops,
-    SymNodeVariable,
-    TensorVariable,
-)
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    UserDefinedVariable,
 )
 
 log = logging.getLogger(__name__)
@@ -117,6 +111,17 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+compare_op_handlers: Dict[str, Any] = {
+    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+}
+handle_contains = BuiltinVariable(operator.contains).call_function
+handle_not = BuiltinVariable(operator.not_).call_function
+compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
+    tx, [*reversed(args)], {}
+)
+compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
+    tx, [handle_contains(tx, [*reversed(args)], {})], {}
+)
 
 
 @dataclasses.dataclass
@@ -213,27 +218,6 @@ class ReturnValueOp(Exception):
     pass
 
 
-class InstructionTranslatorGraphState(NamedTuple):
-    output: OutputGraphState
-    symbolic_locals: Dict[str, VariableTracker]
-    stack: List[VariableTracker]
-    block_stack: List[BlockStackEntry]
-    instruction_pointer: Optional[int]
-    current_instruction: Instruction
-    next_instruction: Optional[Instruction]
-    lineno: int
-
-    def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
-        for k in self._fields:
-            if k == "output":
-                return self.output.diff(other.output, prefix=f"{k}.")
-            sv = getattr(self, k)
-            ov = getattr(other, k)
-            if sv != ov:
-                return f"{k} mismatch: {sv} != {ov}"
-        return None
-
-
 def stack_op(fn: typing.Callable[..., object]):
     nargs = len(inspect.signature(fn).parameters)
     fn_var = BuiltinVariable(fn)
@@ -316,6 +300,36 @@ def _detect_and_normalize_assert_statement(
 
 
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
+    def jump_graph_break(self, inst, value, extra_msg=""):
+        if not self.should_compile_partial_graph():
+            unimplemented("should_compile_partial_graph=False")
+        # compile a partial subgraph prefix then jump into user code
+        if self.has_backedge():
+            msg = (
+                "Skipping frame because there is a graph break in a for/while loop\n"
+                f"{self.frame_summary()}"
+            )
+            log.info(msg)
+            raise exc.SkipFrame(msg)
+
+        self.push(value)
+        log.debug("generic_jump triggered compile")
+        self.output.compile_subgraph(
+            self,
+            reason=GraphCompileReason(
+                f"generic_jump {typestr(value)}{extra_msg}", [self.frame_summary()]
+            ),
+        )
+        self.pop()
+
+        if_next = self.create_call_resume_at(self.next_instruction)
+        push and self.push(value)
+        if_jump = self.create_call_resume_at(inst.target)
+
+        self.output.add_output_instructions(
+            [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
+        )
+
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         if (
@@ -351,7 +365,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
                 result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
                 if not result:
-                    raise unimplemented(
+                    unimplemented(
                         "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
                     )
                 self.jump(inst)
@@ -382,32 +396,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif (
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
         ):
-            # compile a partial subgraph prefix then jump into user code
-            if self.has_backedge():
-                msg = (
-                    "Skipping frame because there is a graph break in a for/while loop\n"
-                    f"{self.frame_summary()}"
-                )
-                log.info(msg)
-                raise exc.SkipFrame(msg)
-
-            self.push(value)
-            log.debug("generic_jump triggered compile")
-            self.output.compile_subgraph(
-                self,
-                reason=GraphCompileReason(
-                    f"generic_jump {typestr(value)}", [self.frame_summary()]
-                ),
-            )
-            self.pop()
-
-            if_next = self.create_call_resume_at(self.next_instruction)
-            push and self.push(value)
-            if_jump = self.create_call_resume_at(inst.target)
-
-            self.output.add_output_instructions(
-                [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
-            )
+            jump_graph_break(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
@@ -445,7 +434,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
-            eval_result = value.evaluate_expr(self.output)
+            try:
+                eval_result = value.evaluate_expr(self.output)
+            except exc.UserError as e:
+                if self.should_compile_partial_graph():
+                    return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
+                raise
             if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
@@ -621,7 +615,6 @@ class BytecodeDistpatchTableMeta(type):
 
 
 class InstructionTranslatorBase(
-    Checkpointable[InstructionTranslatorGraphState],
     metaclass=BytecodeDistpatchTableMeta,
 ):
     output: OutputGraph
@@ -630,7 +623,6 @@ class InstructionTranslatorBase(
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
-    next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
@@ -734,15 +726,11 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        assert isinstance(self.instruction_pointer, int)
-        inst = self.instructions[self.instruction_pointer]
-        self.current_instruction = inst
-        self.instruction_pointer += 1
-        try:
-            self.next_instruction = self.instructions[self.instruction_pointer]
-        except IndexError:
-            self.instruction_pointer = None
-            self.next_instruction = None
+        ip = self.instruction_pointer
+        if ip is None:
+            return False
+        self.current_instruction = inst = self.instructions[ip]
+        self.instruction_pointer = ip + 1
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
@@ -763,7 +751,7 @@ class InstructionTranslatorBase(
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
-            return True
+            return not self.output.should_exit
         except ReturnValueOp:
             return False
         except Unsupported:
@@ -821,6 +809,10 @@ class InstructionTranslatorBase(
         def update_block_stack(self, inst):
             pass
 
+    @property
+    def next_instruction(self):
+        return self.instructions[self.instruction_pointer]  # type: ignore[index]
+
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -844,11 +836,7 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
-                while (
-                    self.instruction_pointer is not None
-                    and not self.output.should_exit
-                    and self.step()
-                ):
+                while self.step():
                     pass
             except BackendCompilerFailed:
                 raise
@@ -880,8 +868,7 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> List[VariableTracker]:
-        assert n >= 0
-        return list(reversed([self.pop() for _ in range(n)]))
+        return [*reversed([self.pop() for _ in range(n)])]
 
     def LOAD_FAST(self, inst):
         name = inst.argval
@@ -890,7 +877,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
-            self.push(self.symbolic_locals[name])
+            self.push(self.symbolic_locals[name].unwrap())
         except KeyError:
             if name.startswith("."):
                 try:
@@ -1073,12 +1060,15 @@ class InstructionTranslatorBase(
             value = self.f_globals[recorded_name]
             source = GlobalSource(recorded_name)
         else:
-            value = __import__(
-                module_name,
-                fromlist=fromlist,
-                level=level,
-                globals=self.f_globals,
-            )
+            try:
+                value = __import__(
+                    module_name,
+                    fromlist=fromlist,
+                    level=level,
+                    globals=self.f_globals,
+                )
+            except ImportError:
+                unimplemented("import a module that does not exist")
 
             if level != 0:
                 pkg = self.calc_package()
@@ -1165,7 +1155,6 @@ class InstructionTranslatorBase(
         bytecode counter by delta
         """
         # Python 3.8 only
-        assert self.next_instruction is not None
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
         self.instruction_pointer = self.indexof[inst.target]
@@ -1201,61 +1190,7 @@ class InstructionTranslatorBase(
             unimplemented(f"FOR_ITER {typestr(it)}")
 
     def COMPARE_OP(self, inst):
-        left, right = self.popn(2)
-        op = inst.argval
-        supported_any = dict(
-            itertools.chain(
-                supported_tensor_comparison_ops.items(),
-                supported_const_comparison_ops.items(),
-            )
-        )
-        if (
-            isinstance(
-                left,
-                (
-                    TensorVariable,
-                    SymNodeVariable,
-                    NNModuleVariable,
-                    BaseListVariable,
-                    UserDefinedVariable,
-                    BaseUserFunctionVariable,
-                    ConstDictVariable,
-                ),
-            )
-            and isinstance(right, ConstantVariable)
-            and right.value is None
-            and op in supported_const_comparison_ops
-        ):
-            # <non-None> is None
-            self.push(
-                ConstantVariable.create(
-                    supported_const_comparison_ops[op](object(), right.value)
-                )
-            )
-
-        elif (
-            left.is_python_constant()
-            and right.is_python_constant()
-            and op in supported_any
-        ):
-            # constant fold
-            self.push(
-                ConstantVariable.create(
-                    supported_any[op](
-                        left.as_python_constant(), right.as_python_constant()
-                    ),
-                )
-            )
-        elif op in ("in", "not in"):
-            self.push(right.call_method(self, "__contains__", [left], {}))
-            if op == "not in":
-                self.UNARY_NOT(inst)
-        else:
-            self.push(
-                BuiltinVariable(supported_any[op]).call_function(
-                    self, [left, right], {}
-                )
-            )
+        self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
@@ -1804,14 +1739,10 @@ class InstructionTranslatorBase(
         else:
             assert not self.accept_prefix_inst
 
-    def BINARY_OP(self, inst):
-        if sys.version_info >= (3, 11):
-            opname = dis._nb_ops[inst.arg][0][3:]  # type: ignore[attr-defined]
-            if opname.startswith("INPLACE"):
-                return getattr(self, "INPLACE_" + opname[8:])(inst)
-            return getattr(self, "BINARY_" + opname)(inst)
-        else:
-            unimplemented("BINARY_OP requires Python 3.11+")
+    if sys.version_info >= (3, 11):
+
+        def BINARY_OP(self, inst):
+            return _binary_op_lookup[inst.arg](self, inst)
 
     def PRECALL(self, inst):
         pass
@@ -1884,8 +1815,6 @@ class InstructionTranslatorBase(
         )
         if sys.version_info >= (3, 11):
             # see create_call_resume_at for block stack details
-            assert self.next_instruction
-            assert self.next_instruction.exn_tab_entry
             target = self.next_instruction.exn_tab_entry.target
         else:
             target = inst.target
@@ -1909,33 +1838,6 @@ class InstructionTranslatorBase(
 
     def RETURN_GENERATOR(self, inst):
         self.append_prefix_inst(inst)
-
-    def copy_graphstate(self) -> InstructionTranslatorGraphState:
-        """Create a checkpoint of the current state by copying everything"""
-        return InstructionTranslatorGraphState(
-            self.output.copy_graphstate(),
-            dict(self.symbolic_locals),
-            list(self.stack),
-            list(self.block_stack),
-            self.instruction_pointer,
-            self.current_instruction,
-            self.next_instruction,
-            self.lineno,
-        )
-
-    def restore_graphstate(self, state: InstructionTranslatorGraphState):
-        """Restore a checkpoint created by self.copy_graphstate()"""
-        (
-            output_state,
-            self.symbolic_locals,
-            self.stack,
-            self.block_stack,
-            self.instruction_pointer,
-            self.current_instruction,
-            self.next_instruction,
-            self.lineno,
-        ) = state
-        self.output.restore_graphstate(output_state)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
@@ -2016,7 +1918,6 @@ class InstructionTranslatorBase(
         self.stack = []
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
-        self.next_instruction = None
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.generic_context_manager_depth = 0
@@ -2170,8 +2071,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
-                self.symbolic_locals = VariableTracker.apply(
-                    lambda x: x.realize(), self.symbolic_locals
+                self.symbolic_locals = variables.LazyVariableTracker.realize_all(
+                    self.symbolic_locals
                 )
 
             self._freevars_ids = dict()
@@ -2196,6 +2097,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         forbidden_keys = (
             torch._C._functorch.TransformType.Vmap,
             torch._C._functorch.TransformType.Grad,
+            torch._C._functorch.TransformType.Jvp,
         )
         if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
             # if it reaches here, it means Dynamo failed to inline a functorch function
@@ -2338,6 +2240,16 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
         raise ReturnValueOp()
+
+
+if sys.version_info >= (3, 11):
+    _binary_op_lookup = [
+        getattr(
+            InstructionTranslator,
+            opname[3:] if "INPLACE" in opname else f"BINARY_{opname[3:]}",
+        )
+        for opname, _ in dis._nb_ops  # type: ignore[attr-defined]
+    ]
 
 
 class InliningInstructionTranslator(InstructionTranslatorBase):

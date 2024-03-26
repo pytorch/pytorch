@@ -93,174 +93,57 @@ std::vector<int64_t> calc_gpu_sizes(
     const std::vector<int64_t>& sizes,
     const api::GPUMemoryLayout memory_layout,
     const api::StorageType storage_type) {
-  size_t ndim = sizes.size();
-
   VK_CHECK_COND(storage_type != api::StorageType::UNKNOWN);
 
-  // For buffer formats, the innermost dim (i.e. where the stride is 1) will be
-  // aligned up. Which dim is the innermost is described by the GPUMemoryLayout.
+  std::vector<int64_t> gpu_sizes;
   if (storage_type == api::StorageType::BUFFER) {
-    std::vector<int64_t> gpu_sizes(sizes.begin(), sizes.end());
-
-    switch (memory_layout) {
-      case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-        gpu_sizes.at(ndim - 1) =
-            api::utils::align_up(sizes.at(ndim - 1), INT64_C(4));
-        break;
-
-      case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-        switch (ndim) {
-          case 3:
-            gpu_sizes.at(0) = api::utils::align_up(sizes.at(0), INT64_C(4));
-            break;
-
-          case 4:
-            gpu_sizes.at(1) = api::utils::align_up(sizes.at(1), INT64_C(4));
-            break;
-        }
-        break;
-
-      default:
-        VK_THROW("Invalid memory format used to create vTensor!");
-        break;
+    gpu_sizes.resize(sizes.size());
+    for (size_t i = 0; i < sizes.size(); i++) {
+      gpu_sizes.at(i) = sizes.at(i);
     }
-
-    return gpu_sizes;
   }
-  // If StorageType is not BUFFER, that means TEXTURE storage will be used. For
-  // texture storage, the returned gpu_sizes will be at least 3 dimensional to
-  // represent the extents of the image texture that will be allocated. For 4
-  // dimensional tensors, The gpu_sizes will also be 4 dimensional in order to
-  // preserve the size of the batch dim to facilitate conversion between logical
-  // tensor coordinates and physical texel positions. Based on the GPU memory
-  // layout, whichever dimension is packed will be aligned up to the next
-  // multiple of 4, as each texel shall store 4 consecutive elements from the
-  // packed dimension.
+  // For texture storage, tensors are typically stored using 3D image textures.
+  // Batches are stacked along the depth dimension. To represent the physical
+  // 3 dimensionality of the image texture (with concatenated batches) GPU sizes
+  // will be fixed to 4 dimensions when using texture storage.
   else {
     VK_CHECK_COND(
-        ndim >= 0 && ndim <= 4,
+        sizes.size() >= 0 && sizes.size() <= 4,
         "Texture storage only valid for 0 <= ndim <= 4, received: ",
-        ndim);
+        sizes.size());
 
-    std::vector<int64_t> gpu_sizes(ndim == 4 ? 4 : 3);
-
-    // Channel dim will be be aligned to the next multiple of 4
-    switch (ndim) {
-      case 0:
-        switch (memory_layout) {
-          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-            // 0-dimension tensors only has 1 element. Hence it is always {4, 1,
-            // 1} when stored as image textures. Channels need to be multiple of
-            // 4 due to packing.
-            gpu_sizes.at(0) = 4;
-            gpu_sizes.at(1) = 1;
-            gpu_sizes.at(2) = 1;
-            break;
-          default:
-            VK_THROW(
-                "Invalid memory format used to create vTensor with zero-dim!");
-        }
-        break;
-      case 1:
-        switch (memory_layout) {
-          case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-            gpu_sizes.at(0) = 1;
-            gpu_sizes.at(1) = 1;
-            gpu_sizes.at(2) = api::utils::align_up(sizes.at(0), INT64_C(4));
-            break;
-          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-            // 1-dimension tensors are interpreted as 3-dimensional tensors with
-            // size {1, 1, L} when stored as image textures, thus channel
-            // packing is valid even though the original tensor does not
-            // technically have a channels dimension. In this mode, 3 channels
-            // of zero padding are added to the unsqueezed size of {1, 1, L}
-            // producing a final shape of {4, 1, L}.
-            gpu_sizes.at(0) = 4;
-            gpu_sizes.at(1) = 1;
-            gpu_sizes.at(2) = sizes.at(0);
-            break;
-          default:
-            VK_THROW("Invalid memory format used to create vTensor!");
-        }
-        break;
-
-      case 2:
-        switch (memory_layout) {
-          case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-            gpu_sizes.at(0) = 1;
-            gpu_sizes.at(1) = sizes.at(0);
-            gpu_sizes.at(2) = api::utils::align_up(sizes.at(1), INT64_C(4));
-            break;
-          case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
-            gpu_sizes.at(0) = 1;
-            gpu_sizes.at(1) = api::utils::align_up(sizes.at(0), INT64_C(4));
-            gpu_sizes.at(2) = sizes.at(1);
-            break;
-          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-            // 2-dimension tensors are interpreted as 3-dimensional tensors with
-            // size {1, H, W} when stored as image textures, thus channel
-            // packing is valid even though the original tensor does not
-            // technically have a channels dimension. In this mode, 3 channels
-            // of zero padding are added to the unsqueezed size of {1, H, W}
-            // producing a final shape of {4, H, W}.
-            gpu_sizes.at(0) = 4;
-            gpu_sizes.at(1) = sizes.at(0);
-            gpu_sizes.at(2) = sizes.at(1);
-            break;
-          default:
-            VK_THROW("Invalid memory format used to create vTensor!");
-        }
-        break;
-
-      case 3:
-        switch (memory_layout) {
-          case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-            gpu_sizes.at(0) = sizes.at(0);
-            gpu_sizes.at(1) = sizes.at(1);
-            gpu_sizes.at(2) = api::utils::align_up(sizes.at(2), INT64_C(4));
-            break;
-          case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
-            gpu_sizes.at(0) = sizes.at(0);
-            gpu_sizes.at(1) = api::utils::align_up(sizes.at(1), INT64_C(4));
-            gpu_sizes.at(2) = sizes.at(2);
-            break;
-          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-            gpu_sizes.at(0) = api::utils::align_up(sizes.at(0), INT64_C(4));
-            gpu_sizes.at(1) = sizes.at(1);
-            gpu_sizes.at(2) = sizes.at(2);
-            break;
-          default:
-            VK_THROW("Invalid memory format used to create vTensor!");
-        }
-        break;
-
-      case 4:
-        switch (memory_layout) {
-          case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-            gpu_sizes.at(0) = sizes.at(0);
-            gpu_sizes.at(1) = sizes.at(1);
-            gpu_sizes.at(2) = sizes.at(3);
-            gpu_sizes.at(3) = api::utils::align_up(sizes.at(3), INT64_C(4));
-            break;
-          case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
-            gpu_sizes.at(0) = sizes.at(0);
-            gpu_sizes.at(1) = sizes.at(1);
-            gpu_sizes.at(2) = api::utils::align_up(sizes.at(2), INT64_C(4));
-            gpu_sizes.at(3) = sizes.at(3);
-            break;
-          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-            gpu_sizes.at(0) = sizes.at(0);
-            gpu_sizes.at(1) = api::utils::align_up(sizes.at(1), INT64_C(4));
-            gpu_sizes.at(2) = sizes.at(2);
-            gpu_sizes.at(3) = sizes.at(3);
-            break;
-          default:
-            VK_THROW("Invalid memory format used to create vTensor!");
-        }
-        break;
-    }
-    return gpu_sizes;
+    gpu_sizes.resize(4);
+    gpu_sizes.at(0) = api::utils::val_at(-4, sizes);
+    gpu_sizes.at(1) = api::utils::val_at(-3, sizes);
+    gpu_sizes.at(2) = api::utils::val_at(-2, sizes);
+    gpu_sizes.at(3) = api::utils::val_at(-1, sizes);
   }
+
+  size_t ndim = gpu_sizes.size();
+  switch (memory_layout) {
+    case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
+      if (ndim >= 1) {
+        gpu_sizes.at(ndim - 1) =
+            api::utils::align_up(api::utils::val_at(-1, sizes), INT64_C(4));
+      }
+      break;
+
+    case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
+      if (ndim >= 2) {
+        gpu_sizes.at(ndim - 2) =
+            api::utils::align_up(api::utils::val_at(-2, sizes), INT64_C(4));
+      }
+      break;
+
+    case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
+      if (ndim >= 3) {
+        gpu_sizes.at(ndim - 3) =
+            api::utils::align_up(api::utils::val_at(-3, sizes), INT64_C(4));
+      }
+      break;
+  }
+
+  return gpu_sizes;
 }
 
 /*
@@ -482,8 +365,9 @@ VmaAllocationCreateInfo vTensor::get_allocation_create_info() const {
     case api::StorageType::TEXTURE_3D:
       return view_->image_.allocation_create_info();
     case api::StorageType::UNKNOWN:
-      return {};
+      break;
   }
+  return {};
 }
 
 VkMemoryRequirements vTensor::get_memory_requirements() const {
@@ -494,8 +378,9 @@ VkMemoryRequirements vTensor::get_memory_requirements() const {
     case api::StorageType::TEXTURE_3D:
       return view_->image_.get_memory_requirements();
     case api::StorageType::UNKNOWN:
-      return {};
+      break;
   }
+  return {};
 }
 
 void vTensor::bind_allocation(const api::MemoryAllocation& allocation) {
