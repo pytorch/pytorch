@@ -467,7 +467,7 @@ class FSDPParam:
                 (
                     all_gather_inputs,
                     self._all_gather_metadata,
-                ) = self._fsdp_pre_all_gather(self._inner_tensor)
+                ) = self._fsdp_pre_all_gather(sharded_param_data)
                 return [t.view(-1) for t in all_gather_inputs]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
@@ -508,10 +508,6 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
-
-    @property
-    def _inner_tensor(self) -> torch.Tensor:
-        return cast(DTensor, self.sharded_param)._local_tensor
 
 
 # NOTE: Unsafe here refers to not checking whether the storage is already
