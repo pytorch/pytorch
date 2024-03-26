@@ -1826,7 +1826,6 @@ def forward(self, arg_0):
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
 
-    @testing.expectedFailureNonStrict
     def test_constrain_size_with_constrain_value(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
