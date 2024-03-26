@@ -32,6 +32,10 @@ static_weight_shapes = True
 cse = True
 
 # Restricts the amount of computation AOTAutograd can do.
+# NB: We have essentially disabled this heuristic now. However, this is kept
+# here for now in case it's useful. Setting it low can artificially reduce the
+# amount of recomputation AOTAutograd performs, although not in any kind of
+# principled way.
 max_dist_from_bw = 1000
 
 
