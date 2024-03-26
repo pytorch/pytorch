@@ -801,6 +801,32 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def method_to_local(self, *args, **kwargs):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+        # and rewrite args to have only proxyable args, then insert call_function
+        args_as_value = [x.as_python_constant() for x in args]
+        kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+        def to_local_fn_with_prim_types(x):
+            return x.to_local(*args_as_value, **kwargs_as_value)
+
+        # attach the same function name for better debugging
+        to_local_fn_with_prim_types.__name__ = "prim_to_local"
+
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                to_local_fn_with_prim_types,
+                *proxy_args_kwargs([self], {}),
+            ),
+        )
+
     def method_register_hook(self, *args, **kwargs):
         return self._method_register_hook("register_hook", *args, **kwargs)
 
