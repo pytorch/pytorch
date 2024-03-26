@@ -490,6 +490,19 @@ def istype(obj, allowed_types):
     return type(obj) is allowed_types
 
 
+if sys.version_info >= (3, 12):
+    # Some typing classes moved to C in 3.12,
+    # which no longer have the _Final mixin.
+    _builtin_final_typing_classes = (
+        typing.ParamSpecArgs,
+        typing.ParamSpecKwargs,
+        typing.ParamSpec,
+        typing.TypeVar,
+        typing.TypeVarTuple,
+        typing.TypeAliasType,
+    )
+
+
 def is_typing(value):
     # _Final catches most of typing classes:
     #   - Any
@@ -499,6 +512,8 @@ def is_typing(value):
     #
     # NB: we intentionally ignore classes that inherit from Generic, since they
     # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
+        return True
     return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
 
 
