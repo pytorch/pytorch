@@ -7081,8 +7081,11 @@ class FusedCollectiveKernel(CollectiveKernel):
 
     def __init__(self, colls: List[CollectiveKernel]):
         assert len(colls) > 0
-        super().__init__(colls[0].layout, colls[0].inputs, colls[0].constant_args)
         self.colls = colls
+        inputs = []
+        for coll in colls:
+            inputs.extend(coll.inputs)
+        super().__init__(colls[0].layout, inputs, colls[0].constant_args)
         self.name = V.graph.register_buffer(self)
 
     def codegen(self, wrapper):
@@ -7104,8 +7107,10 @@ class FusedCollectiveKernel(CollectiveKernel):
                 f"{output_name}_pg = {pg_name}"
             )
 
+        device = self.colls[0].inputs[0].get_device()
+
         wrapper.writeline(
-            f"with c10d._coalescing_manager(async_ops=True) as cm:"
+            f"{pg_name}._start_coalescing(torch.device('{device}'))"
         )
 
         for coll in self.colls:
@@ -7114,7 +7119,7 @@ class FusedCollectiveKernel(CollectiveKernel):
             coll.codegen(wrapper)
 
         wrapper.writeline(
-            f"cm.wait()"
+            f"{pg_name}._end_coalescing(torch.device('{device}'))"
         )
 
         for coll in self.colls:
