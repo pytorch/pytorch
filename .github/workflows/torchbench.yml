@@ -20,7 +20,7 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "torchbench_smoketest", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
