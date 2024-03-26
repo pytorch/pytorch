@@ -1257,6 +1257,9 @@ def same(
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif type(ref).__name__ == "QuestionAnsweringModelOutput":
+        # This skips checking accuracy for start_logits/end_logits.
+        # Tentatively, start_logits/end_logits appear to be very prone to
+        # inaccuracies and is somewhat subsumed by checking the loss.
         return same(
             ref.loss,
             res.loss,

@@ -430,7 +430,7 @@ def reordering_to_mimic_autograd_engine(gm):
         if node.op == 'placeholder':
             depths[node] = 0
         else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes if isinstance(arg, torch.fx.Node)], default=0)
+            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
 
     def insert_node_in_graph(node):
         if node in env:
@@ -452,6 +452,8 @@ def reordering_to_mimic_autograd_engine(gm):
             if order[user] < minimum_order:
                 minimum_order = order[user]
                 first_node_in_bwd = user
+
+    # If gradInp does not depend upon gradOut, we may not find any nodes in the "backwards pass"
     if first_node_in_bwd is None:
         return gm
 
@@ -812,6 +814,7 @@ def min_cut_rematerialization_partition(
         # Arbitrary hack that sometimes seems to help things. The above
         # modification appears to have made this heuristic a lot less critical
         # for performance.
+        # NB: As of PR #121692, this hack no longer seems necessary.
         if not graph_has_recomputable_ops:
             if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
                 return True
@@ -904,7 +907,6 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
     # todo(chilli): This is the most questionable of the 3 heuristics for banning recompute.
-    # I would look more into it but I'm out of time for now
     # Some example models to look at where this helps perf: poolformer_m36,
     # mixer_b16_224, cait_m36_384
 
@@ -921,7 +923,11 @@ def min_cut_rematerialization_partition(
     # backwards pass instead of only relying on whether it's unfusible in the
     # forwards.
 
-    def find_first_unfusible(start_nodes, max_range):
+    def find_first_unfusible(start_nodes: List[fx.Node], max_range: int) -> int:
+        """
+        Finds the first unfusible node in the chain of nodes starting from
+        `start_nodes` and returns its position.
+        """
         sorted_nodes = []
         for n in start_nodes:
             heapq.heappush(sorted_nodes, (n.fw_order, n, True))
