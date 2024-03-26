@@ -50,7 +50,7 @@ class ONNXTorchPatcher:
         self.paths: List[Union[str, io.BufferedIOBase]] = []
 
         def torch_load_wrapper(f, *args, **kwargs):
-            # Record path.
+            # Record path for later serialization into ONNX proto
             self.paths.append(f)
             # Then, call the original torch.load.
             return self.torch_load(f, *args, **kwargs)
@@ -64,6 +64,8 @@ class ONNXTorchPatcher:
         if has_safetensors_and_transformers:
 
             def safetensors_load_file_wrapper(filename, device="cpu"):
+                # Record path for later serialization into ONNX proto
+                self.paths.append(filename)
                 result = {}
                 with safetensors.torch.safe_open(  # type: ignore[attr-defined]
                     filename, framework="pt", device=device

@@ -36,7 +36,7 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
         test_ratings = {
             TestRun(k): v for (k, v) in ratings.items() if TestRun(k).test_file in tests
         }
-        return TestPrioritizations(tests, normalize_ratings(test_ratings, 1))
+        return TestPrioritizations(tests, normalize_ratings(test_ratings, 0.25))
 
 
 def _get_historical_test_class_correlations() -> Dict[str, Dict[str, float]]:

@@ -61,6 +61,26 @@ def _get_split_args_default(split_node):
     )
 
 
+def _get_dim(node: Any) -> int:
+    assert isinstance(node, torch.fx.Node)
+    if "dim" in node.kwargs:
+        assert isinstance(node.kwargs["dim"], int)
+        return node.kwargs["dim"]
+    if node.target == torch.unbind:
+        if len(node.args) == 2:
+            assert isinstance(node.args[-1], int)
+            return node.args[-1]
+        return 0  # defaults to dim=0
+    if node.target == torch.split:
+        if len(node.args) == 3:
+            assert isinstance(node.args[-1], int)
+            return node.args[-1]
+        return 0  # defaults to dim=0
+    raise AssertionError(
+        f"Can't extract `dim` from {node.target} {node.args} {node.kwargs}"
+    )
+
+
 # noqa: W605
 # ############The pattern to be optimized is#########
 #         unbind (dim=0)
@@ -115,10 +135,10 @@ def normalize_split_base(
     graph = match.graph
     split_input, split_size, split_dim = _get_split_args(split_node)
     if split_input is None or split_dim is None or split_size is None:
-        log.info("couldn't find split args")
+        log.debug("couldn't find split args")
         return
     if "example_value" not in split_node.meta:
-        log.warning("example value absent for node: %s", split_node)
+        log.debug("example value absent for node: %s", split_node)
         return
     assert isinstance(split_node.meta["example_value"], (list, tuple))
     split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
@@ -132,11 +152,17 @@ def normalize_split_base(
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["example_value"].dim()
+
+    new_args = (split_input, split_sections)
+    new_kwargs = {"dim": split_dim}
+    if split_node.args == new_args and split_node.kwargs == new_kwargs:
+        return
+
     with graph.inserting_after(split_node):
         new_split_node = graph.call_function(
             torch.split,
-            args=(split_input, split_sections),
-            kwargs={"dim": split_dim},
+            args=new_args,
+            kwargs=new_kwargs,
         )
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
@@ -180,10 +206,10 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
         else:
             dim = 0
     if input is None:
-        log.info("couldn't find unbind args")
+        log.debug("couldn't find unbind args")
         return
     if "example_value" not in input.meta:
-        log.warning("example value absent for node: %s", input)
+        log.debug("example value absent for node: %s", input)
         return
     ndim = input.meta["example_value"].ndim
     if dim < 0:  # Normalize unbind dim
@@ -219,12 +245,12 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         else:
             cat_dim = 0
     if tensors is None or cat_dim is None:
-        log.info("couldn't find cat args")
+        log.debug("couldn't find cat args")
         return
     assert isinstance(tensors, (list, tuple))
     for tensor in itertools.chain([cat_node], tensors):
         if "example_value" not in tensor.meta:
-            log.warning("example value absent for node: %s", tensor)
+            log.debug("example value absent for node: %s", tensor)
             return
 
     ndim = cat_node.meta["example_value"].dim()
@@ -241,11 +267,16 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
+    new_args = (tensors,)
+    new_kwargs = {"dim": cat_dim}
+    if cat_node.args == new_args and cat_node.kwargs == new_kwargs:
+        return
+
     with graph.inserting_after(cat_node):
         new_cat_node = graph.call_function(
             torch.cat,
-            args=(tensors,),
-            kwargs={"dim": cat_dim},
+            args=new_args,
+            kwargs=new_kwargs,
         )
     cat_node.replace_all_uses_with(new_cat_node)
     new_cat_node.meta.update(cat_node.meta)
@@ -264,14 +295,14 @@ def normalize_stack_default(match: Match, *args, **kwargs):
     tensors = get_arg_value(node, 0, "tensors")
     dim = get_arg_value(node, 1, "dim") or 0
     if tensors is None or dim is None:
-        log.info("couldn't find stack args")
+        log.debug("couldn't find stack args")
         return
     assert isinstance(tensors, (list, tuple))
 
     # A bug in pytorch, some nodes miss the example_value metadata
     for tensor in itertools.chain([node], tensors):
         if "example_value" not in tensor.meta:
-            log.warning("example value absent for node: %s", tensor)
+            log.debug("example value absent for node: %s", tensor)
             return
 
     ndim = node.meta["example_value"].dim()
@@ -407,7 +438,7 @@ def merge_splits(
     new_split_sections = list(first_split_sections)
     new_split_sections[next_split_index : next_split_index + 1] = next_split_sections  # type: ignore[operator, misc]
 
-    first_split_dim = first_split.kwargs["dim"]  # type: ignore[union-attr]
+    first_split_dim = _get_dim(first_split)
 
     to_remove = []
 
@@ -646,7 +677,7 @@ class SplitCatSimplifier:
 
         We replace a split node with an unflatten followed by a movedim
         """
-        split_dim = split_node.kwargs["dim"]
+        split_dim = _get_dim(split_node)
         split_sections = split_node.args[1]
         transform_params_list: List[List[_TransformParam]] = []
 
@@ -702,7 +733,7 @@ class SplitCatSimplifier:
         Returns the new `user_inputs_list`, with tuples replaced with new getitems from the newer split node.
         """
         split_input = split_node.args[0]
-        split_dim = split_node.kwargs["dim"]
+        split_dim = _get_dim(split_node)
         if len(split_ranges) == 1:  # We can completely eliminate the split node
             split_items = [split_input]
         else:
@@ -753,8 +784,7 @@ class SplitCatSimplifier:
         user_inputs_list_new,
         transform_params_list: List[List[_TransformParam]],
     ):
-        split_dim = split_node.kwargs["dim"]
-
+        split_dim = _get_dim(split_node)
         split_users = split_node.users.keys()
         new_cats = []
         for user_node, user_inputs_new, transform_params in zip(
@@ -929,7 +959,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
 
         """
-        split_dim = unbind_node.kwargs["dim"]
+        split_dim = _get_dim(unbind_node)
         transform_params_list: List[List[_TransformParam]] = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             cat_dim = get_arg_value(user_node, 1, "dim") or 0

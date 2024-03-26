@@ -17,7 +17,7 @@ void cpu_pixel_shuffle(
     TensorBase& output,
     const TensorBase& input,
     int64_t upscale_factor) {
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   // [(B1...Bn), C, H, W] => [N, C, H, W]
@@ -59,7 +59,7 @@ void cpu_pixel_shuffle_channels_last(
     int64_t upscale_factor) {
   TORCH_CHECK(input.ndimension() == 4,
               "pixel shuffle with channels last format supports tensors with 4 dims");
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -81,7 +81,7 @@ void cpu_pixel_shuffle_channels_last(
     data_index_init(begin, n, nbatch, h, height);
     for (const auto i : c10::irange(begin, end)) {
       for (const auto w : c10::irange(width)) {
-        scalar_t* input_ptr = input_data + n * height * width * channels + h * width * channels + w * channels;
+        const scalar_t* input_ptr = input_data + n * height * width * channels + h * width * channels + w * channels;
 
         // step 1: transpose each channel lane
         //   from: [c, s1*s2]
@@ -115,7 +115,7 @@ void cpu_pixel_unshuffle(
     TensorBase& output,
     const TensorBase& input,
     int64_t downscale_factor) {
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   // [(B1...Bn), C, H, W] => [N, C, H, W]
@@ -158,7 +158,7 @@ void cpu_pixel_unshuffle_channels_last(
     int64_t downscale_factor) {
   TORCH_CHECK(input.ndimension() == 4,
               "pixel unshuffle with channels last format supports tensors with 4 dims");
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);

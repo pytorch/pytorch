@@ -59,13 +59,32 @@ default_graph_search_options = {
 graph_search_options = default_graph_search_options
 
 
-def update_stack_example_value(stack_node, metadata, dim=0):
+def update_stack_example_value(node, metadata, dim=0, op=torch.stack):
     """
     Update the example value of the node in the graph to enable followup split cat opt.
     """
-    if stack_node is not None and hasattr(stack_node, "meta"):
-        example_value = torch.stack(metadata, dim=dim)
-        stack_node.meta["example_value"] = example_value
+    if node is not None and hasattr(node, "meta"):
+        if op == torch.stack:
+            example_value = torch.stack(metadata, dim=dim)
+        elif op == torch.unbind:
+            example_value = torch.unbind(metadata, dim=dim)  # type: ignore[assignment]
+        else:
+            return
+        node.meta["example_value"] = example_value
+
+
+def update_pointwise_example_value(pointwise_node, input, other, op):
+    """
+    Update the example value of the add node in the graph to enable followup split cat opt.
+    """
+    if pointwise_node is not None and hasattr(pointwise_node, "meta"):
+        if op == torch.add:
+            example_value = torch.add(input, other)
+        elif op == torch.mul:
+            example_value = torch.mul(input, other)
+        else:
+            return
+        pointwise_node.meta["example_value"] = example_value
 
 
 class GroupBatchFusionBase:
@@ -215,6 +234,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             original_mm.replace_all_uses_with(new_mm_cont)
             new_mm_cont.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+        counters["inductor"]["batch_linear_post_grad"] += 1
 
 
 @register_fusion("group_linear", pre_grad=False)
@@ -296,6 +316,7 @@ class GroupLinearFusion(GroupFusion):
             original_mm.replace_all_uses_with(new_mm)
             new_mm.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+        counters["inductor"]["group_linear"] += 1
 
 
 class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
@@ -332,7 +353,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             input, other = node.args
             shape = list(input.meta["tensor_meta"].shape)  # type: ignore[union-attr]
             group_key = (
-                "batch_" + self.op.__name__.lower() + "_post_grad",
+                "batch_" + self.op.__name__.lower().split(".")[0] + "_post_grad",
                 str(shape),
                 str(input.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
                 str(other.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
@@ -369,6 +390,9 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 original_add.replace_all_uses_with(new_add)
                 new_add.meta.update(original_add.meta)
                 graph.erase_node(original_add)
+        counters["inductor"][
+            "batch_aten_" + self.op.__name__.lower().split(".")[0]
+        ] += 1
 
 
 @register_fusion("batch_linear_lhs")
@@ -445,6 +469,7 @@ class BatchLinearLHSFusion(BatchFusion):
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)
+        counters["inductor"]["batch_linear_lhs"] += 1
 
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]):
@@ -557,6 +582,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                 linear.replace_all_uses_with(getitem)
                 getitem.meta.update(linear.meta)
                 graph.erase_node(linear)
+        counters["inductor"]["batch_linear"] += 1
 
 
 @register_fusion("batch_layernorm")
@@ -655,27 +681,62 @@ class BatchLayernormFusion(BatchFusion):
                 args=(stack_input, group_shapes[-1]),
                 kwargs={"eps": group_epss[-1]},
             )
+            batch_layer_norm.meta["example_value"] = stack_input.meta["example_value"]
 
             if group_weights is not None and group_biases is not None:
+                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
+                update_pointwise_example_value(
+                    batch_layer_norm,
+                    stack_weight.meta["example_value"],
+                    previous_batch_layer_norm_meta,
+                    torch.mul,
+                )
+                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
+                )
+                update_pointwise_example_value(
+                    batch_layer_norm,
+                    stack_bias.meta["example_value"],
+                    previous_batch_layer_norm_meta,
+                    torch.add,
                 )
             elif group_weights is not None and group_biases is None:
+                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
+                update_pointwise_example_value(
+                    batch_layer_norm,
+                    stack_weight.meta["example_value"],
+                    previous_batch_layer_norm_meta,
+                    torch.mul,
+                )
             elif group_weights is None and group_biases is not None:
+                previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
+                )
+                update_pointwise_example_value(
+                    batch_layer_norm,
+                    stack_bias.meta["example_value"],
+                    previous_batch_layer_norm_meta,
+                    torch.add,
                 )
 
             batch_layer_norm_unbind = graph.call_function(
                 torch.unbind,
                 args=(batch_layer_norm,),
                 kwargs={"dim": stack_dim},
+            )
+            update_stack_example_value(
+                batch_layer_norm_unbind,
+                batch_layer_norm.meta["example_value"],
+                op=torch.unbind,
+                dim=stack_dim,
             )
 
         for i, node in enumerate(group_nodes):
@@ -686,6 +747,7 @@ class BatchLayernormFusion(BatchFusion):
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)
+        counters["inductor"]["batch_layernorm"] += 1
 
 
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
@@ -703,7 +765,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
             # for relu op, we also use the inplace to construct the key
             group_key = (
-                "batch_" + self.op.__name__.lower() + "_pre_grad",
+                "batch_" + self.op.__name__.lower().split(".")[0] + "_pre_grad",
                 str(input.meta["example_value"].shape),
                 str(node.kwargs.get("inplace", False)),
             )
@@ -747,6 +809,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)
+        counters["inductor"]["batch_" + self.op.__name__.lower().split(".")[0]] += 1
 
 
 @register_fusion("batch_tanh")
@@ -952,14 +1015,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             ):
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
-                if isinstance(rule, GroupFusion):
-                    counters["inductor"]["group_fusion"] += 1
-                elif isinstance(rule, BatchFusion):
-                    counters["inductor"]["batch_fusion"] += 1
-                else:
-                    counters["inductor"]["unknown_group_batch_fusion"] += 1
-
-                log.info(
+                log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
 

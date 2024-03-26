@@ -55,11 +55,10 @@ class SmallBuffer {
       delete[] data_;
     }
   }
-
-  T& operator[](int64_t idx) {
+  T& operator[](size_t idx) {
     return data()[idx];
   }
-  const T& operator[](int64_t idx) const {
+  const T& operator[](size_t idx) const {
     return data()[idx];
   }
   T* data() {

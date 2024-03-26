@@ -4,8 +4,6 @@
 
 #include <sys/wait.h>
 #include <unistd.h>
-#include <cmath>
-#include <mutex>
 #include <vector>
 
 namespace c10::xpu {
@@ -131,7 +129,7 @@ void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDeviceProperties(device_prop, device);
 }
 
-int get_device_idx_from_pointer(void* ptr) {
+DeviceIndex get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
   auto type = sycl::get_pointer_type(ptr, get_device_context());
@@ -146,8 +144,9 @@ int get_device_idx_from_pointer(void* ptr) {
       gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
   TORCH_CHECK(
       it != gDevicePool.devices.end(),
-      "Cant't find the pointer from XPU devices.");
-  return static_cast<int>(std::distance(gDevicePool.devices.begin(), it));
+      "Can't find the pointer from XPU devices.");
+  return static_cast<DeviceIndex>(
+      std::distance(gDevicePool.devices.begin(), it));
 }
 
 DeviceIndex device_count() {
