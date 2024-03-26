@@ -2597,6 +2597,10 @@ class Layout(IRNode):
         if len(in_strides) == 0:
             return in_strides
 
+        current_fx_node = V.get_current_node()
+        if hasattr(current_fx_node, "meta") and current_fx_node.meta.get("dislike_padding", False):
+            return in_strides
+
         # get_stride_order does not work with dynamic shape. Also we can not
         # statically decide if a padding is needed or how much padding we should
         # do for dynamic shape.
@@ -2611,10 +2615,10 @@ class Layout(IRNode):
         stride_order = get_stride_order(in_strides)
         fill_order = stride_order2fill_order(stride_order)
 
-        new_stride = [0 for _ in range(len(in_strides))]
+        new_strides = [0 for _ in range(len(in_strides))]
         # since way pad when the layout is flexible, we can decide the
         # smallest stride to be 1.
-        new_stride[fill_order[0]] = 1
+        new_strides[fill_order[0]] = 1
 
         # don't align an too small stride since that cause too much memory increase.
         # Pick heuristic value 320 since for alignement=16, that results in at most 5% memory increase.
@@ -2624,13 +2628,13 @@ class Layout(IRNode):
         align_stride_threshold = 320
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
-            stride = new_stride[prev_idx] * size[prev_idx]
+            stride = new_strides[prev_idx] * size[prev_idx]
 
             if stride > align_stride_threshold and stride % align != 0:
                 stride = (stride + align - 1) // align * align
-            new_stride[idx] = stride
+            new_strides[idx] = stride
 
-        return new_stride
+        return new_strides
 
     def need_padding(self, align=DEFAULT_ALIGN):
         assert self._stride is not None
