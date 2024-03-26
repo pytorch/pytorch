@@ -186,11 +186,12 @@ def remove_unnecessary_split_with_sizes(mod):
     mod.recompile()
 
 
-
-def replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_then_inplace_foreach_copy_pattern(mod):
+def replace_foreach_all_gather_copy_out_pattern(mod):
     """
     NOTE: this pattern is from `foreach_all_gather_copy_out` in ppFSDP:
     ```
+    ... = dist.all_gather_into_tensor(...)  # in another function
+    all_gather_output = all_gather_output.view(world_size, -1)
     splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
     for i, fsdp_param in enumerate(fsdp_params):
         splits_unpadded.append(
@@ -202,6 +203,8 @@ def replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_the
     with torch.no_grad():
         torch._foreach_copy_(out, splits_unpadded)
     ```
+
+    ====== Pattern #1: len(splits) > 1 ======
 
     wait_tensor: "f32[3047980]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
     view_1: "f32[2, 1523990]" = torch.ops.aten.reshape.default(wait_tensor, [2, -1]);  wait_tensor = None
@@ -258,6 +261,30 @@ def replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_the
     as_strided_3: "f32[1234]" = torch.ops.aten.as_strided.default(view_8, [1234], [1], 0);  view_8 = None
 
     ... (uses as_strided, as_strided_1, as_strided_2, as_strided_3. But make sure to keep the primals in graph output list)
+
+
+    ====== Pattern #2: len(splits) == 1 ======
+
+    wait_tensor: "f32[1024]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:138 in foreach_all_gather_copy_out, code: torch._foreach_copy_(out, splits_unpadded)
+    view_2: "f32[2, 512]" = torch.ops.aten.reshape.default(wait_tensor, [2, -1]);  wait_tensor = None
+    view_3: "f32[1024]" = torch.ops.aten.reshape.default(view_2, [1024]);  view_2 = None
+    as_strided_1: "f32[32, 32]" = torch.ops.aten.as_strided.default(view_3, [32, 32], [32, 1], 0);  view_3 = None
+    _foreach_copy_1 = torch.ops.aten._foreach_copy_.default([primals_3], [as_strided_1]);  as_strided_1 = None
+
+    ... (uses primals_3)
+
+    ->
+
+    wait_tensor: "f32[1024]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:138 in foreach_all_gather_copy_out, code: torch._foreach_copy_(out, splits_unpadded)
+    view_2: "f32[2, 512]" = torch.ops.aten.reshape.default(wait_tensor, [2, -1]);  wait_tensor = None
+    view_3: "f32[1024]" = torch.ops.aten.reshape.default(view_2, [1024]);  view_2 = None
+    as_strided_1: "f32[32, 32]" = torch.ops.aten.as_strided.default(view_3, [32, 32], [32, 1], 0);  view_3 = None
+
+    ... (uses as_strided_1)
     """
 
     primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
@@ -270,22 +297,40 @@ def replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_the
     for i, n in enumerate(node_list):
         if (
             n.target is torch.ops._c10d_functional.wait_tensor.default \
-            and (node_list[i+1].target is torch.ops.aten.reshape.default and node_list[i+1].args[0] == n) \
-            and node_list[i+2].target is torch.ops.aten.split_with_sizes.default and node_list[i+2].args[0] == node_list[i+1]
+            and (node_list[i+1].target is torch.ops.aten.reshape.default and node_list[i+1].args[0] == n)
         ):
-            split_with_sizes_node = node_list[i+2]
-            block_seq_start_index = i+3
-            num_blocks = len(split_with_sizes_node.args[1])
-            for j in range(num_blocks):
-                clone_node = node_list[block_seq_start_index + j * 4 + 1]
-                assert clone_node.target is torch.ops.aten.clone.default, f"mod: {mod}, clone_node.target: {clone_node.target}"
-                clone_input = clone_node.args[0]
-                clone_node.replace_all_uses_with(clone_input)
-                mod.graph.erase_node(clone_node)
-            foreach_copy_start_index = block_seq_start_index + num_blocks * 4
-            foreach_copy_node = node_list[foreach_copy_start_index]
-            assert foreach_copy_node.target is torch.ops.aten._foreach_copy_.default
-            for copy_into_node, copy_from_node in zip(foreach_copy_node.args[0], foreach_copy_node.args[1]):
+            if node_list[i+2].target is torch.ops.aten.split_with_sizes.default and node_list[i+2].args[0] == node_list[i+1]:
+                # If there is `split_with_sizes` in graph (i.e. len(splits) > 1)
+                split_with_sizes_node = node_list[i+2]
+                block_seq_start_index = i+3
+                num_blocks = len(split_with_sizes_node.args[1])
+                for j in range(num_blocks):
+                    clone_node = node_list[block_seq_start_index + j * 4 + 1]
+                    assert clone_node.target is torch.ops.aten.clone.default, f"mod: {mod}, clone_node.target: {clone_node.target}"
+                    clone_input = clone_node.args[0]
+                    clone_node.replace_all_uses_with(clone_input)
+                    mod.graph.erase_node(clone_node)
+                foreach_copy_start_index = block_seq_start_index + num_blocks * 4
+                foreach_copy_node = node_list[foreach_copy_start_index]
+                assert foreach_copy_node.target is torch.ops.aten._foreach_copy_.default
+                for copy_into_node, copy_from_node in zip(foreach_copy_node.args[0], foreach_copy_node.args[1]):
+                    assert copy_into_node in primal_inputs_tensor_only
+                    # TODO(yf225): since we don't know from the graph that primals are size-0 in graph output,
+                    # how do we make sure it is sound that we don't replace primal with as_strided_X in graph output?
+                    copy_into_node.replace_all_uses_with(
+                        copy_from_node,
+                        delete_user_cb=lambda n: n != return_op,
+                    )
+                mod.graph.erase_node(foreach_copy_node)
+            elif (
+                node_list[i+2].target is torch.ops.aten.reshape.default and node_list[i+2].args[0] == node_list[i+1]
+                and node_list[i+3].target is torch.ops.aten.as_strided.default and node_list[i+3].args[0] == node_list[i+2]
+                and node_list[i+4].target is torch.ops.aten._foreach_copy_.default and node_list[i+4].args[1][0] == node_list[i+3]
+            ):
+                # If there is no `split_with_sizes` in graph (i.e. len(splits) == 1)
+                foreach_copy_node = node_list[i+4]
+                copy_into_node = foreach_copy_node.args[0][0]
+                copy_from_node = foreach_copy_node.args[1][0]
                 assert copy_into_node in primal_inputs_tensor_only
                 # TODO(yf225): since we don't know from the graph that primals are size-0 in graph output,
                 # how do we make sure it is sound that we don't replace primal with as_strided_X in graph output?
@@ -293,7 +338,7 @@ def replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_the
                     copy_from_node,
                     delete_user_cb=lambda n: n != return_op,
                 )
-            mod.graph.erase_node(foreach_copy_node)
+                mod.graph.erase_node(foreach_copy_node)
     mod.graph.lint()
     mod.recompile()
 

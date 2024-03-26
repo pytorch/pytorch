@@ -153,7 +153,7 @@ def init():
     # simple_mlp + unbalanced -> works
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
-    test_case = "nested_fully_shard"  # "simple_mlp" / "nested_fully_shard"
+    test_case = "simple_seq_module"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
     balanced = False
     if balanced:
         hidden_dim = 1234
@@ -171,6 +171,16 @@ def init():
             nn.Linear(hidden_dim, hidden_dim, device=device_type),
         )
         fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
+    elif test_case == "simple_seq_module":  # this causes `len(splits) == 1` which is an interesting case for `replace_foreach_all_gather_copy_out_pattern` FX pass.
+        class SimpleModule(nn.Module):
+            def __init__(self, device: torch.device):
+                super().__init__()
+                self.param = nn.Parameter(torch.randn(hidden_dim, hidden_dim, device=device))
+
+            def forward(self, x):
+                return torch.matmul(x, self.param)
+
+        model = nn.Sequential(*[SimpleModule(torch.device("cuda")) for _ in range(1)])
     elif test_case == "nested_fully_shard":
         model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])
         for mlp in model:

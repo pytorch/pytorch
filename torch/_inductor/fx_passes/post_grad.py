@@ -123,7 +123,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
     fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(gm)
     fsdp_fx_passes.remove_unnecessary_split_with_sizes(gm)  # only matters for CA BWD graph
-    fsdp_fx_passes.replace_wait_tensor_then_split_then_contiguous_then_view_then_as_strided_then_inplace_foreach_copy_pattern(gm)
+    fsdp_fx_passes.replace_foreach_all_gather_copy_out_pattern(gm)
     fsdp_fx_passes.undo_functionalization_for_split_with_sizes_then_inplace_foreach_copy(gm)
     fsdp_fx_passes.replace_empty_then_slice_then_compute_then_foreach_copy_then_slice_scatter_pattern(gm)
     fsdp_fx_passes.replace_inplace_foreach_copy_with_inplace_copy(gm)
