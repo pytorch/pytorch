@@ -479,7 +479,7 @@ class TestCheckpoint(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_infer_device_state_recursive_multi_cuda(self):
-        # Check that *no* warning is issued for either cuda:0, cuda:1 or
+        # Check that no warning is issued for either cuda:0, cuda:1 or
         # cuda:0, cuda:0 cases since they are both the same device type
         inp = {'foo' : torch.rand(10, device="cuda:0"), 'bar': [torch.rand(10, device="cuda:1")]}
         with warnings.catch_warnings():
@@ -491,8 +491,8 @@ class TestCheckpoint(TestCase):
             warnings.simplefilter("error")
             device_type = _infer_device_type(inp)
             self.assertEqual("cuda", device_type)
-        # Check that a warning *is* issued for cuda:0, meta and that it
-        # includes device type information
+        # Check that a warning is issued for cuda:0, meta and that it includes
+        # device type information
         inp = {'foo' : torch.rand(10, device="cuda:0"), 'bar': [torch.rand(10, device="meta")]}
         with warnings.catch_warnings(record=True) as w:
             device_type = _infer_device_type(inp)
