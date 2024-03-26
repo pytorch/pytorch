@@ -986,6 +986,7 @@ class OutputGraph:
             for arg in args:
                 cg(arg)
             cg.extend_output(create_call_function(len(args), True))
+            cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg)
