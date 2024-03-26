@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
+    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
@@ -272,6 +273,20 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             stride=outer_stride,
         )
 
+    def __coerce_tangent_metadata__(self):
+        if not any(isinstance(p, _Partial) for p in self.placements):
+            return self
+        placements = [
+            Replicate() if isinstance(p, _Partial) else p for p in self.placements
+        ]
+        return self.redistribute(device_mesh=self.device_mesh, placements=placements)
+
+    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
+        return self.redistribute(
+            device_mesh=self.device_mesh,
+            placements=metadata_tensor.placements,
+        )
+
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
@@ -445,10 +460,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
-
-        # Early return the original DTensor if the placements are the same.
-        if self._spec.placements == placements:
-            return self
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(self, device_mesh, placements, async_op)
