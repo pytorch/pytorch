@@ -2261,12 +2261,17 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
-  TORCH_CHECK(coalescedDevice_.index() >= 0, MULTI_DEVICE_ERROR_MSG);
+  TORCH_CHECK(
+      coalescedDevice_.index() >= 0,
+      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
+  TORCH_CHECK(
+      coalescedComm_ != nullptr,
+      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
   auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
-  auto comm = getNCCLComm(key, device, OpType::COALESCED);
+  auto comm = coalescedComm_;
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
@@ -2349,6 +2354,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     coalescing_state_ |= CoalColl;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
+      coalescedComm_ = ncclComm;
     } else {
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
@@ -2716,6 +2722,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     coalescing_state_ |= CoalP2P;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
+      coalescedComm_ = ncclComm;
     } else {
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
