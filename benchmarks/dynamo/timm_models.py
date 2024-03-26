@@ -25,7 +25,7 @@ except ModuleNotFoundError:
     pip_install("git+https://github.com/rwightman/pytorch-image-models")
 finally:
     from timm import __version__ as timmversion
-    from timm.data import resolve_data_config, create_transform
+    from timm.data import create_transform, resolve_data_config
     from timm.models import create_model
 
 TIMM_MODELS = dict()
@@ -263,8 +263,6 @@ class TimmRunner(BenchmarkRunner):
         batch_size = batch_size or recorded_batch_size
 
         torch.manual_seed(1337)
-        from urllib.request import urlopen
-        from PIL import Image
 
         transforms = create_transform(**data_config, is_training=False)
 
