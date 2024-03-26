@@ -30,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, Sha
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.reference import PythonReferenceAnalysis
-from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -250,7 +249,8 @@ class OutputGraph:
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides = WeakTensorKeyDictionary()
+        # Map from graph input's `Source` to sizes / strides metadata
+        self.input_source_to_sizes_strides: Dict[Source, Dict[str, Any]] = {}
         self.cleanup_hooks: List[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
