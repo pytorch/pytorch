@@ -28,6 +28,11 @@ on:
         default: 300
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -158,12 +163,9 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
-          TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           set -x
-
-          TEST_COMMAND=scripts/torchbench_test.sh
 
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for GPU_FLAG since that doesn't play nice
@@ -241,4 +243,3 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
-  
