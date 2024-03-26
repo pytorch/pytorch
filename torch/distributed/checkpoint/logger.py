@@ -50,8 +50,8 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
 
 
 def _dcp_method_logger(
-    log_exceptions: bool = False, **wrapper_kwargs: _P.kwargs
-) -> Callable[[Callable[_P, _T]], Any]:
+    log_exceptions: bool = False, **wrapper_kwargs: Any
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:  # pyre-ignore
     """This method decorator logs the start, end, and exception of wrapped events."""
 
     def decorator(func: Callable[_P, _T]):

@@ -42,7 +42,7 @@ def load_state_dict(
         )
 
 
-@_dcp_method_logger(log_exceptions=True)  # type: ignore[arg-type]
+@_dcp_method_logger(log_exceptions=True)
 @_api_bc_check
 def load(
     state_dict: Dict[str, Any],
@@ -174,7 +174,6 @@ def load(
             elem = state_dict[key]
             if isinstance(elem, Stateful):
                 elem.load_state_dict(statetful_sd[key])
-            state_dict[key] = elem
 
 
 def _load_state_dict(
@@ -195,7 +194,7 @@ def _load_state_dict(
     if (ckpt_id := getattr(storage_reader, "checkpoint_id", None)) is not None:
         ckpt_kwargs["checkpoint_id"] = ckpt_id
 
-    @_dcp_method_logger(**ckpt_kwargs)  # type: ignore[arg-type]
+    @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
         metadata = storage_reader.read_metadata()
@@ -206,7 +205,7 @@ def _load_state_dict(
         local_plan = storage_reader.prepare_local_plan(local_plan)
         return local_plan
 
-    @_dcp_method_logger(**ckpt_kwargs)  # type: ignore[arg-type]
+    @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
         assert planner is not None
         all_local_plans = planner.create_global_plan(all_local_plans)
@@ -215,7 +214,7 @@ def _load_state_dict(
 
     central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
 
-    @_dcp_method_logger(**ckpt_kwargs)  # type: ignore[arg-type]
+    @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
         assert planner is not None
         final_local_plan = planner.finish_plan(central_plan)
