@@ -1531,7 +1531,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
-                    is_dynamic=is_dynamic
+                    is_dynamic=is_dynamic,
                 )
 
     @skipIfNoDynamoSupport

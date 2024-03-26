@@ -1222,11 +1222,22 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
 
 
-    def _check_annotation(self, node, is_quant_out):
-        annot = node.meta.get(QUANT_ANNOTATION_KEY, None)
-        if annot is None:
-            return False
-        return annot._annotated and annot._is_output_of_quantized_pattern == is_quant_out
+    def _check_annotation_stat(self, gm, expected_stat_dict):
+        # Check expected annotation statistics to ensure the annotation is correct
+
+        def _check_annotation(node):
+            annot = node.meta.get(QUANT_ANNOTATION_KEY, None)
+            if annot is None:
+                return False, False
+            return annot._annotated, annot._is_output_of_quantized_pattern
+
+        for node in gm.graph.nodes:
+            if node.target in expected_stat_dict.keys():
+                annotated, is_quant_out = _check_annotation(node)
+                expected_stat_dict[node.target]['annotated'] -= annotated
+                expected_stat_dict[node.target]['is_quant_out'] -= is_quant_out
+        for op_stat in expected_stat_dict.values():
+            assert all(v == 0 for v in op_stat.values())
 
 
     def _test_linear_binary_helper(self, is_qat=False, is_dynamic=False):
@@ -1294,14 +1305,20 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                     is_qat=is_qat,
                 )[-1]
-                # linear_1 is quantized alone. linear and add are fused.
-                for node in fq_m.graph.nodes:
-                    if node.name == "linear":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "linear_1":
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name in ("add", "add_"):
-                        assert self._check_annotation(node, is_quant_out=True)
+                # One linear and add are fused. The other linear is quantized alone if present
+                aten = torch.ops.aten
+                add_op = aten.add_.Tensor if inplace_add else aten.add.Tensor
+                expected_annotation_stat = {
+                    aten.linear.default: {
+                        'annotated': 2 if linear_pos == NodePosType.both else 1,
+                        'is_quant_out': 1 if linear_pos == NodePosType.both else 0,
+                    },
+                    add_op: {
+                        'annotated': 1,
+                        'is_quant_out': 1
+                    },
+                }
+                self._check_annotation_stat(fq_m, expected_annotation_stat)
 
 
     @skipIfNoX86
@@ -1380,14 +1397,20 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )[-1]
-                # linear is quantized alone. linear_1 and add are fused.
-                for node in fq_m.graph.nodes:
-                    if node.name == "linear":
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name == "linear_1":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name in ("add", "add_"):
-                        assert self._check_annotation(node, is_quant_out=True)
+                # One linear and add are fused. The other linear is quantized alone if present
+                aten = torch.ops.aten
+                add_op = aten.add_.Tensor if inplace_add else aten.add.Tensor
+                expected_annotation_stat = {
+                    aten.linear.default: {
+                        'annotated': 2,
+                        'is_quant_out': 1,
+                    },
+                    add_op: {
+                        'annotated': 1,
+                        'is_quant_out': 1
+                    },
+                }
+                self._check_annotation_stat(fq_m, expected_annotation_stat)
 
     @skipIfNoX86
     def _test_linear_binary_unary_helper(self, is_qat=False, is_dynamic=False):
@@ -1459,19 +1482,26 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )[-1]
-                # linear, add, relu (or relu_, relu_1) are fused
-                # linear_1 is quantized alone if present
-                for node in fq_m.graph.nodes:
-                    if node.name == "linear":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "linear_1":
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name in ("add", "add_"):
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "relu" and linear_pos == NodePosType.both:
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name in ("relu_1", "relu_"):
-                        assert self._check_annotation(node, is_quant_out=True)
+                # linear, add, relu are fused
+                # The other linear is quantized alone if present
+                aten = torch.ops.aten
+                add_op = aten.add_.Tensor if inplace_add else aten.add.Tensor
+                relu_op = aten.relu_.default if inplace_relu else aten.relu.default
+                expected_annotation_stat = {
+                    aten.linear.default: {
+                        'annotated': 2 if linear_pos == NodePosType.both else 1,
+                        'is_quant_out': 1 if linear_pos == NodePosType.both else 0,
+                    },
+                    add_op: {
+                        'annotated': 1,
+                        'is_quant_out': 0
+                    },
+                    relu_op: {
+                        'annotated': 1,
+                        'is_quant_out': 1
+                    },
+                }
+                self._check_annotation_stat(fq_m, expected_annotation_stat)
 
 
     @skipIfNoX86
@@ -1551,26 +1581,25 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )[-1]
-                # linear and linear_2 are quantized alone
-                # linear_1, add, relu are fused
-                # linear_3, add_1, relu_1 are fused
-                for node in fq_m.graph.nodes:
-                    if node.name == "linear":
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name == "linear_1":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "linear_2":
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name == "linear_3":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "add":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "relu":
-                        assert self._check_annotation(node, is_quant_out=True)
-                    elif node.name == "add_1":
-                        assert self._check_annotation(node, is_quant_out=False)
-                    elif node.name == "relu_1":
-                        assert self._check_annotation(node, is_quant_out=True)
+                # Two linear nodes are quantized alone
+                # The other two are fused with add and relu
+                aten = torch.ops.aten
+                expected_annotation_stat = {
+                    aten.linear.default: {
+                        'annotated': 4,
+                        'is_quant_out': 2,
+                    },
+                    aten.add.Tensor: {
+                        'annotated': 2,
+                        'is_quant_out': 0
+                    },
+                    aten.relu.default: {
+                        'annotated': 2,
+                        'is_quant_out': 2
+                    },
+                }
+                self._check_annotation_stat(fq_m, expected_annotation_stat)
+
 
     @skipIfTorchDynamo("very slow")
     @skipIfNoX86
