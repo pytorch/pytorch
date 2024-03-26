@@ -649,14 +649,26 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
-    def test_big_num_tensors(self, device, dtype, op):
+    @parametrize("use_cuda_graph", (False, True))
+    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph):
         N = 600
         tensorlist = [make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False) for _ in range(N)]
         fn, ref_fn, *_ = self._get_funcs(op)
 
         import math
         for ord in (1, 2, math.inf):
-            actual = fn(inputs=[tensorlist], is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
+            if not use_cuda_graph:
+                actual = fn(inputs=[tensorlist], is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
+            else:
+                # When using CUDA graphs and the tensor metadata doesn't fit in
+                # the static kernel argument space, multi_tensor_apply creates
+                # the launch arguments once, uses cudaUserObject_t to tie its
+                # lifetime to the graph, and reuses it throughout replays. This
+                # test verifies multi_tensor_apply's behavior in the scenario.
+                g = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(g):
+                    actual = fn.func(tensorlist, ord=ord)
+                g.replay()
             expect = ref_fn(inputs=[tensorlist], ord=ord)
 
             self.assertEqual(expect, actual, equal_nan=True)
