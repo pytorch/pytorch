@@ -605,6 +605,11 @@ def print_meta(s):
     return
 
 
+@register_meta(aten._record_scalar.default)
+def record_scalar_meta(scalar, prefix, filename):
+    return
+
+
 @register_meta(aten._make_dep_token.default)
 def make_dep_token(
     *,

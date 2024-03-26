@@ -70,6 +70,7 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM70OrLater,
     SM80OrLater,
     TEST_CUDA,
     TEST_MULTIGPU,
@@ -7669,6 +7670,34 @@ def fn():
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @unittest.skipIf(not SM70OrLater, "requires GPU capability >= SM70")
+    def test_record_scalar(self):
+        with tempfile.NamedTemporaryFile(mode="w+b") as f:
+            torch.manual_seed(0)
+
+            class MockModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.relu = torch.nn.ReLU()
+                    self.linear = torch.nn.Linear(10, 10)
+                    self.register_buffer("buf0", torch.randn(10, 10))
+
+                def forward(self, x):
+                    x = self.relu(self.linear(x) + self.buf0)
+                    y = x.sum().item()
+                    torch._record_scalar(y, "x:sum", f.name)
+                    return x + 1, y + 1
+
+            x = torch.randn(10, 10, device="cuda")
+            mod = MockModule().to("cuda")
+            opt_mod = torch.compile(fullgraph=True)(mod)
+            self.assertTrue(same(mod(x), opt_mod(x)))
+            f.flush()
+            self.assertEqual(f.read(), b"x:sum: 30.21811866760254\n")
 
     @dataclasses.dataclass
     class CSETestCase:
