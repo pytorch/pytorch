@@ -8,6 +8,7 @@ import random
 import sys
 import threading
 import time
+import traceback
 import types
 import typing
 import weakref
@@ -98,6 +99,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 compile_lock = threading.RLock()
@@ -696,6 +698,19 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
+            if isinstance(e, Unsupported):
+                # Log this message in graph break logger because this can happen
+                # when we dont support a particular bytecode like LOAD_ATTR.
+                if graph_break_log.isEnabledFor(logging.DEBUG):
+                    assert isinstance(e, Unsupported)  # make mypy happy
+                    user_stack = e.real_stack
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    graph_break_log.debug(
+                        "Graph break: skip: from user code at:\n%s",
+                        user_stack_formatted,
+                        exc_info=True,
+                    )
+
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
