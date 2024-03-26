@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import copy
 import re
 import unittest
 from textwrap import dedent
@@ -12,6 +13,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
@@ -1104,6 +1106,12 @@ SeqNr|OrigAten|SrcFn
 
         self.assertEqual(x, x_opt)
         self.assertEqual(z.grad, z_opt.grad)
+
+    def test_data_ptr_access_copy(self):
+        with FakeTensorMode(allow_unsafe_data_ptr_access=False):
+            x = torch.randn(3)
+            y = copy.copy(x)
+        self.assertEqual(y.shape, x.shape)
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
