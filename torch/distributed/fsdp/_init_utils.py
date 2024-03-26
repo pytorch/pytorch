@@ -1044,7 +1044,11 @@ def _get_compute_device(
     if device_from_device_id is not None and compute_device != device_from_device_id:
         raise ValueError(
             f"Inconsistent compute device and `device_id` on rank {rank}: "
-            f"{compute_device} vs {device_from_device_id}"
+            f"{compute_device} vs {device_from_device_id}."
+            "If this error is related to meta device, please ensure"
+            " the passed in param_init_fn to FSDP moves all modules to the compute"
+            " device, else this error will occur since some modules are left on "
+            " meta device."
         )
     return compute_device
 
