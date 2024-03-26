@@ -1850,6 +1850,19 @@ class InstructionTranslatorBase(
     def RETURN_GENERATOR(self, inst):
         self.append_prefix_inst(inst)
 
+    # 3.12 opcodes
+    def BINARY_SLICE(self, inst):
+        # BUILD_SLICE
+        items = self.popn(2)
+        self.push(SliceVariable(items))
+        self.BINARY_SUBSCR(inst)
+
+    def STORE_SLICE(self, inst):
+        # BUILD SLICE
+        items = self.popn(2)
+        self.push(SliceVariable(items))
+        self.STORE_SUBSCR(inst)
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
