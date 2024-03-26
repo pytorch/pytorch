@@ -184,8 +184,7 @@ static void basicAutogradNotImplementedFallbackImpl(
             // users typically call .backward() and backprop through
             // the entire program).
             if (t.is_view() && is_mutable_output) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              auto& base = const_cast<at::TensorBase&>(t._base());
+              const auto& base = t._base();
               if (base.requires_grad()) {
                 // Can only register_hook on tensors that require grad.
                 base.register_hook([op_name](const at::TensorBase& grad) {
@@ -210,8 +209,7 @@ static void basicAutogradNotImplementedFallbackImpl(
           // rebase_history assumes single Tensor(a!) return, and in general
           // custom ops don't have a good in-place story.
           if (!is_mutable_output) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            set_history(const_cast<at::Tensor&>(t), grad_fn);
+            set_history(t, grad_fn);
           }
         },
         stack,
@@ -301,11 +299,26 @@ static void autogradNotImplementedFallbackImpl(
       num_arguments);
 
   const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
+  const bool has_out_arg = std::any_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [](const c10::Argument& arg) { return arg.is_out(); });
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
         if (schema.is_mutable({c10::SchemaArgType::input, i})) {
-          check_inplace(t, any_requires_grad);
+          if (has_out_arg) {
+            // Normally out argument overloads would not support any arguments
+            // that require grad. However, we loosen this check to maintain
+            // backward compatibility.
+            // See https://github.com/pytorch/pytorch/issues/120988
+            if (can_mutate_inplace(t, any_requires_grad) !=
+                can_mutate_inplace_result::success) {
+              throw_error_out_requires_grad(schema.name().c_str());
+            }
+          } else {
+            check_inplace(t, any_requires_grad);
+          }
         }
       },
       stack,
@@ -418,11 +431,9 @@ static void autogradNotImplementedFallbackImpl(
         [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
           if (isDifferentiableType(t.scalar_type())) {
             if (is_inplace_output[idx_ret]) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              rebase_history(const_cast<at::Tensor&>(t), grad_fn);
+              rebase_history(t, grad_fn);
             } else {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              set_history(const_cast<at::Tensor&>(t), grad_fn);
+              set_history(t, grad_fn);
             }
           }
         },

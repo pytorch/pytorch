@@ -99,7 +99,7 @@ DeviceIndex device_count() noexcept {
     try {
       auto result = device_count_impl(/*fail_if_no_driver=*/false);
       TORCH_INTERNAL_ASSERT(
-          result <= c10::Device::MAX_NUM_DEVICES,
+          result <= std::numeric_limits<DeviceIndex>::max(),
           "Too many CUDA devices, DeviceIndex overflowed");
       return result;
     } catch (const c10::Error& ex) {
@@ -118,7 +118,7 @@ DeviceIndex device_count_ensure_non_zero() {
   // Zero gpus doesn't produce a warning in `device_count` but we fail here
   TORCH_CHECK(count, "No CUDA GPUs are available");
   TORCH_INTERNAL_ASSERT(
-      count <= c10::Device::MAX_NUM_DEVICES,
+      count <= std::numeric_limits<DeviceIndex>::max(),
       "Too many CUDA devices, DeviceIndex overflowed");
   return static_cast<DeviceIndex>(count);
 }
@@ -219,7 +219,8 @@ cudaError_t GetDevice(DeviceIndex* device) {
   auto err = cudaGetDevice(&tmp_device);
   if (err == cudaSuccess) {
     TORCH_INTERNAL_ASSERT(
-        tmp_device >= 0 && tmp_device < c10::Device::MAX_NUM_DEVICES,
+        tmp_device >= 0 &&
+            tmp_device <= std::numeric_limits<DeviceIndex>::max(),
         "cudaGetDevice returns invalid device ",
         tmp_device);
     *device = static_cast<DeviceIndex>(tmp_device);
@@ -269,7 +270,8 @@ DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   int tmp_cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&tmp_cur_device));
   TORCH_INTERNAL_ASSERT(
-      tmp_cur_device >= 0 && tmp_cur_device < c10::Device::MAX_NUM_DEVICES,
+      tmp_cur_device >= 0 &&
+          tmp_cur_device <= std::numeric_limits<DeviceIndex>::max(),
       "cudaGetDevice returns invalid device ",
       tmp_cur_device);
   auto cur_device = static_cast<DeviceIndex>(tmp_cur_device);
@@ -295,7 +297,8 @@ cudaError_t GetDevice(DeviceIndex* device) {
   auto err = cudaGetDevice(&tmp_device);
   if (err == cudaSuccess) {
     TORCH_INTERNAL_ASSERT(
-        tmp_device >= 0 && tmp_device < c10::Device::MAX_NUM_DEVICES,
+        tmp_device >= 0 &&
+            tmp_device <= std::numeric_limits<DeviceIndex>::max(),
         "cudaGetDevice returns invalid device ",
         tmp_device);
     *device = static_cast<DeviceIndex>(tmp_device);
