@@ -1912,6 +1912,9 @@ class InstructionTranslatorBase(
         else:
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
+    def END_SEND(self, inst):
+        del self.stack[-2]
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
