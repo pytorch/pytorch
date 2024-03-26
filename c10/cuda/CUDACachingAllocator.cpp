@@ -971,9 +971,13 @@ class DeviceCachingAllocator {
     TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
     pool = pool_it->second.get();
 
+    TORCH_INTERNAL_ASSERT(pool != nullptr);
+
     size_t allocated_pool_blocks = 0;
 
     for (Block* b : active_blocks) {
+      TORCH_INTERNAL_ASSERT(b != nullptr);
+      TORCH_INTERNAL_ASSERT(b->pool != nullptr);
       if (b->allocated && b->pool->owner_PrivatePool == pool) {
         if (!expected_live_allocations.count(b->ptr)) {
           return false;
@@ -1446,8 +1450,6 @@ class DeviceCachingAllocator {
   }
 
   void freeBlocksAllocatedToPool(PrivatePool* private_pool, RestoreResult& rr) {
-    std::unordered_map<void*, Block*> orig_ptrs_to_blocks;
-
     auto pool_blocks = get_private_pool_head_blocks(private_pool);
 
     std::vector<Block*> head_blocks;

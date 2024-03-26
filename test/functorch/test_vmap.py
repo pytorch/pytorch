@@ -3625,6 +3625,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        # TODO: implement batching rule
+        xfail('_batch_norm_with_update'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
@@ -3664,6 +3666,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        # TODO: implement batching rule
+        xfail('_batch_norm_with_update'),
         xfail('histogram'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
@@ -3673,7 +3677,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
@@ -5045,7 +5048,6 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
-    @xfailIfTorchDynamo
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param
