@@ -469,6 +469,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertEqual(out_ref, out_test)
             self.assertEqual(x_ref.grad, x_test.grad)
 
+        def test_open_device_scalar_type_fallback():
+            torch.utils.rename_privateuse1_backend('foo')
+            z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
+            z = torch.triu_indices(3, 3, device='foo')
+            self.assertEqual(z_cpu, z)
+
         def test_open_device_tensor_type_fallback():
             torch.utils.rename_privateuse1_backend('foo')
             # create tensors located in custom device
@@ -528,6 +534,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_compile_autograd_function_returns_self()
         test_compile_autograd_function_aliasing()
 
+        test_open_device_scalar_type_fallback()
         test_open_device_tensor_type_fallback()
         test_open_device_tensorlist_type_fallback()
 
