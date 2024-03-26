@@ -11,7 +11,12 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import FSDP, fully_shard
+from torch.distributed._composable.fsdp import (
+    CPUOffloadPolicy,
+    FSDP,
+    fully_shard,
+    OffloadPolicy,
+)
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
@@ -279,6 +284,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             {
                 "reshard_after_forward": [True, False, 2],
                 "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
@@ -294,6 +300,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             {
                 "reshard_after_forward": [True, False],
                 "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False],
                 "delay_before_reduce_scatter": [False],
@@ -302,9 +309,29 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_multi_group_cpu_offload_eager(self):
+        """
+        Tests train parity against DDP when using multiple parameter groups for
+        communication and CPU offloading.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True],  # save CI time
+                "offload_policy": [CPUOffloadPolicy(True), CPUOffloadPolicy(False)],
+                "device_type": ["cuda"],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False, True],
+                "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+            },
+            self._test_train_parity_multi_group,
+        )
+
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: Union[bool, int],
+        offload_policy: OffloadPolicy,
         device_type: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
@@ -332,9 +359,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             replicate(ref_model, process_group=gloo_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         mesh = init_device_mesh(device_type, (self.world_size,))
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            mesh=mesh,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=offload_policy,
+        )
         for mlp in model:
-            fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
+            fully_shard_fn(mlp)
+        fully_shard_fn(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
@@ -627,6 +660,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False, 2],
+                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
                 # For `True`, disable reduce-scatter for all MLPs, and for
                 # `False`, only disable it for some MLPs
                 "recurse": [True, False],
@@ -637,8 +671,14 @@ class TestFullyShardGradientAccumulation(FSDPTest):
     def _test_set_requires_gradient_sync(
         self,
         reshard_after_forward: Union[bool, int],
+        offload_policy: OffloadPolicy,
         recurse: bool,
     ):
+        if (
+            isinstance(offload_policy, CPUOffloadPolicy)
+            and reshard_after_forward is not True
+        ):
+            return  # save CI time
         torch.manual_seed(42)
         local_batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
         global_batch_size = local_batch_size * self.world_size
@@ -649,7 +689,9 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         )
         ref_model = copy.deepcopy(model).cuda()
         fully_shard_fn = functools.partial(
-            fully_shard, reshard_after_forward=reshard_after_forward
+            fully_shard,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=offload_policy,
         )
         for mlp in model:
             fully_shard_fn(mlp)
