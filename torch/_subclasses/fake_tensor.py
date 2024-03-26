@@ -38,7 +38,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
-from torch.utils.weak import WeakIdRef
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -234,29 +233,21 @@ class FakeTensorConverter:
         del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t):
-        if WeakIdRef(t) in self.tensor_memo:
-            out = self.tensor_memo[WeakIdRef(t)]
-            out._fix_weakref()
-            return out
-        return None
+        tid = self.meta_converter.describer.lookup_tensor.get(t)
+        if tid is None:
+            return None
+        return self.tensor_memo.get(tid)
 
     def set_tensor_memo(self, t, v):
-        th = WeakIdRef(t)
+        tid = self.meta_converter.describer.get_tensor_id(t)
+        self.meta_converter.tensor_memo[tid] = v
 
-        # hold a weak ref to self, otherwise it will be kept alive
-        # by the del_ten closure
-        self_weak_ref = weakref.ref(self)
-
-        def del_ten():
-            self_ref = self_weak_ref()
-            if self_ref is None:
-                return
-            # on shutdown, th may not be in memo
-            self_ref.tensor_memo.pop(th, None)
-
-        weakref.finalize(t, del_ten)
-        self.tensor_memo[th] = v
-
+    # You can have a real tensor that you need to convert into a fake tensor.
+    # If you have a meta tensor already, call from_meta_and_device.
+    #
+    # You're allowed to pass a meta tensor to be turned into a fake
+    # tensor; although an odd thing to do, this can occur if you're doing
+    # cross ref testing and the inner test is already operating on meta tensors.
     def from_real_tensor(
         self,
         fake_mode,
@@ -266,7 +257,6 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
-        memoized_only=False,
     ):
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -278,8 +268,6 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        if memoized_only:
-            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -322,39 +310,14 @@ class FakeTensorConverter:
         assert (
             t.device.type == "meta"
         ), f"tensor's device must be `meta`, got {t.device.type} instead"
+        # This is a bit abusive (this is not the "real" tensor) but whatever,
+        # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
         out = FakeTensor(fake_mode, t, device)
         self.set_tensor_memo(t, out)
         return out
-
-    # You can have a real tensor that you need to convert into a fake tensor.
-    # If you have a meta tensor already, call from_meta_and_device.
-    #
-    # You're allowed to pass a meta tensor to be turned into a fake
-    # tensor; although an odd thing to do, this can occur if you're doing
-    # cross ref testing and the inner test is already operating on meta tensors.
-    def __call__(
-        self,
-        fake_mode,
-        t,
-        *,
-        make_constant=False,
-        shape_env=None,
-        source=None,
-        symbolic_context=None,
-        memoized_only=False,
-    ):
-        return self.from_real_tensor(
-            fake_mode,
-            t,
-            make_constant,
-            shape_env=shape_env,
-            source=source,
-            symbolic_context=symbolic_context,
-            memoized_only=memoized_only,
-        )
 
 
 @functools.lru_cache(None)
@@ -732,6 +695,7 @@ class _ShapeEnvSettings:
     assume_static_by_default: bool
     specialize_zero_one: bool
     duck_shape: bool
+    prefer_deferred_runtime_asserts_over_guards: bool
 
     def __init__(self, env: "ShapeEnv"):
         # Initialize this way because the class is frozen (to enable hashing):
@@ -744,6 +708,11 @@ class _ShapeEnvSettings:
         )
         object.__setattr__(self, "specialize_zero_one", env.specialize_zero_one)
         object.__setattr__(self, "duck_shape", env.duck_shape)
+        object.__setattr__(
+            self,
+            "prefer_deferred_runtime_asserts_over_guards",
+            env.prefer_deferred_runtime_asserts_over_guards,
+        )
 
 
 class _DispatchCacheKey(list):
@@ -860,7 +829,7 @@ class FakeTensorMode(TorchDispatchMode):
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: List[Tuple[bool, Optional[FakeTensorMode]]] = []
 
-        self.shape_env = shape_env
+        self.shape_env: ShapeEnv = shape_env
 
         self.stack = "".join(traceback.format_stack())
 
@@ -1284,7 +1253,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # therefore the exact type test above
                 with no_dispatch():
                     out = out.clone()
-                return converter(self, out, make_constant=True)
+                return converter.from_real_tensor(self, out, make_constant=True)
 
         # See [subclass inputs] below
         # NB: If you're seeing a mysterious infinite loop involving fake
@@ -1308,7 +1277,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
 
             if type(args[0]) is torch.Tensor:
-                return converter(self, args[0])
+                return converter.from_real_tensor(self, args[0])
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
@@ -1350,7 +1319,7 @@ class FakeTensorMode(TorchDispatchMode):
             if all_constant:
                 return pytree.tree_map_only(
                     torch.Tensor,
-                    lambda t: converter(self, t, make_constant=True),
+                    lambda t: converter.from_real_tensor(self, t, make_constant=True),
                     out,
                 )
 
@@ -1538,7 +1507,7 @@ class FakeTensorMode(TorchDispatchMode):
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
 
-                x = converter(self, x)
+                x = converter.from_real_tensor(self, x)
 
             flat_arg_fake_tensors.append(x)
             return x
@@ -1578,7 +1547,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
                     # We thus directly convert real tensor to fake tensor.
-                    return converter(self, e)
+                    return converter.from_real_tensor(self, e)
                 else:
                     return converter.from_meta_and_device(
                         self, e, device or common_device
@@ -1642,9 +1611,6 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
-        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
-        # seen before.
-        memoized_only=False,
     ):
         shape_env = self.shape_env
         if static_shapes is None:
@@ -1654,19 +1620,12 @@ class FakeTensorMode(TorchDispatchMode):
                 symbolic_context is None
             ), "cannot set both static_shapes and symbolic_context"
             shape_env = None
-        # see note [Tensor Fakification and Symbol Caching]
-        if not symbolic_context and not source and not static_shapes:
-            if tracing_context := torch._guards.TracingContext.try_get():
-                if tensor in tracing_context.tensor_to_context:
-                    symbolic_context = tracing_context.tensor_to_context[tensor]
-                    source = symbolic_context.tensor_source
-        return self.fake_tensor_converter(
+        return self.fake_tensor_converter.from_real_tensor(
             self,
             tensor,
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
-            memoized_only=memoized_only,
         )
 
 
@@ -1725,7 +1684,7 @@ def run_fallback_kernel(
             if id(e) in inp_impls:
                 return inp_impls[id(e)]
             else:
-                return fake_mode.fake_tensor_converter(fake_mode, e)
+                return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, e)
         else:
             return e
 
