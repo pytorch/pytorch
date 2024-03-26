@@ -356,7 +356,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
+        if len(self.node.get_inputs_that_alias_output()) > 0:
+            return self
+        if isinstance(self.node.layout, ir.MultiOutputLayout):
             return self
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
@@ -439,7 +441,7 @@ class WrapperCodeGen(CodeGen):
         # or (nested) subgraph---is currently codegened; the primary use case is
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
-        self.codegened_graph_stack = [V.graph]
+        self.codegened_graph_stack = []
 
         self.write_header()
         self.write_prefix()
@@ -1013,6 +1015,10 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+        from torch.utils._triton import patch_triton_dtype_repr
+
+        patch_triton_dtype_repr()
+
         original_name = kernel.__name__
 
         from .common import KernelArgType, SizeArg, TensorArg
@@ -1299,6 +1305,11 @@ class WrapperCodeGen(CodeGen):
         raise NotImplementedError()
 
     def val_to_arg_str(self, s):
+        from torch.utils._triton import dtype_to_string, has_triton_package
+
+        if has_triton_package():
+            import triton
+
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
         elif isinstance(s, sympy.Expr):
@@ -1317,6 +1328,8 @@ class WrapperCodeGen(CodeGen):
             return _get_qualified_name(s)
         elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
+        elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
+            return dtype_to_string(s)
         else:
             return repr(s)
 
@@ -1403,9 +1416,9 @@ class WrapperCodeGen(CodeGen):
             return
 
         layout = buffer.get_layout()
-        if isinstance(layout, ir.MutationLayout):
+        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
             return
-        if isinstance(layout, ir.AliasedLayout):
+        if isinstance(layout, ir.NonOwningLayout):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
@@ -1499,11 +1512,19 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
+
+        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
+
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
+        predicate = conditional.predicate.codegen_reference()
+        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
+            # move the Tensor predicate to host
+            predicate = f"{predicate}.item()"
+
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
+        self.writeline(f"if {predicate}:")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
@@ -1512,11 +1533,44 @@ class WrapperCodeGen(CodeGen):
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
 
+    def codegen_while_loop(self, while_loop):
+        name = while_loop.get_name()
+        outer_inputs = [buf.codegen_reference() for buf in while_loop.operands]
+
+        self.writeline(f"{name} = [None] * {len(while_loop.operands)}")
+        for i, inp in enumerate(outer_inputs):
+            # set the initial state before the loop
+            self.writeline(f"{name}[{i}] = {inp}")
+
+        cond_outer_inputs = [f"{name}[{i}]" for i in range(len(while_loop.operands))]
+        cond_outer_outputs = [f"{name}_cond_result"]
+        body_outer_inputs = list(
+            cond_outer_inputs
+        )  # same inputs for cond_fn and body_fn
+        body_outer_outputs = list(
+            body_outer_inputs
+        )  # carry over the state from body_fn
+
+        self.writeline("while True:")
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(
+            f"if not {cond_outer_outputs[0]}.item(): break"
+        )  # condition doesn't hold
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
+        self.writeline(ExitSubgraphLine(self))
+
     @staticmethod
     def statically_known_int_or_none(x):
         try:
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(x)
+            return int(val)
         except Exception:
             return None
 
