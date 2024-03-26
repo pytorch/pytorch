@@ -505,6 +505,8 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         ]
         metrics.cpp_outer_loop_fused_inner_counts.append(len(loop_nest_list))
 
+        kernel_group = cpp_kernel_proxy_list[0].kernel_group
+
         def _merge_outer_fusion_loop_levels(
             loop_level_nested_list: List[List["LoopLevel"]],
             outer_loop_fusion_depth,
@@ -526,7 +528,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
                 )
             else:
                 # This is the last looplevel to do outer loop fusion
-                outer_loop_fused_kernel = OuterLoopFusedKernel()
+                outer_loop_fused_kernel = OuterLoopFusedKernel(kernel_group)
                 loop_level_of_first_kernel = loop_level_nested_list[0][0]
                 for kernel_idx in range(len(loop_level_nested_list)):
                     # Append each LoopLevel into OuterLoopFusedKernel.inner
@@ -1685,11 +1687,6 @@ class CppTile2DOverrides(CppVecOverrides):
         assert isinstance(V.kernel, CppTile2DKernel)
         expr = V.kernel.transform_indexing(expr)
         return CppVecOverrides.index_expr(expr, dtype)
-
-
-@dataclasses.dataclass
-class OuterLoopFusedKernel:
-    inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
 
 
 class CppKernel(Kernel):
@@ -3748,6 +3745,12 @@ class CppKernelProxy(CppKernel):
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
+
+
+class OuterLoopFusedKernel(CppKernel):
+    def __init__(self, kernel_group):
+        super().__init__(kernel_group.args, kernel_group.ws.num_threads)
+        self.inner: List["LoopLevel"] = []
 
 
 class ReasonFusedNodes(Enum):
