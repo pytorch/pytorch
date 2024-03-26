@@ -2451,18 +2451,9 @@ class Scheduler:
 
         self.flush()
 
-    def is_unaligned_buffer(self, buf_name):
-        if buf_name in V.graph.graph_inputs:
-            return not config.assume_aligned_inputs
-        if buf_name in V.graph.constants:
-            # all constants are assumed to be aligned
-            return False
+    def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         node = self.name_to_node[buf_name]
-        layout = node.node.get_layout()
-        if isinstance(layout, ir.NonOwningLayout):
-            return not layout.maybe_guard_aligned()
-        else:
-            return False
+        return node.node.get_layout()
 
 
 class BaseScheduling:

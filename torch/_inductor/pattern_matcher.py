@@ -11,7 +11,6 @@ import os
 import re
 import textwrap
 import typing
-from abc import abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from typing import (
@@ -28,7 +27,7 @@ from typing import (
     Union,
 )
 
-from typing_extensions import TypeGuard, Self
+from typing_extensions import Self, TypeGuard
 
 import torch
 import torch._guards
