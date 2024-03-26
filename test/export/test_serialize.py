@@ -87,6 +87,34 @@ class TestSerialize(TestCase):
         self.assertEqual(exp_out, actual_out)
         self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
 
+    def test_export_example_inputs_preserved(self):
+        class MyModule(torch.nn.Module):
+            """A test module with that has multiple args and uses kwargs"""
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x, y, use_p=False):
+                out = x + y
+                if use_p:
+                    out += self.p
+                return out
+
+        model = MyModule().eval()
+        random_inputs = (torch.rand([2, 3]), torch.rand([2, 3]))
+        exp_program = torch.export.export(model, random_inputs, {"use_p": True})
+
+        output_buffer = io.BytesIO()
+        # Tests that example inputs are preserved when saving and loading module.
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+        # Extract the example inputs from before and after saving.
+        orig_args, orig_kwargs = exp_program.example_inputs
+        loaded_args, loaded_kwargs = loaded_model.example_inputs
+        # Run both modules and confirm that outputs match.
+        orig_out = exp_program.module()(*orig_args, **orig_kwargs)
+        loaded_out = loaded_model.module()(*loaded_args, **loaded_kwargs)
+        self.assertEqual(orig_out, loaded_out)
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
@@ -742,7 +770,8 @@ class TestSchemaVersioning(TestCase):
             ExportedProgramDeserializer().deserialize(
                 serialized_program.exported_program,
                 serialized_program.state_dict,
-                serialized_program.constants
+                serialized_program.constants,
+                serialized_program.example_inputs
             )
 
 
