@@ -18,4 +18,12 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
 
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
 
+_PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
+    PyThreadState* tstate,
+    size_t size);
+
+void THP_PyThreadState_PopFrame(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame);
+
 #endif
