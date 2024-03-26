@@ -1025,6 +1025,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 }
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_VECTORIZED_INIT(Half, half);
+
 #else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
