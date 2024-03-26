@@ -31,7 +31,7 @@ runs:
     # retry this step several time similar to how checkout-pytorch GHA does
     - name: Cleanup workspace
       if: always()
-      uses: nick-fields/retry@v2.8.2
+      uses: nick-fields/retry@v3.0.0
       env:
         EXTRA_DELETE_DIR: ${{ inputs.extra-delete-dir }}
       with:

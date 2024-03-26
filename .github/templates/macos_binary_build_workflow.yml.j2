@@ -84,7 +84,7 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
