@@ -199,8 +199,12 @@ def make_constraints(
     #   - eval_frame.py solves constraints
     #   - _trace.py installs shape metadata in IR.
 
+    inline_constraints = gm.meta.get("inline_constraints", [])
+    range_constraints = {
+        symbol: inline_constraints[symbol] for symbol in inline_constraints
+    }
     if dynamic_shapes == []:
-        return {}
+        return range_constraints
 
     def _is_dynamic_shape_leaf(x):
         if x is None:
