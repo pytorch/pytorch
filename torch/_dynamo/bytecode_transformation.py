@@ -218,6 +218,28 @@ def create_call_method(nargs) -> List[Instruction]:
     return [create_instruction("CALL_METHOD", arg=nargs)]
 
 
+def create_load_attr(name) -> Instruction:
+    # in 3.12, create a LOAD_ATTR instruction with the low bit unset
+    return Instruction(
+        opcode=dis.opmap["LOAD_ATTR"],
+        opname="LOAD_ATTR",
+        arg=False,  # lowbit for 3.12
+        argval=name,
+    )
+
+
+def create_load_method(name) -> Instruction:
+    if sys.version_info >= (3, 12):
+        # in 3.12, create a LOAD_ATTR instruction with the low bit set
+        return Instruction(
+            opcode=dis.opmap["LOAD_ATTR"],
+            opname="LOAD_ATTR",
+            arg=True,  # lowbit for 3.12
+            argval=name,
+        )
+    return create_instruction("LOAD_METHOD", argval=name)
+
+
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> Tuple[List[int], Callable[[int, int], None]]:
@@ -762,6 +784,7 @@ def strip_extended_args(instructions: List[Instruction]) -> None:
 
 def remove_load_call_method(instructions: List[Instruction]) -> List[Instruction]:
     """LOAD_METHOD puts a NULL on the stack which causes issues, so remove it"""
+    assert sys.version_info < (3, 11)
     rewrites = {"LOAD_METHOD": "LOAD_ATTR", "CALL_METHOD": "CALL_FUNCTION"}
     for inst in instructions:
         if inst.opname in rewrites:
@@ -958,6 +981,16 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 11):
+                instructions[i].arg = (names[instructions[i].argval] << 1) + (
+                    cast(int, instructions[i].arg) % 2
+                )
+            else:
+                instructions[i].arg = names[instructions[i].argval]
+        elif instructions[i].opname == "LOAD_ATTR":
+            # 3.12 LOAD_ATTR requires both arg and argval, like LOAD_GLOBAL
+            assert instructions[i].arg is not None
+            assert instructions[i].argval is not _NotProvided
+            if sys.version_info >= (3, 12):
                 instructions[i].arg = (names[instructions[i].argval] << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )

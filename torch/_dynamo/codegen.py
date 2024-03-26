@@ -12,7 +12,9 @@ from .bytecode_transformation import (
     create_call_function,
     create_dup_top,
     create_instruction,
+    create_load_attr,
     create_load_global,
+    create_load_method,
     create_rot_n,
     Instruction,
 )
@@ -261,12 +263,12 @@ class PyCodegen:
 
     def create_load_method(self, name):
         self.tx.output.update_co_names(name)
-        return create_instruction("LOAD_METHOD", argval=name)
+        return create_load_method(name)
 
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
-        return create_instruction("LOAD_ATTR", argval=name)
+        return create_load_attr(name)
 
     def load_attr(self, name):
         self.append_output(self.create_load_attr(name))
