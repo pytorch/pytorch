@@ -153,9 +153,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
-        from .builder import VariableBuilder
-        from .lazy import LazyVariableTracker
-
         # Tracing the _init_group is expensive. But we still have to insert the
         # necessary guards for _init_group. So, we manually handle insertion of
         # guards. We also want to mark all the tensors inside the state dict to
@@ -163,9 +160,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # Mark all the tensors in the state dict to be static address.
         from ..decorators import mark_static_address
+        from .builder import VariableBuilder
+        from .lazy import LazyVariableTracker
+
         for param, value in self.value.state.items():
             mark_static_address(param, guard=False)
-            for _, hyper_param in value.items():
+            for hyper_param in value.values():
                 if isinstance(hyper_param, torch.Tensor):
                     mark_static_address(hyper_param, guard=False)
 
