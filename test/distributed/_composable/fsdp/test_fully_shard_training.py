@@ -11,7 +11,12 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import FSDP, fully_shard, OffloadPolicy
+from torch.distributed._composable.fsdp import (
+    CPUOffloadPolicy,
+    FSDP,
+    fully_shard,
+    OffloadPolicy,
+)
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
@@ -313,7 +318,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True],  # save CI time
-                "offload_policy": [OffloadPolicy("cpu")],
+                "offload_policy": [CPUOffloadPolicy(True), CPUOffloadPolicy(False)],
                 "device_type": ["cuda"],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -655,7 +660,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False, 2],
-                "offload_policy": [OffloadPolicy(), OffloadPolicy("cpu")],
+                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
                 # For `True`, disable reduce-scatter for all MLPs, and for
                 # `False`, only disable it for some MLPs
                 "recurse": [True, False],

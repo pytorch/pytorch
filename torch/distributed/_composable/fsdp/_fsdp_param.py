@@ -11,7 +11,7 @@ from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -139,7 +139,10 @@ class FSDPParam:
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
-        self.offload_to_cpu: bool = offload_policy.offload_type == "cpu"
+        self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
+        self.pin_memory = (
+            self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
+        )
         self.grad_offload_event: Optional[torch.cuda.Event] = None
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
@@ -216,7 +219,9 @@ class FSDPParam:
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
         if self.offload_to_cpu:
-            padded_sharded_param = padded_sharded_param.cpu().pin_memory()
+            padded_sharded_param = padded_sharded_param.cpu()
+            if self.pin_memory:
+                padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -467,20 +472,17 @@ class FSDPParam:
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            if self._fsdp_pre_all_gather:
-                inner_tensor = self._inner_tensor
-                if self.offload_to_cpu:
-                    inner_tensor = inner_tensor.to(self.device, non_blocking=True)
-                (
-                    all_gather_inputs,
-                    self._all_gather_metadata,
-                ) = self._fsdp_pre_all_gather(inner_tensor)
-                return [t.view(-1) for t in all_gather_inputs]
             sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
+            if self._fsdp_pre_all_gather:
+                (
+                    all_gather_inputs,
+                    self._all_gather_metadata,
+                ) = self._fsdp_pre_all_gather(sharded_param_data)
+                return [t.view(-1) for t in all_gather_inputs]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # TODO: Add extensions path.
@@ -520,10 +522,6 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
-
-    @property
-    def _inner_tensor(self) -> torch.Tensor:
-        return cast(DTensor, self.sharded_param)._local_tensor
 
 
 # NOTE: Unsafe here refers to not checking whether the storage is already

@@ -4,7 +4,11 @@ import functools
 
 import torch
 
-from torch.distributed._composable.fsdp import fully_shard, OffloadPolicy
+from torch.distributed._composable.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    OffloadPolicy,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -63,7 +67,7 @@ class TestFullyShardMemory(FSDPTest):
         fully_shard_fn = functools.partial(
             fully_shard,
             reshard_after_forward=reshard_after_forward,
-            offload_policy=OffloadPolicy("cpu" if use_cpu_offload else None),
+            offload_policy=CPUOffloadPolicy() if use_cpu_offload else OffloadPolicy(),
         )
         for module in model.modules():
             if isinstance(module, TransformerBlock):

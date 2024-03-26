@@ -93,14 +93,12 @@ def fully_shard(
             module. See :class:`MixedPrecisionPolicy` for details.
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
-            :class:`OffloadPolicy` for details.
+            :class:`OffloadPolicy` and its subclasses for details.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
-    if (offload_type := offload_policy.offload_type) not in (None, "cpu"):
-        raise ValueError(f"Offloading only supports 'cpu', not {offload_type}")
     mesh = mesh or _init_default_fully_shard_mesh()
     if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
