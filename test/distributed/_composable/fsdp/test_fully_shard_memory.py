@@ -79,7 +79,6 @@ class TestFullyShardMemory(FSDPTest):
         # Init: Each module is moved to GPU before sharding parameters
         peak_mem_mb = self._get_peak_active_memory_mb()
         curr_mem_mb = self._get_curr_active_memory_mb()
-
         # Allow for some buffer for the peak memory since original parameters
         # are not freed until a `fully_shard` call returns
         buffer_mb = 4
