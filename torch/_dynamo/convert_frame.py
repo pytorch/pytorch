@@ -702,7 +702,6 @@ def _compile(
                 # Log this message in graph break logger because this can happen
                 # when we dont support a particular bytecode like LOAD_ATTR.
                 if graph_break_log.isEnabledFor(logging.DEBUG):
-                    assert isinstance(e, Unsupported)  # make mypy happy
                     user_stack = e.real_stack
                     user_stack_formatted = "".join(traceback.format_list(user_stack))
                     graph_break_log.debug(
