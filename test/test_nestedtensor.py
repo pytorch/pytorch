@@ -999,7 +999,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(IndexError, lambda: nt[2])
         self.assertRaises(IndexError, lambda: nt[-3])
         self.assertRaises(NotImplementedError, lambda: nt[:])
-        self.assertRaises(NotImplementedError, lambda: nt[...])
+        self.assertEqual(nt[...], nt)
         # tuple of indices: only support integer in the batch dimension
         #                 + all possible indexing in the original tensor dimensions
         self.assertEqual(nt[0, 0, 0], x0[0, 0])
@@ -3609,6 +3609,106 @@ class TestNestedTensorSubclass(TestCase):
                 self.assertEqual(t.grad, torch.ones_like(t) * 2)
 
             _check_grad(base if values_is_view else values)
+
+    @dtypes(torch.float)
+    def test_nested_tensor_from_jagged(self, device, dtype):
+        # construct from (values, offsets)
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        self.assertTrue(isinstance(nt, NestedTensor))
+        self.assertTrue(nt._is_view() and nt._base is values)
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.size(0), offsets.size(0) - 1)
+        self.assertEqual(nt.size(-1), values.size(-1))
+        self.assertIsNone(nt._lengths)
+        self.assertTrue(nt.is_contiguous())
+
+        # construct from (values, offsets, lengths)
+        lengths = torch.tensor([2, 1, 1, 2])
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets, lengths=lengths)
+        self.assertTrue(isinstance(nt, NestedTensor))
+        self.assertTrue(nt._is_view() and nt._base is values)
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.size(0), offsets.size(0) - 1)
+        self.assertEqual(nt.size(-1), values.size(-1))
+        self.assertEqual(nt._lengths, lengths)
+        # when both offsets / lengths are specified, expect non-contiguous
+        self.assertFalse(nt.is_contiguous())
+
+        # construct from (values, lengths)
+        values = torch.randn(14, 5, device=device, dtype=dtype)
+        lengths = torch.tensor([2, 3, 4, 5])
+        nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+        self.assertTrue(isinstance(nt, NestedTensor))
+        self.assertTrue(nt._is_view() and nt._base is values)
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.size(0), lengths.size(0))
+        self.assertEqual(nt.size(-1), values.size(-1))
+        # for now, if only lengths is specified, convert to offsets to integrate best with the
+        # existing kernels
+        expected_offsets = torch.tensor([0, 2, 5, 9, 14])
+        expected_nt = torch.nested.nested_tensor_from_jagged(values, offsets=expected_offsets)
+        for n1, n2 in zip(nt.unbind(), expected_nt.unbind()):
+            self.assertEqual(n1, n2)
+
+        # error case: no offsets or lengths
+        with self.assertRaisesRegex(RuntimeError, "At least one of offsets or lengths is required"):
+            torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("dim", range(5))
+    @parametrize("layout", [torch.strided, torch.jagged],
+                 name_fn=lambda l: f"layout_{str(l).split('.')[1]}")
+    @parametrize("requires_grad", [False, True])
+    @parametrize("contiguous", [False, True])
+    def test_as_nested_tensor_from_tensor(
+            self, device, dtype, dim, layout, requires_grad, contiguous):
+        if dim == 0:
+            t = torch.tensor(3., requires_grad=requires_grad)
+        else:
+            t = torch.randn(*(3 for _ in range(dim)), requires_grad=requires_grad)
+        assert t.dim() == dim
+
+        if dim < 2:
+            # 0-1 dim tensors can't be converted to NTs
+            with self.assertRaisesRegex(RuntimeError, "Expected tensor argument to have dim"):
+                nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
+            return
+
+        orig_t = t
+        if not contiguous:
+            t = t.transpose(0, 1)
+
+        nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
+        expected_dim = t.dim()
+        expected_batch_size = t.size(0)
+        self._validate_nt(
+            nt, device, dtype, layout, requires_grad, expected_dim, expected_batch_size)
+
+        if torch.device(device) == t.device and dtype == t.dtype and contiguous:
+            # should be the non-copying (view) case
+            self.assertTrue(nt._is_view() and nt._base is t)
+
+        # should be equivalent to construction from unbound tensor list
+        nt_from_unbind = torch.nested.as_nested_tensor(
+            list(t.unbind(0)), device=device, dtype=dtype, layout=layout)
+        self.assertEqual(nt, nt_from_unbind)
+
+        # ensure call on a NT with the same properties returns the NT directly
+        nt2 = torch.nested.as_nested_tensor(nt, device=device, dtype=dtype, layout=layout)
+        self.assertTrue(nt is nt2)
+
+        # we don't support conversion between layouts this way atm
+        other_layout = torch.strided if layout == torch.jagged else torch.jagged
+        with self.assertRaisesRegex(
+                RuntimeError, "Converting between nested tensor layouts is not supported"):
+            torch.nested.as_nested_tensor(nt, device=device, dtype=dtype, layout=other_layout)
+
+        if requires_grad:
+            # make sure gradients flow back into inputs
+            (nt * 2).backward(torch.ones_like(nt))
+            self.assertEqual(orig_t.grad, torch.ones_like(orig_t) * 2)
 
     @dtypes(torch.double, torch.half)
     @onlyCUDA
