@@ -1189,6 +1189,14 @@ class InstructionTranslatorBase(
                 self.push(next_iter)
                 self.push(val)
             except StopIteration:
+                # leave iterator upon exhaustion in 3.12
+                if sys.version_info >= (3, 12):
+                    # CPython 3.12 actually jumps to the instruction after the END_FOR
+                    # and performs the action of END_FOR as part of FOR_ITER. We jump
+                    # to the END_FOR and run it, so we need to make sure 2 values are
+                    # on the stack for it to pop.
+                    self.push(it)
+                    self.push(ConstantVariable.create(None))
                 self.jump(inst)
         else:
             unimplemented(f"FOR_ITER {typestr(it)}")
@@ -1862,6 +1870,9 @@ class InstructionTranslatorBase(
         items = self.popn(2)
         self.push(SliceVariable(items))
         self.STORE_SUBSCR(inst)
+
+    def END_FOR(self, inst):
+        self.popn(2)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
