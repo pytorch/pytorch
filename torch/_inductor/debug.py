@@ -335,7 +335,6 @@ class DebugContext:
                 if os.path.exists(new_path):
                     shutil.rmtree(new_path)
                 shutil.copytree(self._path, new_path)
-                self._path = new_path
         except OSError:
             log.warning(
                 "Failed to copy debug files from %s to %s", self._path, new_path
