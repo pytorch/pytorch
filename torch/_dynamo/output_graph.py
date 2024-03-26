@@ -938,6 +938,10 @@ class OutputGraph:
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
+            # restore all the live local vars
+            self.add_output_instructions(
+                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+            )
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
@@ -952,6 +956,7 @@ class OutputGraph:
             )
             self.codegen_suffix(tx, stack_values, pass2)
 
+            stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -960,15 +965,21 @@ class OutputGraph:
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
+                    stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
-        # restore all the live local vars
-        self.add_output_instructions(
-            [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
-        )
+            # restore all the live local vars
+            self.add_output_instructions(
+                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+            )
+
+            if stored_graph_output_var:
+                self.add_output_instructions(
+                    [PyCodegen(tx).create_delete(graph_output_var)]
+                )
 
     def codegen_suffix(self, tx, stack_values, cg):
         if self.backward_state:
