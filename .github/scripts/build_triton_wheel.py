@@ -102,9 +102,7 @@ def build_triton(
         if release:
             ver, rev, patch = version.split(".")
             if build_rocm:
-                check_call(
-                    ["git", "checkout", f"release/2.2.x"], cwd=triton_basedir
-                )
+                check_call(["git", "checkout", "release/2.2.x"], cwd=triton_basedir)
             else:
                 check_call(
                     ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
