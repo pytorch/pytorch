@@ -2659,6 +2659,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @serialTest()
     def test_CTCLoss_long_targets(self):
         input_length = 4000
         vocab_size = 3

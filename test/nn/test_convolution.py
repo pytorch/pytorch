@@ -3144,7 +3144,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @largeTensorTest("12GB")
+    @largeTensorTest('12GB')
+    @serialTest(TEST_CUDA)
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == "cuda" else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
