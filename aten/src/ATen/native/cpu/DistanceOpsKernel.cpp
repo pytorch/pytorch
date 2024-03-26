@@ -146,7 +146,7 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_pdist(Tensor& result, const Tensor& self, const scalar_t p) {
-    const scalar_t * const self_start = self.data_ptr<scalar_t>();
+    const scalar_t * const self_start = self.const_data_ptr<scalar_t>();
     const scalar_t * const self_end = self_start + self.numel();
     int64_t n = self.size(0);
     int64_t m = self.size(1);
