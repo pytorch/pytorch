@@ -175,5 +175,4 @@ except ImportError as e:
     logging.warning(e)
 
 if __name__ == '__main__':
-    # config.use_single_step_graph = False
     run_tests()
