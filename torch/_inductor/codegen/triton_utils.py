@@ -65,8 +65,11 @@ def signature_to_meta(
 
 def is_unaligned_buffer(arg: TensorArg):
     buf_name = arg.buffer
-    if buf_name in V.graph.graph_inputs or buf_name in V.graph.constants:
-        # all graph inputs or constants are assumed to be aligned
+    if buf_name in V.graph.graph_inputs:
+        return not config.assume_aligned_inputs
+
+    if buf_name in V.graph.constants:
+        # all constants are assumed to be aligned
         return False
 
     if V.graph.scheduler:
@@ -80,7 +83,7 @@ def is_unaligned_buffer(arg: TensorArg):
         else:
             layout = buffer.get_layout()
 
-    if isinstance(layout, torch._inductor.ir.AliasedLayout):
+    if isinstance(layout, torch._inductor.ir.NonOwningLayout):
         return not layout.maybe_guard_aligned()
     else:
         return False
