@@ -3175,6 +3175,7 @@ MOD_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
+    "torch._dynamo.variables.inline_helper",
     "torch._functorch.vmap",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
@@ -3199,7 +3200,6 @@ MOD_INLINELIST = {
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
-    "torch._dynamo.variables.inline_helper",
 }
 
 
