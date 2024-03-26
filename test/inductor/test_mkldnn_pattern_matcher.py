@@ -1520,7 +1520,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qlinear_binary_matcher_count"], 2
                 )
 
-            for is_qat in [False, True]:
+            is_qat_list = [False, True]
+            is_dynamic_list = [False, True]
+            cases = itertools.product(is_qat_list, is_dynamic_list)
+            for is_qat, is_dynamic in cases:
                 self._test_common(
                     mod,
                     (v,),
@@ -1528,6 +1531,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
+                    is_dynamic=is_dynamic
                 )
 
     @skipIfNoDynamoSupport
