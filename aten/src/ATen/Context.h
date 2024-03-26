@@ -77,12 +77,15 @@ class TORCH_API Context {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     initXPUIfNeeded(device_type);
+    initMPSIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
     } else {
@@ -151,6 +154,9 @@ class TORCH_API Context {
   }
   void lazyInitXPU() {
     c10::call_once(thx_init, [&] { detail::getXPUHooks().initXPU(); });
+  }
+  void lazyInitMPS() {
+    c10::call_once(thm_init, [&] { detail::getMPSHooks().initMPS(); });
   }
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
@@ -338,10 +344,16 @@ class TORCH_API Context {
       lazyInitXPU();
     }
   }
+  void initMPSIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::MPS) {
+      lazyInitMPS();
+    }
+  }
   static bool checkCuBLASConfigDeterministic();
   c10::once_flag thc_init;
   c10::once_flag thh_init;
   c10::once_flag thx_init;
+  c10::once_flag thm_init;
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;

@@ -68,6 +68,10 @@ void* MPSHooks::getDispatchQueue() const {
   return at::mps::getDefaultMPSStream()->queue();
 }
 
+Device MPSHooks::getDeviceFromPtr(void* ptr) const {
+  return at::Device(at::DeviceType::MPS, 0);
+}
+
 void MPSHooks::emptyCache() const {
   at::mps::getIMPSAllocator()->emptyCache();
 }

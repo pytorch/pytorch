@@ -113,7 +113,8 @@ list(APPEND ATen_MPS_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp)
 if(APPLE AND USE_MPS)
   list(APPEND ATen_MPS_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm)
+    ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_from_blob.mm)
 endif()
 
 list(APPEND ATen_XPU_TEST_SRCS
