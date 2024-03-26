@@ -1805,11 +1805,9 @@ bool Reducer::rebuild_buckets() {
           params_.size(),
           " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
-  std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
-  std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
       (getCvarString({"DDP_SET_LAST_BUCKET_CAP"}, "N/A") == "1");
 
@@ -1822,7 +1820,7 @@ bool Reducer::rebuild_buckets() {
     std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
     std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
   }
-  std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
+  auto [rebuilt_bucket_indices, per_bucket_size_limits] =
       compute_bucket_assignment_by_size(
           rebuilt_params_,
           bucket_size_limits,

@@ -139,7 +139,7 @@ class CustomMmaPipelined : public CustomMmaBase<Shape_, Policy_, 2> {
   /// Complex transform on B operand
   static ComplexTransform const kTransformB = Operator::kTransformB;
 
-  // staticaly assert kStages for MmaPipelined is two (Double-buffered pipeline)
+  // statically assert kStages for MmaPipelined is two (Double-buffered pipeline)
   static_assert(
       (Base::kStages == 2),
       "MmaPipelined requires kStages set to value 2");

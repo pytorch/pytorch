@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
+import sys
 
 import torch
 import torch._dynamo as torchdynamo
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
 class TestGraphUtils(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_conv_bn_conv_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -65,6 +67,7 @@ class TestGraphUtils(TestCase):
         self.assertRaises(ValueError, x)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_conv_bn_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -100,6 +103,7 @@ class TestGraphUtils(TestCase):
         self.assertEqual(len(fused_partitions), 0)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_customized_equivalet_types_dict(self):
         class M(torch.nn.Module):
             def __init__(self):
