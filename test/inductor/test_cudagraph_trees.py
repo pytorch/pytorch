@@ -954,6 +954,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 node = self.curr_node()
                 self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
+        def test_ignored_dim1_stride(self):
+            t = torch.empty_strided((1, 12, 64, 64), (0, 64, 2304, 1), device="cuda")
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(t):
+                return t + 1
+
+            for _ in range(3):
+                self.assertEqual(foo(t), t + 1)
+
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
