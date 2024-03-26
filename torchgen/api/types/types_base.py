@@ -95,11 +95,13 @@ class ConstRefCType(CType):
     elem: "CType"
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
-        if strip_ref:
+        if isinstance(self.elem, ConstRefCType) or strip_ref:
             return self.elem.cpp_type(strip_ref=strip_ref)
         return f"const {self.elem.cpp_type()} &"
 
     def cpp_type_registration_declarations(self) -> str:
+        if isinstance(self.elem, ConstRefCType):
+            return self.elem.cpp_type_registration_declarations()
         return f"const {self.elem.cpp_type_registration_declarations()} &"
 
     def remove_const_ref(self) -> "CType":
