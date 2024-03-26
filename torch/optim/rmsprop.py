@@ -80,10 +80,8 @@ class RMSprop(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                if group["capturable"]:
-                    state["step"] = torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                else:
-                    state["step"] = torch.zeros((), dtype=_get_scalar_dtype())
+                state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                                 if group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
                 state["square_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -113,6 +111,8 @@ class RMSprop(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -145,6 +145,7 @@ class RMSprop(Optimizer):
                 foreach=group["foreach"],
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
+                capturable=group["capturable"],
                 has_complex=has_complex,
             )
 
@@ -208,6 +209,7 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
         {_foreach_doc}
         {_capturable_doc}
         {_maximize_doc}
+        {_capturable_doc}
         {_differentiable_doc}
 
     """
@@ -222,10 +224,10 @@ def rmsprop(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    capturable: bool = False,
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    capturable: bool = False,
     has_complex: bool = False,
     *,
     lr: float,
@@ -238,6 +240,10 @@ def rmsprop(
     r"""Functional API that performs rmsprop algorithm computation.
     See :class:`~torch.optim.RMSProp` for details.
     """
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
@@ -274,6 +280,7 @@ def rmsprop(
         momentum=momentum,
         centered=centered,
         maximize=maximize,
+        capturable=capturable,
         differentiable=differentiable,
         has_complex=has_complex,
     )
@@ -295,6 +302,7 @@ def _single_tensor_rmsprop(
     centered: bool,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
 
@@ -357,6 +365,7 @@ def _multi_tensor_rmsprop(
     centered: bool,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
     if len(params) == 0:
