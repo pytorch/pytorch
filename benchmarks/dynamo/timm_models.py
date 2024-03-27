@@ -43,28 +43,21 @@ with open(filename) as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 8,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "dpn107": 2,
     "gluon_xception65": 2,
     "mobilevit_s": 2,
-    "pit_b_224": 2,
     "pnasnet5large": 2,
     "poolformer_m36": 2,
-    "res2net101_26w_4s": 2,
     "resnest101e": 2,
-    "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
     "swsl_resnext101_32x16d": 2,
-    "twins_pcpvt_base": 2,
     "vit_base_patch16_224": 2,
     "volo_d1_224": 2,
     "jx_nest_base": 4,
-    "xcit_large_24_p8_224": 4,
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
