@@ -755,7 +755,7 @@ def device_count() -> int:
     # NB: Do not cache the device count prior to CUDA initialization, because
     # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
     # setting prior to CUDA initialization.
-    if _cached_device_count is None and _initialized:
+    if _initialized:
         _cached_device_count = r
     return r
 
