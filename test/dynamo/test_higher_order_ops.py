@@ -2629,6 +2629,25 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(guards=True)
+    def test_emit_functorch_guard_if_active(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.sin(x)
+
+        x = torch.randn(3, 4)
+        _ = fn(x)
+        self.assertFalse(self.hasRecord(records, "pyfunctorch"))  # sanity check
+
+        _ = torch.vmap(fn)(x)
+        self.assertTrue(self.hasRecord(records, "pyfunctorch"))
+        record = self.getRecord(records, "pyfunctorch")
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # _dynamo/output_graph.py:N in init_ambient_guards""",
+        )
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):

@@ -427,6 +427,17 @@ class OutputGraph:
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
+        ci = torch._C._functorch.peek_interpreter_stack()
+        keys = (
+            torch._C._functorch.TransformType.Vmap,
+            torch._C._functorch.TransformType.Grad,
+            torch._C._functorch.TransformType.Jvp,
+        )
+        if ci is not None and ci.key() in keys:
+            self.guards.add(
+                GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
+            )
+
     def synthetic_graph_input(self, fn, args):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
