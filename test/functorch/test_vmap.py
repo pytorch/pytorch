@@ -5048,7 +5048,6 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
-    @xfailIfTorchDynamo
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param
