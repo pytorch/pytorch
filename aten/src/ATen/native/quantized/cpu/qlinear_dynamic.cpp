@@ -737,7 +737,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
       TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"),
       TORCH_FN(QLinearDynamicFp16<false>::run));
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::linear_unpacked_dynamic_fp16"),
+      TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16_unpacked_weight"),
       TORCH_FN(QLinearUnpackedDynamicFp16::run));
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_fp16"),
@@ -746,7 +746,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 
 TORCH_LIBRARY_IMPL(quantized, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::linear_unpacked_dynamic_fp16"),
+      TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16_unpacked_weight"),
       TORCH_FN(QLinearUnpackedDynamicFp16::meta));
 }
 
