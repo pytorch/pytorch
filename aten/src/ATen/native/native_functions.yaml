@@ -1932,6 +1932,7 @@
   dispatch:
     CPU: cummax_helper_cpu
     CUDA: cummax_helper_cuda
+    MPS: cummax_helper_mps
 
 - func: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
@@ -1956,6 +1957,7 @@
   dispatch:
     CPU: cummin_helper_cpu
     CUDA: cummin_helper_cuda
+    MPS: cummin_helper_mps
 
 - func: cummaxmin_backward(Tensor grad, Tensor input, Tensor indices, int dim) -> Tensor
   variants: function
