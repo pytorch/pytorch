@@ -2141,6 +2141,59 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
+
+    def test_non_contiguous_output_alias(self):
+        # Test x.contiguous() where x is non-contiguous.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                transposed = squared.t()    # non-contiguous
+                contig = transposed.contiguous()
+                return transposed, contig
+
+        x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
+        model = Model()
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+        # contiguous() should create a new tensor
+        self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
+
+    def test_contiguous_output_alias(self):
+        # Test x.contiguous() where x is already contiguous.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                contig = squared.contiguous()
+                return squared, contig
+
+        x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
+        model = Model()
+
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+        # contigous() shuold re-use the tensor
+        self.assertTrue(result[0].data_ptr() == result[1].data_ptr())
+
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
             def __init__(self):

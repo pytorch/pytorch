@@ -394,6 +394,11 @@ aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
 
+// Make one tensor alias another tensor. Here, alias means both tensors
+// share the same storage and metadata (e.g. size, dtype, etc.)
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_alias_tensor(AtenTensorHandle src, AtenTensorHandle* ret_dst);
+
 // This function will create a new tensor object and its pointer is returned
 // through *ret. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
