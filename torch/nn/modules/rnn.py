@@ -183,9 +183,10 @@ class RNNBase(Module):
         first_fw = self._flat_weights[0]
         dtype = first_fw.dtype
         for fw in self._flat_weights:
-            if (not isinstance(fw.data, Tensor) or not (fw.data.dtype == dtype) or
-                    not fw.data.is_cuda or
-                    not torch.backends.cudnn.is_acceptable(fw.data)):
+            if (
+                not isinstance(fw, Tensor) or not (fw.dtype == dtype) or
+                not fw.is_cuda or not torch.backends.cudnn.is_acceptable(fw)
+            ):
                 return
 
         # If any parameters alias, we fall back to the slower, copying code path. This is
