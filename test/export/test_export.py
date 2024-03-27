@@ -26,6 +26,7 @@ from torch._export.utils import (
 )
 from torch._subclasses import FakeTensorMode
 from torch.export import Dim, dynamic_dim, export, unflatten
+from torch.export.graph_signature import InputKind
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -133,7 +134,6 @@ class TestDynamismExpression(TestCase):
         res = gm.module()(*inp)
 
         self.assertTrue(torchdynamo.utils.same(ref, res))
-
         gm = make_fx(f, tracing_mode="symbolic")(*inp)
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
@@ -1757,14 +1757,14 @@ class TestExport(TestCase):
             str(gm.code).strip(),
             """\
 def forward(self, arg_0):
-    u_x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
-    conv2d = torch.ops.aten.conv2d.default(u_x, conv_weight, conv_bias);  u_x = conv_weight = conv_bias = None
+    conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
     return pytree.tree_unflatten((getitem,), self._out_spec)""",
@@ -1776,7 +1776,7 @@ def forward(self, arg_0):
             str(gm_train.code).strip(),
             """\
 def forward(self, arg_0):
-    u_x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -1784,7 +1784,7 @@ def forward(self, arg_0):
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked
-    conv2d = torch.ops.aten.conv2d.default(u_x, conv_weight, conv_bias);  u_x = conv_weight = conv_bias = None
+    conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
     getitem = _native_batch_norm_legit_functional[0]
@@ -3197,9 +3197,10 @@ def forward(self, arg_0):
             def __init__(self):
                 super().__init__()
                 self.op = torch.ops.aten.scatter_add
+                self.register_buffer('beta', torch.randn(5))
 
             def forward(self, t, dim, index, src, **kwargs):
-                return self.op(t, dim, index, src, **kwargs)
+                return self.op(t, dim, index, src, **kwargs) + self.beta
 
         t = torch.randn(10, 5)
         dim = -1
@@ -3332,11 +3333,11 @@ def forward(self, arg_0):
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(),
             """\
 graph():
-    %u_x : [num_users=1] = placeholder[target=u_x]
+    %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %u_x, %t), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
     return addmm""",
         )
 
@@ -3404,11 +3405,11 @@ graph():
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(),
             """\
 graph():
-    %u_x : [num_users=1] = placeholder[target=u_x]
+    %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %u_x, %t), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
     return addmm""",
         )
         self.assertExpectedInline(
@@ -3456,11 +3457,11 @@ graph():
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, p_bar_linear_weight, p_bar_linear_bias, u_x):
-    cos = torch.ops.aten.cos.default(u_x)
+def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
+    cos = torch.ops.aten.cos.default(x)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, u_x]);  true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = u_x = None
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
@@ -3550,19 +3551,19 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, u_x):
         )
 
         self.assertExpectedInline(str(exported_program.graph_module.code.strip()), """\
-def forward(self, b_pred, b_t, u_x, u_y):
+def forward(self, b_pred, b_t, x, y):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, u_x, u_y]);  b_pred = true_graph_0 = false_graph_0 = b_t = u_x = u_y = None
+    conditional = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
     getitem = conditional[0];  conditional = None
     return (getitem,)""")  # noqa: B950
 
         self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.code.strip()), """\
-def forward(self, b_t, u_x, u_y):
+def forward(self, b_t, x, y):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
-    sub = torch.ops.aten.sub.Tensor(u_x, 1);  u_x = None
+    sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
     add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
-    add_1 = torch.ops.aten.add.Tensor(add, u_y);  add = u_y = None
+    add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_1,)""")
 
@@ -3760,18 +3761,18 @@ def forward(self, b_t, u_x, u_y):
 
         ep = torch.export.export(M(), inps)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, u_x):
-    cos = torch.ops.aten.cos.default(u_x)
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = u_x, z = cos);  u_x = cos = None
+def forward(self, x):
+    cos = torch.ops.aten.cos.default(x)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""")
 
         ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, u_x):
-    cos = torch.ops.aten.cos.default(u_x)
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = u_x, z = cos);  u_x = cos = None
+def forward(self, x):
+    cos = torch.ops.aten.cos.default(x)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""")
@@ -3789,9 +3790,9 @@ def forward(self, u_x):
 
         ep = torch.export.export(M(), inps)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, u_x):
-    cos = torch.ops.aten.cos.default(u_x)
-    cos_1 = torch.ops.aten.cos.default(u_x);  u_x = None
+def forward(self, x):
+    cos = torch.ops.aten.cos.default(x)
+    cos_1 = torch.ops.aten.cos.default(x);  x = None
     auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
@@ -3799,39 +3800,134 @@ def forward(self, u_x):
 
         ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, u_x):
-    foo_functional = torch.ops.testlib.foo_functional.default(u_x);  u_x = None
+def forward(self, x):
+    foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
     return (foo_functional,)""")
 
-    def test_naming_collisions(self):
+    def test_placeholder_naming_collisions(self):
         """
-        Ensuring naming collisions between nested user inputs
-        are handled correctly, without failing compilation.
+        Ensure naming collisions between nodes are handled correctly.
         """
+        # test collisions between nested user inputs
         class Foo(torch.nn.Module):
             def forward(self, x, x_foo, x_foo_0):
-                return x.foo[0] + x_foo[0] + x_foo_0
+                return x['foo'][0] + x_foo[0] + x_foo_0
 
-        @dataclass
-        class DataClass:
-            foo: List[Tensor]
-        register_dataclass_as_pytree_node(
-            DataClass,
-            serialized_type_name="test_naming_collisions.DataClass",
-        )
         inputs = (
-            DataClass(foo=[torch.randn(4, 4)]),
+            {'foo': [torch.randn(4, 4)]},
             (torch.randn(4, 4), ),
             torch.randn(4, 4),
         )
         ep = export(Foo(), inputs)
         expected_names = [
-            "u_x_foo_0",
-            "u_x_foo_0_1",
-            "u_x_foo_0_2"
+            "x_foo_0",
+            "x_foo_0_1",
+            "x_foo_0_2"
         ]
         real_names = [spec.arg.name for spec in ep.graph_signature.input_specs]
         self.assertEqual(expected_names, real_names)
+
+        # test collisions between user inputs and params, buffers, constants
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(4))
+                self.register_buffer('alpha', torch.randn(4), persistent=True)
+                self.register_buffer('beta', torch.randn(4), persistent=False)
+                self.gamma = torch.randn(4)
+            def forward(self, p, b_alpha, b, c_gamma):
+                p = self.param + p.param
+                b = self.alpha + self.beta + b_alpha + b['beta']
+                c = self.gamma + c_gamma
+                return p, b, c
+
+        @dataclass
+        class DataClass:
+            param: Tensor
+        register_dataclass_as_pytree_node(
+            DataClass,
+            serialized_type_name="test_placeholder_naming_collisions.DataClass",
+        )
+        inputs = (
+            DataClass(param=torch.randn(4)),
+            torch.randn(4),
+            {"beta": torch.randn(4)},
+            torch.randn(4),
+        )
+        ep = export(Foo(), inputs)
+        expected_names = [  # user inputs should be prioritized, unprefixed
+            ('p_param_1', InputKind.PARAMETER),
+            ('b_alpha_1', InputKind.BUFFER),
+            ('b_beta_1', InputKind.BUFFER),
+            ('c_gamma_1', InputKind.CONSTANT_TENSOR),
+            ('p_param', InputKind.USER_INPUT),
+            ('b_alpha', InputKind.USER_INPUT),
+            ('b_beta', InputKind.USER_INPUT),
+            ('c_gamma', InputKind.USER_INPUT)
+        ]
+        real_names = [(spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs]
+        self.assertEqual(expected_names, real_names)
+
+        # test collisions between user inputs & call_function nodes
+        class Foo(torch.nn.Module):
+            def forward(self, mul, add, add_1):
+                return mul * mul + add * add_1
+
+        ep = export(Foo(), (torch.randn(4, 4), torch.randn(4, 4), torch.randn(4, 4)))
+        expected_names_and_ops = [
+            ("mul", "placeholder"),
+            ("add", "placeholder"),
+            ("add_1", "placeholder"),
+            ("mul_1", "call_function"),
+            ("mul_2", "call_function"),
+            ("add_2", "call_function"),
+            ("output", "output"),
+        ]
+        real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
+        self.assertEqual(expected_names_and_ops, real_names_and_ops)
+
+        # test collisions between top-level nodes & HOO subgraph nodes
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                mul = x * x
+                return cond(mul.sum() > 0, lambda x:x*2.0, lambda x:x+2.0, [mul])
+
+        ep = export(Foo(), (torch.randn(4, 4), ))
+        expected_names_and_ops = [
+            ("_root_mul", "placeholder"),
+            ("mul", "call_function"),
+            ("output", "output"),
+        ]
+        real_names_and_ops = [(node.name, node.op) for node in ep.graph_module.true_graph_0.graph.nodes]
+        self.assertEqual(expected_names_and_ops, real_names_and_ops)
+
+        # test collisions between user inputs & higher order op subgraphs
+        # (please never do this)
+        class Foo(torch.nn.Module):
+            def forward(self, input, true_graph, body_graph):
+                def map_body(x, y):
+                    return x + y
+                x = map(map_body, input, body_graph[0])
+                x = x + true_graph[0] + true_graph[1]
+                x = cond(x.sum() > 0, lambda x:x*2.0, lambda x:x+2.0, [x])
+                x = cond(x.sum() > 0, lambda x:x*2.0, lambda x:x+2.0, [x])
+                return x
+
+        inputs = (
+            torch.randn(10, 4),
+            (torch.randn(4), torch.randn(4)),
+            (torch.randn(4), ),
+        )
+        ep = export(Foo(), inputs)
+        expected_getattr_names = [
+            "body_graph_1",
+            "true_graph_2",
+            "false_graph_0",
+            "true_graph_3",
+            "false_graph_1",
+        ]
+        real_getattr_names = [node.name for node in ep.graph.nodes if node.op == "get_attr"]
+        self.assertEqual(expected_getattr_names, real_getattr_names)
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

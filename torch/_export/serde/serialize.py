@@ -409,6 +409,8 @@ class GraphModuleSerializer:
             )
         elif isinstance(node.meta["val"], torch.SymInt):
             raise AssertionError("SymInt graph input is not implemented yet.")
+        elif isinstance(node.meta["val"], (int, bool, str, float, type(None))):
+            graph_input = self.serialize_input(node.meta["val"])
         elif isinstance(node.meta["val"], ep.CustomObjArgument):
             class_fqn = node.meta["val"].class_fqn
             graph_input = Argument.create(
@@ -417,8 +419,6 @@ class GraphModuleSerializer:
             self.graph_state.custom_obj_values[node.name] = (
                 self.serialize_script_obj_meta(node.meta["val"])
             )
-        elif isinstance(node.meta["val"], (int, bool, str, float, type(None))):
-            graph_input = self.serialize_input(node.meta["val"])
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
         self.graph_state.inputs.append(graph_input)
@@ -826,7 +826,7 @@ class GraphModuleSerializer:
 
     def serialize_input_spec(self, spec: ep.InputSpec) -> InputSpec:
         if spec.kind == ep.InputKind.USER_INPUT:
-            if isinstance(spec.arg, ep.ConstantArgument):  # ep.ConstantArgument
+            if isinstance(spec.arg, ep.ConstantArgument):
                 if isinstance(spec.arg.value, int):
                     constant_spec = ConstantValue.create(as_int=spec.arg.value)
                 elif isinstance(spec.arg.value, bool):
@@ -837,6 +837,8 @@ class GraphModuleSerializer:
                     constant_spec = ConstantValue.create(as_float=spec.arg.value)
                 elif spec.arg.value is None:
                     constant_spec = ConstantValue.create(as_none=())
+                else:
+                    raise SerializeError(f"Unhandled constant input {spec.arg.value} to serialize")
                 return InputSpec.create(
                     constant_input=ConstantInputSpec(
                         name=spec.arg.name, value=constant_spec
@@ -1503,9 +1505,7 @@ class GraphModuleDeserializer:
                 "as_none",
                 "as_string",
             ):
-                input_spec = self.signature.input_specs[i]
-                assert isinstance(input_spec.arg, ep.ConstantArgument)
-                node_name = input_spec.arg.name
+                node_name = self.signature.input_specs[i].arg.name
                 placeholder_node = self.graph.placeholder(node_name)
                 placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:
@@ -1878,9 +1878,7 @@ class GraphModuleDeserializer:
             raise SerializeError(f"Unhandled argument {inp}")
 
     def deserialize_constant_input(self, inp: ConstantValue) -> Any:
-        if inp.type == "as_none":
-            return None
-        elif inp.type == "as_int":
+        if inp.type == "as_int":
             return int(inp.as_int)
         elif inp.type == "as_float":
             return float(inp.as_float)
@@ -1888,8 +1886,10 @@ class GraphModuleDeserializer:
             return str(inp.as_string)
         elif inp.type == "as_bool":
             return bool(inp.as_bool)
+        elif inp.type == "as_none":
+            return None
         else:
-            raise SerializeError(f"Unhandled constant argument {inp}")
+            raise SerializeError(f"Unhandled constant argument {inp} to deserialize")
 
     def deserialize_sym_argument(self, sym_arg):
         if isinstance(sym_arg, SymIntArgument):
@@ -2043,7 +2043,7 @@ class GraphModuleDeserializer:
         elif x.type == "as_sym_int":
             return ep.SymIntArgument(name=x.as_sym_int.as_name)
         else:
-            raise SerializeError(f"Unhandled argument spec: {x.type}")
+            raise SerializeError(f"Unhandled argument spec to deserialize: {x}")
 
     def deserialize_module_call_signature(
         self, module_call_signature: ModuleCallSignature
@@ -2680,7 +2680,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                 "as_string",
                 "as_custom_obj",
             ):
-                raise AssertionError("Constant inputs should be handled with ConstantInputSpecs")
+                return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
         elif spec.type == "parameter":

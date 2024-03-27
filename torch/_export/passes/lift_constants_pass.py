@@ -150,7 +150,7 @@ def lift_constants_pass(
                 if constant_fqn is not None:
                     constant_name = constant_fqn.replace(".", "_")
                 else:
-                    constant_name = f"lifted_custom_{num_custom_obj}"
+                    constant_name = f"obj_lifted_custom_{num_custom_obj}"
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
@@ -159,7 +159,7 @@ def lift_constants_pass(
                 if constant_fqn is not None:
                     constant_name = constant_fqn.replace(".", "_")
                 else:
-                    constant_name = f"lifted_tensor_{num_tensor_constants}"
+                    constant_name = f"c_lifted_tensor_{num_tensor_constants}"
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
             elif isinstance(constant_val, torch.fx.GraphModule):

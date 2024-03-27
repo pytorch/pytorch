@@ -284,35 +284,29 @@ def _rename_constants_nodes(
     graph_signature: ExportGraphSignature,
 ) -> None:
     """
-    For strict mode only.
-    Rename the constant nodes in the graph & graph signature from buffers to constants.
+    For strict mode, rename constants nodes that were previously annotated as buffers.
     """
     # handle name collisions with existing constants
     node_names = {node.name for node in gm.graph.nodes}
 
     def rename_constant(name):
         if name in node_names:
-            n = 0
+            n = 1
             while (dup_name := f"{name}_{n}") in node_names:
                 n += 1
             name = dup_name
         node_names.add(name)
         return name
 
+    # use input specs to map names from buffers to constants
     buffer_to_constant = {}
-    for spec in graph_signature.input_specs:  # read from and update input specs
-        if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
-            "c_"
-        ):
-            assert spec.arg.name.startswith("b_")
+    for spec in graph_signature.input_specs:
+        if spec.kind == InputKind.CONSTANT_TENSOR and spec.arg.name.startswith("b_"):
             c_name = rename_constant(f"c_{spec.arg.name[2:]}")
             buffer_to_constant[spec.arg.name] = c_name
             spec.arg.name = c_name
-    for spec in graph_signature.output_specs:  # update output specs
-        if (
-            not isinstance(spec.arg, ConstantArgument)
-            and spec.arg.name in buffer_to_constant
-        ):
+    for spec in graph_signature.output_specs:
+        if spec.arg.name in buffer_to_constant:
             spec.arg.name = buffer_to_constant[spec.arg.name]
 
     # Rename constants nodes for all modules
@@ -445,39 +439,6 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _verify_placeholder_node_names(
-    gm: torch.fx.GraphModule, sig: ExportGraphSignature, constants: Dict[str, Any]
-):
-    """
-    Performs a sanity check on the placeholder node names.
-    - User input nodes: no restrictions, should match the original forward() signature
-    - Params/buffers/constants/custom_obj nodes: should start with "p", "b", "c", "obj"
-    """
-    name_to_kind = {
-        spec.arg.name: spec.kind
-        for spec in sig.input_specs
-        if not isinstance(spec.arg, ConstantArgument)
-    }
-    kind_to_prefix = {
-        InputKind.USER_INPUT: "u",
-        InputKind.PARAMETER: "p",
-        InputKind.BUFFER: "b",
-        InputKind.CONSTANT_TENSOR: "c",
-        InputKind.CUSTOM_OBJ: "obj",
-        InputKind.TOKEN: "token",
-    }
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if node.name not in name_to_kind:  # skip constant user inputs
-                continue
-            node_kind = name_to_kind[node.name]
-            prefix = kind_to_prefix[node_kind] + "_"
-            if not node.name.startswith(prefix):
-                raise SpecViolationError(
-                    f"Placeholder node name {node.name} does not follow spec for {node_kind}, name should start with {prefix}_"
-                )
-
-
 def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
     """Search the module hierarchy, gathering up all tensor and ScriptObject constants.
 
@@ -563,10 +524,10 @@ def _export_non_strict(
         gm = replace_set_grad_with_hop_pass(gm)
 
     # Remove nn_module_stack metadata from all placeholders/inputs nodes.
-    for submod in gm.modules():
-        if not isinstance(submod, torch.fx.GraphModule):
+    for _mod in gm.modules():
+        if not isinstance(_mod, torch.fx.GraphModule):
             continue
-        for node in submod.graph.nodes:
+        for node in _mod.graph.nodes:
             if node.op in ["placeholder", "output"]:
                 node.meta.pop("nn_module_stack", None)
 
@@ -649,7 +610,6 @@ def _export_non_strict(
     placeholder_naming_pass(
         gm,
         export_graph_signature,
-        constants,
         mod,
         fake_args,
         fake_kwargs,
@@ -748,6 +708,37 @@ def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
                     raise SpecViolationError(
                         f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
                     )
+
+
+def _verify_placeholder_names(gm: torch.fx.GraphModule, sig: ExportGraphSignature):
+    """
+    Performs a sanity check on the placeholder node names.
+    - User input nodes: no restrictions, should match the original forward() signature
+    - Params/buffers/constants/custom_obj nodes: should start with "p", "b", "c", "obj"
+    """
+    name_to_kind = {
+        spec.arg.name: spec.kind
+        for spec in sig.input_specs
+        if not isinstance(spec.arg, ConstantArgument)
+    }
+    kind_to_prefix = {
+        InputKind.USER_INPUT: "",
+        InputKind.PARAMETER: "p_",
+        InputKind.BUFFER: "b_",
+        InputKind.CONSTANT_TENSOR: "c_",
+        InputKind.CUSTOM_OBJ: "obj_",
+        InputKind.TOKEN: "token",
+    }
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if node.name not in name_to_kind:  # skip constant user inputs
+                continue
+            node_kind = name_to_kind[node.name]
+            prefix = kind_to_prefix[node_kind]
+            if not node.name.startswith(prefix):
+                raise SpecViolationError(
+                    f"Placeholder node name {node.name} does not follow spec for {node_kind}, name should have prefix: {prefix}"
+                )
 
 
 def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
@@ -1008,7 +999,7 @@ def _export(
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
-        _verify_placeholder_node_names(gm, ep_non_strict.sig, ep_non_strict.constants)
+        _verify_placeholder_names(gm, ep_non_strict.sig)
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -1204,8 +1195,8 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
-    _verify_placeholder_node_names(gm, export_graph_signature, constants)
     _verify_nn_module_stack(gm)
+    _verify_placeholder_names(gm, export_graph_signature)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
