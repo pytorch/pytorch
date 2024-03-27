@@ -5,7 +5,7 @@ import torch
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.abstract_impl_class import _ns_and_class_name, AbstractScriptObject
+from torch._library.abstract_impl_class import _ns_and_class_name, FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -48,8 +48,7 @@ def _need_python_dispatch():
 
 def _is_torch_bind_operator(op, args, kwargs):
     return any(
-        isinstance(arg, AbstractScriptObject)
-        for arg in list(args) + list(kwargs.values())
+        isinstance(arg, FakeScriptObject) for arg in list(args) + list(kwargs.values())
     )
 
 
@@ -140,7 +139,7 @@ def enable_torchbind_tracing():
 def call_torchbind_impl(obj, method, *args, **kwargs):
     if isinstance(obj, torch.ScriptObject):
         return _orig_scriptmethod_call(getattr(obj, method), *args, **kwargs)
-    elif isinstance(obj, AbstractScriptObject):
+    elif isinstance(obj, FakeScriptObject):
         return getattr(obj.wrapped_obj, method)(*args, **kwargs)
     else:
         raise RuntimeError(f"Unsupported first arg type {type(obj)} for call_torchbind")
@@ -168,7 +167,7 @@ def inner(mode, *args, **kwargs):
             log.warning(
                 "Tracing torchbind method %s.%s with real ScriptObject. This may"
                 " cause the original object being mutated. If this is not intended,"
-                ' You can register an abstract class with torch._library.impl_abstract_class("%s::%s").',
+                ' You can register a fake class with torch._library.impl_abstract_class("%s::%s").',
                 class_name,
                 method,
                 ns,
