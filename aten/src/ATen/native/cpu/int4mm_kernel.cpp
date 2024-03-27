@@ -16,6 +16,10 @@
 #define RESTRICT __restrict__
 #endif
 
+#if defined(__aarch64__) 
+#include <third_party/simd-everywhere/simde/x86/avx2.h>
+#endif
+
 namespace at::native {
 
 namespace {
@@ -24,7 +28,7 @@ inline bool is_block_start(int index, int BLOCK_SIZE) {
   return !(index & (BLOCK_SIZE -1));
 }
 
-#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#if (defined(__aarch64__) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 // convert 16x int4 to int8, handle 64 bits at a time
 // used in avx2 and avx512
 inline __m128i conver_int4_to_int8(const uint8_t* data) {
@@ -195,7 +199,7 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#elif (defined(__aarch64__) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <int BLOCK_M, int BLOCK_N>
 inline void tinygemm_kernel(
@@ -491,7 +495,7 @@ void weight_to_int4pack_kernel(
             dst[k * nb_size / 2 + n / 2] = packed;
           }
         }
-#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#elif (defined(__aarch64__) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
           // for nb_size 32
           for (const auto d : c10::irange(16)) {
