@@ -2944,7 +2944,7 @@ class GraphModule(torch.nn.Module):
         # Python 3.10 and 3.11 produces slightly different graphs
         if sys.version_info[:2] > (3, 10):
             self.assertExpectedInline(
-                actual.split("\n")[-1],
+                actual.split("\n")[-2],
                 """        return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)""",
             )
         else:
