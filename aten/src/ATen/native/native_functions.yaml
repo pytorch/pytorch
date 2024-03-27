@@ -3348,6 +3348,10 @@
   dispatch:
     CUDA: _sparse_semi_structured_apply
 
+- func: _sparse_semi_structured_apply_dense(Tensor input, Tensor thread_masks) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_apply_dense
+
 - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None, ScalarType? out_dtype=None) -> Tensor
   dispatch:
     CUDA: _sparse_semi_structured_linear

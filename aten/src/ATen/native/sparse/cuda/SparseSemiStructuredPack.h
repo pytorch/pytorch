@@ -430,7 +430,7 @@ struct KernelTypes {
     }
   }
 
-  CUTLASS_DEVICE static void sparse24_apply_kernel(Params p) {
+  CUTLASS_DEVICE static void sparse_semi_structured_apply_kernel(Params p) {
     // See `sparse24_sparsify_both_ways_kernel`
     // It's basically the same, just that we skip
     // the part where compute the indices we keep

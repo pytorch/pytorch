@@ -1,7 +1,6 @@
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Tuple, List, Callable, Dict
-from functools import partial
 
 import torch
 from torch.sparse._semi_structured_conversions import (

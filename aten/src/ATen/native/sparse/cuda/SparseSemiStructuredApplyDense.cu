@@ -6,6 +6,39 @@
 #include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/Tensor.h>
+#include <ATen/Functions.h>
+#include <ATen/Utils.h>
+#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/util/accumulate.h>
+#include <torch/library.h>
+
+#include <ATen/ScalarOps.h>
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
+#include <ATen/autocast_mode.h>
+#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
+#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAUtils.h>
+#include <ATen/Dispatch.h>
+#include <torch/library.h>
+#include <torch/types.h>
+
+#include <cuda_runtime.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/layout/layout.h>
+#include <cutlass/tensor_ref.h>
+#include <cutlass/epilogue/thread/linear_combination.h>
+#include <cutlass/epilogue/thread/linear_combination_relu.h>
+#include <cutlass/epilogue/thread/linear_combination_silu.h>
+
+#include <type_traits>
+#include <tuple>
 
 namespace at::native {
 struct Params {
@@ -41,8 +74,7 @@ struct Params {
 };
 
 template <bool kInputRowMajor = true, bool kOutputRowMajor = true>
-__global__ void __launch_bounds__(32 /* num_threads */, 32)
-    sparse24_apply_dense_output_k(Params p) {
+__global__ void __launch_bounds__(32 /* num_threads */, 32) sparse_semi_structured_apply_dense_k(Params p) {
   using Fragment = cutlass::Array<uint16_t, 8>;
 
   // Top-left of the 8x8 tile we own
@@ -113,10 +145,10 @@ __global__ void __launch_bounds__(32 /* num_threads */, 32)
   }
 }
 
-template <bool kIsMeta = false>
-at::Tensor sparse24_apply_dense_output(
-    at::Tensor input,
-    at::Tensor threads_masks) {
+Tensor _sparse_semi_structured_apply_dense(
+    const Tensor& input,
+    const Tensor& threads_masks) {
+
   TORCH_CHECK(
       input.scalar_type() == at::ScalarType::Half ||
           input.scalar_type() == at::ScalarType::BFloat16,
@@ -145,9 +177,6 @@ at::Tensor sparse24_apply_dense_output(
   at::Tensor output = at::empty({p.input_dim0, p.input_dim1}, input.options());
   TORCH_INTERNAL_ASSERT(output.stride(-1) == 1, "expected RowMajor?");
   p.output = (uint16_t*)output.data_ptr();
-  if (kIsMeta) {
-    return output;
-  }
 
   bool inputRowMajor = input.stride(-1) == 1;
   bool outputRowMajor = output.stride(-1) == 1;
@@ -158,10 +187,10 @@ at::Tensor sparse24_apply_dense_output(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   size_t smem_bytes = 0;
   if (inputRowMajor && outputRowMajor) {
-    sparse24_apply_dense_output_k<true, true>
+    sparse_semi_structured_apply_dense_k<true, true>
         <<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
   } else if (!inputRowMajor && outputRowMajor) {
-    sparse24_apply_dense_output_k<false, true>
+    sparse_semi_structured_apply_dense_k<false, true>
         <<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
   } else {
     TORCH_CHECK(
@@ -173,15 +202,6 @@ at::Tensor sparse24_apply_dense_output(
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return output;
-}
-
-at::Tensor sparse24_apply_dense_output_autocast(
-    at::Tensor input,
-    at::Tensor threads_masks) {
-  c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::DispatchKey::Autocast);
-  auto exec_type = at::autocast::get_autocast_gpu_dtype();
-  return sparse24_apply_dense_output(
-      at::autocast::cached_cast(exec_type, input), threads_masks);
 }
 
 } // namespace

@@ -36,9 +36,9 @@ namespace at::native {
 
 template <typename KT>
 __global__ void __launch_bounds__(32 /* num_threads */)
-  sparse24_apply_kernel(typename KT::Params p)
+  sparse_semi_structured_apply_kernel(typename KT::Params p)
 {
-  KT::sparse24_apply_kernel(p);
+  KT::sparse_semi_structured_apply_kernel(p);
 }
 
 // Apply a 2:4 sparsify pattern computed with
@@ -96,7 +96,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
 
   if (!kIsMeta) {
     size_t smem_bytes = 0;
-    sparse24_apply_kernel<KT>
+    sparse_semi_structured_apply_kernel<KT>
         <<<p.getBlocksGrid(),
            p.getThreadsGrid(),
            smem_bytes,
