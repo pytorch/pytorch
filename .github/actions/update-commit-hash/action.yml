@@ -1,0 +1,59 @@
+name: Update commit hash
+
+inputs:
+  repo-owner:
+    required: false
+    type: string
+    description: Name of repository's owner.
+    default: pytorch
+  repo-name:
+    required: true
+    type: string
+    description: Name of the repository we're updating commit hash for.
+  branch:
+    required: true
+    type: string
+    description: Branch to fetch commit of
+  pin-folder:
+    type: string
+    description: Path to folder with commit pin
+    required: false
+    default: .github/ci_commit_pins
+  updatebot-token:
+    required: true
+    type: string
+    description: update bot token
+  pytorchbot-token:
+    required: true
+    type: string
+    description: update bot token
+
+description: update commit hash
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 1
+        submodules: false
+        token: ${{ inputs.updatebot-token }}
+    - name: Checkout
+      shell: bash
+      run: |
+        git clone https://github.com/${{ inputs.repo-owner }}/${{ inputs.repo-name }}.git --quiet
+    - name: Check if there already exists a PR
+      shell: bash
+      env:
+        REPO_NAME: ${{ inputs.repo-name }}
+        BRANCH: ${{ inputs.branch }}
+        PIN_FOLDER: ${{ inputs.pin-folder }}
+        UPDATEBOT_TOKEN: ${{ inputs.updatebot-token }}
+        PYTORCHBOT_TOKEN: ${{ inputs.pytorchbot-token }}
+        NEW_BRANCH_NAME: update-${{ inputs.repo-name }}-commit-hash/${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
+      run: |
+        # put this here instead of the script to prevent accidentally changing the config when running the script locally
+        git config --global user.name "PyTorch UpdateBot"
+        git config --global user.email "pytorchupdatebot@users.noreply.github.com"
+        python .github/scripts/update_commit_hashes.py --repo-name "${REPO_NAME}" --branch "${BRANCH}" --pin-folder "${PIN_FOLDER}"

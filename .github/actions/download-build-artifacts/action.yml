@@ -1,0 +1,34 @@
+name: Download PyTorch Build Artifacts
+
+description: Download and unzip artifacts from a previous PyTorch build.
+
+inputs:
+  name:
+    description: Name of what artifact to download
+    required: true
+  use-gha:
+    description: If set to any value, use GHA to download the artifact. Otherwise use s3.
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Download PyTorch Build Artifacts from S3
+      if: ${{ !inputs.use-gha }}
+      uses: seemethere/download-artifact-s3@v4
+      with:
+        name: ${{ inputs.name }}
+
+    - name: Download PyTorch Build Artifacts from GHA
+      if: inputs.use-gha
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ inputs.name }}
+
+    - name: Unzip artifacts
+      shell: bash
+      run: unzip -o artifacts.zip
+
+    - name: Output disk space left
+      shell: bash
+      run: df -H
