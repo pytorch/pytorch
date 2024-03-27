@@ -396,3 +396,6 @@ class PyCodegen:
             self.create_load_const(kw_names),
             create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]
+
+    def create_delete(self, value) -> Instruction:
+        return create_instruction("DELETE_FAST", argval=value)
