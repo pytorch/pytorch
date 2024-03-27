@@ -130,6 +130,12 @@ inline bool VecMask<int, 1>::is_masked(int i) const {
   return _mm512_movepi32_mask(mask_[0]) & (1 << i);
 }
 
+template <>
+inline bool VecMask<int, 1>::all_masked() const {
+  __mmask16 mask = _mm512_movepi32_mask(mask_[0]);
+  return mask == 0xffff;
+}
+
 #define VEC_MASK_METHOD_WITH_CAST_TO_INT(                   \
     T, N, return_type, method, args_def, args)              \
   template <>                                               \
@@ -141,6 +147,8 @@ VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, all_zero, (), ())
 VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, all_zero, (), ())
 VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, is_masked, (int i), (i))
 VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, is_masked, (int i), (i))
+VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, all_masked, (), ())
+VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, all_masked, (), ())
 
 #undef VEC_MASK_DEFINE_METHOD_WITH_CAST_TO_INT
 

@@ -17,6 +17,7 @@ inline namespace CPU_CAPABILITY {
  * 3. `all_zero`: Checks if all mask elements are zero.
  * 4. `is_masked`: Checks if a specific element is masked.
  * 5. `loadu`: Loads data from memory using the mask.
+ * 6. `all_masked`: Checks if all mask elements are masked.
  *
  * Some helper template classes are provided to simplify the specialization of
  * the `VecMask` for the specific CPU arch:
@@ -150,6 +151,13 @@ class VecMask {
     mask_.store(mask);
     return std::all_of(
         mask, mask + size(), [](T m) { return m == static_cast<T>(0); });
+  }
+
+  inline bool all_masked() const {
+    __at_align__ T mask[size()];
+    mask_.store(mask);
+    return std::all_of(
+        mask, mask + size(), [](T m) { return m != static_cast<T>(0); });
   }
 
   inline bool is_masked(int i) const {

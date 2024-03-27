@@ -1247,11 +1247,11 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, assert_fn, var, mask, size_map):
+    def __init__(self, line, indirect_assert, var, mask, size_map):
+        super().__init__(line)
         self.var = var
         self.mask = mask
-        self.line = line
-        self.assert_fn = assert_fn
+        self.indirect_assert = indirect_assert
         self.size_map = size_map
 
     def __call__(self):
@@ -1261,31 +1261,26 @@ class IndirectAssertLine(DeferredLineBase):
         assert_min = (self.var.bounds.lower >= 0) != sympy.true
         assert_max = (self.var.bounds.upper < size) != sympy.true
 
-        # FooBar interview question
+        lower = None
+        upper = None
         if not (assert_min or assert_max):
             return None
         elif assert_min and assert_max:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-            cond_print = f"0 <= {self.var} < {size_str}"
+            lower = "0"
+            upper = size_str
         elif assert_min:
-            cond = f"0 <= {self.var}"
-            cond_print = cond
+            lower = "0"
         else:
             assert assert_max
-            cond = f"{self.var} < {size_str}"
-            cond_print = cond
+            upper = size_str
 
-        if self.mask:
-            cond = f"({cond}) | ~{self.mask}"
         return self.line.format(
-            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
+            assert_line=self.indirect_assert(self.var, lower, upper, self.mask)
         )
 
     def _new_line(self, line):
         return IndirectAssertLine(
-            line, self.assert_fn, self.var, self.mask, self.size_map
+            line, self.indirect_assert, self.var, self.mask, self.size_map
         )
 
 
@@ -1431,6 +1426,25 @@ class Kernel(CodeGen):
     def assert_function(self) -> str:
         raise NotImplementedError()
 
+    def indirect_assert(self, var, lower, upper, mask=None):
+        if lower and upper:
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower} <= {var} < {upper}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = cond
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = cond
+
+        if mask:
+            cond = f"({cond}) | ~{mask}"
+
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
+
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError()
 
@@ -1486,7 +1500,7 @@ class Kernel(CodeGen):
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, "0")
+                        lt = ops.lt(var, 0)
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
@@ -1505,13 +1519,10 @@ class Kernel(CodeGen):
                     if existing_size is not None:
                         size = sympy.Min(size, existing_size)
                     else:
-                        line = (
-                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
-                        )
                         self.compute.writeline(
                             IndirectAssertLine(
-                                line,
-                                self.assert_function,
+                                "{assert_line}",
+                                self.indirect_assert,
                                 var,
                                 mask,
                                 self.indirect_max_sizes,

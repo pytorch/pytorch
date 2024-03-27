@@ -69,6 +69,12 @@ inline bool VecMask<int, 1>::is_masked(int i) const {
   return _mm256_movemask_ps(_mm256_castsi256_ps(mask_[0])) & (1 << i);
 }
 
+template <>
+inline bool VecMask<int, 1>::all_masked() const {
+  int mask = _mm256_movemask_ps(_mm256_castsi256_ps(mask_[0]));
+  return mask == 0xff;
+}
+
 #define VEC_MASK_METHOD_WITH_CAST_TO_INT(                   \
     T, N, return_type, method, args_def, args)              \
   template <>                                               \
@@ -80,6 +86,8 @@ VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, all_zero, (), ())
 VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, all_zero, (), ())
 VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, is_masked, (int i), (i))
 VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, is_masked, (int i), (i))
+VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, all_masked, (), ())
+VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, all_masked, (), ())
 
 #undef VEC_MASK_DEFINE_METHOD_WITH_CAST_TO_INT
 

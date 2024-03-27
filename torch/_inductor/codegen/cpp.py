@@ -554,10 +554,6 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
-class CppVecUnsupportedError(Exception):
-    pass
-
-
 class CppCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
@@ -1016,7 +1012,8 @@ class CppVecOverrides(CppOverrides):
                 scalars = [
                     arg
                     for arg in args
-                    if isinstance(arg, CppCSEVariable) and not arg.is_vec
+                    if isinstance(arg, (int, sympy.Expr))
+                    or (isinstance(arg, CppCSEVariable) and not arg.is_vec)
                 ]
                 vectors = [
                     arg
@@ -1029,6 +1026,17 @@ class CppVecOverrides(CppOverrides):
                     new_args = []
                     vec_dtype = vectors[0].dtype
                     for arg in args:
+                        if isinstance(arg, (int, sympy.Expr)):
+                            arg_dtype = torch.int64
+                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+                            assert opt_ctx
+                            if opt_ctx.dtype is not None:
+                                arg_dtype = opt_ctx.dtype
+                            if isinstance(arg, sympy.Expr) and not arg.is_number:
+                                arg = ops.index_expr(arg, arg_dtype)
+                            else:
+                                arg = ops.constant(arg, arg_dtype)
+                            arg = arg.value if isinstance(arg, OpsValue) else arg
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
@@ -1493,33 +1501,23 @@ class CppVecOverrides(CppOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx and opt_ctx.dtype is not None
         dtype = opt_ctx.dtype
-        assert dtype == torch.int32
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-        stride = stride_at_vec_range(index, tiling_var, V.kernel.tiling_factor)
-        if stride.is_number and not V.kernel.index_indirect_depends_on(
-            index, tiling_var
-        ):
-            if stride == 0:
-                return CppOverrides.index_expr(expr, dtype)
+        stride = V.kernel._try_get_const_stride(index, tiling_var)
+        if stride == 0:
+            return CppOverrides.index_expr(expr, dtype)
+        elif stride is not None:
             value = ops.to_dtype(cexpr(index), dtype)
             if isinstance(value, OpsValue):
                 value = value.value
             csevar = V.kernel.arange(value, stride)
         else:
-            csevar = V.kernel.load_non_contiguous(None, index, dtype, V.kernel.compute)
+            csevar = V.kernel._load_or_store_non_contiguous(  # type: ignore[assignment]
+                None, index, dtype, V.kernel.compute
+            )
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
-
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
-        assert isinstance(index_var, CppCSEVariable)
-        if index_var.is_vec:
-            raise CppVecUnsupportedError(
-                "indirect_indexing does not support vector index_var"
-            )
-        return sympy_index_symbol(str(index_var))
 
 
 CppVecOverrides._initialize_pointwise_overrides("cppvec")
@@ -2028,6 +2026,20 @@ class CppVecKernel(CppKernel):
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
 
+    def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
+        if self.index_indirect_depends_on(index, itervar):
+            return None
+        for indirect_var in (
+            self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+            for s in index.free_symbols
+            if s.name.startswith("tmp")  # type: ignore[attr-defined]
+        ):
+            assert isinstance(indirect_var, CppCSEVariable)
+            if indirect_var.is_vec:
+                return None
+        stride = stride_at_vec_range(index, itervar, self.tiling_factor)
+        return stride if stride.is_number else None
+
     def _get_num_vectors(self, dtype: torch.dtype) -> int:
         num_vectors = math.ceil(
             self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
@@ -2106,17 +2118,18 @@ class CppVecKernel(CppKernel):
             )
         return line
 
-    def load_non_contiguous(
+    def _load_or_store_non_contiguous(
         self,
         var: Optional[str],
         index: sympy.Expr,
         dtype: torch.dtype,
         buffer: Optional[IndentedBuffer] = None,
-    ) -> CppCSEVariable:
+        store_value: Optional[Union[str, CppCSEVariable]] = None,
+    ) -> Optional[CppCSEVariable]:
         """
-        Load a vector in a non-contiguous way. The vector is initialized from an array that is
+        Load or store a vector in a non-contiguous way. The vector is initialized from an array that is
         filled in an inner loop over the tiling factor.
-        :param var: buffer to load from, i.e. `var[transformed(index)]`. If None, we load the index
+        :param var: buffer to load from or store to, i.e. `var[transformed(index)]`. If None, we load the index
                     as index expression, i.e. `transformed(index)`.
         :param index: index into the `var` or the index expression by its own if `var` is None.
                       The `index` could contain indirect indexing or the tiling itervar. When used in
@@ -2125,8 +2138,11 @@ class CppVecKernel(CppKernel):
                       2. the indirect indexing vector variables are transformed into arrays over the tiling dim.
         :param dtype: data type of `var` or `index` if `var` is None.
         :param buffer: the code buffer to write the generated code to. If None, we write to `self.loads`.
-        :return: a CppCSEVariable that represents the loaded vector.
+        :param store_value: the value to store. If None, we load the vector.
+        :return: a CppCSEVariable that represents the loaded vector or None if it is a store.
         """
+        assert not store_value or var is not None, "store var must be provided"
+
         if buffer is None:
             buffer = self.loads
 
@@ -2169,6 +2185,8 @@ class CppVecKernel(CppKernel):
                 f"__at_align__ std::array<{result_type}, {result_size}> tmpbuf;"
             )
             code.writeline(result_declare)
+            if store_value:
+                code.writeline(f"{store_value}.store(tmpbuf.data());")
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2182,17 +2200,17 @@ class CppVecKernel(CppKernel):
                 if indirect_var.is_vec:
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
+            index = self.scale_index_with_offset(
+                index, itervar_idx=self.tiling_idx, offset=itervar_inner
+            )
             load_mask = None
             if self._load_mask is not None:
+                assert not store_value, "unexpected store with load mask"
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-            index = self.scale_index_with_offset(
-                index, itervar_idx=self.tiling_idx, offset=itervar_inner
-            )
             if codecache.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
@@ -2201,24 +2219,36 @@ class CppVecKernel(CppKernel):
                 f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
-                rhs = (
-                    f"{var}[{cexpr_index(index)}]"
-                    if var is not None
-                    else f"{cexpr_index(index)}"
-                )
+                index_c = cexpr_index(index)
+                for indirect_var in replacements:
+                    index_c = re.sub(
+                        r"\b" + f"{indirect_var}" + r"\b",
+                        replacements[indirect_var],
+                        index_c,
+                    )
+                rhs = f"{var}[{index_c}]" if var is not None else f"{index_c}"
                 if is_mask:
                     rhs = f"{self._get_mask_type()}::from({rhs})"
                 if load_mask:
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
-                code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
-            load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
-            code.writeline(f"return {load_line};")
+                if store_value:
+                    code.writeline(f"{rhs} = tmpbuf[{itervar_inner}];")
+                else:
+                    code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
+            if not store_value:
+                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
+                code.writeline(f"return {load_line};")
         code.writeline("()")
-        csevar = self.cse.generate(buffer, code)
-        assert isinstance(csevar, CppCSEVariable)
-        csevar.is_vec = True
-        return csevar
+        if store_value:
+            code.writeline(";")
+            buffer.splice(code)
+            return None
+        else:
+            csevar = self.cse.generate(buffer, code)
+            assert isinstance(csevar, CppCSEVariable)
+            csevar.is_vec = True
+            return csevar
 
     def load(self, name: str, index: sympy.Expr):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
@@ -2226,18 +2256,16 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
+        stride = self._try_get_const_stride(index, tiling_var)
         if stride == 0:
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
-        non_contiguous = stride != 1 or self.index_indirect_depends_on(
-            index, tiling_var
-        )
-        if non_contiguous:
-            csevar = self.load_non_contiguous(var, index, dtype)
-        else:
+        elif stride == 1:
+            # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
+        else:
+            csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (name, index), {})
         csevar.is_vec = True
@@ -2246,7 +2274,7 @@ class CppVecKernel(CppKernel):
             opt_ctx.dtype = torch.bool
         return csevar
 
-    def _get_vec_store_line(
+    def _get_store_line(
         self,
         value: Union[str, CppCSEVariable],
         var: str,
@@ -2254,7 +2282,8 @@ class CppVecKernel(CppKernel):
         dtype: torch.dtype,
     ):
         """
-        Get a store line str that stores `value` into `var` at `index` of `dtype`.
+        Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
+        both contiguous and non-contiguous store cases.
         :param value: Vectorized type templaterized on `dtype`.
         :param var: buffer to store into.
         :index: index into the `var`.
@@ -2265,29 +2294,19 @@ class CppVecKernel(CppKernel):
             isinstance(value, CppCSEVariable) and value.is_vec
         ), value
         tiling_var = self.itervars[self.tiling_idx]
-        assert index.has(tiling_var), f"index: {index}, tiling_var: {tiling_var}"
         var_expr = f"{var} + {cexpr_index(index)}"
-        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
-        non_contiguous = stride != 1 or self.index_indirect_depends_on(
-            index, tiling_var
-        )
-        if non_contiguous:
-            var_expr = "tmpbuf"
-        if dtype == torch.float:
-            line = f"{value}.store({var_expr});"
+        stride = self._try_get_const_stride(index, tiling_var)
+        code = IndentedBuffer()
+        if stride == 1:
+            if dtype == torch.float:
+                code.writeline(f"{value}.store({var_expr});")
+            else:
+                code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
         else:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        if non_contiguous:
-            inner = sympy_index_symbol(f"{tiling_var}_inner")
-            new_index = self.scale_index_with_offset(
-                index, itervar_idx=self.tiling_idx, offset=inner
+            self._load_or_store_non_contiguous(
+                var, index, dtype, buffer=code, store_value=value
             )
-            line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{self.tiling_factor}]; {line} "
-                f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
-                f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
-            )
-        return line
+        return code
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
@@ -2300,12 +2319,8 @@ class CppVecKernel(CppKernel):
         var = self.args.output(name)
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
-        self.stores.writeline(
-            DeferredLine(
-                name,
-                self._get_vec_store_line(value, var, index, V.graph.get_dtype(name)),
-            )
-        )
+        code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
+        self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
@@ -2396,38 +2411,27 @@ class CppVecKernel(CppKernel):
         out_dtype = V.graph.get_dtype(name)
         # Only float reductions are vectorized currently
         dtype = torch.float
+        code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            self.reduction_suffix.writeline(
-                DeferredLine(
-                    name,
-                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
-                )
+            code.writeline(
+                f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});"
             )
         else:
             # Vertical reduction
-            store_lines = []
             if out_dtype != dtype:
                 if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
                     _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                    store_lines = [
-                        DeferredLine(
-                            name,
-                            f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});",
-                        )
-                    ]
+                    code.writeline(
+                        f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                    )
                     value = _lowp_fp_tmpvar_vec
                 else:
                     raise AssertionError(
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
-            store_lines += [
-                DeferredLine(
-                    name,
-                    self._get_vec_store_line(value, var, index, out_dtype),
-                )
-            ]
-            self.reduction_suffix.writelines(store_lines)
+            code.splice(self._get_store_line(value, var, index, out_dtype))
+        self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def broadcast(self, scalar_var: CppCSEVariable) -> CppCSEVariable:
         assert not scalar_var.is_vec
@@ -2506,6 +2510,31 @@ class CppVecKernel(CppKernel):
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError()
+
+    def indirect_assert(self, var, lower, upper, mask=None):
+        assert not mask, "do not support mask in indirect_indexing assertion"
+        assert isinstance(var, CppCSEVariable)
+        assert var.dtype is not None
+        if not var.is_vec:
+            return super().indirect_assert(var, lower, upper, mask)
+        lower_scalar = lower
+        upper_scalar = upper
+        if lower:
+            lower = f"{self._get_vec_type(var.dtype)}({lower})"
+        if upper:
+            upper = f"{self._get_vec_type(var.dtype)}({upper})"
+        if lower and upper:
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower_scalar} <= {var} < {upper_scalar}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = f"{lower_scalar} <= {var}"
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = f"{var} < {upper_scalar}"
+        cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -3537,52 +3566,48 @@ class CppKernelProxy(CppKernel):
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
-            try:
-                if len(tiling_indices) == 1:
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    metrics.generated_cpp_vec_kernel_count += 1
-                    main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                        tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    main_loop.set_kernel(vec_kernel)
-                    tail_loop.set_kernel(scalar_kernel)
-                    main_loop.simd_vec = True
-                    tail_loop.simd_omp = True
-                    # We chop the loop into two cubes by the nelements - main loop and tail loop.
-                    # Regarding the main loop, it is straightforward that it could be vectorized with
-                    # nelements. But for the tail loop, it still could be vectorized. For example,
-                    # if the nelements is 8(256bits), then the tail loop still could be vectorized
-                    # as 4(128bits).
-                    tail_loop.simd_nelements = tiling_factors[0] // 2
-                elif len(tiling_indices) == 2:
-                    assert (
-                        tiling_indices[1] == len(self.itervars) - 1
-                        and tiling_factors[0] == tiling_factors[1]
-                    )
-                    tile2d_kernel = codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
-                    )
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    metrics.generated_cpp_vec_kernel_count += 2
-                    outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
-                        tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    outer_tail_loop.set_kernel(scalar_kernel)
-                    (
-                        inner_main_loop,
-                        inner_tail_loop,
-                    ) = outer_main_loop.split_with_tiling(
-                        tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    inner_main_loop.set_kernel(tile2d_kernel)
-                    inner_tail_loop.set_kernel(vec_kernel)
-            except CppVecUnsupportedError as e:
-                if schedule_log.isEnabledFor(logging.DEBUG):
-                    schedule_log.debug("Disabled vectorization: %s", e)
+            if len(tiling_indices) == 1:
+                vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                )
+                metrics.generated_cpp_vec_kernel_count += 1
+                main_loop, tail_loop = self.loop_nest.split_with_tiling(
+                    tiling_indices[0], factor=tiling_factors[0]
+                )
+                main_loop.set_kernel(vec_kernel)
+                tail_loop.set_kernel(scalar_kernel)
+                main_loop.simd_vec = True
+                tail_loop.simd_omp = True
+                # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                # Regarding the main loop, it is straightforward that it could be vectorized with
+                # nelements. But for the tail loop, it still could be vectorized. For example,
+                # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                # as 4(128bits).
+                tail_loop.simd_nelements = tiling_factors[0] // 2
+            elif len(tiling_indices) == 2:
+                assert (
+                    tiling_indices[1] == len(self.itervars) - 1
+                    and tiling_factors[0] == tiling_factors[1]
+                )
+                tile2d_kernel = codegen_kernel(
+                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                )
+                vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                )
+                metrics.generated_cpp_vec_kernel_count += 2
+                outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
+                    tiling_indices[0], factor=tiling_factors[0]
+                )
+                outer_tail_loop.set_kernel(scalar_kernel)
+                (
+                    inner_main_loop,
+                    inner_tail_loop,
+                ) = outer_main_loop.split_with_tiling(
+                    tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
+                )
+                inner_main_loop.set_kernel(tile2d_kernel)
+                inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
