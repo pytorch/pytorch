@@ -19,12 +19,12 @@ class AbstractClassRegistry:
         self._check_registered(full_qualname)
         return self._registered_class[full_qualname]
 
-    def register(self, full_qualname: str, abstract_class=None) -> None:
+    def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
             raise RuntimeError(
                 f"{full_qualname} is already registered. Please use deregister to deregister it first."
             )
-        self._registered_class[full_qualname] = abstract_class
+        self._registered_class[full_qualname] = fake_class
 
     def deregister(self, full_qualname: str) -> Any:
         if not self.has_impl(full_qualname):
@@ -48,8 +48,8 @@ class AbstractClassRegistry:
 global_abstract_class_registry = AbstractClassRegistry()
 
 
-def create_abstract_obj(x: torch.ScriptObject):
-    abstract_x = _abstract_obj_from_concrete(x)
+def create_fake_obj(fake_mode, x: torch.ScriptObject):
+    fake_x = _fake_obj_from_real(fake_mode, x)
 
     def _call_torchbind(method_name):
         from torch._higher_order_ops.torchbind import call_torchbind
@@ -59,32 +59,35 @@ def create_abstract_obj(x: torch.ScriptObject):
 
         return wrapped
 
-    abstract_x_wrapped = AbstractScriptObject(abstract_x)
+    fake_x_wrapped = FakeScriptObject(fake_x)
     for name in x._method_names():  # type: ignore[attr-defined]
-        attr = getattr(abstract_x, name, None)
+        attr = getattr(fake_x, name, None)
         if attr:
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
             setattr(
-                abstract_x_wrapped,
+                fake_x_wrapped,
                 name,
-                _call_torchbind(name).__get__(abstract_x_wrapped),
+                _call_torchbind(name).__get__(fake_x_wrapped),
             )
         else:
-            log.warning("Abstract object of %s doesn't implement method %s.", x, name)
-    return abstract_x_wrapped
+            log.warning("fake object of %s doesn't implement method %s.", x, name)
+    return fake_x_wrapped
 
 
-def impl_abstract_class(qualname, abstract_class=None):
-    r"""Register an abstract implementation for this class.
+def impl_abstract_class(qualname, fake_class=None):
+    r"""Register an fake implementation for this class.
 
-    It's in the same spirit of registering an abstract implementation for
+    It's in the same spirit of registering an fake implementation for
     an operator with impl_abstract but with the difference that it
-    associates a abstract class with the original torch bind class (registered
-    with torch::class_).  In this way, , object of the class can be properly
-    guarded and tracked by components in PT2 stack such as Dynamo and AOTAutograd.
+    associates a fake class with the original torch bind class (registered
+    with torch::class_). In this way, torch.compile can handle them properly
+    in components such as Dynamo and AOTAutograd.
 
-    This API may be used as a decorator (see examples).
+    This API may be used as a decorator (see examples). Users are required
+    to provide a from_real classmethod that takes a real object and returns an
+    instance of the fake class. All tensors in the fake object should also be
+    properly fakified with create_fake_tensor() in from_real.
 
     Examples:
         # For a torch Bind class Foo defined in test_custom_class_registration.cpp:
@@ -105,70 +108,54 @@ def impl_abstract_class(qualname, abstract_class=None):
                     [](std::vector<int64_t> state) { // __setstate__
                       return c10::make_intrusive<Foo>(state[0], state[1]);
                 });
-        # We could register a abstract class abstractFoo in Python as follows:
+        # We could register a fake class fakeFoo in Python as follows:
         import torch
 
-        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
-        class abstractFoo:
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, q):
+                self.queue = q
 
             @classmethod
-            def from_concrete(cls, foo_obj):
-                x, y = foo_obj.__getstate__()
-                return cls(x, y)
+            def from_real(cls, real_tq):
+                ctx = torch.library.get_ctx()
+                fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.clone_queue()]
+                return cls(fake_queue)
 
-            def add_tensor(self, z):
-                return (self.x + self.y) * z1
+            def push(self, x):
+                self.queue.append(x)
 
-    Temporal Limitations:
-        - We don't support method call on the script object yet. Please use custom op to manipulate them. Please
-          implement a custom op that takes the script object as input and call the method in the custom op.
+            def pop(self):
+                return self.queue.pop(0)
 
-    Examples:
-        # CPU impl in test_custom_class_registration.cpp:
+            def size(self):
+                return len(self.queue)
 
-        at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
-          return foo->add_tensor(x);
-        }
-        TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
-          m.impl("takes_foo", takes_foo);
-        }
-
-        # abstract impl in torchbind_impls.py:
-        @torch.library.impl_abstract("_TorchScriptTesting::takes_foo")
-        def foo_add_tensor(foo, z):
-            return foo.add_tensor(z)
     """
 
-    def inner(abstract_class):
+    def inner(fake_class):
         ns, name = parse_namespace(qualname)
 
         # This also checks whether the refered torch::class_ exists.
         torchbind_class = torch._C._get_custom_class_python_wrapper(ns, name)
 
-        from_method = getattr(abstract_class, _CONVERT_FROM_REAL_NAME, None)
+        from_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)
         if not from_method:
-            raise RuntimeError(
-                f"{abstract_class} doesn't define a classmethod from_concrete."
-            )
+            raise RuntimeError(f"{fake_class} doesn't define a classmethod from_real.")
 
-        if not isinstance(
-            abstract_class.__dict__[_CONVERT_FROM_REAL_NAME], classmethod
-        ):
+        if not isinstance(fake_class.__dict__[_CONVERT_FROM_REAL_NAME], classmethod):
             raise RuntimeError(
                 f"{_CONVERT_FROM_REAL_NAME} method is not a classmethod."
             )
 
         global_abstract_class_registry.register(
-            _full_qual_class_name(qualname), abstract_class
+            _full_qual_class_name(qualname), fake_class
         )
-        return abstract_class
+        return fake_class
 
-    if abstract_class is None:
+    if fake_class is None:
         return inner
-    return inner(abstract_class)
+    return inner(fake_class)
 
 
 def deregister_abstract_impl(qualname):
@@ -201,36 +188,38 @@ def _ns_and_class_name(full_qualname: str):
 def _find_abstract_class_for_script_object(x: torch.ScriptObject):
     full_qualname = x._type().qualified_name()  # type: ignore[attr-defined]
     ns, class_name = _ns_and_class_name(full_qualname)
-    abstract_class = find_abstract_impl(full_qualname)
-    if abstract_class is None:
+    fake_class = find_abstract_impl(full_qualname)
+    if fake_class is None:
         raise RuntimeError(
-            f" ScriptObject's {full_qualname} haven't registered a abstract class."
-            f" Please use impl_abstract_class({ns}::{class_name}) to annotate a abstract class for the script obj."
-            f" Specifically, create a python class that implements a abstract version for all the methods"
+            f" ScriptObject's {full_qualname} haven't registered a fake class."
+            f" Please use impl_abstract_class({ns}::{class_name}) to annotate a fake class for the script obj."
+            f" Specifically, create a python class that implements a fake version for all the methods"
             f" that're used in the program and put annotated class in the program e.g. after loading the library."
-            f" The abstract methods can be written in the same way as a meta kernel for an operator but need to also"
-            f" simulate the object's states when necessary. Be sure to add a {_CONVERT_FROM_REAL_NAME} classmethod"
-            f" to enable creating a abstract obj from a real one."
+            f" The fake methods can be written in the same way as a meta kernel for an operator but need to additionally"
+            f" simulate the object's states. Be sure to add a {_CONVERT_FROM_REAL_NAME} classmethod"
+            f" to enable creating a fake obj from a real one."
         )
-    return abstract_class
+    return fake_class
 
 
-_CONVERT_FROM_REAL_NAME = "from_concrete"
+_CONVERT_FROM_REAL_NAME = "from_real"
 
 
-class AbstractScriptObject:
+class FakeScriptObject:
     def __init__(self, wrapped_obj):
         self.wrapped_obj = wrapped_obj
 
 
-def _abstract_obj_from_concrete(x):
-    abstract_class = _find_abstract_class_for_script_object(x)
+def _fake_obj_from_real(fake_mode, x):
+    fake_class = _find_abstract_class_for_script_object(x)
 
-    from_concrete_method = getattr(abstract_class, _CONVERT_FROM_REAL_NAME, None)
-    if not from_concrete_method:
+    from_real_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)
+    if not from_real_method:
         raise RuntimeError(
-            f"{abstract_class} must define a classmethod {_CONVERT_FROM_REAL_NAME}"
-            f" that converts the real object to the abstract object."
+            f"{fake_class} must define a classmethod {_CONVERT_FROM_REAL_NAME}"
+            f" that converts the real object to the fake object."
         )
 
-    return abstract_class.from_concrete(x)
+    ctx = torch._library.abstract_impl.AbstractImplCtx(fake_mode, None)
+    with torch._library.abstract_impl.set_ctx_getter(lambda: ctx):
+        return fake_class.from_real(x)
