@@ -249,6 +249,11 @@ TORCH_LIBRARY(_quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("_quantized::linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack"));
 }
 
+TORCH_LIBRARY(quantized_wrapper, m) {
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized_wrapper::wrapped_fbgemm_pack_gemm_matrix_fp16(Tensor W) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized_wrapper::wrapped_fbgemm_linear_fp16_weight(Tensor X, Tensor W, Tensor B, int out_channel) -> Tensor"));
+}
+
 TORCH_LIBRARY(onednn, m) {
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Weight Prepack
