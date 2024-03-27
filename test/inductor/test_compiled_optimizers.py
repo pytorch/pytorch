@@ -92,7 +92,7 @@ KERNEL_COUNTS = {
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
-    SGD: KernelCounts(multitensor=1, singletensor=8),
+    SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -317,11 +317,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             compiled_step()
 
         if self.check_kernel_count:
-            # currently, we compile the step and the rest of the computation
-            # separately because the step is a single element tensor
-            # hence, the usual kernel count is 2
-            # multiply by 2 to account for the recompile
-            multiplier = 2
+            if optim_cls is SGD:
+                # SGD triggers an additional recompile
+                # because of momentum buffer list mutation in step()
+                multiplier = 3
+            else:
+                # currently, we compile the step and the rest of the computation
+                # separately because the step is a single element tensor
+                # hence, the usual kernel count is 2
+                # multiply by 2 to account for the recompile
+                multiplier = 2
 
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count,
