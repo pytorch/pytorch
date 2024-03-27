@@ -540,12 +540,7 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape* mp
     firstDimToSlice++;
   }
 
-  int64_t view_numel = 1;
-  for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
-    view_numel *= src_base_shape[i];
-  }
-
-  int64_t sliceOffset = src.storage_offset() / view_numel;
+  int64_t sliceOffset = src.storage_offset() % src_base_shape[firstDimToSlice];
   [srcTensorNDArrayDesc
       sliceDimension:src_ndim_base - 1 - firstDimToSlice
         withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
@@ -553,11 +548,7 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape* mp
   // Slice any remaining dimensions
   for (const auto crtSliceOffset : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
     if (src_view_shape[crtSliceOffset] != src_base_shape[crtSliceOffset]) {
-      if (crtSliceOffset == src_base_shape.size() - 1) {
-        sliceOffset = src.storage_offset() % src_base_shape[src_base_shape.size() - 1];
-      } else {
-        sliceOffset = (src.storage_offset() % view_numel) / (view_numel / src_base_shape[crtSliceOffset]);
-      }
+      sliceOffset = src.storage_offset() % src_base_shape[crtSliceOffset];
       [srcTensorNDArrayDesc
           sliceDimension:src_ndim_base - 1 - crtSliceOffset
             withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[crtSliceOffset])}];
