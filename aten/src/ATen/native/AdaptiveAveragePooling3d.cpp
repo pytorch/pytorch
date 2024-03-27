@@ -317,6 +317,12 @@ Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_siz
     // in this case, adaptive pooling is just computing mean over hw
     // dimensions, which can be done more efficiently
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);
+    if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d) {
+      // assert ndim == 5, since ndim = 4 doesn't give channels_last
+      const auto n = input.sym_size(0);
+      const auto c = input.sym_size(1);
+      out.as_strided__symint({n, c, 1, 1, 1}, {c, 1, c, c, c});
+    }
     return out;
   } else {
     return _adaptive_avg_pool3d_symint(input, output_size);
