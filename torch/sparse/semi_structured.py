@@ -311,21 +311,22 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     @classmethod
     def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
-        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(
-            original_tensor,
-            backend=cls.BACKEND, algorithm=algorithm)
+        raise NotImplementedError
+        # (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+        #     original_tensor,
+        #     algorithm=algorithm, use_cutlass=isinstance(cls, SparseSemiStructuredTensorCUTLASS))
 
-        sInp = cls(
-            original_tensor.shape,
-            packed=packed,
-            meta=meta,
-            packed_t=packed_t,
-            meta_t=meta_t,
-            threads_masks=threads_masks,
-            requires_grad=False,
-            fuse_transpose_cusparselt=True,
-        )
-        return sInp
+        # sInp = cls(
+        #     original_tensor.shape,
+        #     packed=packed,
+        #     meta=meta,
+        #     packed_t=packed_t,
+        #     meta_t=meta_t,
+        #     threads_masks=threads_masks,
+        #     requires_grad=False,
+        #     fuse_transpose_cusparselt=True,
+        # )
+        # return sInp
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
@@ -428,6 +429,25 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             requires_grad=original_tensor.requires_grad,
         )
 
+    @classmethod
+    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+            original_tensor,
+            algorithm=algorithm,
+            use_cutlass=True)
+
+        sInp = cls(
+            original_tensor.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+            requires_grad=False,
+            fuse_transpose_cusparselt=True,
+        )
+        return sInp
+
     def to_dense(self):
         assert self.meta is not None and self.packed is not None
         return (
@@ -500,6 +520,24 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             requires_grad=original_tensor.requires_grad,
         )
 
+    @classmethod
+    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+            original_tensor,
+            algorithm=algorithm,
+            use_cutlass=False)
+
+        sInp = cls(
+            original_tensor.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+            requires_grad=False,
+            fuse_transpose_cusparselt=True,
+        )
+        return sInp
 
     def _mm(
         self,

@@ -324,7 +324,7 @@ class TestSparseSemiStructured(TestCase):
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":
-                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
+                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
                 with self.assertRaisesRegex(RuntimeError,
@@ -349,6 +349,8 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A_sparse.t(), B) throws error
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 256, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
@@ -368,6 +370,8 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A, B_sparse.t()) is correct
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         B = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         B_sparse = to_sparse_semi_structured(B)
 
@@ -391,6 +395,8 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A, B_sparse) throws error
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         B = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         B_sparse = to_sparse_semi_structured(B)
 
@@ -410,6 +416,8 @@ class TestSparseSemiStructured(TestCase):
         Test nn.Linear has the same numerics
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         input = torch.rand((dense_input_shape), device=device).half()
         model = nn.Linear(128, 256).to(device).half()
         m, n = model.weight.shape
@@ -463,6 +471,8 @@ class TestSparseSemiStructured(TestCase):
     @parametrize_backends
     def test_values(self, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.values().shape == (128, 64)
@@ -471,6 +481,8 @@ class TestSparseSemiStructured(TestCase):
     @parametrize_backends
     def test_indices(self, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.indices().shape == (128, 8)
@@ -497,6 +509,8 @@ class TestSparseSemiStructured(TestCase):
     @parametrize_backends
     def test_unsupported_shape(self, dtype, device, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(2, 2, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
             A_sparse = to_sparse_semi_structured(A)
@@ -505,6 +519,8 @@ class TestSparseSemiStructured(TestCase):
     @parametrize_backends
     def test_unsupported_dtype(self, dtype, device, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
         if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
@@ -516,6 +532,8 @@ class TestSparseSemiStructured(TestCase):
     @parametrize_backends
     def test_unsupported_dim(self, device, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        if backend == "cutlass" and IS_WINDOWS:
+            self.skipTest("CUTLASS not supported on Windows")
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):
@@ -600,8 +618,8 @@ class TestSparseSemiStructuredTraining(TestCase):
 
         if backend == "cutlass":
             assert isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS)
-            (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(
-                mask_dense)
+            (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+                mask_dense, use_cutlass=True)
 
             sparse_mask = SparseSemiStructuredTensorCUTLASS(
                 mask_dense.shape,
@@ -624,7 +642,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         a = torch.randn([N, N], dtype=dtype, device="cuda")
         b = torch.eye(N, dtype=dtype, device="cuda")
 
-        packed, meta, packed_t, meta_t = torch.ops.sparse._semi_structured_sparsify_both_ways(a)[
+        packed, meta, packed_t, meta_t = torch._sparse_semi_structured_tile(a)[
             :4
         ]
         # Heuristic to ensure we pack the same values
@@ -667,7 +685,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         )
         a = torch.randn([32, 64], dtype=dtype, device="cuda")
         a[:4, :4] = quad
-        packed, meta, packed_t, meta_t = torch.ops.sparse._semi_structured_sparsify_both_ways(a)[:4]
+        packed, meta, packed_t, meta_t = torch._sparse_semi_structured_tile(a)[:4]
         # Check first line in A
         assert packed[0, 0].item() == 2
         assert packed[0, 1].item() == 0
@@ -685,7 +703,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             packed_t,
             meta_t,
             threads_masks,
-        ) = torch.ops.sparse._semi_structured_sparsify_both_ways(x)
+        ) = torch.ops.sparse._sparse_semi_structured_tile(x)
         packed2, packed_t2 = torch.ops.sparse._semi_structured_apply(x, threads_masks)
         assert torch.allclose(packed, packed2)
         assert torch.allclose(packed_t, packed_t2)
@@ -698,7 +716,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         b = torch.randn([K, N], device="cuda", dtype=dtype)
         a_m = sparse24_largest_mask_2d(a)
         b_m = sparse24_largest_mask_2d(b)
-        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(a)
+        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(a)
         a_s = SparseSemiStructuredTensorCUTLASS(
             a.shape,
             packed=packed,
@@ -707,7 +725,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             meta_t=meta_t,
             threads_masks=threads_masks,
         )
-        (packed, meta, packed_t, meta_t, threads_masks) = torch.ops.sparse._semi_structured_sparsify_both_ways(b)
+        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(b)
         b_s = SparseSemiStructuredTensorCUTLASS(
             a.shape,
             packed=packed,

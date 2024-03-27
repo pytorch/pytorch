@@ -335,7 +335,7 @@ LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        self.assertIn("[INFO]", handler.format(records[0]))
+        self.assertIn("I", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
 
     @make_logging_test(dynamo=logging.INFO)
@@ -354,7 +354,7 @@ LoweringException: AssertionError:
         for record in records:
             r = handler.format(record)
             for l in r.splitlines():
-                self.assertIn("[INFO]", l)
+                self.assertIn("I", l)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 

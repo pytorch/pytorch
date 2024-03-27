@@ -36,7 +36,7 @@ TEST(MemoryDAGTest, Basic) {
     t->makePointerTo(e, a);
     t->makePointerTo(e, f);
 
-    auto dag = std::make_unique<MemoryDAG>(std::move(t));
+    auto dag = std::move(*t).createMemoryDAG();
 
     /**
      * Test mayAlias()
@@ -69,7 +69,7 @@ TEST(MemoryDAGTest, Basic) {
     auto c = t->makeFreshValue(cValue);
     t->addToContainedElements(a, c);
 
-    auto dag = std::make_unique<MemoryDAG>(std::move(t));
+    auto dag = std::move(*t).createMemoryDAG();
     EXPECT_TRUE(dag->mayContainAlias(a, b));
     EXPECT_TRUE(dag->mayContainAlias(b, a));
 
@@ -99,7 +99,7 @@ TEST(MemoryDAGTest, Basic) {
     auto d = t->makeFreshValue(dValue);
     t->addToContainedElements(b, d);
 
-    auto dag = std::make_unique<MemoryDAG>(std::move(t));
+    auto dag = std::move(*t).createMemoryDAG();
     EXPECT_TRUE(dag->mayContainAlias(b, d));
     EXPECT_TRUE(dag->mayContainAlias(d, b));
 
@@ -126,7 +126,7 @@ TEST(MemoryDAGTest, Basic) {
 
     t->addToContainedElements(f, e);
 
-    auto dag = std::make_unique<MemoryDAG>(std::move(t));
+    auto dag = std::move(*t).createMemoryDAG();
     for (auto elem : {a, b, c, d}) {
       EXPECT_FALSE(dag->mayContainAlias(f, elem));
       EXPECT_FALSE(dag->mayContainAlias(e, elem));

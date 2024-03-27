@@ -1,10 +1,13 @@
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/CallOnce.h>
-#include <ATen/Utils.h>
+#include <deque>
 
 namespace at {
 namespace cuda::detail {
@@ -24,10 +27,10 @@ static std::deque<c10::once_flag> cuda_gens_init_flag;
 static std::vector<Generator> default_gens_cuda;
 
 /*
-* Populates the global variables related to CUDA generators
-* Warning: this function must only be called once!
-*/
-static void initCUDAGenVector(){
+ * Populates the global variables related to CUDA generators
+ * Warning: this function must only be called once!
+ */
+static void initCUDAGenVector() {
   num_gpus = c10::cuda::device_count();
   cuda_gens_init_flag.resize(num_gpus);
   default_gens_cuda.resize(num_gpus);
@@ -78,6 +81,150 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 } // namespace cuda::detail
 
 /**
+ * Creates a clone of this CUDA Generator State.
+ */
+c10::intrusive_ptr<CUDAGeneratorState> CUDAGeneratorState::clone() {
+  return make_intrusive<CUDAGeneratorState>(
+      seed_, philox_offset_per_thread_, offset_intragraph_);
+}
+
+/**
+ * Function to increase the internal offset based on the specified increment.
+ */
+void CUDAGeneratorState::increase(uint64_t increment) {
+  // Rounds increment up to the nearest multiple of 4 to meet alignment
+  // requirements.
+  // see Note [Why enforce RNG offset % 4 == 0?]
+  increment = ((increment + 3) / 4) * 4;
+  // Handling different behaviors based on whether capturing is active.
+  if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+    // Ensures that the state is actually capturing.
+    TORCH_CHECK(
+        capturing_,
+        "Attempt to increase offset for a CUDA generator not in capture mode.");
+    // Ensures the offset is a multiple of 4
+    // see Note [Why enforce RNG offset % 4 == 0?]
+    TORCH_INTERNAL_ASSERT(
+        offset_intragraph_ % 4 == 0, "RNG offset must be a multiple of 4.");
+    // Ensures the increment does not cause overflow.
+    TORCH_INTERNAL_ASSERT(
+        offset_intragraph_ <= std::numeric_limits<uint32_t>::max() - increment,
+        "Increment causes overflow in the offset value.");
+    offset_intragraph_ += increment;
+  } else {
+    // Checks that the increment is expected outside graph capturing.
+    TORCH_CHECK(
+        !capturing_,
+        "Offset increment outside graph capture encountered unexpectedly.");
+    // Ensures the offset is a multiple of 4
+    // see Note [Why enforce RNG offset % 4 == 0?]
+    TORCH_INTERNAL_ASSERT(
+        philox_offset_per_thread_ % 4 == 0,
+        "RNG offset must be a multiple of 4.");
+    philox_offset_per_thread_ += increment;
+  }
+}
+
+/**
+ * Registers this state to a CUDA graph to manage within the graph.
+ */
+void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
+  // Ensures that the RNG state is not currently being captured.
+  at::cuda::assertNotCapturing(
+      "Cannot register the state during capturing stage.");
+
+  // If this is the first graph to be registered, allocate memory for the seed
+  // and offset on the GPU.
+  if (registered_graphs_.empty()) {
+    auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
+    seed_extragraph_ = at::empty({1}, options);
+    offset_extragraph_ = at::empty({1}, options);
+  }
+
+  // Insert the graph into the set of registered graphs if it's not already
+  // registered.
+  if (registered_graphs_.find(graph) == registered_graphs_.end()) {
+    registered_graphs_.insert(graph);
+  }
+}
+
+/**
+ * Unregisters a CUDA graph from the RNG state.
+ */
+void CUDAGeneratorState::unregister_graph(cuda::CUDAGraph* graph) {
+  // Ensures that the RNG state is not currently being captured.
+  at::cuda::assertNotCapturing(
+      "Cannot unregister the state during capturing stage.");
+  // Verify the graph was previously registered.
+  TORCH_CHECK(
+      registered_graphs_.find(graph) != registered_graphs_.end(),
+      "The graph should be registered to the state");
+
+  // Remove the graph from the set of registered graphs.
+  registered_graphs_.erase(graph);
+
+  // If no more graphs are registered, deallocate the GPU memory for the seed
+  // and offset.
+  if (registered_graphs_.empty()) {
+    seed_extragraph_.reset();
+    offset_extragraph_.reset();
+  }
+}
+
+/**
+ * Note [Explicit Registration of Generators to the CUDA Graph]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *
+ * Ideally, it would be more user-friendly if the state could be exchanged and generators
+ * could be registered with the CUDA graph implicitly. However, resetting GPU tensors during
+ * the capture stage causes these reset operations to be recorded within the CUDA graph.
+ * This behavior is undesirable because we do not want these tensors to be reset during
+ * the replay stage of the graph.
+ *
+ * As of now, there is no available method to perform a CUDA operation during the graph's
+ * recording phase without having that operation be included in the CUDA graph.
+ * This limitation necessitates explicit user action to register generators with the graph.
+ * By requiring users to manually register their generators, we can ensure that state resets
+ * (capture_prologue) only occur before the graph capture begins, thus avoiding unintended
+ * resets during the replay of the graph. See https://github.com/pytorch/pytorch/pull/114068.
+ */
+
+/**
+ * Performs the prologue steps for capturing a CUDA graph state.
+ * This method is intended to reset graph-related state variables before capturing begins.
+ */
+void CUDAGeneratorState::capture_prologue() {
+  capturing_ = true;
+  offset_intragraph_ = 0;
+  seed_extragraph_.fill_(int64_t(seed_));
+  offset_extragraph_.fill_(int64_t(0));
+}
+
+/**
+ * Ends the capturing phase and resets related variables, returning the whole
+ * graph increment.
+ */
+uint64_t CUDAGeneratorState::capture_epilogue() {
+  capturing_ = false;
+  return offset_intragraph_;
+}
+
+/**
+ * Prepares the state for replay by setting initial state tensors and applying
+ * total increment.
+ */
+void CUDAGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
+  // Ensures the generator is not in capturing mode.
+  at::cuda::assertNotCapturing(
+      "Cannot prepare for replay during capturing stage.");
+  seed_extragraph_.fill_(int64_t(seed_));
+  offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
+  // Applies the total increment achieved during previous captures to update the
+  // offset.
+  increase(wholegraph_increment);
+}
+
+/**
  * Note [Why enforce RNG offset % 4 == 0?]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Curand philox does allow offsets that aren't a multiple of 4.
@@ -97,8 +244,18 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
-              DispatchKeySet(c10::DispatchKey::CUDA)} {
+          DispatchKeySet(c10::DispatchKey::CUDA)} {
   at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
+  state_ = make_intrusive<CUDAGeneratorState>();
+  no_reset_rnn_state_.clear();
+}
+
+CUDAGeneratorImpl::CUDAGeneratorImpl(
+    DeviceIndex device_index,
+    c10::intrusive_ptr<CUDAGeneratorState> state)
+    : c10::
+          GeneratorImpl{Device(DeviceType::CUDA, device_index), DispatchKeySet(c10::DispatchKey::CUDA)},
+      state_(std::move(state)) {
   no_reset_rnn_state_.clear();
 }
 
@@ -109,9 +266,10 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_current_seed");
-  seed_ = seed;
-  philox_offset_per_thread_ = 0;
+  at::cuda::assertNotCapturing(
+      "Cannot call CUDAGeneratorImpl::set_current_seed");
+  state_->seed_ = seed;
+  state_->philox_offset_per_thread_ = 0;
   no_reset_rnn_state_.clear();
 }
 
@@ -134,14 +292,8 @@ uint64_t CUDAGeneratorImpl::get_offset() const {
   // Debatable if get_offset() should be allowed in captured regions.
   // Conservatively disallow it for now.
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::get_offset");
-  return philox_offset_per_thread_;
+  return state_->philox_offset_per_thread_;
 }
-
-#define CAPTURE_DEFAULT_GENS_MSG \
-"In regions captured by CUDA graphs, you may only use the default CUDA RNG " \
-"generator on the device that's current when capture begins. " \
-"If you need a non-default (user-supplied) generator, or a generator on another " \
-"device, please file an issue."
 
 /**
  * Gets the current seed of CUDAGeneratorImpl.
@@ -150,7 +302,7 @@ uint64_t CUDAGeneratorImpl::current_seed() const {
   // Debatable if current_seed() should be allowed in captured regions.
   // Conservatively disallow it for now.
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::current_seed");
-  return seed_;
+  return state_->seed_;
 }
 
 /**
@@ -194,6 +346,8 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
  * and size of the internal state.
  */
 void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
+  at::cuda::assertNotCapturing(
+      "Please ensure to utilize the CUDAGeneratorImpl::set_state_index method during capturing.");
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = seed_size + offset_size;
@@ -208,7 +362,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
   }
 
-  uint64_t input_seed;
+  uint64_t input_seed = 0;
   auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state, seed_size);
   this->set_current_seed(input_seed);
@@ -220,43 +374,58 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
 }
 
 /**
+ * Sets the generator's current state to
+ * This function allows switching between different registered states of
+ * the generator.
+ */
+void CUDAGeneratorImpl::graphsafe_set_state(
+    const c10::intrusive_ptr<GeneratorImpl>& gen) {
+  c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
+      dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(gen);
+  TORCH_CHECK(cuda_gen, "Expected a CUDA Generator");
+  state_ = cuda_gen->state_;
+}
+
+/**
+ * Get the GeneratorImpl that point to current state_
+ */
+c10::intrusive_ptr<c10::GeneratorImpl> CUDAGeneratorImpl::graphsafe_get_state()
+    const {
+  auto gen = make_intrusive<CUDAGeneratorImpl>(device().index(), state_);
+  return gen;
+}
+
+/**
  * Sets the philox_offset_per_thread_ to be used by curandStatePhilox4_32_10
  *
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_philox_offset_per_thread");
   // see Note [Why enforce RNG offset % 4 == 0?]
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  philox_offset_per_thread_ = offset;
+  state_->philox_offset_per_thread_ = offset;
 }
 
 /**
  * Gets the current philox_offset_per_thread_ of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::philox_offset_per_thread");
-  return philox_offset_per_thread_;
+  return state_->philox_offset_per_thread_;
 }
 
 /**
- * Called by CUDAGraph to prepare this instance for a graph capture region.
- * offset_extragraph is the initial offset at the start of the graphed region.
- * offset_intragraph tracks the offset in the graphed region.
+ * Registers this state to a CUDA graph to manage within the graph.
  */
-void CUDAGeneratorImpl::capture_prologue(int64_t* seed_extragraph, int64_t* offset_extragraph) {
-  seed_extragraph_ = seed_extragraph;
-  offset_extragraph_ = offset_extragraph;
-  offset_intragraph_ = 0;
-  graph_expects_this_gen_ = true;
+void CUDAGeneratorImpl::register_graph(cuda::CUDAGraph* graph) {
+  graph->register_generator_state(state_);
+  state_->register_graph(graph);
 }
 
 /**
- * Called by CUDAGraph to finalize a graph capture region for this instance.
+ * Unregisters a CUDA graph from the RNG state.
  */
-uint64_t CUDAGeneratorImpl::capture_epilogue() {
-  graph_expects_this_gen_ = false;
-  return offset_intragraph_;
+void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraph* graph) {
+  state_->unregister_graph(graph);
 }
 
 /**
@@ -281,30 +450,17 @@ uint64_t CUDAGeneratorImpl::capture_epilogue() {
  * See Note [Acquire lock when using random generators]
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
-  // rounds increment up to the nearest multiple of 4
-  increment = ((increment + 3) / 4) * 4;
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-    TORCH_CHECK(graph_expects_this_gen_,
-                "philox_cuda_state for an unexpected CUDA generator used during capture. "
-                CAPTURE_DEFAULT_GENS_MSG);
-    // see Note [Why enforce RNG offset % 4 == 0?]
-    TORCH_INTERNAL_ASSERT(this->offset_intragraph_ % 4 == 0);
-    uint32_t offset = this->offset_intragraph_;
-    TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
-                          std::numeric_limits<uint32_t>::max() - increment);
-    this->offset_intragraph_ += increment;
-    return PhiloxCudaState(this->seed_extragraph_,
-                           this->offset_extragraph_,
-                           offset);
+    uint32_t offset = state_->offset_intragraph_;
+    state_->increase(increment);
+    return PhiloxCudaState(
+        state_->seed_extragraph_.data_ptr<int64_t>(),
+        state_->offset_extragraph_.data_ptr<int64_t>(),
+        offset);
   } else {
-    TORCH_CHECK(!graph_expects_this_gen_,
-                "CUDA generator expects graph capture to be underway, "
-                "but the current stream is not capturing.");
-    // see Note [Why enforce RNG offset % 4 == 0?]
-    TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
-    uint64_t offset = this->philox_offset_per_thread_;
-    this->philox_offset_per_thread_ += increment;
-    return PhiloxCudaState(this->seed_, offset);
+    uint64_t offset = state_->philox_offset_per_thread_;
+    state_->increase(increment);
+    return PhiloxCudaState(state_->seed_, offset);
   }
 }
 
@@ -312,16 +468,13 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
  * Temporarily accommodates call sites that use philox_engine_inputs.
  * Allows incremental refactor of call sites to use philox_cuda_state.
  */
-std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
-  at::cuda::assertNotCapturing("Refactor this op to use CUDAGeneratorImpl::philox_cuda_state. "
-                               "Cannot call CUDAGeneratorImpl::philox_engine_inputs");
-  // rounds increment up to the nearest multiple of 4
-  increment = ((increment + 3) / 4) * 4;
-  // see Note [Why enforce RNG offset % 4 == 0?]
-  TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
-  uint64_t offset = this->philox_offset_per_thread_;
-  this->philox_offset_per_thread_ += increment;
-  return std::make_pair(this->seed_, offset);
+std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(
+    uint64_t increment) {
+  at::cuda::assertNotCapturing(
+      "Refactor this op to use CUDAGeneratorImpl::philox_cuda_state. Cannot call CUDAGeneratorImpl::philox_engine_inputs");
+  uint64_t offset = state_->philox_offset_per_thread_;
+  state_->increase(increment);
+  return std::make_pair(state_->seed_, offset);
 }
 
 /*
@@ -348,9 +501,7 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
  */
 CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::clone_impl");
-  auto gen = new CUDAGeneratorImpl(this->device().index());
-  gen->set_current_seed(this->seed_);
-  gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
+  auto gen = new CUDAGeneratorImpl(this->device().index(), state_->clone());
   return gen;
 }
 

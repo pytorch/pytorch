@@ -24,6 +24,7 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
+    is_namedtuple,
     is_safe_constant,
     istensor,
     istype,
@@ -48,21 +49,20 @@ def initialize_lazy_module(tx, mod, args, kwargs):
     if hasattr(mod, "_initialize_hook"):
 
         def convert_to_fake(x):
-            return get_fake_value(x.node, tx) if isinstance(x, torch.fx.Proxy) else x
+            if is_namedtuple(x):
+                return type(x)(*(convert_to_fake(elem) for elem in x))
+            elif isinstance(x, dict):
+                return {k: convert_to_fake(v) for k, v in x.items()}
+            elif isinstance(x, (list, tuple, set)):
+                return type(x)(convert_to_fake(elem) for elem in x)
+            elif isinstance(x, torch.fx.Proxy):
+                return get_fake_value(x.node, tx)
+            else:
+                return x
 
         proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-        fake_args = [
-            type(arg)([convert_to_fake(x) for x in arg])
-            if isinstance(arg, (list, tuple))
-            else convert_to_fake(arg)
-            for arg in proxy_args
-        ]
-        fake_kwargs = {
-            k: type(v)([convert_to_fake(x) for x in v])
-            if isinstance(v, (list, tuple))
-            else convert_to_fake(v)
-            for k, v in proxy_kwargs.items()
-        }
+        fake_args = [convert_to_fake(arg) for arg in proxy_args]
+        fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
         mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
@@ -77,7 +77,12 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "module_type",
+        "module_key",
+        "module",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
@@ -304,6 +309,14 @@ class NNModuleVariable(VariableTracker):
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
+                # NB: torch.nn.utils.parametrize changes the class type of the
+                # parametrized module such that its __module__ points to the
+                # "torch.nn.utils.parametrize". These modules should be treated
+                # as unspecialized since parametrizations can do arbitrary computation.
+                if mod.__module__ == "torch.nn.utils.parametrize":
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
+
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -418,7 +431,7 @@ class NNModuleVariable(VariableTracker):
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
-                raise unimplemented(f"non-const NNModule method {name}")
+                unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
             assert_all_args_kwargs_const()

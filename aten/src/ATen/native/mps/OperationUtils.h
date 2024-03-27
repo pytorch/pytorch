@@ -381,4 +381,14 @@ inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds,
 inline bool supportsComplex() {
   return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
 }
+
+// MPS yet to support double types, but starting from MacOS 14, supports bfloat16
+inline bool supportedFloatingType(ScalarType dtype) {
+  return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
+}
+
+inline bool supportedFloatingType(const Tensor& t) {
+  return supportedFloatingType(t.scalar_type());
+}
+
 } // namespace at::native::mps

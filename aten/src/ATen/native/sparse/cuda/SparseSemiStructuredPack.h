@@ -8,8 +8,8 @@
 #include <cutlass/half.h>
 #include <cutlass/integer_subbyte.h>
 
-namespace torch {
-namespace sparse {
+namespace at::native {
+
 using cutlass::uint1b_t;
 using cutlass::uint2b_t;
 using cutlass::uint4b_t;
@@ -516,5 +516,5 @@ struct KernelTypes {
         packed_trans, p.packed_trans_stride, packed_trans_b, packed_trans_d);
   }
 };
-} // namespace sparse
-} // namespace torch
+
+} // namespace at::native

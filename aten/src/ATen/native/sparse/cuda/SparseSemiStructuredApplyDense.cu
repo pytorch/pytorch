@@ -7,7 +7,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
 
-namespace torch::sparse {
+namespace at::native {
 struct Params {
   uint64_t const* threads_masks;
 
@@ -186,20 +186,20 @@ at::Tensor sparse24_apply_dense_output_autocast(
 
 } // namespace
 
-TORCH_LIBRARY_IMPL(sparse, CUDA, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
-      TORCH_FN(torch::sparse::sparse24_apply_dense_output<false>));
-}
+// TORCH_LIBRARY_IMPL(sparse, CUDA, m) {
+//   m.impl(
+//       TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
+//       TORCH_FN(torch::sparse::sparse24_apply_dense_output<false>));
+// }
 
-TORCH_LIBRARY_IMPL(sparse, Meta, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
-      TORCH_FN(torch::sparse::sparse24_apply_dense_output<true>));
-}
+// TORCH_LIBRARY_IMPL(sparse, Meta, m) {
+//   m.impl(
+//       TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
+//       TORCH_FN(torch::sparse::sparse24_apply_dense_output<true>));
+// }
 
-TORCH_LIBRARY_IMPL(sparse, Autocast, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
-      TORCH_FN(torch::sparse::sparse24_apply_dense_output_autocast));
-}
+// TORCH_LIBRARY_IMPL(sparse, Autocast, m) {
+//   m.impl(
+//       TORCH_SELECTIVE_NAME("sparse::_semi_structured_apply_dense_output"),
+//       TORCH_FN(torch::sparse::sparse24_apply_dense_output_autocast));
+// }

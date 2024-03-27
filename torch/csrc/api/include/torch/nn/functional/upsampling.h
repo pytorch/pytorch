@@ -18,12 +18,7 @@ inline std::vector<int64_t> _interp_output_size(
         c10::optional<std::vector<int64_t>>,
         c10::optional<std::vector<double>>,
         c10::optional<bool>> closed_over_args) {
-  Tensor input;
-  c10::optional<std::vector<int64_t>> size;
-  c10::optional<std::vector<double>> scale_factor;
-  c10::optional<bool> recompute_scale_factor;
-  std::tie(input, size, scale_factor, recompute_scale_factor) =
-      closed_over_args;
+  auto [input, size, scale_factor, recompute_scale_factor] = closed_over_args;
   if (size == c10::nullopt && scale_factor == c10::nullopt) {
     TORCH_CHECK(false, "either size or scale_factor should be defined");
   }
@@ -264,7 +259,7 @@ inline Tensor interpolate(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.interpolate
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.interpolate
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::InterpolateFuncOptions`

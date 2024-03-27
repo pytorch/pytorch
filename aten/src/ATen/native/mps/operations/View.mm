@@ -750,11 +750,11 @@ static const std::string& getGatherScatterScalarType(const Tensor& t) {
   return it->second;
 }
 
-static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const std::string& dtypeDst) {
+static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const std::string& dtypeDst, bool needsConj) {
   const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
   const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
   if (dstComplex) {
-    return dtypeDst + (srcComplex ? "(x.x, x.y)" : "(x,  0.0)");
+    return dtypeDst + (srcComplex ? needsConj ? "(x.x, -x.y)" : "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
     // TODO: Document why explicit cast is needed only for bfloat types
@@ -773,8 +773,9 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
 static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
                                                      const std::string& dtypeSrc,
                                                      const std::string& dtypeDst,
-                                                     bool needsScatter) {
-  auto key = std::to_string(needsScatter) + dtypeSrc + dtypeDst;
+                                                     bool needsScatter,
+                                                     bool needsConj) {
+  auto key = std::to_string(needsScatter) + std::to_string(needsConj) + dtypeSrc + dtypeDst;
   static std::unordered_map<std::string, id<MTLLibrary>> _libCache;
   auto it = _libCache.find(key);
   if (it != _libCache.end()) {
@@ -787,7 +788,7 @@ static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
   const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
                                      dtypeSrc,
                                      dtypeDst,
-                                     genScatterGatherCvtFunc(dtypeSrc, dtypeDst));
+                                     genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj));
   auto gatherScatterLib = [device newLibraryWithSource:[NSString stringWithUTF8String:shaderStr.c_str()]
                                                options:options
                                                  error:&error];
@@ -802,8 +803,9 @@ static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
                                                     const std::string& kernel,
                                                     const std::string& dtypeSrc,
                                                     const std::string& dtypeDst,
-                                                    bool needsScatter) {
-  auto key = kernel + dtypeSrc + dtypeDst;
+                                                    bool needsScatter,
+                                                    bool needsConj) {
+  auto key = kernel + dtypeSrc + dtypeDst + std::to_string(needsConj);
   static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
   auto it = _mtlPipelineCache.find(key);
   if (it != _mtlPipelineCache.end()) {
@@ -811,7 +813,7 @@ static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
   }
 
   NSError* error = nil;
-  id<MTLLibrary> library = compileGatherScatterOpsLibrary(device, dtypeSrc, dtypeDst, needsScatter);
+  id<MTLLibrary> library = compileGatherScatterOpsLibrary(device, dtypeSrc, dtypeDst, needsScatter, needsConj);
   id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
   TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
   id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
@@ -847,7 +849,8 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
                                                              functionName,
                                                              getGatherScatterScalarType(src),
                                                              getGatherScatterScalarType(output),
-                                                             /*needsScatter=*/false);
+                                                             /*needsScatter=*/false,
+                                                             src.is_conj() != dst.is_conj());
 
     // this function call is a no-op if MPS Profiler is not enabled
     getMPSProfiler().beginProfileKernel(gatherPSO, functionName, {src, output});
@@ -904,7 +907,8 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
                                                                 functionName,
                                                                 getGatherScatterScalarType(src),
                                                                 getGatherScatterScalarType(output),
-                                                                /*needsScatter=*/true);
+                                                                /*needsScatter=*/true,
+                                                                src.is_conj() != output.is_conj());
 
       getMPSProfiler().beginProfileKernel(scatterPSO, functionName, {src, output});
 

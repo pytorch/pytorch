@@ -19,7 +19,7 @@ struct numeric_limits<cutlass::bfloat16_t> {
 };
 } // namespace platform
 
-namespace torch::sparse{
+namespace at::native{
 
 template <typename Element, typename Pointwise>
 struct TileValueOrderedT {
@@ -182,4 +182,4 @@ void named_algorithms(T callback) {
   callback(LargestValuesGreedy<IdentityOp>(), "");
 }
 
-} // namespace torch::sparse
+} // namespace

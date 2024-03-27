@@ -46,7 +46,7 @@ struct TORCH_API KinetoEvent {
   int64_t debugHandle() const;
   std::string name() const;
   c10::DeviceType deviceType() const;
-  uint8_t deviceIndex() const;
+  int deviceIndex() const;
   int64_t nBytes() const;
   uint64_t startUs() const;
   uint64_t durationUs() const;
