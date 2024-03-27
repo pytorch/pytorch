@@ -32,8 +32,28 @@ Tensor& addmm_out(
 
   std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
   result.resize_(result_shape);
-  if (result.numel() == 0)
+
+  IntArrayRef result_sizes = result.sizes();
+  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
     return result;
+  }
+
+  if (mat1.numel() == 0){
+    if(beta.to<float>() == 0.f){
+      return result.zero_();
+    }
+    return at::mul_out(
+      result,
+      self.expand(result.sizes()),
+      at::native::scalar_tensor(
+        beta,
+        self.scalar_type(),
+        c10::nullopt,
+        at::kCPU,
+        c10::nullopt
+      )
+    );
+  }
 
   TORCH_CHECK(
       are_expandable(self.sizes(), result_shape),
@@ -41,17 +61,6 @@ Tensor& addmm_out(
       result_shape,
       " but got:",
       self.sizes());
-
-  // special case
-  if (alpha.to<float>() == 0.f) {
-    if (self.defined() && beta.to<float>() != 0.f) {
-      result = at::mul_out(
-          result, self, at::native::wrapped_scalar_tensor(at::Scalar(beta)));
-    } else {
-      result.zero_();
-    }
-    return result;
-  }
 
   // complex/double case
   if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
@@ -150,6 +159,7 @@ Tensor mv(const Tensor& self, const Tensor& vec) {
   return at::addmv_(result, self, vec, 0, 1);
 }
 
+
 // result = beta * input + alpha * (batch1 @ batch2)
 Tensor& baddbmm_out(
     const Tensor& input,
@@ -171,7 +181,7 @@ Tensor& baddbmm_out(
     if (beta.to<c10::complex<double>>() == 0.0){
       return result.zero_();
     }else{
-      result = input.mul_(beta);
+      at::mul_out(result, input, beta);
       return result;
     }
   }
@@ -218,6 +228,7 @@ Tensor& baddbmm_(
     const Tensor& batch2,
     const Scalar& beta,
     const Scalar& alpha) {
+  TORCH_CHECK(self.dtype() == batch1.dtype(), "Input dtypes must be the same, got: input ", self.dtype(), ", batch1: ", batch1.dtype(), ", batch2: ", batch2.dtype());
   return at::native::xpu::baddbmm_out(
       self, batch1, batch2, beta, alpha, self);
 }
@@ -229,6 +240,7 @@ Tensor baddbmm(
     const Scalar& beta,
     const Scalar& alpha) {
   Tensor r = at::empty({0}, input.options());
+  TORCH_CHECK(input.dtype() == batch1.dtype(), "Input dtypes must be the same, got: input ", input.dtype(), ", batch1: ", batch1.dtype(), ", batch2: ", batch2.dtype());
   r = at::native::xpu::baddbmm_out(input, batch1, batch2, beta, alpha, r);
   return r;
 }
