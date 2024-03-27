@@ -731,6 +731,31 @@ def fx_codegen_and_compile(
             metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
 
+            if (
+                cudagraphs
+                and config.triton.cudagraph_skip_dynamic_graphs
+                and not V.graph.disable_cudagraphs_reason
+                and torch._inductor.utils.any_is_symbolic(*example_inputs)
+            ):
+                stack_trace = None
+                for node in gm.graph.nodes:
+                    meta_val = node.meta.get("val", None)
+                    if (
+                        node.op == "placeholder"
+                        or not isinstance(meta_val, torch.Tensor)
+                        or not torch._inductor.utils.any_is_symbolic(meta_val)
+                    ):
+                        continue
+
+                    if stack_trace := node.meta.get("stack_trace", None):
+                        break
+                disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
+                if stack_trace:
+                    disable = f"{disable} Found from {stack_trace}\n"
+                else:
+                    disable = f"{disable}\n"
+                V.graph.disable_cudagraphs_reason = disable
+
             if V.aot_compilation is True:
                 return compiled_fn
 
