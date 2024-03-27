@@ -124,13 +124,12 @@ def find_input_mutations(g):
 
 # Mutates input graph
 def apply_cuda_graphs(gm):
-    for n in gm.graph.nodes:
-        if n.op == "call_module":
-            assert not n.kwargs
-            submod = gm.get_submodule(n.target)
-            gm.delete_submodule(n.target)
-            mutated_inputs = find_input_mutations(submod.graph)
-            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
+    for n in gm.graph.find_nodes(op="call_module"):
+        assert not n.kwargs
+        submod = gm.get_submodule(n.target)
+        gm.delete_submodule(n.target)
+        mutated_inputs = find_input_mutations(submod.graph)
+        gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
     # NB: we didn't actually change the graph, no need for recompile
 
 

@@ -214,12 +214,12 @@ class AutogradCompilerInstance:
         the graph.  This differs from eager mode, which schedules them as soon as possible. This
         pass attempts to reorder the graph to mimic eager behavior.
         """
-        target = torch.ops.inductor.accumulate_grad_.default
-        for node in [*self.fx_tracer.graph.nodes]:
-            if node.op == "call_function" and node.target == target:
-                arg = max(node.args)  # last arg
-                if arg is not node.prev and arg.op != "placeholder":
-                    arg.append(node)
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+        ):
+            arg = max(node.args)  # last arg
+            if arg is not node.prev and arg.op != "placeholder":
+                arg.append(node)
 
     def to_proxy(self, t):
         if t is None:
