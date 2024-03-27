@@ -199,6 +199,7 @@ def remove_unnecessary_split_with_sizes(mod):
 
 def replace_foreach_all_gather_copy_out_pattern(mod):
     """
+    TODO(yf225): in eager code, can we replace this entire pattern with an ATen op? e.g. https://github.com/pytorch/pytorch/pull/121081. Simplest is just to add a C++ version.
     NOTE: this pattern is from `foreach_all_gather_copy_out` in ppFSDP:
     ```
     ... = dist.all_gather_into_tensor(...)  # in another function
@@ -357,6 +358,7 @@ def replace_foreach_all_gather_copy_out_pattern(mod):
 
 def replace_foreach_all_gather_pattern(mod):
     """
+    TODO(yf225): in eager code, can we replace this entire pattern with an ATen op? e.g. https://github.com/pytorch/pytorch/pull/121081. Simplest is just to add a C++ version.
     NOTE: replace this pattern in `foreach_all_gather()` in _fsdp_collectives.py:
     ```
     all_gather_output = torch.empty(
@@ -600,6 +602,7 @@ def _collect_node_types_and_indices(mod):
 
 def replace_foreach_reduce_scatter_copy_in_pattern(mod):
     """
+    TODO(yf225): use Boyuan's _chunk_cat kernel
     NOTE: pattern from `foreach_reduce_scatter_copy_in`:
     ```
     for grad in unsharded_grads:
