@@ -197,10 +197,10 @@ class TestLift(TestCase):
         # is at the root submodule.
         # TODO(suo): we shouldn't hardcode these names in the test, this is an
         # internal detail of the pass.
-        self.assertIn("_lifted_tensor_constant0", constants)
-        self.assertEqual(constants["_lifted_tensor_constant0"], const_tensor)
-        self.assertIn("_lifted_custom_obj0", constants)
-        self.assertEqual(constants["_lifted_custom_obj0"], const_obj)
+        self.assertIn("lifted_tensor_0", constants)
+        self.assertEqual(constants["lifted_tensor_0"], const_tensor)
+        self.assertIn("lifted_custom_0", constants)
+        self.assertEqual(constants["lifted_custom_0"], const_obj)
 
         # The constant node should be removed.
         getattr_nodes = [n for n in gm.graph.nodes if n.op == "get_attr"]
@@ -212,17 +212,17 @@ class TestLift(TestCase):
 
         # The lifted constant should be placed before user inputs but after params/buffers
         lifted_tensor_placeholder = placeholder_nodes[2]
-        self.assertEqual(lifted_tensor_placeholder.target, "_lifted_tensor_constant0")
+        self.assertEqual(lifted_tensor_placeholder.target, "lifted_tensor_0")
         # It should have a val equivalent to the constant
         self.assertEqual(lifted_tensor_placeholder.meta["val"], const_tensor)
 
         lifted_obj_placeholder = placeholder_nodes[3]
-        self.assertEqual(lifted_obj_placeholder.target, "_lifted_custom_obj0")
+        self.assertEqual(lifted_obj_placeholder.target, "lifted_custom_0")
         # It should have a val equivalent to the constant
         self.assertEqual(
             lifted_obj_placeholder.meta["val"],
             CustomObjArgument(
-                name="_lifted_custom_obj0",
+                name="lifted_custom_0",
                 class_fqn="__torch__.torch.classes._TorchScriptTesting._Foo",
             ),
         )
@@ -267,8 +267,8 @@ class TestLift(TestCase):
         self.assertEqual(len(constants), 1)
 
         # The key of the constants table should match the fqn of the constant.
-        self.assertIn("foo._lifted_tensor_constant0", constants)
-        self.assertEqual(constants["foo._lifted_tensor_constant0"], const_tensor)
+        self.assertIn("foo.lifted_tensor_0", constants)
+        self.assertEqual(constants["foo.lifted_tensor_0"], const_tensor)
 
         # The constant node should be removed.
         getattr_nodes = [n for n in gm.graph.nodes if n.op == "get_attr"]
@@ -280,7 +280,7 @@ class TestLift(TestCase):
 
         # The lifted constant should be placed before user inputs but after params/buffers
         lifted_constant_placeholder = placeholder_nodes[0]
-        self.assertEqual(lifted_constant_placeholder.target, "_lifted_tensor_constant0")
+        self.assertEqual(lifted_constant_placeholder.target, "lifted_tensor_0")
 
         # Graph signature should have been mutated a way that reflects the placeholders.
         constant_input_spec = graph_signature.input_specs[0]

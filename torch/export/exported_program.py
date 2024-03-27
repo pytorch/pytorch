@@ -495,6 +495,11 @@ class ExportedProgram:
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
 
+        # rename the placeholders
+        assert len(new_placeholders) == len(old_placeholders)
+        for old_ph, new_ph in zip(old_placeholders, new_placeholders):
+            new_ph.name = new_ph.target = old_ph.name
+
         # To match the output target with correct input for input mutations
         # need to find the old to new placeholder map
         old_new_placeholder_map = {

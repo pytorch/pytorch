@@ -1,22 +1,27 @@
 import dataclasses
+import inspect
 import math
 import operator
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
 
 from torch.export import ExportedProgram
+from torch.export.exported_program import InputKind, OutputKind
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
     FlattenFunc,
     FromDumpableContextFn,
+    GetAttrKey,
     KeyPath,
     keystr,
     MappingKey,
     SequenceKey,
     ToDumpableContextFn,
+    tree_flatten_with_path,
     UnflattenFunc,
 )
 
@@ -168,6 +173,10 @@ def register_dataclass_as_pytree_node(
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
+    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+        flattened, (flat_names, none_names) = flatten_fn(obj)  # type: ignore[misc]
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
     unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
 
@@ -182,6 +191,7 @@ def register_dataclass_as_pytree_node(
         flatten_fn,
         unflatten_fn,
         serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=default_flatten_fn_with_keys,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
     )
@@ -399,3 +409,186 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
     gm.delete_all_unused_submodules()
     gm.recompile()
     return gm
+
+
+def name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
+    """
+    Propagate placeholder names from the top-level graph into HigherOrderOp subgraphs.
+    - For placeholder inputs, the top-level name is retained.
+    - For call_function inputs, node names are prefixed with the FQN to avoid naming collisions.
+    """
+    # gather all HOO subgraphs and their top-level named placeholder nodes
+    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and isinstance(
+            node.target, torch._ops.HigherOrderOperator
+        ):
+            # HOO subgraphs have varying input schemas, so we enumerate them there
+            if node.target._name == "cond":
+                _, true_graph, false_graph, cond_args = node._args
+                subgraph_ph_tuples.append((getattr(gm, true_graph.target), cond_args))
+                subgraph_ph_tuples.append((getattr(gm, false_graph.target), cond_args))
+            elif node.target._name == "wrap_with_set_grad_enabled":
+                subgraph, phs = node._args[1], node._args[2:]
+                subgraph_ph_tuples.append((getattr(gm, subgraph.target), phs))
+            elif node.target._name == "map_impl":
+                body_graph, array, args = node._args
+                subgraph_ph_tuples.append(
+                    (getattr(gm, body_graph.target), array + args)
+                )
+
+    # propagate names
+    for subgraph, hoo_phs in subgraph_ph_tuples:
+        for i, node in enumerate(subgraph.graph.nodes):
+            if i >= len(hoo_phs):
+                break
+            ph = hoo_phs[i]
+            # avoid duplicate names on ops with nn_module_stack
+            if ph.op == "call_function":
+                module_stack = ph.meta.get("nn_module_stack", {})
+                module_stack = [fqn for fqn, _ in module_stack.values()][1:]
+                name = "_".join(["_root"] + module_stack + [ph.name])
+            else:  # retain name
+                name = ph.name
+            node.name = node.target = name
+        # recurse and recompile
+        name_hoo_subgraph_placeholders(subgraph)
+        subgraph.recompile()
+
+
+def placeholder_naming_pass(
+    gm: torch.fx.GraphModule,
+    export_graph_signature: torch.export.ExportGraphSignature,
+    mod: torch.nn.Module,
+    fake_args,
+    fake_kwargs,
+    fake_params_buffers,
+) -> None:
+    """
+    This pass is run at the end of _export_non_strict() to assign better placeholder node names:
+        - User inputs:
+            These follow the signature of mod.forward(), e.g. forward(x, y) produces nodes x, y.
+            For nested inputs from dictionaries, lists, tuples, or dataclasses,
+            the names are a concatenation of the path to the tensor.
+                e.g. x = {
+                    'a': torch.randn(),
+                    'b': [torch.randn(), torch.randn()]
+                }
+            produces nodes x_a, x_b_0, x_b_1.
+        - Parameters/buffers/constants/custom objects:
+            These follow the FQN of the object, prefixed by "p", "b", "c", "obj" respectively.
+                e.g. self.bar.l0.weight produces "p_bar_l0_weight".
+        - Effect tokens:
+            These are named token, token_1, ...
+    """
+
+    prefixes = {
+        InputKind.PARAMETER: "p",
+        InputKind.BUFFER: "b",
+        InputKind.CONSTANT_TENSOR: "c",
+        InputKind.CUSTOM_OBJ: "obj",
+    }
+
+    def _strip_name(x):
+        if x.startswith("L__self___"):
+            x = x[len("L__self___") :]
+        return x.replace(".", "_")
+
+    # handle collisions with suffixing
+    name_map: Dict[str, str] = {}
+
+    def _rename_without_collisions(orig_name, name):
+        if name in name_map.values():
+            n = 1
+            while (dup_name := f"{name}_{n}") in name_map.values():
+                n += 1
+            name_map[orig_name] = dup_name
+        else:
+            name_map[orig_name] = name
+        return name_map[orig_name]
+
+    def _extract_pytree_key(x):
+        if isinstance(x, MappingKey):
+            return str(x.key).replace(".", "_")
+        elif isinstance(x, SequenceKey):
+            return str(x.idx)
+        elif isinstance(x, GetAttrKey):
+            return x.name
+        else:
+            raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
+
+    # map user input names with mod.forward() signature
+    combined_args = (
+        inspect.signature(mod.forward).bind(*fake_args, **fake_kwargs).arguments
+    )
+    flat_args_with_path, _ = tree_flatten_with_path(combined_args)
+    user_input_names = [
+        spec.arg.name
+        for spec in export_graph_signature.input_specs
+        if spec.kind == InputKind.USER_INPUT
+    ]
+
+    # use pytree path to name nested user inputs
+    for (arg_path, arg), user_input_name in zip(flat_args_with_path, user_input_names):
+        _rename_without_collisions(
+            user_input_name, "_".join(_extract_pytree_key(x) for x in arg_path)
+        )
+
+    # use graph signature input specs to map param/buffer/constant names
+    # name effect tokens as token, token_1, ... (these aren't visible to user)
+    for spec in export_graph_signature.input_specs:
+        if spec.kind in [
+            InputKind.PARAMETER,
+            InputKind.BUFFER,
+            InputKind.CONSTANT_TENSOR,
+            InputKind.CUSTOM_OBJ,
+        ]:
+            _rename_without_collisions(
+                spec.arg.name, f"{prefixes[spec.kind]}_{_strip_name(spec.target)}"
+            )
+        elif spec.kind == InputKind.TOKEN:
+            _rename_without_collisions(spec.arg.name, "token")  # handle collisions
+
+    # handle naming collisions with call_function/get_attr inputs.
+    # here, we want to prioritize user input names over call_function names
+    # e.g. not have forward(self, mul): lead to a placeholder node called mul_13,
+    # so we increment the suffix of call_function nodes as needed
+    pattern = r"(.*)_(\d+)"
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            continue
+        if node.name in name_map.values():  # name collision
+            if match := re.match(pattern, node.name):
+                base, suffix = match.group(1), int(match.group(2))
+            else:
+                base, suffix = node.name, 0
+            while (new_name := f"{base}_{suffix + 1}") in name_map.values():
+                suffix += 1
+            name_map[node.name] = new_name
+        else:
+            name_map[node.name] = node.name
+
+    # assign new node names
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            assert node.name in name_map
+            node.name = node.target = name_map[node.name]
+        elif node.name in name_map:
+            node.name = name_map[node.name]
+
+    # propagate names to higher order op subgraphs
+    name_hoo_subgraph_placeholders(gm)
+
+    # re-generate graph module code
+    gm.recompile()
+
+    # modify graph signature (input specs, output specs, user input mutations)
+    for spec in export_graph_signature.input_specs:
+        assert spec.arg.name in name_map
+        spec.arg.name = name_map[spec.arg.name]
+
+    for spec in export_graph_signature.output_specs:
+        if spec.arg.name in name_map:
+            spec.arg.name = name_map[spec.arg.name]
+        if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
+            spec.target = name_map[spec.target]
