@@ -2,9 +2,12 @@
 
 import torch
 import torch.testing._internal.torchbind_impls  # noqa: F401
+import torch.utils._pytree as pytree
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch._library.abstract_impl_class import FakeScriptObject
 from torch.export import export
 from torch.export._trace import _export
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -16,6 +19,66 @@ from torch.testing._internal.common_utils import (
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
+    def setUp(self):
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_real(cls, foo):
+                (x, y), _ = foo.__getstate__()
+                return cls(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
+
+        test = self
+        test.tq_push_counter = 0
+        test.tq_pop_counter = 0
+        test.tq_size_counter = 0
+
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, q):
+                self.queue = q
+
+            @classmethod
+            def from_real(cls, real_tq):
+                ctx = torch.library.get_ctx()
+                fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.clone_queue()]
+                return cls(fake_queue)
+
+            def push(self, x):
+                test.tq_push_counter += 1
+                self.queue.append(x)
+
+            def pop(self):
+                test.tq_pop_counter += 1
+                return self.queue.pop(0)
+
+            def size(self):
+                test.tq_size_counter += 1
+                return len(self.queue)
+
+    def tearDown(self):
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_Foo"
+        )
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_TensorQueue"
+        )
+
+    def _assertEqualSkipScriptObject(self, exp, actual):
+        flat_exp = pytree.tree_leaves(exp)
+        flat_actual = pytree.tree_leaves(actual)
+        self.assertEqual(len(flat_exp), len(flat_actual))
+        for a, b in zip(flat_exp, flat_actual):
+            if isinstance(a, torch.ScriptObject) and isinstance(b, torch.ScriptObject):
+                continue
+            self.assertEqual(a, b)
+
     def _test_export_same_as_eager(
         self, f, args, kwargs=None, strict=True, pre_dispatch=False
     ):
@@ -350,6 +413,188 @@ def forward(self, arg0_1, attr, arg1_1):
     add_1 = torch.ops.aten.add.Tensor(arg1_1, getitem_4);  arg1_1 = getitem_4 = None
     return (getitem_3, add_1)""",  # noqa: B950
         )
+
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_tensor_queue_methods(self, make_fx_tracing_mode):
+        test = self
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 2)
+                self.check_tq_is_fake = True
+
+            def forward(self, tq, x):
+                if self.check_tq_is_fake:
+                    test.assertTrue(isinstance(tq, FakeScriptObject))
+                tq.push(x.cos())
+                tq.push(x.sin())
+                x_cos = tq.pop() + tq.size()
+                x_sin = tq.pop() - tq.size()
+                return x_sin, x_cos, tq
+
+        mod = Model()
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
+            gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
+            self.assertEqual(self.tq_push_counter, 2)
+            self.assertEqual(self.tq_pop_counter, 2)
+            self.assertEqual(self.tq_size_counter, 2)
+            self.assertEqual(tq.size(), 0)
+            self.assertExpectedInline(
+                gm.code.strip("\n"),
+                """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg1_1)
+    call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'push', cos);  cos = None
+    sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'push', sin);  sin = None
+    call_torchbind_2 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    add = torch.ops.aten.add.Tensor(call_torchbind_2, 1);  call_torchbind_2 = None
+    call_torchbind_4 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
+    call_torchbind_5 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    sub = torch.ops.aten.sub.Tensor(call_torchbind_4, 0);  call_torchbind_4 = None
+    return (sub, add, arg0_1)
+    """,
+            )
+            mod.check_tq_is_fake = False
+            self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
+
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_tensor_queue_methods_fakify_internal_states(
+        self, make_fx_tracing_mode
+    ):
+        test = self
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 2)
+                self.check_tq_is_fake = True
+                self.current_test = test
+
+            def forward(self, tq, x):
+                if self.check_tq_is_fake:
+                    self.current_test.assertTrue(isinstance(tq, FakeScriptObject))
+                x_cos = tq.pop() + tq.size() + x
+                x_sin = tq.pop() - tq.size() + x
+                return x_sin, x_cos, tq
+
+        mod = Model()
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        for _ in range(2):
+            tq.push(torch.ones(2, 3))
+            tq1.push(torch.ones(2, 3))
+        x = torch.ones(2, 3)
+        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
+            prev_size = tq.size()
+            gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
+            self.assertEqual(self.tq_push_counter, 0)
+            self.assertEqual(self.tq_pop_counter, 2)
+            self.assertEqual(self.tq_size_counter, 2)
+            self.assertEqual(tq.size(), prev_size)
+            self.assertExpectedInline(
+                gm.code.strip("\n"),
+                """\
+def forward(self, arg0_1, arg1_1):
+    call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    add = torch.ops.aten.add.Tensor(call_torchbind, 1);  call_torchbind = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = None
+    call_torchbind_2 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    sub = torch.ops.aten.sub.Tensor(call_torchbind_2, 0);  call_torchbind_2 = None
+    add_2 = torch.ops.aten.add.Tensor(sub, arg1_1);  sub = arg1_1 = None
+    return (add_2, add_1, arg0_1)
+    """,
+            )
+            # turn off tq type checking in eager execution
+            mod.check_tq_is_fake = False
+            self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
+            self.assertEqual(tq.size(), 0)
+            self.assertEqual(tq1.size(), 0)
+
+
+@skipIfTorchDynamo("torchbind not supported with dynamo yet")
+class TestImplAbstractClass(TestCase):
+    def tearDown(self):
+        torch._library.abstract_impl_class.global_abstract_class_registry.clear()
+
+    def test_impl_abstract_class_no_torch_bind_class(self):
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate class"):
+
+            @torch._library.impl_abstract_class("_TorchScriptTesting::NOT_A_VALID_NAME")
+            class Invalid:
+                pass
+
+    def test_impl_abstract_class_no_from_real(self):
+        with self.assertRaisesRegex(RuntimeError, "define a classmethod from_real"):
+
+            @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+            class InvalidFakeFoo:
+                def __init__(self):
+                    pass
+
+    def test_impl_abstract_class_from_real_not_classmethod(self):
+        with self.assertRaisesRegex(RuntimeError, "is not a classmethod"):
+
+            @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+            class FakeFoo:
+                def __init__(self, x, y):
+                    self.x = x
+                    self.y = y
+
+                def from_real(self, foo_obj):
+                    x, y = foo_obj.__getstate__()
+                    return FakeFoo(x, y)
+
+    def test_impl_abstract_class_valid(self):
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_real(cls, foo_obj):
+                x, y = foo_obj.__getstate__()
+                return cls(x, y)
+
+        torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
+
+    def test_impl_abstract_class_duplicate_registration(self):
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_real(cls, foo_obj):
+                x, y = foo_obj.__getstate__()
+                return cls(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, "already registered"):
+            torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
 
 
 instantiate_parametrized_tests(TestExportTorchbind)
