@@ -1098,31 +1098,41 @@ class GraphLowering(torch.fx.Interpreter):
                         # When we do a better job selecting layout, we should
                         # revisit this.
                         need_fixed_layout = [
-                            torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
+                        need_fixed_channels_last_layout = [
+                            torch.ops.aten.convolution_backward.default,
+                        ]
                         if not self.layout_opt:
-                            need_fixed_layout.append(torch.ops.aten.convolution.default)
+                            need_fixed_channels_last_layout.append(torch.ops.aten.convolution.default)
                         if torch._C._has_mkldnn:
                             need_fixed_layout += [
+                                torch.ops.mkldnn._linear_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.binary,
+                                torch.ops.aten.mkldnn_rnn_layer.default,
+                                torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
+                            ]
+                            need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
                                 torch.ops.mkldnn._convolution_pointwise.binary,
                                 torch.ops.mkldnn._convolution_pointwise_.binary,
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.binary,
-                                torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
-                                torch.ops.onednn.qlinear_pointwise.default,
-                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
                         if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
+                            )
+                        if user.target in need_fixed_channels_last_layout:
+                            channels_last_stride_order = [0] + list(reversed(range(1, len(result.get_size()) - 1)))
+                            channels_last_stride_order = [len(channels_last_stride_order)] + channels_last_stride_order
+                            result = ir.ExternKernel.require_stride_order(
+                                result, channels_last_stride_order
                             )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
