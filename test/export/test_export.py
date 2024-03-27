@@ -8,6 +8,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
+from typing import List
 
 import torch
 import torch._dynamo as torchdynamo
@@ -1756,14 +1757,14 @@ class TestExport(TestCase):
             str(gm.code).strip(),
             """\
 def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    u_x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
-    conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
+    conv2d = torch.ops.aten.conv2d.default(u_x, conv_weight, conv_bias);  u_x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
     return pytree.tree_unflatten((getitem,), self._out_spec)""",
@@ -1775,7 +1776,7 @@ def forward(self, arg_0):
             str(gm_train.code).strip(),
             """\
 def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    u_x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -1783,7 +1784,7 @@ def forward(self, arg_0):
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked
-    conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
+    conv2d = torch.ops.aten.conv2d.default(u_x, conv_weight, conv_bias);  u_x = conv_weight = conv_bias = None
     add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
     getitem = _native_batch_norm_legit_functional[0]
@@ -3331,11 +3332,11 @@ def forward(self, arg_0):
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(),
             """\
 graph():
-    %x : [num_users=1] = placeholder[target=x]
+    %u_x : [num_users=1] = placeholder[target=u_x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %u_x, %t), kwargs = {})
     return addmm""",
         )
 
@@ -3403,11 +3404,11 @@ graph():
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(),
             """\
 graph():
-    %x : [num_users=1] = placeholder[target=x]
+    %u_x : [num_users=1] = placeholder[target=u_x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %u_x, %t), kwargs = {})
     return addmm""",
         )
         self.assertExpectedInline(
@@ -3455,11 +3456,11 @@ graph():
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
-    cos = torch.ops.aten.cos.default(x)
+def forward(self, p_bar_linear_weight, p_bar_linear_bias, u_x):
+    cos = torch.ops.aten.cos.default(u_x)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, u_x]);  true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = u_x = None
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
@@ -3549,19 +3550,19 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         )
 
         self.assertExpectedInline(str(exported_program.graph_module.code.strip()), """\
-def forward(self, b_pred, b_t, x, y):
+def forward(self, b_pred, b_t, u_x, u_y):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
+    conditional = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, u_x, u_y]);  b_pred = true_graph_0 = false_graph_0 = b_t = u_x = u_y = None
     getitem = conditional[0];  conditional = None
     return (getitem,)""")  # noqa: B950
 
         self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.code.strip()), """\
-def forward(self, b_t, x, y):
+def forward(self, b_t, u_x, u_y):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
-    sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
+    sub = torch.ops.aten.sub.Tensor(u_x, 1);  u_x = None
     add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
-    add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
+    add_1 = torch.ops.aten.add.Tensor(add, u_y);  add = u_y = None
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_1,)""")
 
@@ -3759,18 +3760,18 @@ def forward(self, b_t, x, y):
 
         ep = torch.export.export(M(), inps)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
+def forward(self, u_x):
+    cos = torch.ops.aten.cos.default(u_x)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = u_x, z = cos);  u_x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""")
 
         ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
+def forward(self, u_x):
+    cos = torch.ops.aten.cos.default(u_x)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = u_x, z = cos);  u_x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""")
@@ -3788,9 +3789,9 @@ def forward(self, x):
 
         ep = torch.export.export(M(), inps)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    cos_1 = torch.ops.aten.cos.default(x);  x = None
+def forward(self, u_x):
+    cos = torch.ops.aten.cos.default(u_x)
+    cos_1 = torch.ops.aten.cos.default(u_x);  u_x = None
     auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
@@ -3798,9 +3799,39 @@ def forward(self, x):
 
         ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
         self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
-def forward(self, x):
-    foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
+def forward(self, u_x):
+    foo_functional = torch.ops.testlib.foo_functional.default(u_x);  u_x = None
     return (foo_functional,)""")
+
+    def test_naming_collisions(self):
+        """
+        Ensuring naming collisions between nested user inputs
+        are handled correctly, without failing compilation.
+        """
+        class Foo(torch.nn.Module):
+            def forward(self, x, x_foo, x_foo_0):
+                return x.foo[0] + x_foo[0] + x_foo_0
+
+        @dataclass
+        class DataClass:
+            foo: List[Tensor]
+        register_dataclass_as_pytree_node(
+            DataClass,
+            serialized_type_name="test_naming_collisions.DataClass",
+        )
+        inputs = (
+            DataClass(foo=[torch.randn(4, 4)]),
+            (torch.randn(4, 4), ),
+            torch.randn(4, 4),
+        )
+        ep = export(Foo(), inputs)
+        expected_names = [
+            "u_x_foo_0",
+            "u_x_foo_0_1",
+            "u_x_foo_0_2"
+        ]
+        real_names = [spec.arg.name for spec in ep.graph_signature.input_specs]
+        self.assertEqual(expected_names, real_names)
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -3999,8 +4030,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, x):
-    add = torch.ops.aten.add.Tensor(x, x);  x = None
+def forward(self, u_x):
+    add = torch.ops.aten.add.Tensor(u_x, u_x);  u_x = None
     mul = torch.ops.aten.mul.Tensor(add, add)
     add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
     return (add, add_1)""",
@@ -4018,8 +4049,8 @@ def forward(self, x):
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, x):
-    add = torch.ops.aten.add.Tensor(x, x);  x = None
+def forward(self, u_x):
+    add = torch.ops.aten.add.Tensor(u_x, u_x);  u_x = None
     return (add,)""",
         )
 

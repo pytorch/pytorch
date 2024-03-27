@@ -42,7 +42,8 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BufferMutationSpec,
-    ConstantArgument,
+    ConstantInputSpec,
+    ConstantValue,
     CustomObjArgument,
     Device,
     ExportedProgram,
@@ -375,7 +376,6 @@ class GraphState:
     tensor_values: Dict[str, TensorMeta] = field(default_factory=dict)
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
-    constant_values: Dict[str, Union[int, bool, str, float, type(None)]] = field(default_factory=dict)
     is_single_tensor_return: bool = False
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
@@ -409,9 +409,6 @@ class GraphModuleSerializer:
             )
         elif isinstance(node.meta["val"], torch.SymInt):
             raise AssertionError("SymInt graph input is not implemented yet.")
-        elif isinstance(node.meta["val"], (int, bool, str, float, type(None))):
-            graph_input = Argument.create(as_constant=ConstantArgument(name=node.name))
-            self.graph_state.constant_values[node.name] = self.serialize_input(node.meta["val"])
         elif isinstance(node.meta["val"], ep.CustomObjArgument):
             class_fqn = node.meta["val"].class_fqn
             graph_input = Argument.create(
@@ -420,6 +417,8 @@ class GraphModuleSerializer:
             self.graph_state.custom_obj_values[node.name] = (
                 self.serialize_script_obj_meta(node.meta["val"])
             )
+        elif isinstance(node.meta["val"], (int, bool, str, float, type(None))):
+            graph_input = self.serialize_input(node.meta["val"])
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
         self.graph_state.inputs.append(graph_input)
@@ -827,9 +826,28 @@ class GraphModuleSerializer:
 
     def serialize_input_spec(self, spec: ep.InputSpec) -> InputSpec:
         if spec.kind == ep.InputKind.USER_INPUT:
-            return InputSpec.create(
-                user_input=UserInputSpec(arg=self.serialize_argument_spec(spec.arg))
-            )
+            if isinstance(spec.arg, ep.ConstantArgument):  # ep.ConstantArgument
+                if isinstance(spec.arg.value, int):
+                    constant_spec = ConstantValue.create(as_int=spec.arg.value)
+                elif isinstance(spec.arg.value, bool):
+                    constant_spec = ConstantValue.create(as_bool=spec.arg.value)
+                elif isinstance(spec.arg.value, str):
+                    constant_spec = ConstantValue.create(as_string=spec.arg.value)
+                elif isinstance(spec.arg.value, float):
+                    constant_spec = ConstantValue.create(as_float=spec.arg.value)
+                elif spec.arg.value is None:
+                    constant_spec = ConstantValue.create(as_none=())
+                return InputSpec.create(
+                    constant_input=ConstantInputSpec(
+                        name=spec.arg.name, value=constant_spec
+                    )
+                )
+            else:
+                return InputSpec.create(
+                    user_input=UserInputSpec(
+                        arg=self.serialize_argument_spec(spec.arg)
+                    )
+                )
         elif spec.kind == ep.InputKind.PARAMETER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
@@ -1215,7 +1233,6 @@ class GraphModuleSerializer:
             sym_int_values=self.graph_state.sym_int_values,
             sym_bool_values=self.graph_state.sym_bool_values,
             custom_obj_values=self.graph_state.custom_obj_values,
-            constant_values=self.graph_state.constant_values,
             outputs=self.graph_state.outputs,
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
@@ -1470,18 +1487,27 @@ class GraphModuleDeserializer:
                 script_obj_meta
             )
 
-        for name, constant_obj in serialized_graph.constant_values.items():
-            self.serialized_name_to_meta[name] = self.deserialize_input(constant_obj)
-
         # Inputs: convert to placeholder nodes in FX.
         for i, input_ in enumerate(serialized_graph.inputs):
-            if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj", "as_constant"):
+            if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
                 # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
                 # we will overwrite it
                 placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
+            elif input_.type in (
+                "as_int",
+                "as_float",
+                "as_bool",
+                "as_none",
+                "as_string",
+            ):
+                input_spec = self.signature.input_specs[i]
+                assert isinstance(input_spec.arg, ep.ConstantArgument)
+                node_name = input_spec.arg.name
+                placeholder_node = self.graph.placeholder(node_name)
+                placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:
                 raise SerializeError(f"Invalid input type {input_}")
 
@@ -1613,6 +1639,15 @@ class GraphModuleDeserializer:
                 kind=ep.InputKind.TOKEN,
                 arg=ep.TokenArgument(name=i.token.arg.name),
                 target=None
+            )
+        elif i.type == "constant_input":
+            return ep.InputSpec(
+                kind=ep.InputKind.USER_INPUT,
+                arg=ep.ConstantArgument(
+                    name=i.constant_input.name,
+                    value=self.deserialize_constant_input(i.constant_input.value)
+                ),
+                target=None,
             )
         else:
             raise AssertionError(f"Unknown input spec {i}")
@@ -1842,6 +1877,20 @@ class GraphModuleDeserializer:
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
+    def deserialize_constant_input(self, inp: ConstantValue) -> Any:
+        if inp.type == "as_none":
+            return None
+        elif inp.type == "as_int":
+            return int(inp.as_int)
+        elif inp.type == "as_float":
+            return float(inp.as_float)
+        elif inp.type == "as_string":
+            return str(inp.as_string)
+        elif inp.type == "as_bool":
+            return bool(inp.as_bool)
+        else:
+            raise SerializeError(f"Unhandled constant argument {inp}")
+
     def deserialize_sym_argument(self, sym_arg):
         if isinstance(sym_arg, SymIntArgument):
             if sym_arg.type == "as_int":
@@ -1994,7 +2043,7 @@ class GraphModuleDeserializer:
         elif x.type == "as_sym_int":
             return ep.SymIntArgument(name=x.as_sym_int.as_name)
         else:
-            return ep.ConstantArgument(value=self.deserialize_input(x))
+            raise SerializeError(f"Unhandled argument spec: {x.type}")
 
     def deserialize_module_call_signature(
         self, module_call_signature: ModuleCallSignature
@@ -2304,8 +2353,6 @@ def _canonicalize_graph(
             return a.as_optional_tensors
         elif a.type == "as_custom_obj":
             return None
-        elif a.type == "as_constant":
-            return a.as_constant
         elif a.type == "as_operator":
             return None
         else:
@@ -2348,8 +2395,6 @@ def _canonicalize_graph(
                     return None
                 else:
                     raise AssertionError(f"Unknown optional tensor type: {a}")
-            elif isinstance(a, ConstantArgument):
-                return a.name
             else:
                 raise AssertionError(f"Unknown argument type: {a}")
 
@@ -2457,8 +2502,6 @@ def _canonicalize_graph(
         elif isinstance(a, SymBoolArgument):
             if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_bool_values)
-        elif isinstance(a, ConstantArgument):
-            a.name = _rename(a.name, graph.constant_values)
         else:
             raise AssertionError(f"Unknown argument type: {a}")
 
@@ -2505,9 +2548,6 @@ def _canonicalize_graph(
     sorted_sym_bool_values = dict(
         sorted(graph.sym_bool_values.items(), key=lambda x: x[0])
     )
-    sorted_constant_values = dict(
-        sorted(graph.constant_values.items(), key=lambda x: x[0])
-    )
 
     # Stage 5: Recurse in subgraphs.
     counter = 0
@@ -2528,7 +2568,6 @@ def _canonicalize_graph(
         tensor_values=sorted_tensor_values,
         sym_int_values=sorted_sym_int_values,
         sym_bool_values=sorted_sym_bool_values,
-        constant_values=sorted_constant_values,
         is_single_tensor_return=graph.is_single_tensor_return,
     )
     return graph, name_table
@@ -2579,6 +2618,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 4, spec.custom_obj.custom_obj_name, idx
         elif spec.type == "token":
             return 0, None, idx
+        elif spec.type == "constant_input":
+            return 6, spec.constant_input.name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2639,7 +2680,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                 "as_string",
                 "as_custom_obj",
             ):
-                return
+                raise AssertionError("Constant inputs should be handled with ConstantInputSpecs")
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
         elif spec.type == "parameter":
@@ -2656,6 +2697,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         elif spec.type == "token":
             tok = spec.token.arg
             tok.name = replace_table[tok.name]
+        elif spec.type == "constant_input":
+            return
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 

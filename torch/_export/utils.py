@@ -9,17 +9,16 @@ from torch._subclasses.fake_tensor import FakeTensor
 
 from torch.export import ExportedProgram
 from torch.export.exported_program import InputKind, OutputKind
-from torch.export.graph_signature import ConstantArgument
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
     FlattenFunc,
     FromDumpableContextFn,
+    GetAttrKey,
     KeyPath,
     keystr,
     MappingKey,
     SequenceKey,
-    GetAttrKey,
     ToDumpableContextFn,
     tree_flatten_with_path,
     UnflattenFunc,
@@ -174,7 +173,7 @@ def register_dataclass_as_pytree_node(
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
-        flattened, (flat_names, none_names) = flatten_fn(obj)
+        flattened, (flat_names, none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
@@ -413,14 +412,10 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
 
 def propagate_placeholder_names_for_cond(gm: torch.fx.GraphModule) -> None:
     """
-    When torch.cond ops are present, GraphModules contain sub-GraphModules,
-    whose inputs are nodes from the top-level graph.
-    However, the default placeholder node names in lower-level graphs have no relation to their parents.
-    This function propagates the placeholder names from the top-level graph to the sub-graphs.
+    Propagate placeholder names from the top-level graph into torch.cond subgraphs.
     - For params/buffers/constants/user inputs, the same name is kept at all levels.
-    - For call_function inputs, names may be duplicated,
-      (e.g. a subgraph takes a mul node as input, and also performs as mul op)
-      so we use nn_module_stack to describe where the node is from.
+    - For call_function inputs, retaining the same name may lead to duplicate naming,
+      so the FQN is used as a prefix.
     """
     for node in gm.graph.nodes:
         if (
@@ -428,29 +423,27 @@ def propagate_placeholder_names_for_cond(gm: torch.fx.GraphModule) -> None:
             and node.name.startswith("conditional")
             and isinstance(node.target, torch._ops.HigherOrderOperator)
         ):
-            _, true_getattr, false_getattr, cond_args = node.args
+            _, true_graph, false_graph, cond_args = node.args
             # propagate names to both subgraphs
-            for getattr_node in [true_getattr, false_getattr]:
-                subgraph = getattr(gm, getattr_node.name)
-                for i, _node in enumerate(subgraph.graph.nodes):
-                    # placeholder nodes come first
-                    if i >= len(cond_args):
-                        break
-                    # handle duplicate names on ops with nn_module_stack
-                    if cond_args[i].op == "call_function":
-                        module_stack = cond_args[i].meta.get("nn_module_stack", {})
-                        module_stack = [x[0] for x in module_stack.values()]
-                        name = "_".join(
-                            ["_root"] + module_stack[1:] + [cond_args[i].name]
-                        )
-                    else:  # keep same name
-                        name = cond_args[i].name
-                    _node.name = _node.target = name
+            for subgraph_node in [true_graph, false_graph]:
+                subgraph = getattr(gm, subgraph_node.name)
+                for i, subgraph_node in enumerate(subgraph.graph.nodes):
+                    if i < len(cond_args):
+                        # handle duplicate names on ops with nn_module_stack
+                        if cond_args[i].op == "call_function":
+                            module_stack = cond_args[i].meta.get("nn_module_stack", {})
+                            module_stack = [fqn for fqn, _ in module_stack.values()][1:]
+                            name = "_".join(
+                                ["_root"] + module_stack + [cond_args[i].name]
+                            )
+                        else:  # no duplicate, keep same name
+                            name = cond_args[i].name
+                        subgraph_node.name = subgraph_node.target = name
                 propagate_placeholder_names_for_cond(subgraph)  # recurse
                 subgraph.recompile()
 
 
-def run_placeholder_naming_pass(
+def placeholder_naming_pass(
     gm: torch.fx.GraphModule,
     export_graph_signature: torch.export.ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]],
@@ -464,14 +457,15 @@ def run_placeholder_naming_pass(
     The default names are arg0_1, arg1_1, ..., which are not very informative.
     The names assigned by this pass are:
         - User inputs:
-            These follow the signature of mod.forward(), e.g. forward(x, y) gets you x, y nodes.
+            These follow the signature of mod.forward(), prefixed by "u",
+                e.g. forward(x, y) gets you u_x, u_y nodes.
             If the tensors are nested in dictionaries/lists/tuples,
             the names are a concatenation of the path to the tensor.
                 e.g. x = {
                     'a': torch.randn(),
                     'b': [torch.randn(), torch.randn()]
                 }
-            gets you nodes x_a, x_b_0, x_b_1.
+            gets you nodes u_x_a, u_x_b_0, u_x_b_1.
         - Parameters/buffers/constants/custom objects:
             These follow the FQN of the object, prefixed by "p", "b", "c", "obj" respectively.
                 e.g. self.bar.l0.weight gets you "p_bar_l0_weight".
@@ -488,28 +482,31 @@ def run_placeholder_naming_pass(
         InputKind.CONSTANT_TENSOR: "c",
         InputKind.CUSTOM_OBJ: "obj",
     }
-    placeholder_name_mapping = {}
+    node_renaming = {
+        node.name: node.name for node in gm.graph.nodes if node.op != "placeholder"
+    }
 
-    # use graph signature input specs to map param/buffer/constant names
-    # name effect tokens as token_1, token_2, ... (these aren't visible to user)
-    num_params_buffers_objs = 0
-    num_tokens = 0
-    for spec in export_graph_signature.input_specs:
-        if spec.kind in [
-            InputKind.PARAMETER,
-            InputKind.BUFFER,
-            InputKind.CONSTANT_TENSOR,
-            InputKind.CUSTOM_OBJ,
-        ]:
-            num_params_buffers_objs += 1
-            placeholder_name_mapping[
-                spec.arg.name
-            ] = f"{prefixes[spec.kind]}_{prettify_name(spec.target)}"
-        elif spec.kind == InputKind.TOKEN:
-            num_tokens += 1
-            placeholder_name_mapping[spec.arg.name] = f"token_{num_tokens}"
+    def rename_placeholder_name(orig_name, name):
+        if name in node_renaming.values():
+            n = 1
+            while (dup_name := f"{name}_{n}") in node_renaming.values():
+                n += 1
+            node_renaming[orig_name] = dup_name
+        else:
+            node_renaming[orig_name] = name
 
-    # use mod.forward signature to map user input names
+    # map user input names with mod.forward() signature
+    combined_args = (
+        inspect.signature(mod.forward).bind(*fake_args, **fake_kwargs).arguments
+    )
+    flat_args_with_path, _ = tree_flatten_with_path(combined_args)
+    user_input_names = [
+        spec.arg.name
+        for spec in export_graph_signature.input_specs
+        if spec.kind == InputKind.USER_INPUT
+    ]
+
+    # use pytree path to name nested user inputs
     def _extract_pytree_key(x):
         if isinstance(x, MappingKey):
             return str(x.key).replace(".", "_")
@@ -520,50 +517,53 @@ def run_placeholder_naming_pass(
         else:
             raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
 
-    combined_args = (
-        inspect.signature(mod.forward).bind(*fake_args, **fake_kwargs).arguments
-    )
-    flat_args_with_path, _ = tree_flatten_with_path(combined_args)
-    user_input_names = [
-        node.name
-        for i, node in enumerate(gm.graph.nodes)
-        if i >= num_params_buffers_objs + num_tokens and node.op == "placeholder"
-    ]
     for (arg_path, arg), user_input_name in zip(flat_args_with_path, user_input_names):
-        placeholder_name_mapping[user_input_name] = "_".join(_extract_pytree_key(x) for x in arg_path)
+        rename_placeholder_name(
+            user_input_name, "u_" + "_".join(_extract_pytree_key(x) for x in arg_path)
+        )
+
+    # use graph signature input specs to map param/buffer/constant names
+    # name effect tokens as token, token_1, ... (these aren't visible to user)
+    for spec in export_graph_signature.input_specs:
+        if spec.kind in [
+            InputKind.PARAMETER,
+            InputKind.BUFFER,
+            InputKind.CONSTANT_TENSOR,
+            InputKind.CUSTOM_OBJ,
+        ]:
+            rename_placeholder_name(
+                spec.arg.name, f"{prefixes[spec.kind]}_{prettify_name(spec.target)}"
+            )
+        elif spec.kind == InputKind.TOKEN:
+            rename_placeholder_name(spec.arg.name, "token")  # handle collisions
 
     # assign placeholder names for root module
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        assert node.name in placeholder_name_mapping
-        node.name = node.target = placeholder_name_mapping[node.name]
+        assert node.name in node_renaming
+        node.name = node.target = node_renaming[node.name]
 
+    # propagate names to torch.cond subgraphs
     propagate_placeholder_names_for_cond(gm)
+
+    # re-generate graph module code
     gm.recompile()
 
-    # modify graph signature
-    # update input specs
+    # modify graph signature, update input specs
     for spec in export_graph_signature.input_specs:
-        if isinstance(spec.arg, ConstantArgument):
-            continue
-        assert spec.arg.name in placeholder_name_mapping
-        spec.arg.name = placeholder_name_mapping[spec.arg.name]
+        assert spec.arg.name in node_renaming
+        spec.arg.name = node_renaming[spec.arg.name]
+
     # update output specs (e.g. model returns an input)
     for spec in export_graph_signature.output_specs:
-        if isinstance(spec.arg, ConstantArgument):
-            continue
-        if spec.arg.name in placeholder_name_mapping:
-            spec.arg.name = placeholder_name_mapping[spec.arg.name]
+        if spec.arg.name in node_renaming:
+            spec.arg.name = node_renaming[spec.arg.name]
         # update node name linked in user input mutation
-        if (
-            spec.kind == OutputKind.USER_INPUT_MUTATION
-            and spec.target in placeholder_name_mapping
-        ):
-            spec.target = placeholder_name_mapping[spec.target]
+        if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in node_renaming:
+            spec.target = node_renaming[spec.target]
+
     # update user input mutation node names
     for user_input in export_graph_signature.user_inputs_to_mutate.values():
-        if user_input in placeholder_name_mapping:
-            export_graph_signature.user_inputs_to_mutate = placeholder_name_mapping[
-                user_input
-            ]
+        if user_input in node_renaming:
+            export_graph_signature.user_inputs_to_mutate = node_renaming[user_input]  # type: ignore[misc]

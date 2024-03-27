@@ -28,7 +28,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import run_placeholder_naming_pass
+from torch._export.utils import placeholder_naming_pass
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
@@ -287,15 +287,27 @@ def _rename_constants_nodes(
     For strict mode only.
     Rename the constant nodes in the graph & graph signature from buffers to constants.
     """
+    # handle name collisions with existing constants
+    node_names = {node.name for node in gm.graph.nodes}
+
+    def rename_constant(name):
+        if name in node_names:
+            n = 0
+            while (dup_name := f"{name}_{n}") in node_names:
+                n += 1
+            name = dup_name
+        node_names.add(name)
+        return name
+
     buffer_to_constant = {}
-    for spec in graph_signature.input_specs:  # update input specs
+    for spec in graph_signature.input_specs:  # read from and update input specs
         if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
             "c_"
         ):
             assert spec.arg.name.startswith("b_")
-            name = spec.arg.name[2:]
-            buffer_to_constant[spec.arg.name] = f"c_{name}"
-            spec.arg.name = f"c_{name}"
+            c_name = rename_constant(f"c_{spec.arg.name[2:]}")
+            buffer_to_constant[spec.arg.name] = c_name
+            spec.arg.name = c_name
     for spec in graph_signature.output_specs:  # update output specs
         if (
             not isinstance(spec.arg, ConstantArgument)
@@ -447,23 +459,22 @@ def _verify_placeholder_node_names(
         if not isinstance(spec.arg, ConstantArgument)
     }
     kind_to_prefix = {
+        InputKind.USER_INPUT: "u",
         InputKind.PARAMETER: "p",
         InputKind.BUFFER: "b",
         InputKind.CONSTANT_TENSOR: "c",
         InputKind.CUSTOM_OBJ: "obj",
-        InputKind.TOKEN: "token"
+        InputKind.TOKEN: "token",
     }
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if node.name not in name_to_kind:  # skip constant user arguments
+            if node.name not in name_to_kind:  # skip constant user inputs
                 continue
             node_kind = name_to_kind[node.name]
-            if node_kind in [InputKind.USER_INPUT]:  # no restrictions on user inputs
-                continue
             prefix = kind_to_prefix[node_kind] + "_"
             if not node.name.startswith(prefix):
                 raise SpecViolationError(
-                    f"Placeholder node name {node.name} does not follow spec for {node_kind}, name should start with {prefix}"
+                    f"Placeholder node name {node.name} does not follow spec for {node_kind}, name should start with {prefix}_"
                 )
 
 
@@ -581,7 +592,7 @@ def _export_non_strict(
     def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
-            return ConstantArgument(value=node)
+            return ConstantArgument(name="", value=node)
 
         assert (
             "val" in node.meta
@@ -601,7 +612,7 @@ def _export_non_strict(
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
             # should have been handled already
-            return ConstantArgument(value=val)
+            return ConstantArgument(name=node.name, value=val)
 
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
@@ -635,7 +646,7 @@ def _export_non_strict(
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     # prettify names for placeholder nodes
-    run_placeholder_naming_pass(
+    placeholder_naming_pass(
         gm,
         export_graph_signature,
         constants,

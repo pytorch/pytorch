@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (6, 1)
+SCHEMA_VERSION = (5, 2)
 TREESPEC_VERSION = 1
 
 
@@ -150,15 +150,9 @@ class CustomObjArgument:
     class_fqn: str
 
 
-@dataclass
-class ConstantArgument:
-    name: str
-
-
 # This is actually a union type
 @dataclass(repr=False)
 class Argument(_Union):
-    as_constant: ConstantArgument
     as_none: Tuple[()]
     as_tensor: TensorArgument
     as_tensors: List[TensorArgument]
@@ -207,7 +201,6 @@ class Graph:
     tensor_values: Dict[str, TensorMeta]
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
-    constant_values: Dict[str, Argument]
     # This is for deserializing the submodule graphs from higher order ops
     # (ex. cond, map) where single tensor returns will just return a single
     # tensor, rather than following export schema and returning a singleton
@@ -220,6 +213,21 @@ class Graph:
 class UserInputSpec:
     # Actually, only tensors and SymInts are allowed here
     arg: Argument
+
+
+@dataclass(repr=False)
+class ConstantValue(_Union):
+    as_none: Tuple[()]
+    as_int: int
+    as_float: float
+    as_string: str
+    as_bool: bool
+
+
+@dataclass
+class ConstantInputSpec:
+    name: str
+    value: ConstantValue
 
 
 @dataclass
@@ -261,6 +269,7 @@ class InputSpec(_Union):
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
     token: InputTokenSpec
+    constant_input: ConstantInputSpec
 
 
 @dataclass
