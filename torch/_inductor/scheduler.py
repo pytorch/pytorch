@@ -1762,7 +1762,7 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_fusion:
+        if not config.benchmark_fusion and not node1.is_template():
             return True
 
         if (

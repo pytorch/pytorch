@@ -285,7 +285,7 @@ benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 benchmark_multi_templates = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "1") == "1"
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
