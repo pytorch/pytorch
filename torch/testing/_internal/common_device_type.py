@@ -529,7 +529,6 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = f'cuda:{torch.cuda.current_device()}'
 
-
 # See Note [Lazy Tensor tests in device agnostic testing]
 lazy_ts_backend_init = False
 class LazyTestBase(DeviceTypeTestBase):
