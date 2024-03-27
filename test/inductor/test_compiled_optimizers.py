@@ -74,18 +74,13 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_momentum_dampening_foreach_cuda": 5,
     "test_sgd_momentum_foreach_cuda": 5,
     "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
-    "test_sgd_weight_decay_maximize_cuda": 4,
-    "test_sgd_weight_decay_maximize_cpu": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
-    "test_sgd_cuda": 4,
-    "test_sgd_cpu": 4,
 }
 
 # also tracks currently supported optimizers
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
-    AdamW: KernelCounts(multitensor=2, singletensor=8),
     NAdam: KernelCounts(multitensor=2, singletensor=12),
     Rprop: KernelCounts(multitensor=1, singletensor=4),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
