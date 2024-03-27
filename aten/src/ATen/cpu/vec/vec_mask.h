@@ -215,13 +215,31 @@ class VecMask {
         VectorizedN<T, N>(a), VectorizedN<T, N>(b.template cast<T, N>()));    \
   }
 
+#define VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(op, EXPR)                  \
+  template <                                                                  \
+      typename T,                                                             \
+      int N,                                                                  \
+      typename V,                                                             \
+      int M,                                                                  \
+      std::enable_if_t<VecMask<T, N>::size() == VecMask<V, M>::size(), int> = \
+          0>                                                                  \
+  inline VecMask<T, N> op(const VecMask<T, N>& a, const VecMask<V, M>& b) {   \
+    return EXPR;                                                              \
+  }
+
 VEC_MASK_DEFINE_UNARY_OP_GLOBAL(operator~)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator&)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator|)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator^)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>, a & ~b)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a& b)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator==, ~(a ^ b))
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>=, (a == b) | (a > b))
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<=, (a == b) | (a < b))
 
 #undef VEC_MASK_DEFINE_UNARY_OP_GLOBAL
 #undef VEC_MASK_DEFINE_BINARY_OP_GLOBAL
+#undef VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

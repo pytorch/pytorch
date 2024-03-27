@@ -1668,14 +1668,8 @@ class Kernel(CodeGen):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    # Load value as mask
-    is_load_as_mask: bool = False
-
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
-
-    # Load uint8/int8 value as float32
-    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)
