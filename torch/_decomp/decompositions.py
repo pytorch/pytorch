@@ -2741,6 +2741,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
 
 
 @register_decomposition(aten.upsample_nearest1d.default)
+@aten.upsample_nearest1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_nearest1d(
@@ -2753,6 +2754,7 @@ def upsample_nearest1d(
 
 
 @register_decomposition(aten._upsample_nearest_exact1d.default)
+@aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def _upsample_nearest_exact1d(
@@ -2782,6 +2784,7 @@ def _upsample_nearest2d_common(input, h_indices, w_indices):
 
 
 @register_decomposition(aten.upsample_nearest2d.default)
+@aten.upsample_nearest2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_nearest2d(
@@ -2797,6 +2800,7 @@ def upsample_nearest2d(
 
 
 @register_decomposition(aten._upsample_nearest_exact2d.default)
+@aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def _upsample_nearest_exact2d(
@@ -2812,6 +2816,7 @@ def _upsample_nearest_exact2d(
 
 
 @register_decomposition(aten.upsample_nearest3d.default)
+@aten.upsample_nearest3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_nearest3d(
@@ -2830,6 +2835,7 @@ def upsample_nearest3d(
 
 
 @register_decomposition(aten._upsample_nearest_exact3d.default)
+@aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def _upsample_nearest_exact3d(
