@@ -4241,6 +4241,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_contains_range_constprop(self):
+        def fn(x):
+            # dynamo should const prop to False
+            if 3 in range(0, 10):
+                return x + 1
+            else:
+                return x + 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     # https://github.com/pytorch/pytorch/issues/104505
     def test_as_strided_on_base_with_mutation_works(self):
         def foo(a):
