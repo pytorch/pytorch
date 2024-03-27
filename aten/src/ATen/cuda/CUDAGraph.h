@@ -4,13 +4,12 @@
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/util/flat_hash_map.h>
+
+#include <mutex>
 
 namespace at {
 
-struct Generator;
 struct CUDAGeneratorImpl;
-struct CUDAGeneratorState;
 
 namespace cuda {
 
@@ -25,12 +24,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   static void inc_pending_event_queries();
   static void dec_pending_event_queries();
   static int num_pending_event_queries();
-  // See Note [Explicit Registration of Generators to the CUDA Graph]
-  void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
-  void register_generator_state(const at::Generator& generator);
-  void capture_begin(
-      MempoolId_t pool = {0, 0},
-      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
+  void capture_begin(MempoolId_t pool={0, 0}, cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void replay();
   void reset();
@@ -38,7 +32,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
 
- protected:
+  protected:
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   cudaGraph_t graph_ = NULL;
   cudaGraphExec_t graph_exec_ = NULL;
@@ -79,16 +73,19 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
 
-  // multiple generator states and their wholegraph_increments in this graph
-  // that are managed by the CUDA Graph
-  ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>
-      captured_generator_states_;
+  // Default generator on device where capture began
+  at::CUDAGeneratorImpl* capture_gen_;
 
   // Device where capture occurred. Right now, for simplicity, we require all ops
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
   // not CUDA itself.  We can straightforwardly modify CUDAGraph to support multi-device
   // captures if needed.
   int capture_dev_;
+
+  // RNG state trackers
+  at::Tensor seed_extragraph_;
+  at::Tensor offset_extragraph_;
+  uint64_t wholegraph_increment_;
 };
 
 } // namespace cuda

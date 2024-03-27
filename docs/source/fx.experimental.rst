@@ -25,7 +25,6 @@ torch.fx.experimental.symbolic_shapes
     StatefulSymbolicContext
     SubclassSymbolicContext
     DimConstraints
-    ShapeEnvSettings
 
     hint_int
     is_concrete_int

@@ -1,17 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import (
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
 import torch
 
@@ -218,22 +207,13 @@ def normalize_sizes(sizes: Union[Shape, Tuple[Shape]]) -> Shape:
         raise RuntimeError("Size must be int... or tuple")
 
 
-def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
+def dim_flatten(ndim: int) -> DimMap:
     if ndim == 0:
         return (Singleton(),)
     elif ndim == 1:
         return (InputDim(0),)
     else:
-        # only flattening dims from start_dim to end_dim (inclusive)
-        # other dims are passed through
-        if end_dim < 0:
-            end_dim += ndim
-        results: List[DimSpec] = [InputDim(i) for i in range(start_dim)]
-        results.append(
-            Flatten.new(tuple(InputDim(i) for i in range(start_dim, end_dim + 1)))
-        )
-        results.extend([InputDim(i) for i in range(end_dim + 1, ndim)])
-        return tuple(results)
+        return (Flatten.new(tuple(InputDim(i) for i in range(ndim))),)
 
 
 def dim_movedim(
@@ -424,16 +404,6 @@ def dim_unsqueeze(ndim: int, dim: int) -> DimMap:
     return dims[:dim] + (Singleton(),) + dims[dim:]
 
 
-def dim_view_as_real(shape: Shape) -> DimMap:
-    ndim = len(shape)
-    results: List[DimSpec] = [InputDim(i) for i in range(ndim - 1)]
-    # each complex number is split into two real numbers,
-    # resulting in one more dimension of size 2
-    results.append(Split(InputDim(ndim - 1), (shape[-1], 2), 0))
-    results.append(Split(InputDim(ndim - 1), (shape[-1], 2), 1))
-    return tuple(results)
-
-
 def dim_reduction(
     ndim: int, dim_or_dims: Optional[Union[int, Sequence[int]]], keepdim: bool
 ) -> DimMap:
@@ -498,10 +468,6 @@ ops: Dict[Callable[..., torch.Tensor], Op] = {
         dim_map=lambda input, *shape: view_groups(input.shape, shape),
         shape_argnum=1,
     ),
-    torch.view_as_complex: Op(
-        dim_map=lambda input: dim_flatten(input.ndim, input.ndim - 2)
-    ),
-    torch.view_as_real: Op(dim_map=lambda input: dim_view_as_real(input.shape)),
 }
 
 
@@ -749,5 +715,3 @@ register_prop_rule_map(
 register_prop_rule_map(
     aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(aten.view_as_complex.default, torch.view_as_complex)
-register_prop_rule_map(aten.view_as_real.default, torch.view_as_real)
