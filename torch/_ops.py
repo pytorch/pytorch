@@ -473,8 +473,7 @@ def unset_mode_pre_dispatch(mode_key):
     # When we are unsetting a mode, we need to check if there is
     # active mode left on the PreDispatch key. If there is nothing
     # active, we need to remove PreDispatch key from local dispatch include
-    # set. Also if we have removed PreDispatch key from local dispatch exclude
-    # set, we need to add it back.
+    # set.
     if new_pre_dispatch_len == 0:
         torch._C._dispatch_tls_set_dispatch_key_included(
             torch._C.DispatchKey.PreDispatch, False
@@ -502,9 +501,7 @@ def _set_mode_pre_dispatch(mode):
     # When we are setting a mode, we need to check if there is
     # active mode left on the PreDispatch key. If there was nothing
     # active before setting this mode, it means that PreDispatch key
-    # was turned off. So we need to turn it on again. Also, if we previously
-    # removed PreDispatch key from local dispatch exclude set, we need to add it back.
-    # Also if we see PreDispatch key in the exclude set, we need to remove it.
+    # was turned off. So we need to turn it on again.
     if previous_mode_stack_len == 0:
         torch._C._dispatch_tls_set_dispatch_key_included(
             torch._C.DispatchKey.PreDispatch, True
