@@ -4120,6 +4120,7 @@ def max_pool2d_with_indices_backward(
     else:
         return out
 
+
 def pad_adaptive_loader(x, pad_val=0.0):
     *_, h, w = x.get_size()
     x_loader = x.make_loader()
