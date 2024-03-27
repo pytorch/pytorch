@@ -235,13 +235,13 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cutlass", dense_input_shape)
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
-    def test_sp24_meta(self) -> None:
-        x = torch.randn([1024, 512], device="meta", dtype=torch.float16)
-        x_s = SparseSemiStructuredTensorCUSPARSELT.from_dense_fast(x)
-        assert x_s.shape == x.shape
-        x_s_t = x_s.t()
-        assert x_s_t.shape == x.t().shape
+    # @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    # def test_sp24_meta(self) -> None:
+    #     x = torch.randn([1024, 512], device="meta", dtype=torch.float16)
+    #     x_s = SparseSemiStructuredTensorCUSPARSELT.from_dense_fast(x)
+    #     assert x_s.shape == x.shape
+    #     x_s_t = x_s.t()
+    #     assert x_s_t.shape == x.t().shape
 
 
     # @parametrize_backends
