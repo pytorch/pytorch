@@ -220,6 +220,7 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183702824
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
@@ -442,6 +443,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -507,6 +509,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -749,6 +752,7 @@ class TestExport(TestCase):
             6,
         )
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183704046
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -798,6 +802,7 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -820,6 +825,7 @@ class TestExport(TestCase):
         self.assertEquals(vr.lower, 1)
         self.assertEquals(vr.upper, 2)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -943,11 +949,7 @@ class TestExport(TestCase):
         ):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
-<<<<<<< HEAD
     @testing.expectedFailureRetraceability  # T183144629
-=======
-    @testing.expectedFailureRetraceability  # TODO (task)
->>>>>>> ea4a6a8f845 (TEMP)
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -2496,12 +2498,7 @@ def forward(self, arg_0):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
-<<<<<<< HEAD
     @testing.expectedFailureRetraceability  # T183144788
-=======
-    @testing.expectedFailurePreDispatchRunDecomp
-    @testing.expectedFailureRetraceability
->>>>>>> ea4a6a8f845 (TEMP)
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2535,11 +2532,7 @@ def forward(self, arg_0):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-<<<<<<< HEAD
     @testing.expectedFailureRetraceability  # T183144788
-=======
-    @testing.expectedFailureRetraceability  # TODO (task)
->>>>>>> ea4a6a8f845 (TEMP)
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -2619,6 +2612,7 @@ def forward(self, arg_0):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
     @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
+    @testing.expectedFailurePreDispatchRunDecomp  # no action needed here
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
