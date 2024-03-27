@@ -104,6 +104,8 @@ manual_torch_name_rule_map = {
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
+    "torch._C._to_dlpack": SkipFunctionVariable,
+    "torch.to_dlpack": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
@@ -213,6 +215,10 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
+    # functorch/jacfwd
+    "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
+    "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
+    "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._constrain_as_value": UserFunctionVariable,
@@ -1183,7 +1189,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._test_only_populate_upgraders",
         "torch._C._test_only_remove_entry_to_op_version_map",
         "torch._C._test_only_remove_upgraders",
-        "torch._C._to_dlpack",
         "torch._C._to_functionality_key",
         "torch._C._tracer_set_force_outplace",
         "torch._C._tracer_set_get_unique_name_fn",
@@ -2169,7 +2174,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
-        "torch._functorch.eager_transforms._construct_standard_basis_for",
         "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
         "torch._functorch.eager_transforms._jvp_treespec_compare",
@@ -2181,11 +2185,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.hessian",
-        "torch._functorch.eager_transforms.jacfwd",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.linearize",
         "torch._functorch.eager_transforms.noop",
-        "torch._functorch.eager_transforms.safe_unflatten",
         "torch._functorch.functional_call.construct_stacked_leaf",
         "torch._functorch.functional_call.functional_call",
         "torch._functorch.functional_call.stack_module_state",
