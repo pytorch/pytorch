@@ -721,8 +721,19 @@ class Node:
                 assert isinstance(value, str)
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
+        update = False
+        if (
+                name in ("target", "op") and
+                hasattr(self, name) and
+                getattr(self, name) != value and
+                hasattr(self.graph, "_find_nodes_lookup_table") and
+                self in self.graph._find_nodes_lookup_table
+        ):
+            update = True
+            self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
-
+        if update:
+            self.graph._find_nodes_lookup_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
