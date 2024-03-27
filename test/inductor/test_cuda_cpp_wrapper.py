@@ -97,7 +97,6 @@ if config.abi_compatible:
     xfail_list = [
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_conv_backward_cuda",
-        "test_custom_op_cuda",  # needs custom op support
         "test_profiler_mark_wrapper_call_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
@@ -188,7 +187,9 @@ if RUN_CUDA:
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
-        BaseTest("test_custom_op"),
+        BaseTest("test_custom_op_1"),
+        BaseTest("test_custom_op_2"),
+        BaseTest("test_custom_op_3"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
@@ -236,10 +237,16 @@ if RUN_CUDA:
         #     device=None,
         #     tests=test_select_algorithm.TestSelectAlgorithm(),
         # ),
-        BaseTest(
-            "test_mm_plus_mm2",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
+        # TODO: Re-enable this test after fixing cpp wrapper for mm_plus_mm2.
+        # This test is unstable: it succeeds when an Triton kernel is used, and fails when a Aten kernel is used.
+        # The current state is that it's unstable, depending on the autotune result.
+        # The failing code generates aoti_torch_cuda__mm_plus_mm (likely some bug when generating ExternKernel)
+        # More information check:
+        # https://hud.pytorch.org/pytorch/pytorch/commit/b6982bf2b25d2d3ba5d82488a39721d6013a838f?fbclid=IwAR23OCV2rCALsGQk6kmkOqT8DfgQedYDt_Gs2R-t9ejSJNjRskkS1rzncDE
+        # BaseTest(
+        #     "test_mm_plus_mm2",
+        #     tests=test_select_algorithm.TestSelectAlgorithm(),
+        # ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
     ]:
