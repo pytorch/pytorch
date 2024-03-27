@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <nccl.h>
@@ -175,14 +176,29 @@ std::string getNcclErrorDetailStr(
     c10::optional<std::string> processGroupFailureReason = c10::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
+// There are some constrains we set for the debug info writer:
+// 1. The writer should only be registered once.
+// 2. Once registered, users cannot change it including un-register.
+// 3. It is recommended to register the customized writer in the trainer setup,
+//    If users don't register before calling launchAsyncDebugDump, then users
+//    lose the chance to register (and the default writer will be
+//    auto-registered).
 class TORCH_API DebugInfoWriter {
  public:
-  DebugInfoWriter(int rank);
   virtual ~DebugInfoWriter();
   virtual void write(const std::string& ncclTrace);
+  static DebugInfoWriter& getWriter(int rank);
+  static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
 
  protected:
+  DebugInfoWriter(std::string namePrefix, int rank) {
+    filename_ = c10::str(namePrefix, rank);
+  }
   std::string filename_;
+
+ private:
+  static std::unique_ptr<DebugInfoWriter> writer_;
+  static std::atomic<bool> hasWriterRegistered_;
 };
 
 // RAII wrapper for NCCL communicator
@@ -267,6 +283,18 @@ class NCCLComm {
   }
 #endif
 
+#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
+  std::unordered_map<std::string, std::string> ncclCommDump() {
+    std::unordered_map<std::string, std::string> dump;
+    if (isAborted()) {
+      LOG(INFO) << "Communicator was aborted before trying to dump its state.";
+      return dump;
+    }
+    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), c10::nullopt);
+    return dump;
+  }
+#endif
+
   ncclUniqueId getNcclId() {
     return ncclId_;
   }
@@ -322,6 +350,9 @@ class NCCLComm {
     // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
     // timeout)
     commFailureReason_ = commFailureReason;
+    LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
+              << (commFailureReason ? *commFailureReason
+                                    : "No abort reason provided.");
 #ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
 #else
@@ -420,6 +451,8 @@ class NCCLComm {
     return ncclInvalidUsage;
 #endif
   }
+
+  friend class ProcessGroupNCCL;
 
  protected:
   ncclComm_t ncclComm_;
