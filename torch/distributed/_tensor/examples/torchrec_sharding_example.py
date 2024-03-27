@@ -113,16 +113,16 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     num_embeddings = 8
     embedding_dim = 16
     emb_table_shape = torch.Size([num_embeddings, embedding_dim])
+    # tensor shape
     local_shard_shape = torch.Size(
         [num_embeddings // world_size, embedding_dim]  # (local_rows, local_cols)
     )
-    # in our case, the embedding table will be sharded row-wisely into 4 local shards
-    # and each rank will have 1 of them.
-    local_shards = [
-        torch.randn(local_shard_shape, device=device) for _ in range(world_size)
-    ]
+    # tensor offset
+    local_shard_offset = (rank * 4, embedding_dim)
+    # tensor
+    local_tensor = torch.randn(local_shard_shape, device=device)
     # row-wise sharding: one shard per rank
-    local_shard = local_shards[rank]
+    local_shards = [TensorShard(local_tensor, local_shard_shape, local_shard_offset)]
 
     ###########################################################################
     # example 1: transform local_shards into DTensor
@@ -137,22 +137,22 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     # this is the sharding placement we use in DTensor to represent row-wise sharding
     # row_wise_sharding_placements means that the global tensor is sharded by first dim
     # over the 1-d mesh.
-    row_wise_sharding_placements = [Shard(0)]
+    row_wise_sharding_placements: List[Placement] = [Shard(0)]
+    dtensor_metadata = DTensorMetadata(device_mesh, row_wise_sharding_placements)
+
+    # create the local shards wrapper
+    local_shards_wrapper = LocalShardsWrapper(local_shards)
+
     # create a DTensor from the local shard
     dtensor = DTensor.from_local(
-        local_shard, device_mesh, row_wise_sharding_placements, run_check=False
+        local_shards_wrapper, device_mesh, row_wise_sharding_placements, run_check=False
     )
 
     # display the DTensor's sharding
     visualize_sharding(dtensor, header="Row-wise even sharding example in DTensor")
-
-    # get the global tensor from the DTensor
-    dtensor_full = dtensor.full_tensor()  # torch.Tensor
-    # manually compose the global tensor from the local shards
-    global_tensor = torch.cat(local_shards, dim=0)
-    # we demonstrate that the DTensor constructed has the same
-    # global view as the actual global tensor
-    assert torch.equal(dtensor_full, global_tensor)
+    # check the dtensor has the correct shape and stride on all ranks
+    assert dtensor.shape == emb_table_shape
+    assert dtensor.stride() == (embedding_dim, 1)
 
     ###########################################################################
     # example 2: transform DTensor into local_shards
@@ -161,34 +161,13 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     #   _pre_load_state_dict_hook, if the source param is a ShardedTensor
     #   then we need to transform it into its local_shards.
 
-    # transform DTensor into local_shards
-    local_shard = dtensor.to_local()
-
-    # another case is that the source param is a torch.Tensor. In this case,
-    # the source param is the global tensor rather than shards so we need to
-    # splice the global tensor into local shards. This will be identical to
-    # existing code in TorchRec.
-    local_shard_shape_list = list(local_shard_shape)
-    local_shard_spliced = global_tensor[
-        local_shard_shape_list[0] * rank : local_shard_shape_list[0] * (rank + 1),
-        :,
-    ]
-    # the local shard obtained from both approaches should be identical
-    assert torch.equal(local_shard, local_shard_spliced)
-
-    ###########################################################################
-    # example 3: load state dict
-    # usage in TorchRec:
-    #   In case where the source param and the destination param are both
-    #   DTensors, we can directly call DTensor.copy_() to load the state.
-    src_dtensor = torch.distributed._tensor.ones(
-        emb_table_shape,
-        device_mesh=device_mesh,
-        placements=row_wise_sharding_placements,
-    )
-    dtensor.copy_(src_dtensor)
-    # these two DTensors should have the same global view after loading
-    assert torch.equal(dtensor.full_tensor(), src_dtensor.full_tensor())
+    # transform DTensor into LocalShardsWrapper
+    dtensor_local_shards = dtensor.to_local()
+    assert isinstance(dtensor_local_shards, LocalShardsWrapper)
+    dtensor_shard = dtensor_local_shards[0]
+    assert torch.equal(dtensor_shard.tensor, local_tensor)  # unwrap tensor
+    assert dtensor_shard.shard_size == local_shard_shape  # unwrap shape
+    assert dtensor_shard.shard_offset == local_shard_offset  # unwrap offset
 
 
 def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
