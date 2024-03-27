@@ -369,6 +369,25 @@ def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(boxes, args=(scores, iou_threshold))
 
+
+def fn0():
+    pass
+
+
+def get_fn1():
+    def fn1():
+        pass
+    return fn1
+
+fn1 = get_fn1()
+
+
+def get_fn2():
+    return lambda x: x
+
+fn2 = get_fn2()
+
+
 custom_op_db = [
     OpInfo(
         'NumpyCubeCustomOp',
