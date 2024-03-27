@@ -24,8 +24,7 @@ import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.nn.utils.fusion import fuse_conv_bn_weights
-from torch.nn.utils.fusion import fuse_linear_bn_weights
+from torch.nn.utils.fusion import fuse_conv_bn_weights, fuse_linear_bn_weights
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
@@ -7062,7 +7061,7 @@ class TestFusionEval(TestCase):
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
            running_mean=hu.tensor(shapes=(6,), dtype=np.double),
            running_var=hu.tensor(shapes=(6,), dtype=np.double))
-    def test_fuse_module_eval_numerics(self, X, running_mean, running_var):
+    def test_fuse_module_conv_eval_numerics(self, X, running_mean, running_var):
         inputs, _ = X
 
         iC, oC = inputs.shape[1], len(running_mean[0])
@@ -7095,6 +7094,43 @@ class TestFusionEval(TestCase):
         Y_hat = conv_na_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
+
+    @set_default_dtype(torch.double)
+    @given(X=hu.tensor(shapes=((5, 3),), dtype=np.double),
+           running_mean=hu.tensor(shapes=(6,), dtype=np.double),
+           running_var=hu.tensor(shapes=(6,), dtype=np.double))
+    def test_fuse_module_linear_eval_numerics(self, X, running_mean, running_var):
+        inputs, _ = X
+
+        iC, oC = inputs.shape[1], len(running_mean[0])
+        inputs = torch.from_numpy(inputs)
+
+        linear = torch.nn.Linear(iC, oC, bias=True)
+        bn_ref = torch.nn.BatchNorm1d(oC)
+        bn_ref.running_mean = torch.from_numpy(running_mean[0])
+        bn_ref.running_var = torch.from_numpy(running_var[0])
+
+        linear.eval()
+        bn_ref.eval()
+
+        Y_ref = bn_ref(linear(inputs))
+        linear_bn_fused = torch.nn.utils.fusion.fuse_linear_bn_eval(linear,
+                                                                    bn_ref)
+        Y_hat = linear_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, msg="Linear+BN fusion results are off")
+
+        na_bn_ref = torch.nn.BatchNorm1d(oC, affine=False)
+        na_bn_ref.running_mean = torch.from_numpy(running_mean[0])
+        na_bn_ref.running_var = torch.from_numpy(running_var[0])
+        na_bn_ref.eval()
+
+        Y_ref = na_bn_ref(linear(inputs))
+        linear_na_bn_fused = torch.nn.utils.fusion.fuse_linear_bn_eval(linear,
+                                                                       na_bn_ref)
+        Y_hat = linear_na_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, msg="Linear+BN(non-affine) fusion results are off")
 
 
 class TestConstantPadNd(TestCase):

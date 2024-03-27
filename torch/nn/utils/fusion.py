@@ -144,6 +144,10 @@ def fuse_linear_bn_weights(
     """
     if linear_b is None:
         linear_b = torch.zeros_like(bn_rm)
+    if bn_w is None:
+        bn_w = torch.ones_like(bn_rm)
+    if bn_b is None:
+        bn_b = torch.zeros_like(bn_rm)
     bn_scale = bn_w * torch.rsqrt(bn_rv + bn_eps)
 
     fused_w = linear_w * bn_scale.unsqueeze(-1)
