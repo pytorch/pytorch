@@ -279,6 +279,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   bool use_cutlass)
 {
   std::string algo(algorithm.data(), algorithm.size());
+
   auto runTyped = [&](auto type)
   {
     using ElementT = decltype(type);
@@ -298,7 +299,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
     default:
       TORCH_CHECK(false, "Only `float16` and `bfloat16` are supported.");
   }
-
 }
 
 } // namespace at::native

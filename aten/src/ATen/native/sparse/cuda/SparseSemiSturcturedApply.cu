@@ -31,6 +31,7 @@
 
 #include <type_traits>
 #include <tuple>
+
 namespace at::native {
 
 template <typename KT>
@@ -105,7 +106,18 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
   return std::make_tuple(packed, packed_trans);
 }
 
-template <bool kIsMeta>
+std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_meta(Tensor input, Tensor threads_masks) // Returned by `_sparse_semi_structured_tile`
+{
+  TORCH_CHECK(
+    input.scalar_type() == at::ScalarType::Half || input.scalar_type() == at::ScalarType::BFloat16,
+    "Unsupported dtype - only `float16` and `bfloat16` are supported currently"
+  );
+  auto result = (input.scalar_type() == at::ScalarType::Half)
+            ? _sparse_semi_structured_apply_typed<true, cutlass::half_t>(input, threads_masks)
+            : _sparse_semi_structured_apply_typed<true, cutlass::bfloat16_t>(input, threads_masks);
+  return result;
+}
+
 std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(Tensor input, Tensor threads_masks) // Returned by `_sparse_semi_structured_tile`
 {
   TORCH_CHECK(
@@ -113,8 +125,8 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(Tensor input, Tensor th
     "Unsupported dtype - only `float16` and `bfloat16` are supported currently"
   );
   auto result = (input.scalar_type() == at::ScalarType::Half)
-            ? _sparse_semi_structured_apply_typed<kIsMeta, cutlass::half_t>(input, threads_masks)
-            : _sparse_semi_structured_apply_typed<kIsMeta, cutlass::bfloat16_t>(input, threads_masks);
+            ? _sparse_semi_structured_apply_typed<false, cutlass::half_t>(input, threads_masks)
+            : _sparse_semi_structured_apply_typed<false, cutlass::bfloat16_t>(input, threads_masks);
   return result;
 }
 
