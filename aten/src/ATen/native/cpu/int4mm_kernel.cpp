@@ -1,6 +1,22 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 
+#if defined(__aarch64__)
+// the gall! Yes we can. Si, se puede!
+#define CPU_CAPABILITY_AVX2
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#define SIMDE_X86_SSE2_ENABLE_NATIVE_ALIASES
+#define SIMDE_X86_AVX_ENABLE_NATIVE_ALIASES
+
+#include <third_party/simd-everywhere/simde/x86/sse.h>
+#include <third_party/simd-everywhere/simde/x86/sse2.h>
+#include <third_party/simd-everywhere/simde/x86/sse3.h>
+#include <third_party/simd-everywhere/simde/x86/sse4.1.h>
+#include <third_party/simd-everywhere/simde/x86/sse4.2.h>
+#include <third_party/simd-everywhere/simde/x86/avx2.h>
+#endif
+
+
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
@@ -16,9 +32,6 @@
 #define RESTRICT __restrict__
 #endif
 
-#if defined(__aarch64__) 
-#include <third_party/simd-everywhere/simde/x86/avx2.h>
-#endif
 
 namespace at::native {
 
