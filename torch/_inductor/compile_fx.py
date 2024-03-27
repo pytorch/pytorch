@@ -1,5 +1,4 @@
 import contextlib
-import dataclasses
 import functools
 import logging
 import os
@@ -39,6 +38,7 @@ from torch._dynamo.utils import (
 )
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
@@ -60,7 +60,7 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops, output_node
 from .virtualized import V
 
 if config.is_fbcode():
@@ -75,15 +75,6 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
-
-
-@dataclasses.dataclass
-class BoxedDeviceIndex:
-    value: Optional[int]
-
-    def set(self, device_idx):
-        assert device_idx is None or isinstance(device_idx, int)
-        self.value = device_idx
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -474,7 +465,7 @@ def compile_fx_inner(
 
     if cudagraphs:
         # output args are tuple of first argument
-        output = list(gm.graph.nodes)[-1]
+        output = output_node(gm)
         assert len(output.args) == 1
         stack_traces = [
             (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
@@ -1402,13 +1393,6 @@ def _shape_env_from_inputs(inputs: List[torch.Tensor]):
 
     # TODO(voz): Should we always have one anyway?
     return None
-
-
-def output_node(gm: torch.fx.GraphModule):
-    """Get the output node from an FX graph"""
-    last_node = next(iter(reversed(gm.graph.nodes)))
-    assert last_node.op == "output"
-    return last_node
 
 
 def graph_returns_tuple(gm: torch.fx.GraphModule):
