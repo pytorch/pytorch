@@ -185,15 +185,20 @@ def register_interface_for_device(
 def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
     if isinstance(device, torch.device):
         device = str(device)
+    if not device_interfaces:
+        init_device_reg()
     if device in device_interfaces:
         return device_interfaces[device]
     raise NotImplementedError(f"No interface for device {device}")
 
 
 def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterface]]]:
+    if not device_interfaces:
+        init_device_reg()
     return device_interfaces.items()
 
 
-register_interface_for_device("cuda", CudaInterface)
-for i in range(torch.cuda.device_count()):
-    register_interface_for_device(f"cuda:{i}", CudaInterface)
+def init_device_reg():
+    register_interface_for_device("cuda", CudaInterface)
+    for i in range(torch.cuda.device_count()):
+        register_interface_for_device(f"cuda:{i}", CudaInterface)
