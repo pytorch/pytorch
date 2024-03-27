@@ -700,6 +700,123 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    def test_input_mutation_storage_resize_up(self):
+        def f(a):
+            torch.ops.inductor.resize_storage_bytes_(a, 32)
+            # float32, 4 bytes per element, 32 bytes == 8 elements
+            with torch.no_grad():
+                a.copy_(torch.ones(8))
+            return a + 1
+
+        inp = torch.zeros(8, requires_grad=True)
+        # Input starts with zero-size-storage
+        inp.untyped_storage().resize_(0)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            decompositions={},
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+        out = compiled_f(inp)
+        # Final functionalized graph has two mutation ops:
+        # (1) a resize_() to resize input tensor up
+        # (2) a copy_() to fill in the resized input with valid data
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1):
+    ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
+    copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
+    add = torch.ops.aten.add.Tensor(copy, 1)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32)
+    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = None
+    return [add]""")
+
+    def test_input_mutation_storage_resize_down(self):
+        def f(a):
+            out = a.sin()
+            torch.ops.inductor.resize_storage_bytes_(a, 0)
+            return out
+
+        inp = torch.zeros(8, requires_grad=True)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            decompositions={},
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+        out = compiled_f(inp)
+        # Final functionalized graph has one mutation ops:
+        # (1) a resize_() to resize input tensor down
+        # Even though there was technically a "data mutation" on the input (from a.copy_()),
+        # We don't include it in the graph since the final input size has zero storage
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1):
+    sin = torch.ops.aten.sin.default(primals_1)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0)
+    return [sin, primals_1]""")
+
+    def test_input_mutation_storage_resize_up_down(self):
+        def f(a):
+            torch.ops.inductor.resize_storage_bytes_(a, 32)
+            # float32, 4 bytes per element, 32 bytes == 8 elements
+            with torch.no_grad():
+                a.copy_(torch.ones(8))
+            out = a.sin()
+            torch.ops.inductor.resize_storage_bytes_(a, 0)
+            return out
+
+        inp = torch.zeros(8, requires_grad=True)
+        # Input starts with zero-size-storage
+        inp.untyped_storage().resize_(0)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            decompositions={},
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+        out = compiled_f(inp)
+        # Final graph has two interesting properties:
+        # (1) no resizes (or copy_()) in the functional graph, since the two resizes cancel out
+        #     and the final size is zero
+        # (2) `copy` is used in the compute (sin), but the original `primals_1` is saved for backward
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1):
+    ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
+    copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
+    sin = torch.ops.aten.sin.default(copy);  copy = None
+    return [sin, primals_1]""")
+
+    def test_input_mutation_storage_resize_not_supported(self):
+        def f(a):
+            a.mul_(2)
+            torch.ops.inductor.resize_storage_bytes_(a, 0)
+            return a
+
+        inp = torch.zeros(8, requires_grad=True)
+
+        with self.assertRaisesRegex(AssertionError, "resize on a graph input, but the input has other mutations"):
+            compiled_f = aot_function(
+                f,
+                fw_compiler=nop,
+                bw_compiler=nop,
+                decompositions={},
+                keep_inference_input_mutations=True,
+                dynamic=False,
+            )
+            out = compiled_f(inp)
+
+
     def test_input_output_aliase_custom_autograd_function(self):
 
         class Foo(torch.autograd.Function):

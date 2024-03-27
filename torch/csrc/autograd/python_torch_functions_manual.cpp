@@ -483,6 +483,27 @@ static PyObject* THPVariable__functionalize_was_storage_changed(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_get_storage_size(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_get_storage_size(Tensor t, bool before)"},
+      /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto before = r.toBool(1);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  auto size = wrapper->get_storage_size(/*before=*/before);
+  return wrap(size);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_has_data_mutation(
     PyObject* self,
     PyObject* args,
@@ -845,6 +866,10 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_was_storage_changed",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_was_storage_changed),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_get_storage_size",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_get_storage_size),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_enable_reapply_views",

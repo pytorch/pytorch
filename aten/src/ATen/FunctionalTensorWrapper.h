@@ -149,8 +149,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return was_storage_changed_;
   }
 
-  void mark_inductor_storage_resize() {
-    functional_storage_impl()->mark_inductor_storage_resize();
+  int64_t get_storage_size(bool before) {
+    return functional_storage_impl()->get_storage_size(before);
   }
 
   // Returns whether the FunctionalTensor experienced an

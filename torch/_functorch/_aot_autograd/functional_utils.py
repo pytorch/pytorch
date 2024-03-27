@@ -124,6 +124,20 @@ def are_all_mutations_under_no_grad_or_inference_mode(t):
         )
 
 
+def was_inductor_storage_resized(t):
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
+            raise RuntimeError(
+                f"storage resizing is not supported on tensor subclass: {type(t)}"
+            )
+    elif not isinstance(t, torch.Tensor):
+        return False
+    else:
+        assert isinstance(t, FunctionalTensor)
+        return torch._functionalize_was_inductor_storage_resized(t.elem)
+
+
 # f_arg here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
@@ -359,12 +373,26 @@ def _check_if_mutation_can_be_in_graph(
     mutates_metadata,
     mutations_hidden_from_autograd,
     mutations_under_no_grad_or_inference_mode,
+    mutation_inductor_storage_resize,
     requires_grad,
 ):
     if keep_input_mutations:
-        return mutates_data and (
+        in_graph = (mutates_data or mutation_inductor_storage_resize) and (
             (not mutates_metadata and not requires_grad)
             or mutations_hidden_from_autograd
             or mutations_under_no_grad_or_inference_mode
         )
-    return False
+    else:
+        in_graph = False
+    if mutation_inductor_storage_resize:
+        assert in_graph, f"""\
+Encountered a resize on a graph input, but the input has other mutations that we cannot
+keep in the graph. This is not supported today. Current state:
+  keep_input_mutations={keep_input_mutations}
+  mutates_data={mutates_data}
+  mutates_metadata={mutates_metadata}
+  mutations_hidden_from_autograd={mutations_hidden_from_autograd}
+  mutations_under_no_grad_or_inference_mode={mutations_under_no_grad_or_inference_mode}
+  mutation_inductor_storage_resize={mutation_inductor_storage_resize}
+  requires_grad={requires_grad}"""
+    return in_graph

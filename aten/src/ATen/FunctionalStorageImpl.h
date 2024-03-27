@@ -104,6 +104,14 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     frozen_ = true;
   }
 
+  int64_t get_storage_size(bool before) {
+    if (before) {
+      return original_storage_size_;
+    } else {
+      return curr_storage_size_;
+    }
+  }
+
   ~FunctionalStorageImpl() override = default;
 
   void mark_mutation() {
@@ -131,8 +139,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
   }
 
-  void mark_inductor_storage_resize() {
+  void mark_inductor_storage_resize(c10::SymInt new_size) {
     inductor_storage_resized_ = true;
+    curr_storage_size_ = new_size.guard_int(__FILE__, __LINE__);
   }
 
   bool was_inductor_storage_resized() {
@@ -161,6 +170,8 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   bool frozen_ = false;
 
   bool inductor_storage_resized_ = false;
+  int64_t original_storage_size_;
+  int64_t curr_storage_size_;
 
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;

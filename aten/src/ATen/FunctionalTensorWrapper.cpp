@@ -280,17 +280,29 @@ void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
   // For simplicity, only allow storage resizing on a base tensor
   TORCH_CHECK(view_metas_.size() == 0, "view chain length: ", view_metas_.size());
 
-  // Handle the two cases separately
+  // The "functionalization rule" for storage resizing is a giant no-op, mainly because we don't want
+  // resize_() calls to actualy emit any ops in the functional graph.
+  // How does it work?
+  // Resizing up (old size == 0):
+  //   We do nothing in this case.
+  //   The expection is that for the user code to be valid, the next op that should run against the current tensor "x"
+  //   will be a x.copy_(y) (or similar), that will fully overwrite the data of x.
+  //   If there are any outstanding aliases of x, we expect them not to be used until after the copy_() call
+  //   (otherwise the eager code would be invalid),
+  //   and therefore functionalization will regenerate the aliases off of the result of `x.copy(y)`.
+  // Resizing down (new size == 0):
+  //   We also (mostly) do nothing in this case. The assumption is that after resizing a tensor down,
+  //   it is fully unused in the program (unless it is later resized back up first, has data copied in)
+  //   One exception:
+  //     A common pattern in FSDP is to take in a parameter as a graph input that has zero-storage,
+  //     resize it up to use in some compute, and then resize it back down to zero at the end of the graph.
+  //     If any of the compute needs to save the parameter for backward, it is important that
+  //     the *original* (zero-sized) param is what we save, and not the temporary resized tensor.
+  //     One simple way to handle this: if a FunctionalTensor experiences multiple resizes, such that
+  //     its storage size becomes 0 multiple times,
+  //     we can just point the current value of our FunctionalTensor to the **first** instance
+  //     of the zero-storage-size tensor (since all of these tensors have no data and are interchangeable).
   if (new_size == 0) {
-    // Resizing down
-    // Assumption (for now - will need to lift later in partial graph world)
-    // In full graph FSDP, we are guaranteed that the resize up and resize down happen in the same graph.
-    // Therefore, our "original" input to the graph should have already had a zero-size storage.
-    // We can just re-use the original tensor in this situation.
-    auto orig_value = functional_storage_impl()->original_base();
-    auto orig_value_bytes = orig_value.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
-    TORCH_CHECK(orig_value_bytes == 0, "We only support the x.storage().resize_(0) case today when x is a graph input and it entered the graph with zero storage");
-
     // Reset the base to be our original, zero-storage-size tensor.
     // Then let vanilla functionalization view regeneration run.
     // Why do we do this? Two reasons:
@@ -300,16 +312,19 @@ void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
     //     and is saved for backward by autograd.
     //     We need to carefully make sure that autograd continues to save the **original**, zero-sized param for backward during tracing,
     //     because fsdp's backward hooks rely on resizing the original parameter again the backward back to the full size.
-    value_ = orig_value;
-    // Flush the update to the FunctionalStorageImpl, so outstanding aliases can regenerate themselves
-    // off of the zero-storage-size tensor.
-    commit_update();
-  } else {
-    // Nothing to do: we expect the next op to show up on this tensor to be a self.copy_(src),
-    // updating value_ to be the src tensor.
-    // We could in theory work harder to assert this invariant, although breaking this invariant
-    // will also cause problems in eager mode.
+    auto orig_value = functional_storage_impl()->original_base();
+    auto orig_value_bytes = orig_value.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+    if (orig_value_bytes == 0) {
+      value_ = orig_value;
+      // Flush the update to the FunctionalStorageImpl, so outstanding aliases can regenerate themselves
+      // off of the zero-storage-size tensor.
+      commit_update();
+    }
   }
+  // Mark the tensor as having its storage resized.
+  // This is so we can detect it for inputs in AOTAutograd and error / emit
+  // an input mutation resize_() appropriately
+  functional_storage_impl()->mark_inductor_storage_resize(new_size);
 }
 
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
