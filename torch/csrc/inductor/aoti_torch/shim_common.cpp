@@ -27,6 +27,9 @@
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
