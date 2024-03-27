@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import json
 import os
 import unittest
 
@@ -252,18 +253,20 @@ class TestMaxAutotune(TestCase):
             def get(self, filenames):
                 nonlocal cache
                 nonlocal num_get
-                ret = {file: cache[file] for file in filenames if file in cache}
+                ret = {
+                    file: json.loads(cache[file]) for file in filenames if file in cache
+                }
                 num_get += len(ret)
                 return ret
 
             def put(self, filename, data):
                 nonlocal cache
                 nonlocal num_put
-                cache[filename] = data
+                cache[filename] = json.dumps(data)
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend"
+            "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
             if config.is_fbcode()
             else "triton.runtime.cache.RedisRemoteCacheBackend"
         )
