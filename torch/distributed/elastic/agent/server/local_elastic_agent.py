@@ -31,7 +31,7 @@ from torch.distributed.elastic.multiprocessing import PContext, start_processes,
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 __all__ = [
     "LocalElasticAgent",
@@ -156,16 +156,16 @@ class LocalElasticAgent(SimpleElasticAgent):
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
-            log.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
+            logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             self._worker_watchdog = timer.FileTimerServer(
                 file_path=watchdog_file_path,
                 max_interval=0.1,
                 daemon=True,
                 log_event=self._log_watchdog_event)
             self._worker_watchdog.start()
-            log.info("FileTimerServer started")
+            logger.info("FileTimerServer started")
         else:
-            log.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
+            logger.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
         # Propagate the watchdog file env to worker processes
         if watchdog_file_path is not None:
             for worker_env in envs.values():
@@ -306,7 +306,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         assert self._pcontext is not None
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
-            log.error(
+            logger.error(
                 "[%s] worker pids do not match process_context pids."
                 " Expected: %s, actual: %s",
                 role, worker_pids, pc_pids
