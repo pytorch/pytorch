@@ -9872,21 +9872,24 @@ fn
 
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, const):
                 super(Mod, self).__init__()
                 self.fc = torch.nn.Linear(3, 3)
+                # Force Dynamo to recompile
+                self.a = const
 
             def forward(self, out):
-                return self.fc(out)
+                return self.a * self.fc(out)
 
         def fn(x, mod):
             return mod(x)
 
-        opt_fn = torch.compile(fn, backend="eager")
+        # dynamic=False forces Dynamo to recompile
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
 
-        m1 = Mod()
-        m2 = Mod()
-        m3 = Mod()
+        m1 = Mod(1)
+        m2 = Mod(2)
+        m3 = Mod(3)
         inp = torch.randn(3, 3)
 
         # NOTE: assumes that each cache entry is guarded
