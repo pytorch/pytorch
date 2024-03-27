@@ -916,7 +916,8 @@ def aot_module_simplified(
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
-        runtime_args.clear()
+        # this is still causing problems
+        # runtime_args.clear()
         return compiled_fn(full_args)
 
     # Just for convenience
