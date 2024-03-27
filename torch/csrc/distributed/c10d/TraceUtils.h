@@ -268,14 +268,40 @@ inline std::string retrieveDesyncReport(
 
 #ifdef USE_C10D_NCCL
 
+int64_t unsafeCUDAEventCompletionTimeInNanoSinceEpoch(
+    int pipefd[2],
+    cudaEvent_t event) {
+  auto addr = (int64_t*)((int64_t)event + 0x58);
+  if (write(pipefd[1], addr, 8) == -1 && errno == EFAULT) {
+    return 0;
+  }
+  addr = (int64_t*)(*addr + 0x8);
+  if (write(pipefd[1], addr, 8) == -1 && errno == EFAULT) {
+    return 0;
+  }
+  addr = (int64_t*)(*addr + 0x8);
+  if (write(pipefd[1], addr, 8) == -1 && errno == EFAULT) {
+    return 0;
+  }
+  char buf[128];
+  read(pipefd[0], buf, 128);
+  return *addr;
+}
+
 /* Helper used by work::getDuration() and nccl flight recorder */
 float getDurationFromEvent(
+    int pipefd[2],
     at::cuda::CUDAEvent& ncclStartEvent,
     at::cuda::CUDAEvent& ncclEndEvent) {
   TORCH_CHECK(
       ncclEndEvent.query(),
       "getDuration can only be called after work is succeeded.")
-  return ncclStartEvent.elapsed_time(ncclEndEvent);
+  auto s =
+      unsafeCUDAEventCompletionTimeInNanoSinceEpoch(pipefd, ncclStartEvent);
+  auto e = unsafeCUDAEventCompletionTimeInNanoSinceEpoch(pipefd, ncclEndEvent);
+  float r = (float)((double)(e - s) / 1.0e6);
+  TORCH_WARN("NCCL DURATION: ", s, " ", e, " ", r);
+  return r;
 }
 
 DebugInfoWriter::~DebugInfoWriter() = default;
@@ -379,6 +405,7 @@ struct NCCLTraceBuffer {
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
     pg_id_to_ranks_ = {};
+    TORCH_CHECK(pipe(pipefd_) != -1, "failed to create dummy pipe");
   }
   using Event = at::cuda::CUDAEvent;
   struct Entry {
@@ -434,6 +461,7 @@ struct NCCLTraceBuffer {
   size_t next_ = 0;
   size_t id_ = 0;
   std::map<size_t, std::vector<uint64_t>> pg_id_to_ranks_;
+  int pipefd_[2];
 
   c10::optional<size_t> record(
       size_t pg_id,
@@ -508,7 +536,7 @@ struct NCCLTraceBuffer {
     }
     if (r.start_ && r.end_ && r.time_discovered_completed_.has_value() &&
         !r.duration_.has_value()) {
-      r.duration_ = getDurationFromEvent(*r.start_, *r.end_);
+      r.duration_ = getDurationFromEvent(pipefd_, *r.start_, *r.end_);
     }
   }
 
