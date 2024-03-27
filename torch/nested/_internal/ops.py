@@ -212,13 +212,12 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     return None
 
 
-def extract_kwargs(arg, **override_kwargs):
+def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
         "_metadata_cache": arg._metadata_cache,
         "_ragged_idx": arg._ragged_idx,
     }
-    kwargs.update(override_kwargs)
     return kwargs
 
 
@@ -449,8 +448,10 @@ def to_copy_default(func, *args, **kwargs):
     new_values = func(inp._values, **new_kwargs)
     new_offsets = inp._offsets.to(device=new_values.device)
     _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+    inp_kwargs = extract_kwargs(inp)
+    inp_kwargs["offsets"] = new_offsets
 
-    return NestedTensor(new_values, **extract_kwargs(inp, offsets=new_offsets))
+    return NestedTensor(new_values, **inp_kwargs)
 
 
 register_jagged_func(
