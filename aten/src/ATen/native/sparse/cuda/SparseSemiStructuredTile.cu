@@ -199,11 +199,11 @@ struct MetadataCutlass {
 
 template <typename KT, typename Metadata, typename Algorithm>
 __global__ void __launch_bounds__(32 /* num_threads */, 20)
-    sparse24_sparsify_both_ways_kernel(
+    sparse_semi_structured_tile_kernel(
         typename KT::Params p,
         Metadata metadata,
         Algorithm algo) {
-  KT::sparse24_sparsify_both_ways_kernel(p, metadata, algo);
+  KT::sparse_semi_structured_tile_kernel(p, metadata, algo);
 }
 
 template <typename Element, typename MetadataFormat>
@@ -213,6 +213,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse_semi_structured_tile_t
 {
   using KT = KernelTypes<Element>;
   c10::optional<at::cuda::CUDAGuard> device_guard;
+  if (!input.is_meta()) {
+    device_guard.emplace(input.device());
+  }
 
   TORCH_CHECK(input.dim() == 2, "Can only sparsify 2d tensors");
   TORCH_CHECK(
@@ -253,8 +256,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse_semi_structured_tile_t
   auto launchKernel = [&](auto algo, std::string const& algo_name) {
     if (algo_name == algorithm) {
       kernel_launched = true;
+      if (input.is_meta()) {
+        return;
+      }
       size_t smem_bytes = 0;
-      sparse24_sparsify_both_ways_kernel<KT>
+      sparse_semi_structured_tile_kernel<KT>
           <<<p.getBlocksGrid(),
              p.getThreadsGrid(),
              smem_bytes,

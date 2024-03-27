@@ -299,7 +299,7 @@ struct KernelTypes {
   }
 
   template <typename Algorithm, typename MetadataStore>
-  CUTLASS_DEVICE static void sparse24_sparsify_both_ways_kernel(
+  CUTLASS_DEVICE static void sparse_semi_structured_tile_kernel(
       Params p,
       MetadataStore metadata_gmem,
       Algorithm compute_tile_indices) {
