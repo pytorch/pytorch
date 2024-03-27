@@ -37,21 +37,102 @@ def torchbind_method_redispatch(self, *args, **kwargs):
     return _orig_scriptmethod_call(self, *args, **kwargs)
 
 
+def _need_python_dispatch():
+    curr_stack_len = torch._C._len_torch_dispatch_stack()
+    # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
+    # calls inside of a mode.
+    return curr_stack_len > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+        DispatchKey.Python
+    )
+
+
+def _is_torch_bind_operator(op, args, kwargs):
+    return any(
+        isinstance(arg, FakeScriptObject) for arg in list(args) + list(kwargs.values())
+    )
+
+
+def _can_skip_cpp_dispatcher(op, args, kwargs):
+    return _need_python_dispatch() or torch._ops.need_handle_pre_dispatch()
+
+
+def _create_skipping_cpp_hanlder(op_overload):
+    if torch._ops.need_handle_pre_dispatch():
+        return torch._ops.create_predispatch_handler(op_overload)
+    elif _need_python_dispatch():
+
+        def handler(*args, **kwargs):
+            with torch.utils._python_dispatch._pop_mode_temporarily() as curr_mode:
+                return torch._ops._mannually_invoke_dispatch_mode_in_python(
+                    curr_mode, op_overload, args, kwargs
+                )
+
+        return handler
+    else:
+        raise RuntimeError(
+            "Only support skippping cpp dispatcher by jumping to either pre-dispatch or Python"
+        )
+
+
+# OpOverloadPackt can be called directly. We directly dispatch to
+# the default implementation for now to skp C++ dispatcher.
+# We could handle other variants when needed.
+def OpOverloadPacket_torchbind_redispatch(orig_call):
+    def wrapped(self_, *args, **kwargs):
+        if _is_torch_bind_operator(self_, args, kwargs):
+            return self_.default(*args, **kwargs)
+        return orig_call(self_, *args, **kwargs)
+
+    return wrapped
+
+
+# We want to skip C++ dispatcher for torchbind operator when there're dispatch mode on the
+# stack. The reason is that the abstract class (similar to fake tensor for tensor) of torch bind object
+# resides in Python and we cannot pass the Python object created from it to C++ dispatcher
+# due to schema mismatch.
+#
+# Implementation-wise, we need to handle two cases: If there are dispatch keys on pre-dispatch mode stack,
+# we'll let pre-dispatch handle the operator. If pre-dispatch mode is off but there are
+# dispatcher modes on the torch dispatch stack, we pop mode from the stack and directly dispatch there.
+# Otherwise, we'll fallback to the original call.
+def OpOverload_torchbind_redispatch(orig_call):
+    def wrapped(self_, *args, **kwargs):
+        if _is_torch_bind_operator(self_, args, kwargs):
+            if _can_skip_cpp_dispatcher(self_, args, kwargs):
+                return _create_skipping_cpp_hanlder(self_)(*args, **kwargs)
+            else:
+                raise RuntimeError(
+                    f"Some inputs of operartor {self_} are abstract, which indicates"
+                    f" we're under tracing/exporting but"
+                    " there's no torch_dispatch mode on the stack. This is likely"
+                    " caused by creating abstract custom classes without tracing."
+                )
+        return orig_call(self_, *args, **kwargs)
+
+    return wrapped
+
+
 @contextmanager
 def enable_torchbind_tracing():
     """Context manager that acts as a feature flag to enable torchbind tracing
     behavior. Once torchbind tracing has been stabilized, we can remove this and
     turn it always on.
     """
+    prior_OpOverloadPacket_call = torch._ops.OpOverloadPacket.__call__
+    prior_OpOverload_call = torch._ops.OpOverload.__call__
     try:
         KNOWN_TYPES.append(torch.ScriptObject)
         torch.ScriptMethod.__call__ = torchbind_method_redispatch  # type: ignore[method-assign]
+        torch._ops.OpOverloadPacket.__call__ = OpOverloadPacket_torchbind_redispatch(prior_OpOverloadPacket_call)  # type: ignore[method-assign]
+        torch._ops.OpOverload.__call__ = OpOverload_torchbind_redispatch(prior_OpOverload_call)  # type: ignore[method-assign]
         yield
     finally:
         assert (
             KNOWN_TYPES.pop() is torch.ScriptObject
         ), "Someone else messed with KNOWN_TYPES during tracing, exploding."
         torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
+        torch._ops.OpOverloadPacket.__call__ = prior_OpOverloadPacket_call  # type: ignore[method-assign]
+        torch._ops.OpOverload.__call__ = prior_OpOverload_call  # type: ignore[method-assign]
 
 
 @call_torchbind.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -98,8 +179,6 @@ def inner(mode, *args, **kwargs):
         return call_torchbind(*args, **kwargs)
 
 
-# TODO: currently we just run the C++ implementation with fake tensors.
-# But we should make it possible to register a fake torchbind implementation.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:

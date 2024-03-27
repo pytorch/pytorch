@@ -534,6 +534,37 @@ def forward(self, arg0_1, arg1_1):
             self.assertEqual(tq.size(), 0)
             self.assertEqual(tq1.size(), 0)
 
+    def test_make_fx_tensor_queue_operatos(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                return x_sin, x_cos, tq
+
+        mod = Model()
+
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+
+        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
+            gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+            self._assertEqualSkipScriptObject(gm(tq1, x), mod(tq2, x))
+
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestImplAbstractClass(TestCase):
