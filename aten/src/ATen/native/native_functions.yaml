@@ -3340,6 +3340,18 @@
   dispatch:
     CUDA: _cslt_sparse_mm_search
 
+- func: _sparse_semi_structured_tile(Tensor input, str algorithm="", bool use_cutlass=True) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _sparse_semi_structured_tile
+
+- func: _sparse_semi_structured_apply(Tensor input, Tensor thread_masks) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _sparse_semi_structured_apply
+
+- func: _sparse_semi_structured_apply_dense(Tensor input, Tensor thread_masks) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_apply_dense
+
 - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None, ScalarType? out_dtype=None) -> Tensor
   dispatch:
     CUDA: _sparse_semi_structured_linear
