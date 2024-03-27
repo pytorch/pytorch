@@ -2202,7 +2202,7 @@ class ShapeEnv:
             if any(a is None for a in args):
                 # We check if we are not mixing SymNode that should not be ignored
                 # (fx_node is not None) with those that should (fx_node is None).
-                assert all(not isinstance(a, torch.fx.Node) for a in args)
+                assert all(not isinstance(a, torch.fx.Node) for a in args), args
                 return None, fresh
 
             fresh = True
@@ -2562,6 +2562,7 @@ class ShapeEnv:
         """Create a SymBool object from a sympy boolean expression"""
         # This function is only being used in serialization, so we do not track it
         # for validation.
+        # TODO: we probably should track this
         return SymBool(SymNode(sym, self, bool, None))
 
     def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
