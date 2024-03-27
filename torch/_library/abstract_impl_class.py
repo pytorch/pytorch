@@ -76,39 +76,42 @@ def create_fake_obj(fake_mode, x: torch.ScriptObject):
 
 
 def impl_abstract_class(qualname, fake_class=None):
-    r"""Register an fake implementation for this class.
+    r"""Register a fake implementation for this class.
 
-    It's in the same spirit of registering an fake implementation for
+    It's in the same spirit of registering a fake implementation for
     an operator with impl_abstract but with the difference that it
     associates a fake class with the original torch bind class (registered
     with torch::class_). In this way, torch.compile can handle them properly
     in components such as Dynamo and AOTAutograd.
 
-    This API may be used as a decorator (see examples). Users are required
-    to provide a from_real classmethod that takes a real object and returns an
-    instance of the fake class. All tensors in the fake object should also be
-    properly fakified with create_fake_tensor() in from_real.
+    This API may be used as a decorator (see example). For the fake class, users
+    are required to provide a from_real classmethod that takes a real object and
+    returns an instance of the fake class. All tensors in the fake object should also
+    be properly fakified with create_fake_tensor() in from_real.
 
     Examples:
-        # For a torch Bind class Foo defined in test_custom_class_registration.cpp:
+        # For a custom class Foo defined in test_custom_class_registration.cpp:
         TORCH_LIBRARY(_TorchScriptTesting, m) {
-            m.class_<Foo>("_Foo")
-                .def(torch::init<int64_t, int64_t>())
-                // .def(torch::init<>())
-                .def("info", &Foo::info)
-                .def("increment", &Foo::increment)
-                .def("add", &Foo::add)
-                .def("add_tensor", &Foo::add_tensor)
-                .def("__eq__", &Foo::eq)
-                .def("combine", &Foo::combine)
-                .def_pickle(
-                    [](c10::intrusive_ptr<Foo> self) { // __getstate__
-                      return std::vector<int64_t>{self->x, self->y};
-                    },
-                    [](std::vector<int64_t> state) { // __setstate__
-                      return c10::make_intrusive<Foo>(state[0], state[1]);
+          m.class_<TensorQueue>("_TensorQueue")
+            .def(torch::init<at::Tensor>())
+            .def("push", &TensorQueue::push)
+            .def("pop", &TensorQueue::pop)
+            .def("top", &TensorQueue::top)
+            .def("size", &TensorQueue::size)
+            .def("clone_queue", &TensorQueue::clone_queue)
+            .def_pickle(
+                // __getstate__
+                [](const c10::intrusive_ptr<TensorQueue>& self)
+                    -> c10::Dict<std::string, at::Tensor> {
+                  return self->serialize();
+                },
+                // __setstate__
+                [](c10::Dict<std::string, at::Tensor> data)
+                    -> c10::intrusive_ptr<TensorQueue> {
+                  return c10::make_intrusive<TensorQueue>(std::move(data));
                 });
-        # We could register a fake class fakeFoo in Python as follows:
+            };
+        # We could register a fake class FakeTensorQueue in Python as follows:
         import torch
 
         @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
@@ -177,7 +180,7 @@ def _full_qual_class_name(qualname: str):
     return "__torch__.torch.classes." + ns + "." + name
 
 
-# Return the namespace and class name of a script object.
+# Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str):
     splits = full_qualname.split(".")
     assert len(splits) == 5
@@ -220,6 +223,7 @@ def _fake_obj_from_real(fake_mode, x):
             f" that converts the real object to the fake object."
         )
 
+    # from_real defined by user need the ctx to fakify the tensor states.
     ctx = torch._library.abstract_impl.AbstractImplCtx(fake_mode, None)
     with torch._library.abstract_impl.set_ctx_getter(lambda: ctx):
         return fake_class.from_real(x)
