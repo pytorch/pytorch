@@ -232,6 +232,55 @@ class NestedTensor(torch.Tensor):
             return func(*args, **kwargs)
 
 
+# NB: These fake view autograd.Functions are superseded by real view ops. Don't use them!
+# TODO: Remove ViewBufferFromNested, ViewNestedFromBuffer, and buffer_from_jagged once the
+# internal BC period has passed.
+
+
+# Not actually a view!
+class ViewBufferFromNested(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x: NestedTensor):  # type: ignore[override]
+        ctx.save_for_backward(x.offsets())
+        ctx.metadata_cache = x._metadata_cache
+        ctx.ragged_idx = x._ragged_idx
+        return x._values
+
+    @staticmethod
+    def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
+        (offsets,) = ctx.saved_tensors
+        return NestedTensor(
+            gO,
+            offsets=offsets,
+            _metadata_cache=ctx.metadata_cache,
+            _ragged_idx=ctx.ragged_idx,
+        )
+
+
+# Not actually a view!
+class ViewNestedFromBuffer(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        values: torch.Tensor,
+        offsets: torch.Tensor,
+        metadata_cache: Optional[Dict[str, Any]] = None,
+    ):  # type: ignore[override]
+        return NestedTensor(
+            values.detach(),
+            offsets=offsets,
+            _metadata_cache=metadata_cache,
+        )
+
+    @staticmethod
+    def backward(ctx, gO: NestedTensor):  # type: ignore[override]
+        return gO._values, None, None
+
+
+def buffer_from_jagged(jagged):
+    return ViewBufferFromNested.apply(jagged)
+
+
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
     tensors: List[torch.Tensor],
@@ -364,19 +413,26 @@ def jagged_from_tensor_and_lengths(
 # for _nested_view_from_values_offsets(). Sizes don't matter much, but they shouldn't be
 # 0/1 because the dummy can be fake-ified and we want to avoid specializing.
 # This arg is otherwise unused.
-_nt_view_dummy = NestedTensor(
-    values=torch.randn(3, 3, device="meta"),
-    offsets=torch.randint(3, (2,), device="meta", dtype=torch.int64),
-).detach()
+_dummy_instance: Optional[torch.Tensor] = None
+
+
+def _nt_view_dummy() -> torch.Tensor:
+    global _dummy_instance
+    if _dummy_instance is None:
+        _dummy_instance = NestedTensor(
+            values=torch.randn(3, 3, device="meta"),
+            offsets=torch.randint(3, (2,), device="meta", dtype=torch.int64),
+        ).detach()
+    return _dummy_instance
 
 
 def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
     return torch._nested_view_from_jagged(
-        values, offsets, _nt_view_dummy, None, ragged_idx
+        values, offsets, _nt_view_dummy(), None, ragged_idx
     )  # type: ignore[return-value]
 
 
 def nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=1):
     return torch._nested_view_from_jagged(
-        values, offsets, _nt_view_dummy, lengths, ragged_idx
+        values, offsets, _nt_view_dummy(), lengths, ragged_idx
     )  # type: ignore[return-value]

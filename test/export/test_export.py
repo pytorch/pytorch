@@ -943,7 +943,11 @@ class TestExport(TestCase):
         ):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
+<<<<<<< HEAD
+    @testing.expectedFailureRetraceability  # T183144629
+=======
     @testing.expectedFailureRetraceability  # TODO (task)
+>>>>>>> ea4a6a8f845 (TEMP)
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -1584,8 +1588,6 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
-    @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
-    @testing.expectedFailurePreDispatchRunDecomp  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2494,8 +2496,12 @@ def forward(self, arg_0):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
+<<<<<<< HEAD
+    @testing.expectedFailureRetraceability  # T183144788
+=======
     @testing.expectedFailurePreDispatchRunDecomp
     @testing.expectedFailureRetraceability
+>>>>>>> ea4a6a8f845 (TEMP)
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2529,7 +2535,11 @@ def forward(self, arg_0):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
+<<<<<<< HEAD
+    @testing.expectedFailureRetraceability  # T183144788
+=======
     @testing.expectedFailureRetraceability  # TODO (task)
+>>>>>>> ea4a6a8f845 (TEMP)
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):

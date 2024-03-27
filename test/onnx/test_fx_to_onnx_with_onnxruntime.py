@@ -1095,7 +1095,14 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
                 assert len(ref_outputs) == len(ort_outputs)
+                for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+                    torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
+                # Test ONNXProgram.__call__ interface
+                ort_outputs = onnx_program(
+                    *args, model_with_state_dict=real_model, **kwargs
+                )
+                assert len(ref_outputs) == len(ort_outputs)
                 for ref_output, ort_output in zip(ref_outputs, ort_outputs):
                     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
