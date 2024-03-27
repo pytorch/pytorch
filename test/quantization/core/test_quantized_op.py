@@ -32,6 +32,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.ao.quantization import PerChannelMinMaxObserver
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
+from torch.testing._internal.optests import opcheck
 import torch.backends.xnnpack
 
 from typing import Optional
@@ -3340,6 +3341,42 @@ class TestDynamicQuantizedOps(TestCase):
                 ref.relu_()
 
             self.assertEqual(out, ref)
+
+    @skipIfNoFBGEMM
+    def test_unpacked_qlinear_dynamic_fp16(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+        )
+        for batch_size, input_channels, output_channels in options:
+            qlinear_dynamic = torch.ops.quantized.linear_unpacked_dynamic_fp16
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels)
+
+            out = qlinear_dynamic(x, w, bias)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+
+            self.assertEqual(out, ref)
+
+
+    @skipIfNoFBGEMM
+    def test_unpacked_qlinear_dynamic_fp16_opcheck(self):
+        qlinear_dynamic = torch.ops.quantized.linear_unpacked_dynamic_fp16.default
+
+        x = torch.randn(4, 4, device='cpu')
+        w = torch.randn(4, 4, device='cpu')
+        bias = torch.randn(4, device='cpu')
+
+        opcheck(qlinear_dynamic, (x, w, bias))
+
 
     """Tests the correctness of the dynamic quantized lstm/gru."""
 
