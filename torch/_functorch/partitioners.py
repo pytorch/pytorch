@@ -793,6 +793,9 @@ def min_cut_rematerialization_partition(
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
 
+        if node.meta.get("recompute", None) == 0:
+            return True
+
         if BAN_IF_NOT_IN_ALLOWLIST:
             if get_aten_target(node) not in recomputable_ops:
                 return True
