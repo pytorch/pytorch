@@ -1367,12 +1367,11 @@ class GuardBuilder(GuardBuilderBase):
                     self.tensor_check_guard_managers.append(guard_manager)
 
                     output_graph = self.check_fn_manager.output_graph
-                    size = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
-                    )
-                    stride = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
-                    )
+                    metadata = output_graph.input_source_to_sizes_strides[
+                        guard.originating_source
+                    ]
+                    size = convert_to_concrete_values(metadata["size"])
+                    stride = convert_to_concrete_values(metadata["stride"])
 
                     verbose_code_parts = get_verbose_code_parts(
                         get_tensor_guard_code_part(value, tensor_name, size, stride),
