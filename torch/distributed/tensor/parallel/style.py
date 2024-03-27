@@ -11,6 +11,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate,
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
+    "SequenceParallel",
     "ColwiseParallel",
     "PrepareModuleInput",
     "PrepareModuleOutput",
@@ -94,7 +95,7 @@ class ColwiseParallel(ParallelStyle):
 
         # transform the input layouts to the desired layouts of ColwiseParallel
         if input_layouts != desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts, async_op=True)
         return input_tensor
 
     def _partition_linear_fn(self, name, module, device_mesh):
@@ -118,7 +119,8 @@ class ColwiseParallel(ParallelStyle):
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
-        outputs = outputs.redistribute(placements=output_layouts)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
 
@@ -191,7 +193,7 @@ class RowwiseParallel(ParallelStyle):
             input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
 
         if input_layouts != desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts, async_op=True)
         return input_tensor
 
     def _partition_linear_fn(self, name, module, device_mesh):
@@ -219,7 +221,8 @@ class RowwiseParallel(ParallelStyle):
         # Rowwise sharding produces partial output, depending on output layouts:
         # 1. to replicate -> allreduce
         # 2. to shard -> reduce_scatter
-        outputs = outputs.redistribute(placements=output_layouts)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
 
@@ -258,7 +261,7 @@ class SequenceParallel(ParallelStyle):
     Keyword Args:
         sequence_dim (int, optional):
             The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
-            become a DTensor that is sharded on the sequence dimension.
+            become a DTensor that is sharded on the sequence dimension, default: 1.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
     Returns:
@@ -421,7 +424,7 @@ class PrepareModuleOutput(ParallelStyle):
             The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
             have the desired DTensor layouts.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: False.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
     Returns:
         A ParallelStyle object that prepares the sharding layouts of the nn.Module's outputs.
 

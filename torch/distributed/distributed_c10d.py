@@ -13,7 +13,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
 
 import torch
 from torch._C._distributed_c10d import (
@@ -1009,7 +1009,10 @@ def _get_default_group() -> ProcessGroup:
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
-    return not_none(GroupMember.WORLD)
+    if TYPE_CHECKING:
+        return not_none(GroupMember.WORLD)
+    else:
+        return GroupMember.WORLD
 
 
 def _get_default_store() -> Store:
@@ -1797,6 +1800,9 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
         _warn_not_in_group("isend")
         return None
 
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
+
     if group is None or group is GroupMember.WORLD:
         pg = _get_default_group()
     else:
@@ -1829,6 +1835,9 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
     if _rank_not_in_group(group):
         _warn_not_in_group("irecv")
         return None
+
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
 
     if group is None or group is GroupMember.WORLD:
         pg = _get_default_group()
@@ -1869,6 +1878,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         _warn_not_in_group("send")
         return None
 
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
+
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         default_pg.send([tensor], dst, tag).wait()
@@ -1898,6 +1910,9 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
     if _rank_not_in_group(group):
         _warn_not_in_group("recv")
         return -1
+
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
 
     if group is None:
         pg = _get_default_group()
@@ -2249,7 +2264,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     warnings.warn(
         "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
@@ -3021,7 +3036,7 @@ def all_gather_coalesced(
     warnings.warn(
         "torch.distributed.all_gather_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.

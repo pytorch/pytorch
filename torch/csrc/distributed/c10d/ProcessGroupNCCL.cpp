@@ -26,8 +26,10 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -76,6 +78,22 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
       "Input tensor data type is not supported for NCCL process group: ",
       type);
   return it->second;
+}
+
+bool complexViewAsRealAllowed(const ReduceOp reduceOp) {
+  switch (reduceOp) {
+    case ReduceOp::SUM:
+      return true;
+    case ReduceOp::AVG:
+      return true;
+    case ReduceOp::PREMUL_SUM:
+      return true;
+    case ReduceOp::UNUSED:
+      return true;
+    default:
+      return false;
+  }
+  return false;
 }
 
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
@@ -729,6 +747,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
+  computeDuration_ = getCvarBool(TORCH_NCCL_COMPUTE_DURATION, false);
   NCCLTraceBuffer::get()->record_pg_ranks(uid_, groupRanks());
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -740,7 +759,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      computeDuration_);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -794,6 +814,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", TORCH_NCCL_COMPUTE_DURATION: " << computeDuration_
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
@@ -897,8 +918,17 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
+  using IntraNodeComm = intra_node_comm::IntraNodeComm;
+  if (!IntraNodeComm::isEnabled()) {
+    return nullptr;
+  }
+  auto prefixStore = c10::make_intrusive<PrefixStore>("IntraNodeComm", store_);
+  auto comm = c10::make_intrusive<IntraNodeComm>(prefixStore, rank_, size_);
+  if (comm->rendezvous()) {
+    return comm;
+  } else {
+    return nullptr;
+  }
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -1141,6 +1171,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
+              << writer.getWriterTarget();
     writer.write(ncclTrace);
     return true;
   }
@@ -1467,6 +1499,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+  auto lastStatusUpdateTime = std::chrono::steady_clock::now();
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
   while (!done || !terminateProcessGroup_.load()) {
@@ -1493,6 +1526,20 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastCompletedSeq_,
         ".");
 #endif
+    auto logger = ::c10d::C10dLogger::getLogger();
+    if (logger &&
+        computeDeltaMS(
+            lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
+            kWorkStatusUpdatePeriodMs) {
+      ::c10d::C10dLoggingData data;
+      data.integers["pg_id"] = uid_;
+      data.integers["rank"] = rank_;
+      data.integers["global_rank"] = globalRank();
+      data.integers["last_enqueued_work"] = lastEnqueuedSeq_;
+      data.integers["last_completed_work"] = lastCompletedSeq_;
+      logger->log(data);
+      lastStatusUpdateTime = std::chrono::steady_clock::now();
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1577,7 +1624,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Clean up completed work
       if (work.isCompleted()) {
         lastCompletedSeq_ = work.seq_;
-        NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_, computeDuration_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -2003,16 +2050,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
             reinterpret_cast<void*>(segmentInfo.address),
             segmentInfo.total_size);
       }
-
-      // Record the mapping between ncclComm and device index so that later
-      // register hook can register a newly allocated segment to communicators
-      // on the same device.
-      // NOTE: we need remove the communicator from this map when it is
-      // destroyed, otherwise may register onto an invalid communicator.
-      ncclCommDevIdxMapMutex.lock();
-      ncclCommDevIdxMap.emplace(ncclComm, device.index());
-      ncclCommDevIdxMapMutex.unlock();
     }
+    // Record the mapping between ncclComm and device index so that later
+    // register hook can register a newly allocated segment to communicators
+    // on the same device.
+    // NOTE: we need remove the communicator from this map when it is
+    // destroyed, otherwise may register onto an invalid communicator.
+    ncclCommDevIdxMapMutex.lock();
+    ncclCommDevIdxMap.emplace(ncclComm, device.index());
+    ncclCommDevIdxMapMutex.unlock();
   }
 
   it = devNCCLCommMap_.find(deviceKey);
@@ -2474,7 +2520,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   auto work = initWork(
-      device, rank_, opType, nullptr, inputs, outputs, /*record=*/true);
+      device, rank_, opType, profilingTitle, inputs, outputs, /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2486,7 +2532,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  // Start event should only be recorded before the ncclGroupStart()
+  // Start event should only be recorded before the ncclGroupStart() (which
+  // happens inside AutoNcclGroup guard below)
   if (work->timingEnabled_) {
     work->ncclStartEvent_->record(ncclStream);
   }
@@ -2543,10 +2590,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     }
   }
 
-  // End event should only be recorded after the ncclGroupEnd()
-  if (!coalescing_state_) {
-    work->ncclEndEvent_->record(ncclStream);
-  }
+  work->ncclEndEvent_->record(ncclStream);
   work->ncclComm_ = ncclComm;
 
   {
@@ -2581,15 +2625,41 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
+  /* Note [cuda graph capture and workEnqueue]
 
-  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+  Normal behavior of the C10D watchdog is to query cuda events on work objects
+  periodically, but when cuda graph recording is active these event queries
+  would crash or mess up the recording.
+
+  To ensure we do not enqueue a work object to the watchdog when cuda graph
+  capture is active, we use a one-way sync. We increment a flag pre-emptively,
+  indicating our intent to enqueue a work object. Then we check capture_status
+  to see if (a) capturing is already in progress (we cannot enqueue in this
+  case), (b) capturing hasn't started yet, so we can trust that no capture will
+  start (since a pre-condition of starting a capture is to check the event query
+  count is 0).
+
+  If we are not able to enqueue the work due to capture-in-progress, we finally
+  decrement the counter.
+
+  For this reason we cannot easily move the increment inside workEnqueue unless
+  we also change the semantic of workEnqueue to 'maybeWorkEnqueue'.
+
+  TODO:
+   - Is our design for flight recorder safe in this context?  are we recording
+  any FR events during cudagraph capture? if so, they won't be safe to poll for
+  completion status.
+  */
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+  if (capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
-
+  // TODO(whc) if the work isn't enqueued, I don't feel great about returning
+  // it, since interactions with it by usercode won't behave normally - they
+  // won't observe work completion, for instance.  Will this lead to silent
+  // problems during capture?
   return work;
 }
 
@@ -2902,7 +2972,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(
       Error,
-      "allreduce_sparse is only available in the NCCL experimental branch.");
+      "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
 #endif
 }
 
@@ -2937,6 +3007,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        complexViewAsRealAllowed(opts.reduceOp),
+        "all_reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
 
   if (intraNodeComm_ != nullptr && opts.reduceOp == ReduceOp::SUM) {
@@ -3023,6 +3101,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
 
   // @lint-ignore CLANGTIDY
@@ -3111,6 +3192,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        complexViewAsRealAllowed(opts.reduceOp),
+        "reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(

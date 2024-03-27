@@ -1,4 +1,5 @@
 import contextlib
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
 
@@ -119,13 +120,9 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
+        torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
         return out
-
-    # Need to disable default torch_function. Why?
-    # Default torch_function will always wrap outputs into a subclass if they aren't already a subclass.
-    # We actually.. don't want to do this sometimes, see Note [FunctionalTensorMode inputs are sometimes plain tensors]
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         unrecognized_types = [
@@ -312,7 +309,16 @@ class FunctionalTensorMode(TorchDispatchMode):
                 alias_info = len(
                     [i for i in func._schema.arguments if i.alias_info is not None]
                 )
-                return alias_info != 0 or func._schema.is_mutable
+                should_decompose = alias_info != 0 or func._schema.is_mutable
+                if not should_decompose:
+                    if func.namespace not in ["aten", "prim"]:
+                        warnings.warn(
+                            f"At pre-dispatch tracing, we will assume that any "
+                            f"custom op that is marked with CompositeImplicitAutograd "
+                            f"and functional are safe to not decompose. We found {func}"
+                            f" to be one such op."
+                        )
+                return should_decompose
             return True
 
         if (
@@ -352,10 +358,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            if self.pre_dispatch:
-                raise NotImplementedError(
-                    "Auto functionalization is not supported on pre-dispatch tracing"
-                )
+            # it doesn't matter what mode we use here because
+            # the implementation of do_auto_functionalize doesn't
+            # interact with FunctionalTensorMode at all
             return do_auto_functionalize(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects

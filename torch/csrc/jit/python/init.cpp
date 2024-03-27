@@ -1870,6 +1870,13 @@ void initJITBindings(PyObject* module) {
             ss << self;
             return ss.str();
           })
+      .def(
+          "__repr__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
       .def_property_readonly(
           "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")

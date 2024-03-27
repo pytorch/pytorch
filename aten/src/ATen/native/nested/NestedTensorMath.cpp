@@ -861,6 +861,12 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
+std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
+  return std::make_tuple(
+      construct_nested_strides(nested_size),
+      construct_offsets(nested_size));
+}
+
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
@@ -931,7 +937,7 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   return self.reshape(sizes);
 }
 
-Tensor& normal_nested_(Tensor& self, double mean, double std, const std::optional<Generator>& gen) {
+Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.normal_(mean, std, gen);
   return self;

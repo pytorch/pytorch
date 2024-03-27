@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -284,6 +284,10 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
+benchmark_multi_templates = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+)
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -329,6 +333,29 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # TODO: fork is not safe in a multithreaded environment, we should evaluate changing
 # the default to spawn.
 worker_start_method = "fork"
+
+# Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
+# on by DDP and should not be set by the users.
+_fuse_ddp_communication = False
+_fuse_ddp_bucket_size = 25
+
+# Flag to control which fusion passes to apply. Functions in the list will
+# be applied in order. There are two different different fusion passes
+# --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
+# one is "fuse_ddp_with_concat_op". Users can also change this to a customized
+# fusion function.
+#
+# The fusion currently does not support multiple DDP with different PG or
+# data type. This feature will be added in the future PRs.
+#
+# "schedule_comm_wait" is used to delay the wait ops to maximize comm/comp
+# overlapping. At this moment, this pass performs better than
+# reorder_for_compute_comm_overlap_passes but we will add the logic of
+# "schedule_comm_wait" in the future and remove the one here.
+_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
+    "fuse_ddp_with_concat_op",
+    "schedule_comm_wait",
+]
 
 
 def decide_compile_threads():
@@ -436,6 +463,11 @@ use_minimal_arrayref_interface: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
+# assume_aligned_inputs means that we assume that inputs will be aligned; we generate
+# code using this assumption, and clone tensors before use if they aren't aligned.
+# In the common case, most inputs will be aligned.
+assume_aligned_inputs: bool = True
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -504,11 +536,22 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
 
+    # Should we skip cudagraphing graphs with dynamic shape inputs
+    # If False, we will re-record a graph for each unique set of shape inputs
+    cudagraph_skip_dynamic_graphs = False
+
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
+
+    # synchronize after cudagraph invocation
+    force_cudagraph_sync = False
+
+    # always run cudagraphs in the eager warmup stage
+    # instead of recording and executing cudagraphs
+    force_cudagraphs_warmup = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
