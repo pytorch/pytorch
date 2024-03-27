@@ -1,6 +1,22 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 
+#if defined(__aarch64__)
+// the gall! Yes we can. Si, se puede!
+#define CPU_CAPABILITY_AVX2
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#define SIMDE_X86_SSE2_ENABLE_NATIVE_ALIASES
+#define SIMDE_X86_AVX_ENABLE_NATIVE_ALIASES
+
+#include <third_party/simd-everywhere/simde/x86/sse.h>
+#include <third_party/simd-everywhere/simde/x86/sse2.h>
+#include <third_party/simd-everywhere/simde/x86/sse3.h>
+#include <third_party/simd-everywhere/simde/x86/sse4.1.h>
+#include <third_party/simd-everywhere/simde/x86/sse4.2.h>
+#include <third_party/simd-everywhere/simde/x86/avx2.h>
+#endif
+
+
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
@@ -16,6 +32,7 @@
 #define RESTRICT __restrict__
 #endif
 
+
 namespace at::native {
 
 namespace {
@@ -24,7 +41,7 @@ inline bool is_block_start(int index, int BLOCK_SIZE) {
   return !(index & (BLOCK_SIZE -1));
 }
 
-#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#if (defined(__aarch64__) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 // convert 16x int4 to int8, handle 64 bits at a time
 // used in avx2 and avx512
 inline __m128i conver_int4_to_int8(const uint8_t* data) {
@@ -195,7 +212,7 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#elif (defined(__aarch64__) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <int BLOCK_M, int BLOCK_N>
 inline void tinygemm_kernel(
@@ -491,7 +508,7 @@ void weight_to_int4pack_kernel(
             dst[k * nb_size / 2 + n / 2] = packed;
           }
         }
-#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#elif (defined(__aarch64__) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
           // for nb_size 32
           for (const auto d : c10::irange(16)) {
