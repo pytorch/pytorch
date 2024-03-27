@@ -193,7 +193,6 @@ def get_read_only_benchmark_value(
 
     XXX: mutating this tensor will cause incorrectness issues.
     """
-
     from .virtualized import V
 
     # ints are often used for indexing, cant grap random allocation
@@ -212,36 +211,12 @@ def get_read_only_benchmark_value(
     )
     needed_bytes = needed_size * get_primitive_bitwidth(dtype)
 
-    tc = torch._guards.TracingContext.try_get()
-    tc_params: List[torch.Tensor] = [] if tc is None else tc.params_flat  # type: ignore[assignment]
-
-    gm = V.graph.module
-    for mod_tensor in itertools.chain(gm.parameters(), gm.buffers(), tc_params):
-        mod_tensor = (
-            mod_tensor.data if type(mod_tensor) is torch.nn.Parameter else mod_tensor
+    mod_tensor = V.graph.get_read_only_parameter_for_benchmarking(needed_bytes, device)
+    if mod_tensor is not None:
+        assert (
+            mod_tensor.untyped_storage().nbytes() >= needed_bytes
+            and mod_tensor.device == device
         )
-        if type(mod_tensor) is not torch.Tensor or not torch._C._has_storage(
-            mod_tensor
-        ):
-            continue
-
-        # MM benchmarking can be sensitive to mantissa
-        # Dont take from integer tensors bc they may be sparse
-        if not mod_tensor.is_floating_point():
-            continue
-
-        if not mod_tensor.device == device:
-            continue
-
-        if not mod_tensor.untyped_storage().nbytes() >= needed_size:
-            continue
-
-        # We dont want to use the same storage for multiple example inputs,
-        # would distort timing.
-        stor_data_ptr = mod_tensor.untyped_storage().data_ptr()
-        if stor_data_ptr in V.graph.module_storages_in_benchmark_use:
-            continue
-
         buffer = mod_tensor.new_empty([], dtype=dtype)
         buffer.set_(
             mod_tensor.untyped_storage(),
@@ -251,6 +226,7 @@ def get_read_only_benchmark_value(
         )  # type: ignore[call-overload]
         out_tensor = torch.as_strided(buffer, size, stride)
 
+        stor_data_ptr = mod_tensor.untyped_storage().data_ptr()
         V.graph.module_storages_in_benchmark_use.add(stor_data_ptr)
         dp_set_ref = weakref.ref(V.graph.module_storages_in_benchmark_use)
 
