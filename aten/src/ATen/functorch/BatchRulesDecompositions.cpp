@@ -188,6 +188,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(log_softmax, int);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
+  OP_DECOMPOSE(matrix_exp);
   OP_DECOMPOSE(matrix_H);
   OP_DECOMPOSE(matrix_power);
   OP_DECOMPOSE2(max, other );
