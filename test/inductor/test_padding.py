@@ -13,6 +13,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch._dynamo.utils import maybe_cprofile
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+DO_ACC_TEST = os.environ.get("DO_ACC_TEST", "1") == "1"
 
 
 class LinearAndSoftmax(nn.Module):
@@ -58,15 +59,18 @@ def forward_and_backward_pass(m, inputs):
 )
 class PaddingTest(TestCase):
     def check_close(self, ref, act):
+        if "LongformerMaskedLMOutput" in str(type(ref)):
+            ref = ref.loss
+            act = act.loss
         tol = 1e-3
         self.assertTrue(
             torch.allclose(ref, act, atol=tol, rtol=tol), f"ref:\n{ref}\nact:\n{act}"
         )
 
-    def common_numeric_check(self, f, *args):
+    def common_numeric_check(self, f, *args, **kwargs):
         opt_f = torch.compile(f)
-        ref = f(*args)
-        act = opt_f(*args)
+        ref = f(*args, **kwargs)
+        act = opt_f(*args, **kwargs)
         self.check_close(ref, act)
 
     def test_mm_perf(self):
@@ -237,13 +241,30 @@ class PaddingTest(TestCase):
 
     @maybe_cprofile
     def run_acc_and_perf_test(self, model, inputs, perf_inputs=None):
-        if not isinstance(inputs, (tuple, list)):
-            inputs = [inputs]
         if perf_inputs is None:
             perf_inputs = inputs
 
-        model.eval()
-        self.common_numeric_check(model, *inputs)
+        def _process_inputs(x):
+            """
+            return args and kwargs
+            """
+            if isinstance(x, dict):
+                return [], x
+
+            if not isinstance(inputs, (tuple, list)):
+                x = [x]
+
+            return x, {}
+
+        args, kwargs = _process_inputs(inputs)
+        perf_args, perf_kwargs = _process_inputs(perf_inputs)
+
+        if DO_ACC_TEST:
+            model.eval()
+            self.common_numeric_check(model, *args, **kwargs)
+        else:
+            print("Accuracy test skipped")
+
         model.train()
 
         if DO_PERF_TEST:
@@ -255,16 +276,29 @@ class PaddingTest(TestCase):
                 )
 
 
-            def get_f(m, optim):
-                def f(*x):
-                    optim.zero_grad(True)
-                    with torch.cuda.amp.autocast():
-                        pred = m(*x)
-                        loss = pred.sum()
-                    loss.backward()
-                    optim.step()
-
-                return f
+            if len(kwargs) > 0:
+                # for huggingface models
+                def get_f(m, optim):
+                    def f(*args, **kwargs):
+                        optim.zero_grad(True)
+                        with torch.cuda.amp.autocast():
+                            pred = m(*args, **kwargs)
+                            loss = pred[0]
+                        loss.backward()
+                        optim.step()
+    
+                    return f
+            else:
+                def get_f(m, optim):
+                    def f(*args, **kwargs):
+                        optim.zero_grad(True)
+                        with torch.cuda.amp.autocast():
+                            pred = m(*args, **kwargs)
+                            loss = pred.sum()
+                        loss.backward()
+                        optim.step()
+    
+                    return f
 
             latency_with_padding = None
             print("Benchmark with padding")
@@ -276,7 +310,7 @@ class PaddingTest(TestCase):
                 opt_f_with_padding = torch.compile(
                     get_f(m_copy_with_padding, optim_with_padding)
                 )
-                latency_with_padding = do_bench(lambda: opt_f_with_padding(*perf_inputs))
+                latency_with_padding = do_bench(lambda: opt_f_with_padding(*perf_args, **perf_kwargs))
             latency_without_padding = None
             print("bencmark without padding")
             with config.patch(comprehensive_padding=False):
@@ -286,16 +320,16 @@ class PaddingTest(TestCase):
                     get_f(m_copy_without_padding, optim_without_padding)
                 )
                 latency_without_padding = do_bench(
-                    lambda: opt_f_without_padding(*perf_inputs)
+                    lambda: opt_f_without_padding(*perf_args, **perf_kwargs)
                 )
             print(
                 f"Latency with and without padding: {latency_with_padding:.3f} v.s. {latency_without_padding:.3f}"
             )
 
             # profiling
-            self.do_profiling(opt_f_with_padding, opt_f_without_padding, perf_inputs)
+            self.do_profiling(opt_f_with_padding, opt_f_without_padding, perf_args, perf_kwargs)
 
-    def do_profiling(self, f_with_padding, f_without_padding, inputs=()):
+    def do_profiling(self, f_with_padding, f_without_padding, args=(), kwargs={}):
        torch.cuda.synchronize()
        with torch.profiler.profile() as p:
            niter = 3
@@ -303,10 +337,10 @@ class PaddingTest(TestCase):
                with torch.profiler.record_function(
                    "With padding"
                ), torch.autograd.skip_grad_layout_contract():
-                   f_with_padding(*inputs)
+                   f_with_padding(*args, **kwargs)
 
                with torch.profiler.record_function("Without padding"):
-                   f_without_padding(*inputs)
+                   f_without_padding(*args, **kwargs)
            torch.cuda.synchronize()
 
        profile_path = "/tmp/chrome.json"
@@ -334,6 +368,26 @@ class PaddingTest(TestCase):
             inputs = torch.randn(1, 3, 640, 959)
 
         self.run_acc_and_perf_test(model, inputs)
+
+    def test_longformer(self):
+        from transformers import AutoConfig, AutoModelForMaskedLM
+        config = AutoConfig.from_pretrained("allenai/longformer-base-4096")
+        model = AutoModelForMaskedLM.from_config(config)
+
+        # input
+        #   "input_ids": [4, 1024]
+        #   "labels": [4, 1024]
+        vocab_size = model.config.vocab_size
+        bs = 4
+        seq_length = 1024
+        def geninp():
+            return torch.randint(0, vocab_size, (bs, seq_length), dtype=torch.int64, requires_grad=False)
+        input_dict = {
+            "input_ids": geninp(),
+            "labels": geninp()
+        }
+
+        self.run_acc_and_perf_test(model, input_dict)
         
     def test_nvidia_deeprecommender(self):
         # SELU

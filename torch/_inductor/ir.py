@@ -2625,7 +2625,15 @@ class Layout(IRNode):
         #
         # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
         # with gaps in between. That causes less coalesced GPU memory access!
-        align_stride_threshold = 320
+        # align_stride_threshold = 320
+
+        # Further raise the threshold to 1024 to avoid interfere with persistent reduction.
+        # Let's say a inner reduction has a row size 513. Inductor will generate
+        # persistent reduction code.
+        # If we do padding, the strides are not contiguous any more. Inductor
+        # uses a much smaller threshold for persistent reduction this case and
+        # generate potentially worse non-persistent reduction code.
+        align_stride_threshold = 1024
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
