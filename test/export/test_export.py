@@ -8,6 +8,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
+from typing import cast
 
 import torch
 import torch._dynamo as torchdynamo
@@ -23,7 +24,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensorMode, FakeTensor
 from torch.export import Dim, dynamic_dim, export, unflatten
 from torch.export._trace import (
     _export,
@@ -3801,6 +3802,33 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     foo_functional = torch.ops.testlib.foo_functional.default(arg0_1);  arg0_1 = None
     return (foo_functional,)""")
+
+    @testing.expectedFailureSerDer  # symint inputs nyi
+    def test_symint_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch._dynamo.source import LocalSource
+
+        shape_env = ShapeEnv()
+        source = LocalSource("moo")
+        symint = shape_env.create_symintnode(
+            shape_env.create_symbol(5, source, positive=None),
+            hint=5,
+            source=source
+        )
+
+        ep = export(M(), (symint, torch.ones(3, 3)))
+        self.assertExpectedInline(str(ep.graph_module.code.strip()), """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg1_1, arg0_1);  arg1_1 = arg0_1 = None
+    return (mul,)""")
+
+        self.assertTrue(torch.allclose(ep.module()(5, torch.ones(3, 3)), torch.ones(3, 3) * 5))
+        self.assertTrue(torch.allclose(ep.module()(6, torch.ones(3, 3)), torch.ones(3, 3) * 6))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
