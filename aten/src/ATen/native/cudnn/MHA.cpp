@@ -73,6 +73,23 @@ using graph_and_tensors = std::tuple<
     std::shared_ptr<fe::graph::Tensor_attributes> // Stats
     >;
 
+using graph_and_tensors_backward = std::tuple<
+    std::shared_ptr<fe::graph::Graph>,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Q,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // K,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // V,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Seed,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Offset,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // O,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // dO,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // stats,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // dQ,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // dK,,
+    std::shared_ptr<fe::graph::Tensor_attributes> // dV,
+    >;
+
+
 #define MAX_MHA_DIM 4
 
 struct MHAParams {
@@ -178,7 +195,7 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
 
 template <typename T, typename KeyType>
 struct MHAGraphCache {
-  std::unordered_map<KeyType, graph_and_tensors, ParamsWrapperHash<KeyType>>
+  std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>>
       engine_cache;
 
   // no mutexes here as caches are now thread local for v8, can also return a
@@ -202,6 +219,7 @@ struct MHAGraphCache {
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
 thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
+thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper> mhagraphbackwardcache;
 
 auto build_graph_and_tensors(
     int64_t b,
@@ -327,6 +345,118 @@ auto build_graph_and_tensors(
       mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats);
 }
 
+auto build_graph_and_tensors_backward(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset,
+    cudnnHandle_t& handle,
+    MHAParams& params) {
+    auto dtype = fe::DataType_t::HALF;
+    if (q.scalar_type() == kBFloat16) {
+      dtype = fe::DataType_t::BFLOAT16;
+    }
+    auto mha_graph = std::make_shared<fe::graph::Graph>();
+    mha_graph->set_io_data_type(dtype)
+        .set_intermediate_data_type(fe::DataType_t::FLOAT)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto Q = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("Q")
+            .set_dim(
+                std::vector<int64_t>(q.sizes().begin(), q.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                q.strides().begin(), q.strides().end())));
+    auto K = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("K")
+            .set_dim(
+                std::vector<int64_t>(k.sizes().begin(), k.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                k.strides().begin(), k.strides().end())));
+    auto V = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("V")
+            .set_dim(
+                std::vector<int64_t>(v.sizes().begin(), v.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                v.strides().begin(), v.strides().end())));
+    auto attn_scale =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+                              .set_name("attn_scale")
+                              .set_dim({1, 1, 1, 1})
+                              .set_stride({1, 1, 1, 1})
+                              .set_is_pass_by_value(true)
+                              .set_data_type(fe::DataType_t::FLOAT));
+    auto Seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_name("Seed")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+    auto Offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(fe::DataType_t::INT32));
+    auto O = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("O")
+            .set_dim(
+                std::vector<int64_t>(o.sizes().begin(), o.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                o.strides().begin(), o.strides().end())));
+     auto STATS = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("stats")
+            .set_dim(
+                std::vector<int64_t>(softmaxstats.sizes().begin(), softmaxstats.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                softmaxstats.strides().begin(), softmaxstats.strides().end()))
+	    .set_data_type(fe::DataType_t::FLOAT));
+     auto DO = mha_graph->tensor(
+        fe::graph::Tensor_attributes()
+            .set_name("dO")
+            .set_dim(
+                std::vector<int64_t>(dO.sizes().begin(), dO.sizes().end()))
+            .set_stride(std::vector<int64_t>(
+                dO.strides().begin(), dO.strides().end())));
+     auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
+                                     .set_name("flash_attention_backward")
+                                     .set_causal_mask(is_causal)
+                                     .set_attn_scale(attn_scale);
+     if (dropout_probability != 0.0f) {
+        sdpa_backward_options.set_dropout(dropout_probability, Seed, Offset);
+     }
+     auto [DQ, DK, DV] = mha_graph->sdpa_backward(Q, K, V, O, DO, STATS, sdpa_backward_options);
+     DQ->set_output(true).set_dim(std::vector<int64_t>(dQ.sizes().begin(), dQ.sizes().end())).set_stride(std::vector<int64_t>(dQ.strides().begin(), dQ.strides().end()));
+     DK->set_output(true).set_dim(std::vector<int64_t>(dK.sizes().begin(), dK.sizes().end())).set_stride(std::vector<int64_t>(dK.strides().begin(), dK.strides().end()));
+     DV->set_output(true).set_dim(std::vector<int64_t>(dV.sizes().begin(), dV.sizes().end())).set_stride(std::vector<int64_t>(dV.strides().begin(), dV.strides().end()));
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
+     AT_CUDNN_FRONTEND_CHECK(
+       mha_graph->create_execution_plans({fe::HeurMode_t::A}));
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
+     AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
+     return std::make_tuple(
+       mha_graph, Q, K, V, attn_scale, Seed, Offset, O, DO, STATS, DQ, DK, DV);
+}
+
+
 void run_cudnn_SDP_fprop(
     int64_t b,
     int64_t h,
@@ -411,6 +541,96 @@ void run_cudnn_SDP_fprop(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
   mhagraphcache.update(key, graph_and_tensors_values);
 }
+
+void run_cudnn_SDP_bprop(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset) {
+   cudnnHandle_t handle = getCudnnHandle();
+   auto key = MHACacheKeyWrapper(
+       b,
+       h,
+       s_q,
+       s_kv,
+       d,
+       q,
+       k,
+       v,
+       dropout_probability,
+       is_causal,
+       true);
+   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key); 
+   graph_and_tensors_backward graph_and_tensors_backward_values;
+   if (graph_and_tensors_backward_ptr) {
+     graph_and_tensors_backward_values = *graph_and_tensors_backward_ptr;
+   } else {
+     graph_and_tensors_backward_values = build_graph_and_tensors_backward(
+       b,
+       h,
+       s_q,
+       s_kv,
+       d,
+       scaling_factor,
+       is_causal,
+       dropout_probability,
+       q,
+       k,
+       v,
+       o,
+       dO,
+       softmaxstats,
+       dQ,
+       dK,
+       dV,
+       dropoutseed,
+       dropoutoffset,
+       handle,
+       key.pod);
+   }
+   auto [mha_graph, Q, K, V, attn_scale, Seed, Offset, O, Do, Stats, Dq, Dk, Dv] = graph_and_tensors_backward_values;
+   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
+    // inputs
+   {Q, q.data_ptr()},
+   {K, k.data_ptr()},
+   {V, v.data_ptr()},
+   {O, o.data_ptr()},
+   {Do, dO.data_ptr()},
+   {Stats, softmaxstats.data_ptr()},
+   // outputs
+   {Dq, dQ.data_ptr()},
+   {Dk, dK.data_ptr()},
+   {Dv, dV.data_ptr()},
+   // pass by value
+   {attn_scale, &scaling_factor}};
+   if (dropout_probability != 0.0f) {
+       variant_pack[Seed]   = dropoutseed.data_ptr();
+       variant_pack[Offset] = dropoutoffset.data_ptr();
+   }
+   auto workspace_size = mha_graph->get_workspace_size();
+   auto workspace_ptr =
+       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+   TORCH_INTERNAL_ASSERT(!workspace_size || workspace_ptr.get());
+   TORCH_INTERNAL_ASSERT(
+       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
+   mhagraphbackwardcache.update(key, graph_and_tensors_backward_values);
+}
+
 
 } // namespace native
 } // namespace at
