@@ -336,11 +336,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
+            compiled_model = None
+
             def get_compiled_model_and_optim(iter_idx):
+                nonlocal compiled_model
                 if not full_graph_compile:
                     return None, None, False
                 if iter_idx > 0:
-                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                    if compiled_model is None:
+                        compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
                     return compiled_model, optim_for_compile, True
                 else:
                     return model_to_be_compiled, optim_for_compile, False
@@ -482,11 +486,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 fully_shard(model_to_be_compiled, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
+            compiled_model = None
+
             def get_compiled_model_and_optim(iter_idx):
+                nonlocal compiled_model
                 if not full_graph_compile:
                     return None, None, False
                 if iter_idx > 0:
-                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                    if compiled_model is None:
+                        compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
                     return compiled_model, optim_for_compile, True
                 else:
                     return model_to_be_compiled, optim_for_compile, False
@@ -653,11 +661,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
+            compiled_model = None
+
             def get_compiled_model_and_optim(iter_idx):
+                nonlocal compiled_model
                 if not full_graph_compile:
                     return None, None, False
                 if iter_idx > 0:
-                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                    if compiled_model is None:
+                        compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
                     return compiled_model, optim_for_compile, True
                 else:
                     return model_to_be_compiled, optim_for_compile, False
@@ -1034,11 +1046,15 @@ class TestFullyShard2DTraining(FSDPTest):
             fully_shard(model_to_be_compiled, mesh=dp_mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
             optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
+        compiled_model = None
+
         def get_compiled_model_and_optim(iter_idx):
+            nonlocal compiled_model
             if not full_graph_compile:
                 return None, None, False
             if iter_idx > 0:
-                compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
+                if compiled_model is None:
+                    compiled_model = torch.compile(model_to_be_compiled, backend="inductor", fullgraph=True)
                 return compiled_model, optim_for_compile, True
             else:
                 return model_to_be_compiled, optim_for_compile, False
