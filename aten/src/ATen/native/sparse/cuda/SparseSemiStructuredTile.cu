@@ -19,7 +19,6 @@
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/linear_combination_relu.h>
 #include <cutlass/epilogue/thread/linear_combination_silu.h>
-#include <cutlass/gemm/device/gemm_sparse_row_broadcast.h>
 
 #include <type_traits>
 #include <tuple>
@@ -208,17 +207,10 @@ __global__ void __launch_bounds__(32 /* num_threads */, 20)
 }
 
 template <typename Element, typename MetadataFormat>
-std::
-    tuple<
-        at::Tensor, // packed
-        at::Tensor, // packed_meta_reordered
-        at::Tensor, // packed_trans
-        at::Tensor, // packed_trans_meta_reordered
-        at::Tensor // threads_masks
-        >
-    sparse24_sparsify_both_ways_typed(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse24_sparsify_both_ways_typed(
         const at::Tensor input,
-        std::string algorithm) {
+        std::string algorithm)
+{
   using KT = KernelTypes<Element>;
   c10::optional<at::cuda::CUDAGuard> device_guard;
 
@@ -280,12 +272,10 @@ std::
       threads_masks);
 }
 
-// < packed, packed_meta_reordered, packed_trans, packed_trans_meta_reorderd, threads_masks >
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile_autocast(
-  const Tensor     input,
+  const Tensor input,
   c10::string_view algorithm,
-  bool             use_cutlass
-)
+  bool use_cutlass)
 {
   c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::DispatchKey::Autocast);
   auto exec_type = at::autocast::get_autocast_gpu_dtype();
@@ -295,7 +285,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile_
       use_cutlass);
 }
 
-// < packed, packed_meta_reordered, packed_trans, packed_trans_meta_reorderd, threads_masks >
+// <packed, packed_meta_reordered, packed_trans, packed_trans_meta_reorderd, threads_masks>
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   const Tensor& input,
   c10::string_view algorithm,
@@ -305,27 +295,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   auto runTyped = [&](auto type)
   {
     using ElementT = decltype(type);
-
-    if (use_cutlass)
-    {
+    if (use_cutlass) {
       return sparse24_sparsify_both_ways_typed<ElementT, MetadataCutlass>(input, algo);
     }
-    else
-    {
+    else {
       return sparse24_sparsify_both_ways_typed<ElementT, MetadataCuSparseLt>(input, algo);
     }
   };
 
-  if (input.scalar_type() == at::ScalarType::Half) {
-    return runTyped(cutlass::half_t());
+  switch (input.scalar_type()) {
+    case at::ScalarType::Half:
+      return runTyped(cutlass::half_t());
+    case at::ScalarType::BFloat16:
+      return runTyped(cutlass::bfloat16_t());
+    default:
+      TORCH_CHECK(false, "Only `float16` and `bfloat16` are supported.");
   }
-  else
-  {
-    TORCH_CHECK(
-        input.scalar_type() == at::ScalarType::Half ||
-        input.scalar_type() == at::ScalarType::BFloat16);
-    return runTyped(cutlass::bfloat16_t());
-  }
+
 }
 
 } // namespace at::native

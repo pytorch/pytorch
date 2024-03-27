@@ -17,9 +17,9 @@ __global__ void __launch_bounds__(32 /* num_threads */)
 }
 
 // Apply a 2:4 sparsify pattern computed with
-// `sparse24_sparsify_both_ways_kernel` to another Tensor
+// `_sparse_semi_structured_tile` to another Tensor
 template <bool kIsMeta, typename Element>
-std::tuple<at::Tensor, at::Tensor> sparse24_apply_typed(at::Tensor input, at::Tensor threads_masks) // Returned by `sparse24_sparsify_both_ways`
+std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Tensor threads_masks)
 {
   using KT = KernelTypes<Element>;
   // TODO: Technically we should be able to deal with that
@@ -82,17 +82,16 @@ std::tuple<at::Tensor, at::Tensor> sparse24_apply_typed(at::Tensor input, at::Te
 }
 
 template <bool kIsMeta>
-std::tuple<at::Tensor, at::Tensor> sparse24_apply(at::Tensor input, at::Tensor threads_masks) // Returned by `sparse24_sparsify_both_ways`
+std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(Tensor input, Tensor threads_masks, bool return_dense) // Returned by `_sparse_semi_structured_tile`
 {
-  if (input.scalar_type() == at::ScalarType::Half)
-  {
-    return sparse24_apply_typed<kIsMeta, cutlass::half_t>(input, threads_masks);
-  }
-  else
-  {
-    TORCH_CHECK(input.scalar_type() == at::ScalarType::Half || input.scalar_type() == at::ScalarType::BFloat16);
-    return sparse24_apply_typed<kIsMeta, cutlass::bfloat16_t>(input, threads_masks);
-  }
+  TORCH_CHECK(
+    input.scalar_type() == at::ScalarType::Half || input.scalar_type() == at::ScalarType::BFloat16,
+    "Unsupported dtype - only `float16` and `bfloat16` are supported currently"
+  );
+  auto result = (input.scalar_type() == at::ScalarType::Half)
+            ? _sparse_semi_structured_apply_typed<kIsMeta, cutlass::half_t>(input, threads_masks)
+            : _sparse_semi_structured_apply_typed<kIsMeta, cutlass::bfloat16_t>(input, threads_masks);
+  return result;
 }
 
 } // namespace
