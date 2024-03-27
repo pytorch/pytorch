@@ -1,7 +1,7 @@
 import contextlib
 import inspect
 import threading
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 from .. import _C, _library, library, Tensor
 from . import utils
@@ -75,7 +75,7 @@ def custom_op(
 
 
 class CustomOpDef:
-    def __init__(self, namespace: str, name: str, schema: str, fn: Callable):
+    def __init__(self, namespace: str, name: str, schema: str, fn: Callable) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
@@ -309,12 +309,14 @@ def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Librar
     return lib
 
 
-def iter_tensors(args, kwargs, allowed_nesting=1):
+def iter_tensors(
+    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
+) -> Iterator[Tensor]:
     def check(arg):
         if isinstance(arg, Tensor):
             yield arg
         elif allowed_nesting > 0 and isinstance(arg, (tuple, list)):
-            yield from iter_tensors(arg, {}, allowed_nesting - 1)
+            yield from iter_tensors(tuple(arg), {}, allowed_nesting - 1)
 
     for arg in args:
         yield from check(arg)
@@ -343,16 +345,16 @@ tls = threading.local()
 tls.can_access_reserved_namespace = False
 
 
-def reserved_namespace():
+def reserved_namespace() -> str:
     return "DONT_USE_THIS_GIVE_EXPLICIT_NAMESPACE_IF_NEEDED"
 
 
-def can_access_reserved_namespace():
+def can_access_reserved_namespace() -> bool:
     return tls.can_access_reserved_namespace
 
 
 @contextlib.contextmanager
-def allow_reserved_namespace_access(allowed=True):
+def allow_reserved_namespace_access(allowed: bool = True) -> Iterator[None]:
     prev = tls.can_access_reserved_namespace
     try:
         tls.can_access_reserved_namespace = allowed
