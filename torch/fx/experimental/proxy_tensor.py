@@ -26,6 +26,7 @@ import weakref
 import operator
 from torch.utils._stats import count
 import logging
+from torch._library.abstract_impl_class import AbstractScriptObject
 
 from torch.overrides import TorchFunctionMode
 
@@ -97,7 +98,7 @@ def set_proxy_slot(obj, tracer, proxy):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, torch.ScriptObject):
+    elif isinstance(obj, (torch.ScriptObject, AbstractScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         tracer.script_object_tracker[obj] = proxy
     else:
@@ -121,7 +122,7 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, torch.ScriptObject):
+    elif isinstance(obj, (torch.ScriptObject, AbstractScriptObject)):
         tracker = tracer.script_object_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
@@ -141,7 +142,7 @@ def extract_val(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
         return val
-    elif isinstance(val, torch.ScriptObject):
+    elif isinstance(val, (torch.ScriptObject, AbstractScriptObject)):
         return val
     elif isinstance(val, BackwardState):
         return val
@@ -218,7 +219,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, lambda: proxy)
-        elif isinstance(e, torch.ScriptObject):
+        elif isinstance(e, (torch.ScriptObject, AbstractScriptObject)):
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
         elif isinstance(e, (tuple, list)):
@@ -337,7 +338,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer)(x)
-            if isinstance(x, (torch.Tensor, torch.ScriptObject))
+            if isinstance(x, (torch.Tensor, torch.ScriptObject, AbstractScriptObject))
             else x
         )
         for x in flat_args_kwargs
@@ -585,7 +586,7 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
         elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return get_proxy_slot(e, self, e, lambda e: e())
-        elif isinstance(e, torch.ScriptObject):
+        elif isinstance(e, (torch.ScriptObject, AbstractScriptObject)):
             return get_proxy_slot(e, self, e)
         else:
             return e
@@ -652,6 +653,11 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
         out = pytree.tree_map_only(
             torch.Tensor,
             lambda t: get_proxy_slot(t, tracer, t, lambda x: x.proxy),
+            out
+        )
+        out = pytree.tree_map_only(
+            (torch.ScriptObject, AbstractScriptObject),
+            lambda t: get_proxy_slot(t, tracer, t, lambda x: x),
             out
         )
         out = pytree.tree_map_only(
@@ -1153,6 +1159,9 @@ def make_fx(f,
             # NB: don't match on bools
             elif type(x) is int and tracing_mode == "symbolic":
                 return shape_env.create_symintnode(shape_env.create_symbol(x, source, positive=None), hint=x, source=source)
+            elif isinstance(x, (torch.ScriptObject, AbstractScriptObject)):
+                from torch._library.abstract_impl_class import create_abstract_obj
+                return create_abstract_obj(x)
 
             return x
 

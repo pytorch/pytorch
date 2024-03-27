@@ -52,9 +52,10 @@ def create_abstract_obj(x: torch.ScriptObject):
     abstract_x = _abstract_obj_from_concrete(x)
 
     def _call_torchbind(method_name):
+        from torch._higher_order_ops.torchbind import call_torchbind
+
         def wrapped(self_, *args, **kwargs):
-            # TODO: wrap with call_torchbind higher order op
-            return getattr(self_.abstract_obj, method_name)(*args, **kwargs)
+            return call_torchbind(self_, method_name, *args, **kwargs)
 
         return wrapped
 
@@ -70,7 +71,7 @@ def create_abstract_obj(x: torch.ScriptObject):
                 _call_torchbind(name).__get__(abstract_x_wrapped),
             )
         else:
-            log.warning("abstract class doesn't implement method %s.", name)
+            log.warning("Abstract object of %s doesn't implement method %s.", x, name)
     return abstract_x_wrapped
 
 
@@ -189,11 +190,17 @@ def _full_qual_class_name(qualname: str):
     return "__torch__.torch.classes." + ns + "." + name
 
 
-def _find_abstract_class_for_script_object(x: torch.ScriptObject):
-    full_qualname = x._type().qualified_name()  # type: ignore[attr-defined]
+# Return the namespace and class name of a script object.
+def _ns_and_class_name(full_qualname: str):
     splits = full_qualname.split(".")
     assert len(splits) == 5
     _torch, torch_ns, classes, ns, class_name = splits
+    return ns, class_name
+
+
+def _find_abstract_class_for_script_object(x: torch.ScriptObject):
+    full_qualname = x._type().qualified_name()  # type: ignore[attr-defined]
+    ns, class_name = _ns_and_class_name(full_qualname)
     abstract_class = find_abstract_impl(full_qualname)
     if abstract_class is None:
         raise RuntimeError(
@@ -212,8 +219,8 @@ _CONVERT_FROM_REAL_NAME = "from_concrete"
 
 
 class AbstractScriptObject:
-    def __init__(self, abstract_obj):
-        self.abstract_obj = abstract_obj
+    def __init__(self, wrapped_obj):
+        self.wrapped_obj = wrapped_obj
 
 
 def _abstract_obj_from_concrete(x):
