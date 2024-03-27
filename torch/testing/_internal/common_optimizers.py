@@ -1754,16 +1754,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=TEST_WITH_TORCHDYNAMO,
             ),
             DecorateInfo(
-                toleranceOverride(
-                    {  # This override is needed because we split addcdiv if we are running in capturable mode
-                        # this results in more casts in fp16 => more error over 7 iterations.
-                        torch.float32: tol(atol=4e-04, rtol=0.01),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
