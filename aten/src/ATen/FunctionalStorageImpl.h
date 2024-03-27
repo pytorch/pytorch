@@ -103,6 +103,31 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
 
   ~FunctionalStorageImpl() override = default;
 
+  void mark_mutation() {
+    mutation_counter_++;
+  }
+  void mark_mutation_during_no_grad_or_inference_mode() {
+    mutation_counter_during_no_grad_or_inference_mode_++;
+  }
+  void mark_mutation_hidden_from_autograd() {
+    mutation_counter_hidden_from_autograd_++;
+  }
+
+  bool are_all_mutations_under_no_grad_or_inference_mode() const {
+    auto non_autograd_mutations =
+        mutation_counter_during_no_grad_or_inference_mode_ +
+        mutation_counter_hidden_from_autograd_;
+    // The <= is because both counters will technically be incremented, if we
+    // perform e.g. a triton kernel mutation under no_grad
+    return mutation_counter_ <= non_autograd_mutations;
+  }
+
+  bool are_all_mutations_hidden_from_autograd() const {
+    // mutations under no_grad / inference_mode are technically not hidden from
+    // autograd - they change the version counter
+    return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
+  }
+
  private:
   // NB: base_ should always point to a tensor BELOW the current
   // functionalization layer. This is mainly to avoid reference cycles. e.g.
@@ -121,6 +146,10 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // If frozen, no more mutations are allowed on this storage.  Once frozen, a
   // storage cannot be unfrozen.
   bool frozen_ = false;
+
+  uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
+  uint64_t mutation_counter_ = 0;
+  uint64_t mutation_counter_hidden_from_autograd_ = 0;
 };
 
 } // namespace at::functionalization
