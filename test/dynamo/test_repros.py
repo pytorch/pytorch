@@ -152,6 +152,32 @@ def shapes_to_tensor(x, device=None):
     return torch.as_tensor(x, device=device)
 
 
+fw_graph = [None]
+bw_graph = [None]
+
+
+def aot_graph_capture_backend(gm, args):
+    from functorch.compile import min_cut_rematerialization_partition
+    from torch._functorch.aot_autograd import aot_module_simplified
+
+    def fw_compiler(gm, _):
+        fw_graph[0] = gm
+        return gm
+
+    def bw_compiler(gm, _):
+        bw_graph[0] = gm
+        return gm
+
+    return aot_module_simplified(
+        gm,
+        args,
+        fw_compiler,
+        bw_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )
+
+
 class Boxes:
     # from detectron2 poolers.py
     def __init__(self, tensor: torch.Tensor):
@@ -4356,6 +4382,72 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # We graph-break here, so the failure should be eager
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
+
+    def test_storage_resize_forward_full_graph(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                self.param.untyped_storage().resize_(
+                    self.param.numel() * self.param.itemsize
+                )
+                with torch.no_grad():
+                    torch._foreach_copy_([self.param], [x])
+                out = torch.matmul(self.param, self.param)
+                self.param.untyped_storage().resize_(0)
+                return out
+
+        def post_accumulate_grad_hook(param):
+            param.untyped_storage().resize_(0)
+
+        # Beginning of backward, resize and put data into the param
+        def pre_backward_hook(module, grad) -> None:
+            module.param.untyped_storage().resize_(
+                self.param.numel() * self.param.itemsize
+            )
+            with torch.no_grad():
+                # simulates loading data into param from allgather
+                module.param.fill_(2)
+
+        def post_forward_hook(module, args, output):
+            output.register_hook(functools.partial(pre_backward_hook, module))
+
+        x = torch.randn(4, 4)
+
+        mod_ref = TestModule()
+        mod_test = deepcopy(mod_ref)
+
+        # Start the param off with zero storage size to mimic fsdp
+        mod_ref.param.untyped_storage().resize_(0)
+        mod_test.param.untyped_storage().resize_(0)
+
+        # Resize storage at beginning of backward
+        # Free storage at end of backward
+        mod_ref.register_forward_hook(post_forward_hook, prepend=False)
+        mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+        mod_test.register_forward_hook(post_forward_hook, prepend=False)
+        mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+
+        mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+
+        out_ref = mod_ref(x)
+        with self.assertRaisesRegex(
+            RuntimeError, "requiring a storage size of 64 are out of bound"
+        ):
+            out_test = mod_test(x)
+        self.assertExpectedInline(
+            str(fw_graph[0].code.strip()),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_2 = None
+    getitem = _foreach_copy[0];  _foreach_copy = None
+    mm = torch.ops.aten.mm.default(getitem, getitem);  getitem = None
+    t_1 = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    return [mm, t_1]""",
+        )
+        # self.assertEqual(out_ref, out_test)
 
     def test_super_in_staticmethod(self):
         class A:

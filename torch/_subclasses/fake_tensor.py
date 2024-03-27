@@ -972,6 +972,13 @@ class FakeTensorMode(TorchDispatchMode):
         if not torch._library.utils.is_builtin(func):
             raise _BypassDispatchCache("non-builtin")
 
+        # TODO: Probably need to fix this before landing
+        # (real fix will look something like including the storage size in the cache key)
+        if func.is_view:
+            raise _BypassDispatchCache(
+                "view caching is broken when we have storage resizing"
+            )
+
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
         # or may not alias the input, so just punt on caching these.

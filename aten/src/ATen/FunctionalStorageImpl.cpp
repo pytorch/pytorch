@@ -96,7 +96,10 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       GetAllocator(kMeta),
       /*resizable=*/true
     ),
-    base_(base)
+    base_(base),
+    original_base_(base),
+    original_storage_size_(base.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes().guard_int(__FILE__, __LINE__)),
+    curr_storage_size_(original_storage_size_)
   {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base_));
 }

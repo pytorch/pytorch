@@ -473,6 +473,40 @@ def create_functionalized_fn(
                 assert is_fun(inpt_f)
                 inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
+                    if meta.input_info[i].mutation_inductor_storage_resize:
+                        # resizing is not supported on subclasses (we error earlier if this happens)
+                        from torch._subclasses.functional_tensor import FunctionalTensor
+
+                        assert isinstance(inpt_f, FunctionalTensor)
+                        old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                            inpt_f.elem, before=True
+                        )
+                        new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                            inpt_f.elem, before=False
+                        )
+                        if old_storage_size != new_storage_size:
+                            assert (
+                                old_storage_size == 0 or new_storage_size == 0
+                            ), f"""\
+Encountered a storage resize during tracing on input {i}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
+We only support storage resizing on graph inputs as long as the input either starts or ends with a storage size of 0
+(the case for FSDP)"""
+                            torch.ops.inductor.resize_storage_bytes_(
+                                inpt_old, new_storage_size
+                            )
+                            if new_storage_size == 0:
+                                # Even if we marked the input as having a data mutation (thus needing a copy_()),
+                                # We should **ignore** it if we resized our input down to 0 (there is no data to mutate)
+                                continue
+                    # Optimization: if the copy_() is a no-op then don't include it in the graph.
+                    # In theory inductor could optimize this away, however in fsdp, we end up with
+                    # param.copy_(param), where param is a zero-storage-size tensor,
+                    # and running this op in eager mode (using the aot_eager backend) will result in a segfault.
+                    # So we may as well optimize it away here.
+                    if inpt_old is inpt_new:
+                        # (This check needs to be done after putting resize_() in the graph,
+                        # since a resize_(0) doesn't actually change the FunctionalTensor's inner tensor)
+                        continue
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.

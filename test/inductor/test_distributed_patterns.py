@@ -15,8 +15,7 @@ def init_fake_distributed():
     # Fake distributed
     WORLD_SIZE = 2
 
-    # TODO(jansel): fix support for this
-    RESIZE = False
+    RESIZE = True
 
     @torch.no_grad
     def all_gather(t):
@@ -30,6 +29,13 @@ def init_fake_distributed():
         with torch.no_grad():
             mod.og_weight = mod.weight
             mod.weight = nn.Parameter(all_gather(mod.weight))
+
+    # Forward:
+    #   Before:
+    #     mod.weight = local_shard
+    #   After:
+    #     mod.weight = local_shard
+    #     mod.empty_weight  =zero-sized allgather
 
     def fw_post_hook(mod, inp, out):
         if RESIZE:
@@ -52,6 +58,13 @@ def init_fake_distributed():
             mod.empty_weight.copy_(full_weight)
         mod.weight = mod.empty_weight
         del mod.empty_weight
+
+    # Backward:
+    #   Before:
+    #     mod.weight = local_shard
+    #     mod.empty_weight = zero-sized allgather
+    #   After:
+    #     mod.weight = local_shard
 
     def bw_post_hook(mod, gI, gO):
         grad = mod.weight.grad

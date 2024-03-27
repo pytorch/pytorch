@@ -137,6 +137,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);
 
+  // Custom implementation of resize_storage_bytes_(self, new_size)
+  void storage_resize_(c10::SymInt new_size);
+
   // Returns whether the current tensor's data was ever mutated
   bool has_data_mutation();
   //
@@ -144,6 +147,16 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // experienced a set_() call.
   bool was_storage_changed() {
     return was_storage_changed_;
+  }
+
+  int64_t get_storage_size(bool before) {
+    return functional_storage_impl()->get_storage_size(before);
+  }
+
+  // Returns whether the FunctionalTensor experienced an
+  // untyped_storage().resize_() call
+  bool was_inductor_storage_resized() {
+    return functional_storage_impl()->was_inductor_storage_resized();
   }
 
   // The functionalization pass can be used to remove mutations.
