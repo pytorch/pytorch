@@ -14,6 +14,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
+from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
                                                   load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO,
                                                   TEST_WITH_ROCM, IS_MACOS)
@@ -939,4 +940,6 @@ if __name__ == "__main__":
 
 
 if __name__ == '__main__':
-    run_tests()
+    # multiprocessing ipc use case not supported on Jetson
+    if not IS_JETSON:
+        run_tests()
