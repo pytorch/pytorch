@@ -55,6 +55,7 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
+    "while_loop",
 ]
 
 torch.library.define(

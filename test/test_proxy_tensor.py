@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
+import torch._dynamo
 import unittest
 import warnings
 import operator
@@ -2031,6 +2032,7 @@ def skipIfNameMatches(pattern):
 # Auto functionalize shouldn't work with make_fx directly
 filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
@@ -2071,3 +2073,4 @@ instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_fo
 
 if __name__ == '__main__':
     run_tests()
+hop
