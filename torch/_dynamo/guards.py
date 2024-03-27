@@ -742,8 +742,9 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
+                example_value = self.get(guard.originating_source.name())
                 base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=val
+                    attr=attr, source=guard.name, example_value=example_value
                 )
             else:
                 base_manager.add_no_hasattr_guard(
