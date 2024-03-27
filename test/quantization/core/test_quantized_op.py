@@ -3408,7 +3408,7 @@ class TestDynamicQuantizedOps(TestCase):
         # to match the result between compiled and eager version.
         #
         # This is only a temporary solution, long term, we should be able to support PT2
-        # with torchbind natively. 
+        # with torchbind natively.
         def func(X, W, B):
             packed_W = torch.ops.quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16(W)
             return torch.ops.quantized_wrapper.wrapped_fbgemm_linear_fp16_weight(X, packed_W, B, W.size(0))

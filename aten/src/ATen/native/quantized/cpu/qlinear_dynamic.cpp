@@ -16,6 +16,9 @@
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
 #endif
 
