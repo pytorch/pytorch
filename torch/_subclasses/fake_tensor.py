@@ -1415,7 +1415,7 @@ class FakeTensorMode(TorchDispatchMode):
             func.name()
         ).abstract_impl.kernel
         if maybe_abstract_impl:
-            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self, func)
             with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
                 result = maybe_abstract_impl(*args, **kwargs)
                 return result
