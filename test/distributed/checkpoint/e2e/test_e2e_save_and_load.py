@@ -17,8 +17,10 @@ from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
+    get_model_state_dict,
     get_state_dict,
 )
+from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -242,9 +244,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         loaded_train_state = TestTrainState()
         dist_model, dist_optim = self._create_model(compile, model_type)
 
-        loaded_stateful_obj = TestStatefulObj()
-        dist_model, dist_optim = self._create_model(compile, model_type)
-
         DCP.load(
             state_dict={
                 "model": dist_model,
@@ -327,6 +326,33 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         # is assumed False
         DCP.save({}, checkpoint_id=self.temp_dir)
         DCP.load({}, checkpoint_id=self.temp_dir)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_partial_load(self):
+        model, optim = self._create_model(compile=False, model_type=ModelType.NONE)
+        _train(model, optim, train_steps=2)
+
+        dist_model, dist_optim = self._create_model(
+            compile=False, model_type=ModelType.FSDP
+        )
+        _train(dist_model, dist_optim, train_steps=2)
+
+        DCP.save(
+            {"model": dist_model, "optimizer": dist_optim}, checkpoint_id=self.temp_dir
+        )
+
+        dist_model, _ = self._create_model(compile=False, model_type=ModelType.FSDP)
+        DCP.load({"model": dist_model}, checkpoint_id=self.temp_dir)
+
+        dist_msd = get_model_state_dict(dist_model)
+        model_sd = get_model_state_dict(model)
+        self._verify_msd(model_sd, dist_msd)
+
+        # another way
+        loaded_model_sd = _load_state_dict_from_keys("model", model_sd)
+        self._verify_msd(model_sd, loaded_model_sd)
 
 
 class TestNoCPU(DTensorTestBase):
