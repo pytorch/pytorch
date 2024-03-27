@@ -84,12 +84,7 @@ fi
     fi
   else
     CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
-
-    if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
-      conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
-    else
-      conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
-    fi
+    conda_install numpy=2.0.0b1 ${CONDA_COMMON_DEPS} -c pytorch-nightly
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
