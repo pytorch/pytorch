@@ -421,13 +421,17 @@ def _multi_tensor_rmsprop(
         if momentum > 0:
             torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
             torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
-            if capturable:
+            # If LR is a tensor, the else branch will internally call item()
+            # which will cause silent incorrectness if we are capturing
+            if capturable and isinstance(lr, torch.Tensor):
                 momentum_lr = torch._foreach_mul(grouped_momentum_buffer_list, -lr)
                 torch._foreach_add_(grouped_params, momentum_lr)
             else:
                 torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)
         else:
-            if capturable:
+            # If LR is a tensor, the else branch will internally call item()
+            # which will cause silent incorrectness if we are capturing
+            if capturable and isinstance(lr, torch.Tensor):
                 torch._foreach_div_(avg, -lr)
                 torch._foreach_addcdiv_(grouped_params, grouped_grads, avg)
             else:
