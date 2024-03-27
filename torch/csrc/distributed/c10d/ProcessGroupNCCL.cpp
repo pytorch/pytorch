@@ -2242,6 +2242,8 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 void ProcessGroupNCCL::startCoalescing() {
+  coalescedDevice_.set_index(-1);
+  coalescedComm_ = nullptr;
   coalescing_state_ |= CoalActive;
   groupStart();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
@@ -2261,11 +2263,14 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
+  if (coalescedComm_ == nullptr) {
+    // There is no actual work being coalesced, return here
+    groupEnd();
+    coalescing_state_ = 0;
+    return nullptr;
+  }
   TORCH_CHECK(
       coalescedDevice_.index() >= 0,
-      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
-  TORCH_CHECK(
-      coalescedComm_ != nullptr,
       "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
 
   // `coalescedComm_` should have same set of comms across collectives
@@ -2321,6 +2326,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
 
   coalescing_state_ = 0;
+  coalescedComm_ = nullptr;
   return work;
 }
 
@@ -2361,7 +2367,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
     }
-    coalescedComm_ = ncclComm;
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2524,7 +2534,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
     }
-    coalescedComm_ = ncclComm;
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2740,7 +2754,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       TORCH_CHECK(
           coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
     }
-    coalescedComm_ = ncclComm;
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
