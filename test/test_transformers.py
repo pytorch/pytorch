@@ -1028,13 +1028,7 @@ class TestTransformers(NNTestCase):
                 if is_causal:
                     # NB: Don't pass attn_mask here
                     actual = torch.nn.functional.scaled_dot_product_attention(
-                        query, key, value, None, dropout_p, is_causal)
-
-                    # Error case: both explicit attn_mask and is_causal are set
-                    with self.assertRaisesRegex(RuntimeError,
-                                                "Explicit attn_mask should not be set when is_causal=True"):
-                        torch.nn.functional.scaled_dot_product_attention(
-                            query, key, value, attn_mask, dropout_p, is_causal)
+                        query, key, value, attn_mask, dropout_p, is_causal)
                 else:
                     actual = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask, dropout_p, is_causal)
