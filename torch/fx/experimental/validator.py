@@ -327,7 +327,7 @@ try:
         def call_function(self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]) -> Any:
             if target != torch._assert:
                 # Lift and runs the node target function
-                return super().call_function(z3op(target, self.validator), args, kwargs)
+                return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
             assert len(args) == 1, f"expected 1 argument on assertion. Got: {len(args)} "
