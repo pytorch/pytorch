@@ -173,22 +173,10 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
-#ifdef USE_ROCM
-    // allow both CUDA and HIP env var names for ROCm builds
-    // also, current default for ROCm builds is disable by default
-    if (env_value == nullptr) {
-        env_value = std::getenv("DISABLE_ADDMM_HIP_LT");
-    }
-    if (env_value != nullptr && strcmp(env_value, "0") == 0) {
-      return false;
-    }
-    return true;
-#else
     if (env_value != nullptr && strcmp(env_value, "1") == 0) {
       return true;
     }
     return false;
-#endif
 }
 
 #ifdef USE_ROCM
@@ -202,7 +190,7 @@ static bool isSupportedHipLtROCmArch(int index) {
             return true;
         }
     }
-    TORCH_CHECK(false, "Attempting to use hipBLASLt on a unsupported architecture!");
+    LOG(WARNING) << "Attempting to use hipBLASLt on a unsupported architecture!";
     return false;
 }
 #endif
@@ -277,7 +265,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         isSupportedHipLtROCmArch(self.device().index()) &&
         (scalar_type == at::ScalarType::Float ||
           scalar_type == at::ScalarType::Half ||
-          scalar_type == at::ScalarType::BFloat16);
+          scalar_type == at::ScalarType::BFloat16) &&
+        beta.toComplexDouble() == 0.0;
 #endif
     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
     self__sizes = self_->sizes();
