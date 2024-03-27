@@ -381,6 +381,48 @@ std::future<bool> launchAsyncGilCheck() {
   return resultFuture;
 }
 
+class CUDAEventCache {
+ public:
+  CUDAEventCache() : caches_(at::cuda::device_count()) {}
+  std::shared_ptr<at::cuda::CUDAEvent> create(int device, bool timing) {
+    auto& deviceCache = caches_[device];
+    auto deleter = [this, device, timing](at::cuda::CUDAEvent* event) {
+      auto& deviceCache = caches_[device];
+      std::lock_guard<std::mutex> lock(deviceCache.mutex);
+      deviceCache.events[timing ? 1 : 0].push_back(event);
+    };
+    at::cuda::CUDAEvent* event = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(deviceCache.mutex);
+      auto& events = deviceCache.events[timing ? 1 : 0];
+      if (!events.empty()) {
+        event = events.back();
+        events.pop_back();
+      }
+    }
+    if (!event) {
+      event = new at::cuda::CUDAEvent(
+          timing ? cudaEventDefault : cudaEventDisableTiming);
+    }
+    return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
+  }
+  static CUDAEventCache& get() {
+    static CUDAEventCache cache;
+    return cache;
+  }
+
+ private:
+  struct Device {
+    std::mutex mutex;
+    // note: we intentionaly store raw pointers so that
+    // we do not attempt to destroy the event objects on process exit,
+    // because cuda may be gone.
+    std::vector<at::cuda::CUDAEvent*>
+        events[2]; // 0 for timing=false, 1 for timing=true
+  };
+  std::vector<Device> caches_;
+};
+
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -442,10 +484,10 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (enableTiming) {
-    ncclStartEvent_ = std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
+    ncclStartEvent_ =
+        CUDAEventCache::get().create(device.index(), enableTiming);
   }
-  ncclEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
-      enableTiming ? cudaEventDefault : cudaEventDisableTiming);
+  ncclEndEvent_ = CUDAEventCache::get().create(device.index(), enableTiming);
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
