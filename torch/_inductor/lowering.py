@@ -4012,13 +4012,8 @@ def max_pool2d_with_indices_backward(
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
         gO_stride is not None and gO_stride[1] == 1
     )
-    autotune = (
-        config.coordinate_descent_tuning
-        or config.max_autotune
-        or config.max_autotune_pointwise
-    )
-    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
-        # don't codegen channels-last when autotune is not enabled, it's very slow
+    if any(d != 1 for d in dilation):
+        # dilation NYI
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
@@ -4114,12 +4109,16 @@ def max_pool2d_with_indices_backward(
         assert gradient is not None
         return gradient
 
-    return Pointwise.create(
+    out = Pointwise.create(
         device=grad_output.get_device(),
         dtype=grad_output.get_dtype(),
         inner_fn=fn,
         ranges=new_size,
     )
+    if is_channels_last:
+        return ir.ExternKernel.require_channels_last(out)
+    else:
+        return out
 
 
 def pad_adaptive_loader(x, pad_val=0.0):
