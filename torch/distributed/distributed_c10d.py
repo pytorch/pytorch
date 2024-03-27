@@ -13,7 +13,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
 
 import torch
 from torch._C._distributed_c10d import (
@@ -1009,7 +1009,10 @@ def _get_default_group() -> ProcessGroup:
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
-    return not_none(GroupMember.WORLD)
+    if TYPE_CHECKING:
+        return not_none(GroupMember.WORLD)
+    else:
+        return GroupMember.WORLD
 
 
 def _get_default_store() -> Store:

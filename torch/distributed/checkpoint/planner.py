@@ -378,7 +378,6 @@ class LoadPlanner:
         """
         pass
 
-
     def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
         """
         Return the BytesIO to be used by the StorageReader to load `read_item`.
