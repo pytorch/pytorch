@@ -143,5 +143,26 @@ struct VecConvert<
 
 #endif
 
+#if (defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)) && !defined(_MSC_VER)
+
+template <typename src_t>
+struct VecConvert<float, 1, src_t, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<src_t, 1>& src) {
+    auto [res_vec1, res_vec2] = at::vec::convert_to_float<src_t>(src[0]);
+    return res_vec1;
+  }
+};
+
+template <typename dst_t>
+struct VecConvert<dst_t, 1, float, 1> {
+  static inline VectorizedN<dst_t, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    return at::vec::convert_from_float<scalar_t>(src[0], src[0]);
+  }
+};
+
+#endif
+
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
