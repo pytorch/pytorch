@@ -314,7 +314,8 @@ class NNModuleVariable(VariableTracker):
 
                 from .builder import wrap_fx_proxy
 
-                if not config.use_single_step_graph:
+                # skip inling into LSTM
+                if not config.use_single_step_graph or type(mod) is torch.nn.modules.rnn.LSTM:
                     return wrap_fx_proxy(
                         tx=tx,
                         proxy=tx.output.create_proxy(
