@@ -699,6 +699,42 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert torch.allclose(packed, packed2)
         assert torch.allclose(packed_t, packed_t2)
 
+    @training_dtypes
+    def test_sp24_apply_dense(self, dtype) -> None:
+        M, N = 256, 1024
+        x = torch.randn([M, N], dtype=dtype, device="cuda")
+        (
+            packed,
+            meta,
+            packed_t,
+            meta_t,
+            threads_masks,
+        ) = torch._sparse_semi_structured_tile(x)
+
+        expected= SparseSemiStructuredTensorCUTLASS(
+            x.shape,
+            packed=packed,
+            meta=meta,
+            packed_t=packed_t,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+        ).to_dense()
+
+        packed2, packed_t2 = torch._sparse_semi_structured_apply(x, threads_masks)
+        sparse = SparseSemiStructuredTensorCUTLASS(
+            x.shape,
+            packed=packed2,
+            meta=meta,
+            packed_t=packed_t2,
+            meta_t=meta_t,
+            threads_masks=threads_masks,
+        )
+
+        dense = torch._sparse_semi_structured_apply_dense(x, threads_masks)
+
+        assert torch.allclose(dense, expected)
+        assert torch.allclose(sparse.to_dense(), expected)
+
 
     @training_dtypes
     def test_sp24_matmuls(self, dtype) -> None:

@@ -16,9 +16,6 @@
 #include <cutlass/cutlass.h>
 #include <cutlass/layout/layout.h>
 #include <cutlass/tensor_ref.h>
-#include <cutlass/epilogue/thread/linear_combination.h>
-#include <cutlass/epilogue/thread/linear_combination_relu.h>
-#include <cutlass/epilogue/thread/linear_combination_silu.h>
 
 #include <type_traits>
 #include <tuple>
