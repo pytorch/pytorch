@@ -412,7 +412,6 @@ template <typename Stub, typename ...Args>
 static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args... args) {
   auto iter = TensorIterator::unary_float_op(result, self);
   stub(iter.device_type(), iter, args...);
-  iter.cast_outputs();
   return result;
 }
 
@@ -973,7 +972,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
 }
 
-// alias for lgamma, implements special.gammanln equivalent to
+// alias for lgamma, implements special.gammaln equivalent to
 // scipy.special.gammaln
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
 Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }

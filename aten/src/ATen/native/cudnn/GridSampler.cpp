@@ -113,8 +113,8 @@ Tensor cudnn_grid_sampler_forward(const Tensor& input_t, const Tensor& grid_t) {
       desc.desc(),
       &one,
       idesc.desc(),
-      input->data_ptr(),
-      grid->data_ptr(),
+      input->const_data_ptr(),
+      grid->const_data_ptr(),
       &zero,
       odesc.desc(),
       output_t.data_ptr()));
@@ -174,7 +174,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
       &one,
       odesc.desc(),
       grad_output->data_ptr(),
-      // intruigingly, the outputs don't need descriptors
+      // intriguingly, the outputs don't need descriptors
       grid->data_ptr(),
       &zero,
       grad_grid_t.data_ptr()));

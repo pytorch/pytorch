@@ -16,15 +16,16 @@
 
 using namespace at;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
-static const char* parse_privateuseone_backend() {
+static const char* parse_privateuseone_backend(bool is_sparse = false) {
   static std::string backend_name = "torch." + get_privateuse1_backend();
-  return backend_name.c_str();
+  static std::string sparse_backend_name = backend_name + ".sparse";
+  return is_sparse == false ? backend_name.c_str()
+                            : sparse_backend_name.c_str();
 }
 
-static const char* backend_to_string(const at::Backend& backend) {
+const char* backend_to_string(const at::Backend& backend) {
   switch (backend) {
     case at::Backend::CPU:
       return "torch";
@@ -50,6 +51,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.mtia";
     case at::Backend::PrivateUse1:
       return parse_privateuseone_backend();
+    case at::Backend::SparsePrivateUse1:
+      return parse_privateuseone_backend(true);
     case at::Backend::Lazy:
       return "torch.lazy";
     case at::Backend::XLA:
@@ -179,5 +182,4 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   return ret;
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

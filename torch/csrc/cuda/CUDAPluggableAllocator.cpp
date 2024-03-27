@@ -17,7 +17,7 @@ _AllocationMetadata::_AllocationMetadata()
 
 _AllocationMetadata::_AllocationMetadata(
     size_t size,
-    int device_idx,
+    c10::DeviceIndex device_idx,
     cudaStream_t stream)
     : size(size), device_idx(device_idx), stream(stream) {}
 
@@ -94,13 +94,11 @@ void* CUDAPluggableAllocator::malloc(
   return r;
 }
 
-c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
+c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) {
   c10::DeviceIndex device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
-  void* r =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<CUDAPluggableAllocator*>(this)->malloc(size, device, stream);
+  void* r = this->malloc(size, device, stream);
   c10::DataPtr data_ptr = {
       r, r, raw_deleter(), c10::Device(c10::DeviceType::CUDA, device)};
   return data_ptr;
@@ -127,7 +125,7 @@ void* CUDAPluggableAllocator::raw_alloc_with_stream(
 
 void CUDAPluggableAllocator::raw_delete(void* ptr) {
   cudaStream_t stream{};
-  int device_idx = -1;
+  c10::DeviceIndex device_idx = -1;
   size_t size = 0;
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);

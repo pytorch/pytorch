@@ -94,6 +94,25 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_replicate_to_local_partial_grad(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        replica_spec = [Replicate()]
+        local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
+
+        replica_tensor = distribute_tensor(local_tensor, device_mesh, replica_spec)
+
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            out = replica_tensor.redistribute(placements=[Replicate()]).to_local(
+                grad_placements=[_Partial()]
+            )
+            out.backward(torch.ones_like(out))
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
+
+    @with_comms
     def test_replicate_to_shard_forward_backward(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         replica_spec = [Replicate()]

@@ -640,7 +640,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     Returns:
         Tensor: A tensor containing the STFT result with shape `(B?, N, T, C?)` where
-           - `B?` is an optional batch dimnsion from the input
+           - `B?` is an optional batch dimension from the input.
            - `N` is the number of frequency samples, `(n_fft // 2) + 1` for
              `onesided=True`, or otherwise `n_fft`.
            - `T` is the number of frames, `1 + L // hop_length`
@@ -682,7 +682,7 @@ It has the same parameters (+ additional optional parameter of :attr:`length`) a
 least squares estimation of the original signal. The algorithm will check using the NOLA condition (
 nonzero overlap).
 
-Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
+Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelope
 created by the summation of all the windows is never zero at certain point in time. Specifically,
 :math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
 
@@ -1707,7 +1707,7 @@ def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size])
             tensor. All elements must be non-negative.
 
     Returns:
-        tuple of Tensors: Each ``i``-th tensor in the ouput corresponds with
+        tuple of Tensors: Each ``i``-th tensor in the output corresponds with
         dimension ``i`` of :attr:`shape`. Each tensor has the same shape as
         ``indices`` and contains one index into dimension ``i`` for each of the
         flat indices given by ``indices``.

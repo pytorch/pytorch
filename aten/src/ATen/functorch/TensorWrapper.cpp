@@ -13,8 +13,7 @@
 
 #include <iostream>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
@@ -204,5 +203,4 @@ TORCH_LIBRARY_IMPL(_, FuncTorchGradWrapper, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 
-}
-} // namespace at
+} // namespace at::functorch
