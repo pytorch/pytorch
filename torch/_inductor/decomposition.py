@@ -20,6 +20,7 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -680,3 +681,50 @@ def put(self, index, source, accumulate=False):
 def put_(self, index, source, accumulate=False):
     out = aten.put(self, index, source, accumulate=accumulate)
     return self.copy_(out)
+
+
+@register_decomposition(aten.max_pool2d_with_indices)
+def max_pool2d_with_indices(
+    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+):
+    if dilation == 1:
+        dilation = [1, 1]
+
+    if padding == 0:
+        padding = [0, 0]
+
+    if stride is None:
+        stride = kernel_size
+
+    kernel_size = pad_listlike(kernel_size, 2)
+    dilation = pad_listlike(dilation, 2)
+    padding = pad_listlike(padding, 2)
+    stride = pad_listlike(stride, 2)
+
+    window_size = kernel_size[0] * kernel_size[1]
+    # We fallback when using non-default dilation or when the window size is too large
+    if (
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
+            kernel_size, dilation
+        )
+        or window_size > torch.iinfo(torch.int8).max
+    ):
+        # Hit the lowering where the fallback should be selected
+        return NotImplemented
+
+    # If the fallback is not being selected we route through the low-memory path.
+    # int8 offsets will be cached for backward pass.
+    # If the backward is lowered offset->index will be inlined.
+    vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        ceil_mode,
+        offset_dtype=torch.int8,
+    )
+    indices = prims._low_memory_max_pool2d_offsets_to_indices(
+        offsets, kernel_size[1], x.size(-1), stride, padding
+    )
+    return vals, indices

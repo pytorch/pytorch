@@ -3877,9 +3877,14 @@ fallback_max_pool2d_with_indices = fallback_handler(
 )
 
 
-@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
-def max_pool2d_with_indices(
-    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+    kernel_size = pad_listlike(kernel_size, 2)
+    window_size = kernel_size[0] * kernel_size[1]
+    return (window_size > 25) or any(d > 1 for d in dilation)
+
+
+def max_pool2d_checks(
+    x, kernel_size, stride, padding, dilation, *, assert_fallback=None
 ):
     if padding == 0:
         padding = [0, 0]
@@ -3887,6 +3892,7 @@ def max_pool2d_with_indices(
         dilation = [1, 1]
     if not stride:
         stride = kernel_size
+
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)
@@ -3899,36 +3905,44 @@ def max_pool2d_with_indices(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    if assert_fallback is not None:
+        assert use_fallback == assert_fallback
+
+    return kernel_size, stride, padding, dilation, use_fallback
+
+
+def max_pool2d_with_offsets_impl(
+    x, kernel_size, stride, padding, ceil_mode=False, *, offset_dtype=None
+):
+    # it should be safe to compute the offsets in int32 or smaller always
+    # For now, conversion to indices will use int64
+    assert offset_dtype in (torch.int32, torch.int16, torch.int8)
+
     x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
+    new_size = list(batch) + [h_out, w_out]
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
         x_loader = constant_boundary_condition(x, float("-inf"), dim=2)
     else:
         x_loader = x.make_loader()
 
-    new_size = list(batch) + [h_out, w_out]
-    window_size = kernel_size[0] * kernel_size[1]
-
-    if window_size > 25 or any(d != 1 for d in dilation):
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode
-        )
-
     def fn(idx, return_index):
         *prefix, bh, bw = idx
         maxval = None
         maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
+        for h_inc, w_inc in itertools.product(
+            range(kernel_size[0]), range(kernel_size[1])
+        ):
+            ih = bh * stride[0] + h_inc - padding[0]
+            iw = bw * stride[1] + w_inc - padding[1]
             val = x_loader([*prefix, ih, iw])
             if return_index:
-                index = ops.index_expr(ih * w + iw, torch.int64)
+                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, offset_dtype)
                 if maxindex is None:
                     maxindex = index
                 else:
@@ -3942,20 +3956,115 @@ def max_pool2d_with_indices(
         else:
             return maxval
 
-    r1 = Pointwise.create(
+    out = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=functools.partial(fn, return_index=False),
         ranges=new_size,
     )
-    r2 = Pointwise.create(
+    offsets = Pointwise.create(
         device=x.get_device(),
-        dtype=torch.int64,
+        dtype=offset_dtype,
         inner_fn=functools.partial(fn, return_index=True),
         ranges=new_size,
     )
-    # TODO(jansel): should we force these to be realized?
-    return r1, r2
+    return out, offsets
+
+
+@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool2d_with_offsets(
+    x, kernel_size, stride, padding, dilation, ceil_mode, *, offset_dtype
+):
+    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation, assert_fallback=False
+    )
+    return max_pool2d_with_offsets_impl(
+        x, kernel_size, stride, padding, ceil_mode=ceil_mode, offset_dtype=offset_dtype
+    )
+
+
+@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
+def max_pool2d_with_indices(
+    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+):
+    kernel_size, stride, padding, dilation, use_fallback = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation
+    )
+    if use_fallback:
+        return fallback_max_pool2d_with_indices(
+            x, kernel_size, stride, padding, dilation, ceil_mode
+        )
+
+    out, offsets = max_pool2d_with_offsets_impl(
+        x, kernel_size, stride, padding, ceil_mode=ceil_mode, offset_dtype=torch.int32
+    )
+    indices = max_pool2d_offsets_to_indices_impl(
+        offsets, kernel_size[1], x.get_size()[-1], stride, padding
+    )
+    # If we landed here, the indices are not used for the backward pass, realize
+    # hint here so the conversion is fused into the forward loop.
+    indices.realize_hint()
+    return out, indices
+
+
+def max_pool2d_offsets_to_indices_impl(
+    offsets, kernel_width, input_width, stride, padding
+):
+    # TODO: Generalize to other max pooling flavors, and arbitrary dim
+
+    offsets_loader = offsets.make_loader()
+
+    def get_input_width_opsvalue():
+        # input width usually comes from a symbolic sizevar on the input
+        if isinstance(input_width, sympy.Expr):
+            assert input_width.is_integer
+            return ops.index_expr(input_width, torch.int64)
+        else:
+            # routing through adaptive_max_pool to here the shape is evaluated
+            # so we get a constant
+            return ops.constant(input_width, torch.int64)
+
+    def increments_to_index(h_inc, w_inc, bh, bw):
+        w_in = get_input_width_opsvalue()
+        stride_expr = [ops.constant(s, torch.int64) for s in stride]
+        padding_expr = [ops.constant(p, torch.int64) for p in padding]
+        ih = bh * stride_expr[0] + h_inc - padding_expr[0]
+        iw = bw * stride_expr[1] + w_inc - padding_expr[1]
+        return ih * w_in + iw
+
+    def offsets_to_indices(idx):
+        *prefix, bh, bw = idx
+        offset = offsets_loader([*prefix, bh, bw])
+        kw_const = ops.constant(kernel_width, torch.int64)
+        h_inc = offset // kw_const
+        w_inc = offset - (h_inc * kw_const)
+        bh_expr = ops.index_expr(bh, torch.int64)
+        bw_expr = ops.index_expr(bw, torch.int64)
+        return increments_to_index(h_inc, w_inc, bh_expr, bw_expr)
+
+    indices = Pointwise.create(
+        device=offsets.get_device(),
+        dtype=torch.int64,
+        inner_fn=offsets_to_indices,
+        ranges=offsets.get_size(),
+    )
+    return indices
+
+
+@register_lowering(
+    prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
+)
+def _low_memory_max_pool2d_offsets_to_indices(
+    offsets, kernel_w, input_w, stride, padding
+):
+    # Routing through the prim means we are going to compute backward,
+    # realize_hint here so the int8 offsets are saved for backward, the
+    # converion will be moved/duplicated to the backward graph
+    offsets.realize_hint()
+    return max_pool2d_offsets_to_indices_impl(
+        offsets, kernel_w, input_w, stride, padding
+    )
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -4022,8 +4131,6 @@ def max_pool2d_with_indices_backward(
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
-
-    indices.realize_hint()
 
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
