@@ -1,6 +1,7 @@
 import sympy
 from sympy import S
 from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
+import math
 
 __all__ = [
     "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
@@ -325,6 +326,17 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
                 [int(a) for a in stride_args]
             )
         return None
+
+
+class Trunc(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        if number.is_integer:
+            return number
+        elif isinstance(number, sympy.Number):
+            return sympy.Integer(math.trunc(float(number)))
 
 
 class Round(sympy.Function):
