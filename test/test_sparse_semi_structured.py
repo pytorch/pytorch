@@ -287,10 +287,13 @@ class TestSparseSemiStructured(TestCase):
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
-            regex = "two_four_sgemm_dispatch_layouts" if backend == "cutlass" else "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"
-
-            with self.assertRaisesRegex(RuntimeError, regex):
-                sparse_result = torch.mm(A_sparse, B)
+            if backend == "cutlass":
+                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_dispatch_layouts"):
+                    sparse_result = torch.mm(A_sparse, B)
+            else:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
+                    sparse_result = torch.mm(A_sparse, B)
         else:
             dense_result = torch.mm(A, B)
             sparse_result = torch.mm(A_sparse, B)
@@ -711,7 +714,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             threads_masks,
         ) = torch._sparse_semi_structured_tile(x)
 
-        expected= SparseSemiStructuredTensorCUTLASS(
+        expected = SparseSemiStructuredTensorCUTLASS(
             x.shape,
             packed=packed,
             meta=meta,

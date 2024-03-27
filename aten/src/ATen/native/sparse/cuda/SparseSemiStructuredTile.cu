@@ -287,13 +287,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
     }
   };
 
-  switch (input.scalar_type()) {
-    case at::ScalarType::Half:
-      return runTyped(cutlass::half_t());
-    case at::ScalarType::BFloat16:
-      return runTyped(cutlass::bfloat16_t());
-    default:
-      TORCH_CHECK(false, "Only `float16` and `bfloat16` are supported.");
+  if (input.scalar_type() == at::ScalarType::Half)
+  {
+    return runTyped(cutlass::half_t());
+  } else {
+    TORCH_CHECK(
+        input.scalar_type() == at::ScalarType::Half ||
+        input.scalar_type() == at::ScalarType::BFloat16, input.scalar_type());
+    return runTyped(cutlass::bfloat16_t());
   }
 }
 

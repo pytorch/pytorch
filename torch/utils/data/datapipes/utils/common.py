@@ -20,10 +20,6 @@ __all__ = [
 ]
 
 
-# BC for torchdata
-DILL_AVAILABLE = dill_available()
-
-
 def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
     """
     Check that function used in a callable datapipe works with the input column.

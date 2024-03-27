@@ -1,4 +1,3 @@
-#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -19,12 +18,6 @@ void device_lazy_init(at::DeviceType device_type) {
   // exception.  In any case, call_once isn't necessary, because we
   // have taken a lock.
   if (is_initialized[static_cast<int>(device_type)]) {
-    return;
-  }
-
-  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(
-      c10::impl::TorchDispatchModeKey::FAKE);
-  if (maybe_mode) {
     return;
   }
 
