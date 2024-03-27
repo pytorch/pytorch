@@ -3231,6 +3231,9 @@ exit(2)
         test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
         rc = check_output(test_script)
         self.assertEqual(rc, "0")
+        test_import = "import torch;import torch._dynamo;print(torch.cuda.device_count.cache_info().currsize)"
+        rc = check_output(test_import)
+        self.assertEqual(rc, "0")  # #122085 import torch._dynamo shouldn't trigger device_count call.
         if not TEST_WITH_ROCM:
             # Check that `cuInit` was not called during the import
             # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
