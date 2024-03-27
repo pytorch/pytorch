@@ -59,7 +59,8 @@ install_ubuntu() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev
+                   roctracer-dev \
+                   amd-smi-lib
 
     # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
     # search for all unversioned packages
@@ -139,7 +140,8 @@ install_centos() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev
+                   roctracer-dev \
+                   amd-smi-lib
 
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
