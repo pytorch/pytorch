@@ -708,7 +708,7 @@ class FlatParamHandle:
             and aligned_numel > 0
             and total_numel != total_numel_without_padding
         ):
-            logger.info(
+            logger.debug(
                 "FSDP FlatParameter address alignment created "
                 "%s numel of padding (%s vs. %s)",
                 total_numel - total_numel_without_padding,
