@@ -243,7 +243,6 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_custom_op_3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
