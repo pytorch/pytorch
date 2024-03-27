@@ -146,7 +146,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->scalar_type() == ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half ||
+      input->scalar_type() == ScalarType::BFloat16) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
@@ -174,14 +175,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   TensorArg output{output_t, "output", 0};
 
   auto handle = getCudnnHandle();
-  auto dataType = getCudnnDataType(*input);
   TensorDescriptor idesc{*input, 4}; // input descriptor
   TensorDescriptor wdesc{
       expandScale(*weight, input->dim()),
       4}; // descriptor for weight, bias, running_mean, etc.
 
-  Constant one(dataType, 1);
-  Constant zero(dataType, 0);
+  auto weightDataType = getCudnnDataType(*weight);
+  Constant one(weightDataType, 1);
+  Constant zero(weightDataType, 0);
+
   Tensor save_mean, save_var;
 
   Tensor reserve;
@@ -300,7 +302,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
-  if (input->scalar_type() == ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half ||
+      input->scalar_type() == ScalarType::BFloat16) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
@@ -330,7 +333,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   auto grad_bias_t = at::empty(weight->sizes(), weight->options());
 
   auto handle = getCudnnHandle();
-  auto dataType = getCudnnDataType(*input);
 
   TensorDescriptor idesc{*input, 4}; // input, grad_output descriptor
   TensorDescriptor odesc{*grad_output, 4}; // input, grad_output descriptor
@@ -338,8 +340,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
       expandScale(*weight, input->dim()),
       4}; // descriptor for weight, save_mean, etc.
 
-  Constant one(dataType, 1);
-  Constant zero(dataType, 0);
+  auto weightDataType = getCudnnDataType(*weight);
+  Constant one(weightDataType, 1);
+  Constant zero(weightDataType, 0);
 
   auto op = CUDNN_BATCHNORM_OPS_BN;
 

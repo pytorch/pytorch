@@ -14,6 +14,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
@@ -491,11 +492,14 @@ BatchNormBackend _select_batch_norm_backend(
   auto& ctx = at::globalContext();
   bool cudnn_enabled = ctx.userEnabledCuDNN();
 
+  static bool support_bf16 = (detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8() && at::native::cudnnv8_enabled_check_debug());
+
   if (
       input.is_cuda()
-      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-      && (input.scalar_type() != at::kHalf
+      && weight.scalar_type() != at::kBFloat16
+      && ((input.scalar_type() != at::kHalf && input.scalar_type() != at::kBFloat16)
         || weight.scalar_type() == at::kFloat)
+      && (input.scalar_type() != at::kBFloat16 || support_bf16)
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
