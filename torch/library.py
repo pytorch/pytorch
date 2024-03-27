@@ -8,6 +8,9 @@ import inspect
 import re
 import contextlib
 import sys
+from ._library.custom_ops import custom_op
+from ._library import custom_ops
+
 
 __all__ = [
     'Library',
@@ -16,6 +19,7 @@ __all__ = [
     'fallthrough_kernel',
     'impl_abstract',
     'get_ctx',
+    'custom_op',
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -57,6 +61,9 @@ class Library:
             raise ValueError("Unsupported kind: ", kind)
 
         if ns in _reserved_namespaces and (kind == "DEF" or kind == 'FRAGMENT'):
+            raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
+
+        if ns == custom_ops.reserved_namespace() and not custom_ops.can_access_reserved_namespace():
             raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
 
         frame = traceback.extract_stack(limit=3)[0]
@@ -178,6 +185,8 @@ class Library:
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        global _impls
+        _impls -= self._op_impls
         for name in self._op_defs:
             # Delete the cached torch.ops.ns.foo if it was registered.
             # Otherwise, accessing it leads to a segfault.
