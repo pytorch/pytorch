@@ -419,21 +419,8 @@ static void py_bind_tensor_types(
   }
 }
 
-static bool PyTensorType_Check(PyObject* obj) {
-  auto it = std::find_if(
-      tensor_types.begin(), tensor_types.end(), [obj](PyTensorType* x) {
-        return (PyObject*)x == obj;
-      });
-  return it != tensor_types.end();
-}
-
+// NB: Only can be called from python set_default_tensor_type api.
 void py_set_default_tensor_type(PyObject* obj) {
-  TORCH_WARN_ONCE(
-      "torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, "
-      "please use torch.set_default_dtype() and torch.set_default_device() as alternatives.")
-  TORCH_CHECK_TYPE(
-      PyTensorType_Check(obj),
-      "invalid type object: only floating-point types are supported as the default type");
   PyTensorType* type = (PyTensorType*)obj;
   TORCH_CHECK_TYPE(
       !type->is_cuda || torch::utils::cuda_enabled(),
