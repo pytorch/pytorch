@@ -1,7 +1,7 @@
 import itertools
 import math
 from copy import deepcopy
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, Dict, cast
 import warnings
 
 import torch
@@ -21,7 +21,7 @@ __all__ = [
     'get_swa_avg_fn'
 ]
 
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, TensorListList, Indices
 
 PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 
@@ -47,7 +47,10 @@ def get_swa_multi_avg_fn():
             torch._foreach_lerp_(averaged_param_list, current_param_list, 1 / (num_averaged + 1))
         else:
             diffs = torch._foreach_sub(current_param_list, averaged_param_list)
-            torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
+            if isinstance(num_averaged, Tensor):
+                torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
+            else:
+                torch._foreach_add_(averaged_param_list, diffs, alpha=1 / (num_averaged + 1))
 
     return swa_update
 
@@ -212,7 +215,11 @@ class AveragedModel(Module):
 
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
-                grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])
+                grouped_tensors = _group_tensors_by_device_and_dtype(
+                    cast(TensorListList, [self_param_detached, model_param_detached]))
+                grouped_tensors = cast(
+                    Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], Indices]],
+                    grouped_tensors)
                 for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
@@ -376,10 +383,13 @@ class SWALR(LRScheduler):
         return (lr - alpha * swa_lr) / (1 - alpha)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
+        # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
+        # so we ignore the type error here. See `LRScheduler.step()` for more details.
+        if not self._get_lr_called_within_step:  # type: ignore[attr-defined]
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
-        step = self._step_count - 1
+        # Set in `LRScheduler._initial_step()`
+        step = self._step_count - 1  # type: ignore[attr-defined]
         if self.anneal_epochs == 0:
             step = max(1, step)
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
