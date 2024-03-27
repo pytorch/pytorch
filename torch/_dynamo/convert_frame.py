@@ -8,6 +8,7 @@ import random
 import sys
 import threading
 import time
+import traceback
 import types
 import typing
 import weakref
@@ -98,6 +99,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 compile_lock = threading.RLock()
@@ -702,6 +704,7 @@ def _compile(
             if e.innermost_user_frame_summary is not None:  # type: ignore[union-attr]
                 fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr]
                 fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr]
+            e.compile_id = compile_id  # type: ignore[union-attr]
             raise
         except Exception as e:
             fail_type = str(type(e))
@@ -710,6 +713,7 @@ def _compile(
             if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
                 fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
                 fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
+            e.compile_id = compile_id  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
@@ -823,6 +827,26 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
                 raise
 
             soft_fail = isinstance(e, Unsupported)
+
+            # This is a soft failure. In the sense, the code path reaches here
+            # when we do not support graph breaks on bytecodes like LOAD_ATTR,
+            # BUILD_SET etc. In such case, we can fallback to eager without
+            # scaring users.
+            if isinstance(e, Unsupported) and graph_break_log.isEnabledFor(
+                logging.DEBUG
+            ):
+                # Log this message in the graph break. Also use the string
+                # "skip: " to tell that the whole frame is falling back to
+                # eager.
+                with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                    user_stack = e.real_stack
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    graph_break_log.debug(
+                        "Graph break: skip: from user code at:\n%s",
+                        user_stack_formatted,
+                        exc_info=True,
+                    )
+
             if not config.suppress_errors and not soft_fail:
                 raise
 
