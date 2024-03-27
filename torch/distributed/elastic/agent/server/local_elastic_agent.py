@@ -156,16 +156,16 @@ class LocalElasticAgent(SimpleElasticAgent):
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
-            logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
+            logger.debug("Starting a FileTimerServer with %s ...", watchdog_file_path)
             self._worker_watchdog = timer.FileTimerServer(
                 file_path=watchdog_file_path,
                 max_interval=0.1,
                 daemon=True,
                 log_event=self._log_watchdog_event)
             self._worker_watchdog.start()
-            logger.info("FileTimerServer started")
+            logger.debug("FileTimerServer started")
         else:
-            logger.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
+            logger.debug("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
         # Propagate the watchdog file env to worker processes
         if watchdog_file_path is not None:
             for worker_env in envs.values():
