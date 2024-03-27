@@ -1163,6 +1163,9 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif
+#if !defined(USE_ROCM)
+  TORCH_CHECK(!isFloat8Type(mat1_dtype) || result_dtype == mat1_dtype, "output dtype must match input dtype for float8 matmuls due to restrictions on amax computation");
+#endif
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
 #ifdef USE_ROCM
