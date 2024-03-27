@@ -19,7 +19,6 @@ from torch import Tensor
 from torch.types import Number
 from typing import *  # noqa: F403
 import torch._custom_ops as custom_ops
-from torch.library import opaque_op
 
 # Note: [custom op db]
 #
@@ -149,7 +148,7 @@ def numpy_take_backward(ctx, saved, grad_out):
         'ind_inv': None,
     }
 
-@opaque_op(mutated_args=())
+@torch.library.custom_op(mutated_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
     x_np = to_numpy(x)
     res = np.stack(np.nonzero(x_np), axis=1)
@@ -157,7 +156,7 @@ def numpy_nonzero(x: Tensor) -> Tensor:
         raise RuntimeError("not supported")
     return torch.tensor(res, device=x.device)
 
-@numpy_nonzero.impl_abstract
+@numpy_nonzero.register_fake
 def _(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
@@ -365,6 +364,25 @@ def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
     iou_threshold = make_arg([], low=0, high=1).item()
 
     yield SampleInput(boxes, args=(scores, iou_threshold))
+
+
+def fn0():
+    pass
+
+
+def get_fn1():
+    def fn1():
+        pass
+    return fn1
+
+fn1 = get_fn1()
+
+
+def get_fn2():
+    return lambda x: x
+
+fn2 = get_fn2()
+
 
 custom_op_db = [
     OpInfo(

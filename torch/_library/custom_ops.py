@@ -1,21 +1,31 @@
+import contextlib
 import inspect
-import sys
+import threading
 from typing import Callable, Dict, List, Optional, Sequence, Union
 
 from .. import _C, _library, library, Tensor
+from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
 
 
-def opaque_op(*, mutated_args: Sequence[str], types: device_types_t = None):
-    """Wraps a function into an opaque custom operator.
+def custom_op(
+    *,
+    mutated_args: Sequence[str],
+    types: device_types_t = None,
+    qualname: Optional[str] = None,
+) -> Callable:
+    """Wraps a function into custom operator.
 
-    Treats the function as a black-box (that is, PyTorch will never peek into
-    the function). The function must have type hints; these are needed
-    to interface with PyTorch's various subsystems.
+    Reasons why you may want to create a custom op include:
+    - Wrapping a third-party library or custom kernel to work with PyTorch
+      subsystems like Autograd.
+    - Preventing torch.compile/export/FX tracing from peeking inside your function.
 
-    This API is used as a decorator (please see examples).
+    This API is used as a decorator around a function (please see examples).
+    The provided function must have type hints; these are needed to interface
+    with PyTorch's various subsystems.
 
     Args:
         mutated_args (Sequence[str]): The names of args that the function mutates.
@@ -23,14 +33,17 @@ def opaque_op(*, mutated_args: Sequence[str], types: device_types_t = None):
         types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
+            Examples: "cpu", "cuda".
+        qualname (None | str): An optional name for the operator. If provided,
+            must look like "{namespace}::{name}", e.g. "mylib::my_linear"
 
     Examples::
         >>> import torch
         >>> from torch import Tensor
-        >>> from torch.library import opaque_op
+        >>> from torch.library import custom_op
         >>> import numpy as np
         >>>
-        >>> @opaque_op(mutated_args=())
+        >>> @custom_op(mutated_args=())
         >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     x_np = x.cpu().numpy()
         >>>     y_np = np.sin(x_np)
@@ -40,8 +53,8 @@ def opaque_op(*, mutated_args: Sequence[str], types: device_types_t = None):
         >>> y = numpy_sin(x)
         >>> assert torch.allclose(y, x.sin())
         >>>
-        >>> # Example of a opaque op that only works for one device type.
-        >>> @opaque_op(mutated_args=(), types="cpu")
+        >>> # Example of a custom op that only works for one device type.
+        >>> @custom_op(mutated_args=(), types="cpu")
         >>> def numpy_sin_cpu(x: Tensor) -> Tensor:
         >>>     x_np = x.numpy()
         >>>     y_np = np.sin(x_np)
@@ -53,24 +66,23 @@ def opaque_op(*, mutated_args: Sequence[str], types: device_types_t = None):
 
     """
     assert len(mutated_args) == 0, "NYI"
-    mod = get_caller_module(stacklevel=2)
-    if mod is None:
-        namespace = "module_not_found"  # can happen in colab
-    else:
-        namespace = mangle_module(mod.__name__)
+    assert qualname is None, "NYI"
 
     def inner(fn):
-        return OpaqueOpDef._from_fn(fn, types, mutated_args, namespace)
+        return CustomOpDef._from_fn(fn, types, mutated_args)
 
     return inner
 
 
-class OpaqueOpDef:
-    def __init__(self, namespace: str, name: str, schema: str):
+class CustomOpDef:
+    def __init__(self, namespace: str, name: str, schema: str, fn: Callable):
+        # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
         self._qualname = f"{self._namespace}::{self._name}"
         self._schema = schema
+
+        self._init_fn = fn
 
         self._backend_fns: Dict[Union[str, None], Callable] = {}
         self._abstract_fn: Optional[Callable] = None
@@ -84,17 +96,22 @@ class OpaqueOpDef:
         fn: Callable,
         types: device_types_t,
         mutated_args: Sequence[str],
-        namespace: str,
-    ):
+    ) -> "CustomOpDef":
         import torch
 
         schema = torch._custom_op.impl.infer_schema(fn, mutated_args)
-        name = fn.__name__
-        result = cls(namespace, name, schema)
-        result.impl(types)(fn)
+        namespace = reserved_namespace()
+        name = utils.mangle(utils.unique_name(fn))
+        result = cls(namespace, name, schema, fn)
+        result.register_impl(types)(fn)
         return result
 
-    def impl(self, types: device_types_t, fn: Optional[Callable] = None):
+    def __repr__(self) -> str:
+        return f"<CustomOpDef({self._init_fn})>"
+
+    def register_impl(
+        self, types: device_types_t, fn: Optional[Callable] = None
+    ) -> Callable:
         """Register an implementation for a device type for this operator.
 
         Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
@@ -107,18 +124,18 @@ class OpaqueOpDef:
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> import torch
             >>> from torch import Tensor
-            >>> from torch.library import opaque_op
+            >>> from torch.library import custom_op
             >>> import numpy as np
             >>>
             >>> # Example of split cpu and cuda definitions
-            >>> @opaque_op(mutated_args=(), types="cpu")
+            >>> @custom_op(mutated_args=(), types="cpu")
             >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     x_np = x.numpy()
             >>>     y_np = np.sin(x_np)
             >>>     return torch.from_numpy(y_np)
             >>>
             >>> # Add implementations for the cuda device
-            >>> @numpy_sin.impl("cuda")
+            >>> @numpy_sin.register_impl("cuda")
             >>> def _(x):
             >>>     x_np = x.cpu().numpy()
             >>>     y_np = np.sin(x_np)
@@ -142,7 +159,7 @@ class OpaqueOpDef:
                     def backend_impl(*args, **kwargs):
                         # Checks the assumption that outputs cannot alias
                         # inputs or other outputs.
-                        storages = set({})
+                        storages = set()
                         for tensor in iter_tensors(args, kwargs):
                             storages.add(id(tensor.untyped_storage()))
 
@@ -184,13 +201,14 @@ class OpaqueOpDef:
             return inner
         return inner(fn)
 
-    def impl_abstract(self, fn: Callable) -> Callable:
-        r"""Register an abstract implementation for this operator.
+    def register_fake(self, fn: Callable) -> Callable:
+        r"""Register a FakeTensor implementation for this custom op.
 
         This is necessary to get the operator to work efficiently with torch.compile.
 
-        An "abstract implementation" specifies the behavior of this operator on
-        Tensors that carry no data. Given some input Tensors with certain properties
+        The Fake impl (sometimes also known as a meta kernel or abstract impl)
+        specifies the behavior of this operator on Tensors that carry no data.
+        Given some input Tensors with certain properties
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
@@ -202,11 +220,11 @@ class OpaqueOpDef:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @torch.library.opaque_op(mutated_args=())
+            >>> @torch.library.custom_op(mutated_args=())
             >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     return (x @ weight.t()) + bias
             >>>
-            >>> @custom_linear.impl_abstract
+            >>> @custom_linear.register_fake
             >>> def _(x, weight, bias):
             >>>     assert x.dim() == 2
             >>>     assert weight.dim() == 2
@@ -224,13 +242,13 @@ class OpaqueOpDef:
             >>> assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @torch.library.opaque_op(mutated_args=())
+            >>> @torch.library.custom_op(mutated_args=())
             >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     x_np = x.cpu().numpy()
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
             >>>     return torch.tensor(res, device=x.device)
             >>>
-            >>> @custom_nonzero.impl_abstract
+            >>> @custom_nonzero.register_fake
             >>> def _(x):
             >>>     # Number of nonzero-elements is data-dependent.
             >>>     # Since we cannot peek at the data in an abstract impl,
@@ -251,21 +269,25 @@ class OpaqueOpDef:
         self._abstract_fn = fn
         return fn
 
-    def _build(self):
+    def _build(self) -> None:
         lib = self._lib
         lib.define(f"{self._name}{self._schema}")
         self._opoverload = _library.utils.lookup_op(self._qualname)
 
-        def abstract_impl(*args, **kwargs):
+        def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
-                import torch
-
-                raise torch._subclasses.fake_tensor.UnsupportedOperatorException(
-                    self._opoverload
+                raise RuntimeError(
+                    f"There was no fake impl registered for {self}. "
+                    f"This is necessary for torch.compile/export/fx tracing to work. "
+                    f"Please use `{self._init_fn.__name__}.register_fake` to add an "
+                    f"fake impl."
                 )
             return self._abstract_fn(*args, **kwargs)
 
-        library.impl_abstract(self._qualname, lib=lib)(abstract_impl)
+        # TODO(rzou): I'm not sure why this needs to create a new library when
+        # we pass one in?
+        with allow_reserved_namespace_access():
+            library.impl_abstract(self._qualname, lib=lib)(fake_impl)
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
@@ -281,44 +303,10 @@ def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Librar
         OPDEF_TO_LIB[qualname]._destroy()
         del OPDEF_TO_LIB[qualname]
 
-    lib = library.Library(namespace, "FRAGMENT")
+    with allow_reserved_namespace_access():
+        lib = library.Library(namespace, "FRAGMENT")
     OPDEF_TO_LIB[qualname] = lib
     return lib
-
-
-def mangle_module(module):
-    """Mangles the module name.
-
-    The scheme is replacing dots with some number of underscores
-    (specified as mangledN where N is the number of underscores).
-
-    Examples:
-    foo.bar.baz -> mangled1_foo_bar_baz
-    foo_bar.baz -> mangled2__foo_bar__baz
-    foo.__baz__ -> mangled3___foo_____baz__
-
-    Don't parse the mangled string directly; use mangle_module and demangle_module
-    """
-    sep = unique_underscoring(module)
-    prefix = f"mangled{len(sep)}"
-    splits = module.split(".")
-    return sep.join([prefix, *splits])
-
-
-def unique_underscoring(s: str):
-    i = 1
-    while True:
-        result = "_" * i
-        if result not in s:
-            return result
-        i += 1
-
-
-def get_caller_module(stacklevel=1):
-    """Returns the fully qualified name of the module that called this function."""
-    frame = sys._getframe(stacklevel)
-    mod = inspect.getmodule(frame)
-    return mod
 
 
 def iter_tensors(args, kwargs, allowed_nesting=1):
@@ -332,3 +320,42 @@ def iter_tensors(args, kwargs, allowed_nesting=1):
         yield from check(arg)
     for kwarg in kwargs.values():
         yield from check(kwarg)
+
+
+# NOTE: [custom_op's automatic naming]
+# If the user does not provide a manual qualname (e.g. mylib::linear) for the
+# custom op, we will autogenerate one from the function passed to
+# custom_op.
+#
+# The autogenerated namespace is {reserved_namespace()}; the autogenerated
+# name is mangle(unique_name(fn)).
+#
+# The user should not depend on the details of the automatic naming (it is
+# not robust to moving code around, among other things). To prevent this,
+# we try our best to error out if we think the user is depending on it:
+# - we disallow the user from creating a new Library object using the namespace
+# - TODO(rzou): we disallow torch.export with custom ops with automatic names.
+#
+# Some of our custom ops infra need to access these though, so we provide
+# some sidechannels (allow_reserved_namespace_access) to do so.
+
+tls = threading.local()
+tls.can_access_reserved_namespace = False
+
+
+def reserved_namespace():
+    return "DONT_USE_THIS_GIVE_EXPLICIT_NAMESPACE_IF_NEEDED"
+
+
+def can_access_reserved_namespace():
+    return tls.can_access_reserved_namespace
+
+
+@contextlib.contextmanager
+def allow_reserved_namespace_access(allowed=True):
+    prev = tls.can_access_reserved_namespace
+    try:
+        tls.can_access_reserved_namespace = allowed
+        yield
+    finally:
+        tls.can_access_reserved_namespace = prev
