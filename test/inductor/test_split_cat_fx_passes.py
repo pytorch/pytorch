@@ -581,7 +581,7 @@ class TestSplitCatFxPasses(TestCase):
             (input_shuffling_multiple_output, 1, 1, 2, 2, 3, default_args),
             (input_shuffling_direct_output, 1, 1, 2, 2, 3, default_args),
             (unequal_split_multiple_output, 1, 1, 2, 2, 3, default_args),
-            (multi_split_cat, 2, 2, 4, 4, 3, multi_args),
+            (multi_split_cat, 1, 1, 2, 2, 3, multi_args),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
