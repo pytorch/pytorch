@@ -11,14 +11,7 @@
 #include <ATen/Dispatch.h>
 #include <torch/library.h>
 #include <torch/types.h>
-
 #include <cuda_runtime.h>
-#include <cutlass/cutlass.h>
-#include <cutlass/layout/layout.h>
-#include <cutlass/tensor_ref.h>
-
-#include <type_traits>
-#include <tuple>
 
 namespace at::native {
 
