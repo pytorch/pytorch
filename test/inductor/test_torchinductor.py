@@ -180,6 +180,30 @@ def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
         ids.add(id_)
 
 
+def define_custom_op_2_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
+    global libtest
+    global ids
+    if id_ not in ids:
+        libtest.define(
+            f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
+        )
+        libtest.impl(id_, fn_cpu, "CPU")
+        libtest.impl(id_, fn_cuda, "CUDA")
+        libtest.impl(id_, fn_meta, "Meta")
+        ids.add(id_)
+
+
+def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
+    global libtest
+    global ids
+    if id_ not in ids:
+        libtest.define(f"{id_}(Tensor[] x) -> Tensor", tags=tags)
+        libtest.impl(id_, fn_cpu, "CPU")
+        libtest.impl(id_, fn_cuda, "CUDA")
+        libtest.impl(id_, fn_meta, "Meta")
+        ids.add(id_)
+
+
 f32 = torch.float32
 
 
@@ -8828,7 +8852,7 @@ class CommonTemplate:
         self.common(fn, (inp, offsets), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True)
-    def test_custom_op(self):
+    def test_custom_op_1(self):
         import torch.library
 
         def foo_cpu(x):
@@ -8849,6 +8873,57 @@ class CommonTemplate:
             return c
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_2(self):
+        import torch.library
+
+        def foo_cpu(x, scale: float):
+            return scale * x, torch.cos(x)
+
+        def foo_cuda(x, scale: float):
+            return scale * x, torch.cos(x)
+
+        def foo_meta(x, scale: float):
+            return torch.empty_like(x), torch.empty_like(x)
+
+        define_custom_op_2_for_test("foo2", foo_cpu, foo_cuda, foo_meta)
+
+        def fn(x, scale: float):
+            a = torch.nn.functional.relu(x)
+            return torch.ops.test.foo2(a, scale)
+
+        self.common(fn, (torch.randn((16, 32)), 2.0), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_3(self):
+        import torch.library
+
+        def foo_cpu(x):
+            result = torch.zeros_like(x[0])
+            for t in x:
+                result += t
+            return result
+
+        def foo_cuda(x):
+            result = torch.zeros_like(x[0])
+            for t in x:
+                result += t
+            return result
+
+        def foo_meta(x):
+            return torch.empty_like(x[0])
+
+        define_custom_op_3_for_test("foo3", foo_cpu, foo_cuda, foo_meta)
+
+        def fn(x):
+            return torch.ops.test.foo3(x)
+
+        self.common(
+            fn,
+            ([torch.randn((16, 32)), torch.randn((16, 32)), torch.randn((16, 32))],),
+            check_lowp=False,
+        )
 
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
