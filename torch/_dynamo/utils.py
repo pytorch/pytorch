@@ -364,12 +364,6 @@ def setup_compile_debug():
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
-        torch._logging.set_logs(
-            dynamo=logging.DEBUG,
-            aot=logging.DEBUG,
-            inductor=logging.DEBUG,
-            output_code=True,  # this is off by default
-        )
         return add_file_handler()
 
     return contextlib.ExitStack()
@@ -673,6 +667,13 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 def record_compilation_metrics(compilation_metrics: CompilationMetrics):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
+    torch._logging.trace_structured(
+        "compilation_metrics",
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
 
