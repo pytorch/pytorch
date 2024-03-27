@@ -889,7 +889,7 @@ class GraphLowering(torch.fx.Interpreter):
                         layout=layout,
                         subgraphs=output_buffer,
                         num_stages=2,
-                        num_warps=8,
+                        num_warps=4,
                         BLOCK_M=64,
                         BLOCK_N=128,
                         BLOCK_DMODEL=args[0].get_size()[-1],

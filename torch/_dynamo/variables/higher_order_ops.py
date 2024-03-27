@@ -1308,7 +1308,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if len(args) == 3:
             return args, kwargs
         elif len(args) > 3:
-            args = args[:3], {"score_mod": args[3]}
+            return args[:3], {"score_mod": args[3]}
         else:
             raise NotImplementedError(
                 f"Expected 3 or 4 arguments but got {len(args)}.\n"

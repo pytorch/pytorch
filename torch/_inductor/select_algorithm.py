@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -303,7 +303,12 @@ class TritonTemplateKernel(TritonKernel):
             self.cse.invalidate(set())
         return self.modification_cache
 
-    def store_output(self, indices, val, mask):
+    def store_output(
+        self,
+        indices: Union[List[Any], Tuple[Any]],
+        val: str,
+        mask: Optional[str] = None,
+    ):
         """
         Hook called from template code to store the final output
         (if the buffer hasn't been optimized away), then append any
@@ -311,7 +316,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
-        assert isinstance(mask, str)
+        assert isinstance(mask, (str, type(None)))
         assert self.template_mask is None
         indices = list(map(TritonPrinter.paren, indices))
         index_symbols = [sympy.Symbol(x) for x in indices]
