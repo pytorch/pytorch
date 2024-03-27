@@ -547,6 +547,59 @@ def get_cached_ops():
     return cached_ops
 
 
+def _mannually_invoke_dispatch_mode_in_python(curr_mode, op_overload, args, kwargs):
+    assert isinstance(curr_mode, TorchDispatchMode)
+    overload_types = []
+    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
+    for a in args_flattened:
+        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+        # where in one case we only include tensors with the python key, and in another
+        # we include **all** tensors.
+        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
+            torch._C.DispatchKey.Python
+        ):
+            overload_types.append(type(a))
+    # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
+    ret = curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+    if ret is NotImplemented:
+        curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+    return ret
+
+
+def need_handle_pre_dispatch():
+    curr_stack_len = _len_torch_dispatch_stack_pre_dispatch()
+    # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
+    # calls inside of a mode.
+    return curr_stack_len > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+        DispatchKey.Python
+    )
+
+
+def create_predispatch_handler(op_overload):
+    def handler(*args, **kwargs):
+        @contextlib.contextmanager
+        def _temporarily_pop_modes_from_pre_dispatch():
+            top_mode = _pop_mode_from_pre_dispatch()
+            try:
+                yield top_mode
+            finally:
+                _set_mode_pre_dispatch(top_mode)
+
+        with _temporarily_pop_modes_from_pre_dispatch() as curr_mode:
+            return _mannually_invoke_dispatch_mode_in_python(
+                curr_mode, op_overload, args, kwargs
+            )
+
+    # Note [Not Caching Per-Dispatch-Key Mode Handlers]
+    # Note that we're not caching this handler.  There isn't really a point, since the slow bit
+    # is the handler itself (in python).
+    # Also, not caching means that we don't have to reset the cache when any existing
+    # modes go out of scope (which in of itself takes time to loop through all operators).
+    return handler
+
+
 # Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase):
@@ -681,53 +734,11 @@ class OpOverload(OperatorBase):
             return handler
 
         functionality_key = torch._C._to_functionality_key(key)  # type: ignore[attr-defined]
-        if functionality_key == torch._C.DispatchKey.PreDispatch:
-            curr_stack_len = _len_torch_dispatch_stack_pre_dispatch()
-            # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
-            # calls inside of a mode.
-            if (
-                curr_stack_len > 0
-                and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                    DispatchKey.Python
-                )
-            ):
-
-                def handler(*args, **kwargs):
-                    @contextlib.contextmanager
-                    def _temporarily_pop_modes_from_pre_dispatch():
-                        top_mode = _pop_mode_from_pre_dispatch()
-                        try:
-                            yield top_mode
-                        finally:
-                            _set_mode_pre_dispatch(top_mode)
-
-                    with _temporarily_pop_modes_from_pre_dispatch() as curr_mode:
-                        assert isinstance(curr_mode, TorchDispatchMode)
-                        overload_types = []
-                        args_flattened, _ = torch.utils._pytree.tree_flatten(
-                            (args, kwargs.values())
-                        )
-                        for a in args_flattened:
-                            # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
-                            # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
-                            # where in one case we only include tensors with the python key, and in another
-                            # we include **all** tensors.
-                            if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(
-                                a
-                            ).has(torch._C.DispatchKey.Python):
-                                overload_types.append(type(a))
-                        # TODO: check that I got these args correct (in C++, we pass in "0000"??)
-
-                        return curr_mode.__torch_dispatch__(
-                            self, overload_types, args, kwargs
-                        )
-
-                # Note [Not Caching Per-Dispatch-Key Mode Handlers]
-                # Note that we're not caching this handler.  There isn't really a point, since the slow bit
-                # is the handler itself (in python).
-                # Also, not caching means that we don't have to reset the cache when any existing
-                # modes go out of scope (which in of itself takes time to loop through all operators).
-                return handler
+        if (
+            functionality_key == torch._C.DispatchKey.PreDispatch
+            and need_handle_pre_dispatch()
+        ):
+            return create_predispatch_handler(self)
 
         final_key = resolve_key(self, key)
 
