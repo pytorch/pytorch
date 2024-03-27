@@ -716,10 +716,33 @@ current_module = sys.modules[__name__]
 
 
 def _get_sym_math_fn(name):
-    def fn(a):
-        import sympy
+    cache = None
 
-        return getattr(sympy, name)(a)
+    def fn(a):
+        nonlocal cache
+
+        if cache is None:
+            import sympy
+
+            class OpaqueUnaryFn(sympy.Function):
+                _torch_handler_name = name
+
+                @classmethod
+                def eval(cls, a):
+                    if isinstance(a, (sympy.Integer, sympy.Float)):
+                        # Python converts to float64 before computing, c.f.
+                        # >>> math.sin(2**53+1)
+                        # -0.848925964814655
+                        # >>> math.sin(float(2**53+1))
+                        # -0.848925964814655
+                        return sympy.Float(getattr(math, name)(float(a)))
+                    return None
+
+            OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
+
+            cache = OpaqueUnaryFn
+
+        return cache(a)
 
     return fn
 

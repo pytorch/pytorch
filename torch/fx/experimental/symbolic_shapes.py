@@ -4225,8 +4225,7 @@ class ShapeEnv:
         try:
             if orig_expr.is_number:
                 self.log.debug("eval %s [trivial]", orig_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert orig_expr == hint, f"{orig_expr} != {hint}"
                 return orig_expr
 
@@ -4237,8 +4236,7 @@ class ShapeEnv:
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
