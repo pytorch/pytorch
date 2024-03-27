@@ -3351,7 +3351,7 @@ class TestDynamicQuantizedOps(TestCase):
             (4, 7, 8),      # output_channels
         )
         for batch_size, input_channels, output_channels in options:
-            qlinear_dynamic = torch.ops.quantized.linear_unpacked_dynamic_fp16
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight
 
             x = torch.randn(batch_size, input_channels)
             w = torch.randn(output_channels, input_channels)
@@ -3369,7 +3369,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @skipIfNoFBGEMM
     def test_unpacked_qlinear_dynamic_fp16_opcheck(self):
-        qlinear_dynamic = torch.ops.quantized.linear_unpacked_dynamic_fp16.default
+        qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight.default
 
         x = torch.randn(4, 4, device='cpu')
         w = torch.randn(4, 4, device='cpu')
