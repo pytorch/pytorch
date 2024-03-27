@@ -329,9 +329,17 @@ class GraphLowering(torch.fx.Interpreter):
             torch.device, List[torch.Tensor]
         ] = self.get_sorted_tensors_for_benchmark_use(gm)
 
-    def get_benchark_tensor(
+    def get_read_only_parameter_for_benchmarking(
         self, needed_bytes: int, device: torch.device
     ) -> Optional[torch.Tensor]:
+        """
+        Generate a tensor that will be read-only from existing parameters.
+
+        Returns None if we do not have a currently unused in benchmarking Tensor large enough.
+
+        XXX: mutating this tensor will cause incorrectness issues.
+        """
+
         sorted_tensors = self.tensors_for_benchmark_use[device]
         min_index = bisect.bisect_left(
             sorted_tensors, needed_bytes, key=lambda x: x.untyped_storage().nbytes()
