@@ -1828,12 +1828,18 @@ class Scheduler:
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
+            triton_choices = 0
+
             for choice, unfused_time in choice_timings.items():
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
                     continue
+
+                triton_choices += 1
+                if triton_choices > config.max_epilogue_benchmarked_choices:
+                    break
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice

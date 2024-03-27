@@ -288,6 +288,9 @@ benchmark_multi_templates = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
 )
 
+# Take how many of the top triton kernels to benchmark epilogue
+max_epilogue_benchmarked_choices = 6
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
