@@ -1868,10 +1868,6 @@ make_fx_failures = {
 
     # AssertionError: Tensor-likes are not close!
     skip('empty_strided', '', device_type='cpu'),
-
-    # Auto_functionalize shouldn't work with make_fx directly
-    skip('auto_functionalize', 'simple'),
-
 }
 
 fake_tensor_failures = {
