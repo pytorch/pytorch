@@ -2818,7 +2818,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        expected = """\
+        self.assertExpectedInline(
+            "\n".join(actual.split("\n")[:-2]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -2936,18 +2938,20 @@ class GraphModule(torch.nn.Module):
         split_2 = movedim.split((12,), dim = -1);  movedim = None
         jac_out_in = split_2[0];  split_2 = None
 
-        unflatten = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
-        """
+        unflatten = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None""",
+        )
+
         # Python 3.10 and 3.11 produces slightly different graphs
         if sys.version_info[:2] > (3, 10):
-            expected += (
-                "return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)\n"
+            self.assertExpectedInline(
+                actual.split("\n")[-1],
+                """        return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)""",
             )
         else:
-            expected += (
-                "return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)\n"
+            self.assertExpectedInline(
+                actual.split("\n")[-2],
+                """        return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)""",
             )
-        self.assertExpectedInline(actual, expected)
 
     @config.patch(capture_func_transforms=True)
     def test_jacrev(self):
