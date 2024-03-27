@@ -22701,6 +22701,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
                             if o.name == op_name and o.variant_test_name == variant_name]
+        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
         for op in matching_opinfos:
             decorators = list(op.decorators)
             if expected_failure:
