@@ -1816,6 +1816,23 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
         return buffer, x.layout
     raise NotImplementedError
 
+def is_pointwise_with_channels_last_inputs(x):
+    if isinstance(x, TensorBox):
+        return is_pointwise_with_channels_last_inputs(x.data)
+    if isinstance(x, StorageBox) and isinstance(x.data, Pointwise):
+        all_reads = x.data.get_reads()
+        def is_channel_last_index(read):
+            if len(read.size) != 4:
+                return False
+            expected_channel_last_index = (
+                read.var_names[0] * read.size[1] * read.size[2] * read.size[3]
+                + read.var_names[1]
+                + read.var_names[2] * read.size[1] * read.size[3]
+                + read.var_names[3] * read.size[1]
+            )
+            return expected_channel_last_index == read.index
+        return any(type(read) is dependencies.MemoryDep and is_channel_last_index(read) for read in all_reads)
+    return False
 
 as_contiguous_storage_and_layout = functools.partial(
     as_storage_and_layout, want_contiguous=True
@@ -3698,6 +3715,9 @@ class ConcatKernel(NopKernel):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
+            elif is_pointwise_with_channels_last_inputs(x):
+                output_stride = make_channels_last_strides_for(new_size)
+                break
 
         concat_kernel = ConcatKernel(
             name=None,
