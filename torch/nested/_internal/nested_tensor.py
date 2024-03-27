@@ -85,6 +85,7 @@ class NestedTensor(torch.Tensor):
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
+        assert values.device == offsets.device
 
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).

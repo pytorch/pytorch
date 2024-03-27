@@ -435,6 +435,8 @@ def linear_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
+    from .nested_tensor import _tensor_symint_registry
+
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -444,8 +446,12 @@ def to_copy_default(func, *args, **kwargs):
     new_kwargs.pop("layout")
 
     new_values = func(inp._values, **new_kwargs)
-    # NB: Purposefully keep offsets on the old device.
-    return NestedTensor(new_values, **extract_kwargs(inp))
+    new_offsets = inp._offsets.to(device=new_values.device)
+    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+    inp_kwargs = extract_kwargs(inp)
+    inp_kwargs["offsets"] = new_offsets
+
+    return NestedTensor(new_values, **inp_kwargs)
 
 
 register_jagged_func(
