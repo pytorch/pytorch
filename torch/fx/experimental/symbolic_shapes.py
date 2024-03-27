@@ -2049,24 +2049,25 @@ class ShapeEnv:
         from torch.fx.experimental.validator import translation_validation_enabled
         self._translation_validation_enabled = translation_validation_enabled()
 
+        self.graph = torch.fx.Graph()
+        # Create an output graph and start inserting before that.
+        # This is needed when 'deepcopy'-ing this object.
+        self.graph.inserting_before(self.graph.output(None))
+
+        # Mapping of each node name to the node itself.
+        #
+        # This is useful for matching an FX node from a recorded ShapeEnv.graph
+        # to the FX node of the ShapeEnv we are running the event on.
+        #
+        # Whenever you add a node to self.graph, you must add a mapping to this
+        # variable. Otherwise, the built FX graph on the replayed ShapeEnv will
+        # not be valid.
+        self.name_to_node: Dict[str, torch.fx.Node] = {}
+
         if self._translation_validation_enabled:
             from torch.fx.experimental.validator import TranslationValidator
 
             self.validator = TranslationValidator()
-            self.graph = torch.fx.Graph()
-            # Create an output graph and start inserting before that.
-            # This is needed when 'deepcopy'-ing this object.
-            self.graph.inserting_before(self.graph.output(None))
-
-            # Mapping of each node name to the node itself.
-            #
-            # This is useful for matching an FX node from a recorded ShapeEnv.graph
-            # to the FX node of the ShapeEnv we are running the event on.
-            #
-            # Whenever you add a node to self.graph, you must add a mapping to this
-            # variable. Otherwise, the built FX graph on the replayed ShapeEnv will
-            # not be valid.
-            self.name_to_node: Dict[str, torch.fx.Node] = {}
 
     def check_equal(self, other: "ShapeEnv") -> None:
         """Compare another ShapeEnv for equivalence
@@ -2163,8 +2164,6 @@ class ShapeEnv:
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
-        if not self._translation_validation_enabled:
-            return None
         srcname = source.name()
         if source not in self.source_to_symbol:
             self.source_to_symbol[srcname] = sympy.Symbol(srcname, integer=True)
@@ -2197,13 +2196,13 @@ class ShapeEnv:
         # Flags whether the returned node was cached or not.
         fresh = False
 
-        if self._translation_validation_enabled and node_key not in self.fx_node_cache:
+        if node_key not in self.fx_node_cache:
 
             # Presence of None in the arguments implies that we should ignore this operation.
             if any(a is None for a in args):
                 # We check if we are not mixing SymNode that should not be ignored
                 # (fx_node is not None) with those that should (fx_node is None).
-                assert all(not isinstance(a, torch.fx.Node) for a in args)
+                assert all(not isinstance(a, torch.fx.Node) for a in args), args
                 return None, fresh
 
             fresh = True
@@ -2221,9 +2220,6 @@ class ShapeEnv:
             symbol: sympy.Symbol,
             type: Type,
     ) -> Optional[torch.fx.Node]:
-        if not self._translation_validation_enabled:
-            return None
-
         node_key = (self.graph.placeholder, (symbol,))
 
         # Check if we haven't added this symbol already.
@@ -2231,7 +2227,8 @@ class ShapeEnv:
         # generates invalid Python code.
         if node_key not in self.fx_node_cache:
             # Add a Z3 variable according to 'type'.
-            self._add_z3var(symbol, type)
+            if self._translation_validation_enabled:
+                self._add_z3var(symbol, type)
             # Create the FX placeholder out of a mangled name.
             mangled_name = re.sub(r'[^a-zA-Z0-9]', '_', re.sub(r'[()]', '', symbol.name))
             node = self.fx_node_cache[node_key] = self.graph.placeholder(mangled_name)
@@ -2243,7 +2240,7 @@ class ShapeEnv:
         return self.fx_node_cache[node_key]
 
     def _remove_fx_node(self, node: Optional[torch.fx.Node]) -> None:
-        if self._translation_validation_enabled and node is not None:
+        if node is not None:
             self.name_to_node.pop(node.name)
             self.graph.erase_node(node)
 
@@ -2526,7 +2523,7 @@ class ShapeEnv:
         """
         source_name = source.name() if source else None
 
-        if self._translation_validation_enabled and source is not None:
+        if source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None
@@ -2535,7 +2532,8 @@ class ShapeEnv:
             fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
             # Add an equality assertion for the newly created symbol and 'sym'.
-            self._add_assertion(sympy.Eq(symbol, sym))
+            if self._translation_validation_enabled:
+                self._add_assertion(sympy.Eq(symbol, sym))
         else:
             fx_node = None
 
@@ -2564,6 +2562,7 @@ class ShapeEnv:
         """Create a SymBool object from a sympy boolean expression"""
         # This function is only being used in serialization, so we do not track it
         # for validation.
+        # TODO: we probably should track this
         return SymBool(SymNode(sym, self, bool, None))
 
     def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
@@ -2870,6 +2869,7 @@ class ShapeEnv:
         output to print them too).  It's private because it's not
         intended for normal use
         """
+
         self.log.info("produce_guards")
 
         # Check if we get to the same ShapeEnv state by replaying the recorded events.
@@ -4187,8 +4187,7 @@ class ShapeEnv:
         node = None
         fresh = False
         if (
-                self._translation_validation_enabled
-                and fx_node is not None
+                fx_node is not None
                 and not self._suppress_guards_tls()
                 and not size_oblivious
         ):
@@ -4207,7 +4206,10 @@ class ShapeEnv:
             # corresponds to this assertion node.
             # Reason: so that, given an assertion node, we can replay the ShapeEnv
             # events until the point where this assertion node was freshly created.
-            if fresh:
+            # But only do this for translation validation (in principle, the
+            # node this was allocated on could be useful, but we don't do it
+            # for perf reasons)
+            if self._translation_validation_enabled and fresh:
                 self._add_fx_node_metadata(node)
 
         # After creating the FX node corresponding to orig_expr, we must make sure that
@@ -4379,13 +4381,12 @@ class ShapeEnv:
 
         # OK, we're definitely doing a runtime assert now
         if (
-            self._translation_validation_enabled
-            and fx_node is not None
+            fx_node is not None
             and not self._suppress_guards_tls()
         ):
             node, fresh = self._create_fx_call_function(torch._assert, (fx_node,))
             assert node is not None
-            if fresh:
+            if self._translation_validation_enabled and fresh:
                 self._add_fx_node_metadata(node)
 
         self._check_frozen(expr, sympy.true)

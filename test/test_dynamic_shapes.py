@@ -151,18 +151,27 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
 
 def create_symtype(cls, pytype, shape_env, val, duck=True):
     from torch._dynamo.source import ConstantSource
+    source = ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")
     symbol = shape_env.create_symbol(
         val,
-        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        source=source,
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
     )
-    return cls(SymNode(
-        symbol,
-        shape_env,
-        pytype,
-        hint=val,
-    ))
+    if cls is SymInt:
+        return shape_env.create_symintnode(symbol, hint=val, source=source)
+    elif cls is SymBool:
+        return shape_env.create_symboolnode(symbol)
+    elif cls is SymFloat:
+        # TODO: this is fake, to be revamped
+        return cls(SymNode(
+            symbol,
+            shape_env,
+            pytype,
+            hint=val,
+        ))
+    else:
+        raise AssertionError(f"unrecognized {cls}")
 
 # TODO: default duck to False
 def create_symint(shape_env, i: int, duck=True):
