@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -13,8 +12,10 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/unique_consecutive.h>
 #include <ATen/ops/unique_consecutive_native.h>
+#include <ATen/ops/unique_dim.h>
 #include <ATen/ops/unique_dim_consecutive.h>
 #include <ATen/ops/unique_dim_consecutive_native.h>
+#include <ATen/ops/unique_dim_native.h>
 #endif
 
 namespace at::native {
@@ -40,7 +41,7 @@ static std::string getUniqueKey(const ScalarType& dtype,
       to_string(return_counts) + "]:[" + to_string(consecutive) + "]";
 }
 
-// dim arg not supported when non consecutive, ie sorted
+// dim arg not supported when non-consecutive, ie sorted
 static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
                                                        UniqueCachedGraph* uniqueGraph,
                                                        const bool return_inverse,
@@ -93,9 +94,45 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
     inputTensor = [graph castTensor:inputTensor toType:dataType name:@"castInputTensor"];
   }
 
+  MPSGraphTensor* argSortedInput = nil;
   MPSGraphTensor* sortedInput = nil;
   if (consecutive) {
     sortedInput = inputTensor;
+  } else if (dimOpt.has_value()) {
+    inputTensor = (dim != 0) ? [graph transposeTensor:inputTensor dimension:dim withDimension:0 name:nil] : inputTensor;
+
+    NSMutableArray* axes = [NSMutableArray arrayWithCapacity:[shape count] - 1];
+    NSMutableArray* dims = [NSMutableArray arrayWithCapacity:[shape count] - 1];
+
+    for (const auto axis : c10::irange(1, [shape count])) {
+      [dims addObject:[inputTensor shape][axis]];
+      [axes addObject:@(axis)];
+    }
+
+    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:dims name:nil];
+    randomTensor = (dataType == MPSDataTypeFloat16) ? [graph castTensor:randomTensor toType:MPSDataTypeFloat16 name:nil]
+                                                    : randomTensor;
+
+    MPSGraphTensor* tensor = (dataType == MPSDataTypeInt32)
+        ? [graph castTensor:inputTensor toType:MPSDataTypeFloat32 name:@"castTensor"]
+        : inputTensor;
+
+    tensor = [graph multiplicationWithPrimaryTensor:tensor secondaryTensor:randomTensor name:nil];
+    tensor = [graph reductionSumWithTensor:tensor axes:axes name:nil];
+    tensor = [graph squeezeTensor:tensor axes:axes name:nil];
+
+    argSortedInput = [graph argSortWithTensor:tensor axis:0 name:nil];
+    sortedInput = [graph gatherWithUpdatesTensor:inputTensor
+                                   indicesTensor:argSortedInput
+                                            axis:0
+                                 batchDimensions:0
+                                            name:nil];
+
+    if (dim != 0)
+      sortedInput = [graph transposeTensor:sortedInput dimension:0 withDimension:dim name:nil];
+
+    [randomTensor release];
+    [tensor release];
   } else {
     sortedInput = [graph sortWithTensor:inputTensor axis:0 name:nil];
   }
@@ -146,13 +183,13 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
 
   // Compute optional returned tensors if requested
   if (return_inverse) {
-    MPSGraphTensor* argSortedInput = nil;
     if (consecutive)
       argSortedInput = [graph coordinateAlongAxis:0
                                         withShape:@[ [NSNumber numberWithUnsignedInteger:length] ]
                                              name:nil];
-    else
+    else if (!dimOpt.has_value())
       argSortedInput = [graph argSortWithTensor:inputTensor axis:0 name:nil];
+
     inverseIndicesTensor = [graph scatterWithUpdatesTensor:scannedIndicesWithHead
                                              indicesTensor:argSortedInput
                                                      shape:@[ [NSNumber numberWithUnsignedInteger:length] ]
@@ -319,6 +356,20 @@ std::tuple<Tensor, Tensor, Tensor> _unique2_mps(const Tensor& self,
   }
 
   return _unique_impl_mps(self, return_inverse, return_counts, false, c10::nullopt);
+}
+
+std::tuple<Tensor, Tensor, Tensor> unique_dim_mps(const Tensor& self,
+                                                  const int64_t dim,
+                                                  const bool sorted,
+                                                  const bool return_inverse,
+                                                  const bool return_counts) {
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: unique_dim op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performance implications.")
+    return castToMPS(at::unique_dim(self.to("cpu"), dim, sorted, return_inverse, return_counts));
+  }
+
+  return _unique_impl_mps(self, return_inverse, return_counts, false, c10::make_optional((int64_t)dim));
 }
 
 } // namespace at::native

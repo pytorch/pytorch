@@ -4019,6 +4019,42 @@ class TestMPS(TestCaseMPS):
         helper(torch.randint(2, (2, 1)), 1, True, True)
         helper(torch.randint(2, (2, 0)), 1, True, True)
 
+    def test_unique_dim(self):
+        torch.manual_seed(0)
+
+        def helper(x, dim, return_inverse, return_counts):
+            cpu_x = x
+            mps_x = cpu_x.detach().clone().to("mps")
+
+            mps_result = torch.unique(mps_x, dim=dim, sorted=True, return_inverse=return_inverse, return_counts=return_counts)
+            cpu_result = torch.unique(cpu_x, dim=dim, sorted=True, return_inverse=return_inverse, return_counts=return_counts)
+
+            self.assertEqual(mps_result, cpu_result)
+
+        for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]:
+            x = torch.tensor([
+                [[1.0, 1.0], [0.0, 1.0], [2.0, 1.0], [0.0, 1.0]],
+                [[1.0, 1.0], [0.0, 1.0], [2.0, 1.0], [0.0, 1.0]],
+            ], dtype=dtype)
+
+            a = torch.tensor([
+                [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 1, 1]],
+                [[0, 0, 1, 1], [0, 0, 1, 1], [1, 1, 1, 1]],
+                [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 1, 1]],
+            ], dtype=dtype)
+
+            x_empty = torch.empty(5, 0, dtype=dtype)
+            helper(x_empty, 1,  True, True)
+
+            helper(x, 0,  True, True)
+            helper(x, 1,  True, True)
+
+            # works but sorting is inconsistent with cpu implementation
+            # helper(x, 2, True, True)
+            # helper(a, 0, True, True)
+            # helper(a, 1, True, True)
+            # helper(a, 2, True, True)
+
     # See https://github.com/pytorch/pytorch/issues/85675
     def test_cat_non_contiguous(self):
         def rotate_subset(data, dim):
