@@ -1584,7 +1584,6 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
-    @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -1825,7 +1824,6 @@ def forward(self, arg_0):
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
 
-    @testing.expectedFailureNonStrict
     def test_constrain_size_with_constrain_value(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1954,7 +1952,6 @@ def forward(self, arg_0):
             )
         )
 
-    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
@@ -2010,7 +2007,6 @@ def forward(self, arg_0):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
-    @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
@@ -2672,7 +2668,6 @@ def forward(self, arg_0):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

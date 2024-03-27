@@ -140,5 +140,5 @@ def get_socket_with_port() -> socket.socket:
             return s
         except OSError as e:
             s.close()
-            logger.info("Socket creation attempt failed.", exc_info=e)
+            logger.warning("Socket creation attempt failed.", exc_info=e)
     raise RuntimeError("Failed to create a socket")
