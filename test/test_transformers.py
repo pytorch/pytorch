@@ -1434,7 +1434,7 @@ class TestSDPAFailureModes(NNTestCase):
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
-            # Passing in a q,k,v with 0 length sequences will error
+            # Passing in a q,k,v with last dim stride not equal to 1 will error
             dtype = torch.float16
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 8, 8)
