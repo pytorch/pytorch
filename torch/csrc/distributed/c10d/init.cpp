@@ -843,6 +843,11 @@ This class does not support ``__members__`` property.)");
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
 
+  module.def(
+      "_set_thread_isolation_mode",
+      &::c10d::set_thread_isolation_mode,
+      py::arg("enable"));
+
   // Bindings for GroupRegistry.hpp
   //
   // Register a process group in the native registry. Process groups registered

@@ -86,7 +86,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.cholesky_ex")}
 """ + r"""
 
 .. seealso::
@@ -222,7 +222,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.inv_ex")}
 """ + r"""
 
 .. note::
@@ -1115,7 +1115,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """)
@@ -1773,7 +1773,7 @@ Examples::
     tensor(3.0957e-06)
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
@@ -2131,7 +2131,7 @@ Letting `*` be zero or more batch dimensions,
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
 
 .. seealso::

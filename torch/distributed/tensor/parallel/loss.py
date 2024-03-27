@@ -26,10 +26,13 @@ __all__ = ["loss_parallel"]
 @contextlib.contextmanager
 def loss_parallel():
     """
-    A context manager which enables loss parallelism, where efficient parallelized cross-entropy loss
-    computation can be performed when the input is sharded on the class dimension. Within this context
-    manager, one can use :func:`~torch.nn.functional.cross_entropy` or :class:`~torch.nn.CrossEntropyLoss`
-    as usual, with the following assumptions on the input parameters.
+    A context manager that enables loss parallelism, where efficient parallelized loss computation
+    can be performed when the input is sharded on the class dimension. Currently only the cross-entropy
+    loss is supported.
+
+    Within this context manager, one can use :func:`~torch.nn.functional.cross_entropy` or
+    :class:`~torch.nn.CrossEntropyLoss` as usual, with the following assumptions on the input parameters.
+    The corresponding ``backward()`` call, if any, also needs to happen under this context manager.
 
     Args:
         input (:class:`DTensor`):
@@ -54,9 +57,9 @@ def loss_parallel():
         >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
         >>> device_mesh = init_device_mesh("cuda", (8,))
-        >>> input = torch.randn(3, 5, device="cuda", requires_grad=True)
+        >>> input = torch.randn(4, 16, device="cuda", requires_grad=True)
         >>> dist_input = distribute_tensor(input, device_mesh, placements=[Shard(1)])
-        >>> target = torch.randint(5, (3,), device="cuda")
+        >>> target = torch.randint(16, (4,), device="cuda")
         >>> with loss_parallel():
         >>>     loss = F.cross_entropy(dist_input, target, reduction="mean")
         >>>     loss.backward()

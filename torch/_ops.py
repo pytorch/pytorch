@@ -276,9 +276,9 @@ class HigherOrderOperator(OperatorBase):
         # TODO (tmanlaibaatar) Make it generic fallback mechanism
         def _(*args, **kwargs):
             if _len_torch_dispatch_stack_pre_dispatch() == 0:
-                with torch._C._ExcludeDispatchKeyGuard(
-                    torch._C.DispatchKeySet(DispatchKey.PreDispatch)
-                ):
+                local_include_set = torch._C._dispatch_tls_local_include_set().remove(DispatchKey.PreDispatch)
+                local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
+                with torch._C._ForceDispatchKeyGuard(local_include_set, local_exclude_set):
                     return self(*args, **kwargs)
             raise AssertionError(
                 """
@@ -434,15 +434,6 @@ def key_extractor(tensors, key_mask):
 class _ModeStackStateForPreDispatch:
     def __init__(self):
         self.__infra_modes = [None, None]
-        # This flag indicates whether we removed PreDispatch key
-        # from local dispatch key exclude set. This is useful to
-        # figure out when to turn on and off PreDispatch key when
-        # there is no active mode on the stack.
-        self._has_removed_pre_dispatch_from_exclude_set_flag = (
-            torch._C._dispatch_tls_local_exclude_set().has(
-                torch._C.DispatchKey.PreDispatch
-            )
-        )
 
     def set(self, index, mode):
         assert index < len(self.__infra_modes)
@@ -489,16 +480,6 @@ def unset_mode_pre_dispatch(mode_key):
             torch._C.DispatchKey.PreDispatch, False
         )
 
-        if (
-            current_mode_stack_pre_dispatch._has_removed_pre_dispatch_from_exclude_set_flag
-        ):
-            torch._C._dispatch_tls_set_dispatch_key_excluded(
-                torch._C.DispatchKey.PreDispatch, True
-            )
-            current_mode_stack_pre_dispatch._has_removed_pre_dispatch_from_exclude_set_flag = (
-                True
-            )
-
     return current_mode
 
 
@@ -528,16 +509,6 @@ def _set_mode_pre_dispatch(mode):
         torch._C._dispatch_tls_set_dispatch_key_included(
             torch._C.DispatchKey.PreDispatch, True
         )
-
-        if torch._C._dispatch_tls_local_exclude_set().has(
-            torch._C.DispatchKey.PreDispatch
-        ):
-            torch._C._dispatch_tls_set_dispatch_key_excluded(
-                torch._C.DispatchKey.PreDispatch, False
-            )
-            mode_stack_state_for_pre_dispatch()._has_removed_pre_dispatch_from_exclude_set_flag = (
-                True
-            )
 
 
 def _pop_mode_from_pre_dispatch():
