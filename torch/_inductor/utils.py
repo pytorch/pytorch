@@ -211,7 +211,7 @@ def get_read_only_benchmark_value(
     )
     needed_bytes = needed_size * get_primitive_bitwidth(dtype)
 
-    mod_tensor = V.graph.get_benchark_tensor(needed_bytes, device)
+    mod_tensor = V.graph.get_read_only_parameter_for_benchmarking(needed_bytes, device)
     if mod_tensor is not None:
         assert (
             mod_tensor.untyped_storage().nbytes() >= needed_bytes
