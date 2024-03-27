@@ -91,8 +91,14 @@ struct DevArrayPack {
   char* buffer_ptr = nullptr;
 
   template <typename T>
-  __device__ __forceinline__ void get_array(T*& out, int idx) {
-    if (buffer_ptr == nullptr) {
+  C10_HOST_DEVICE __forceinline__ void get_array(
+      T*& out,
+      int idx,
+      bool use_small_buffer) {
+    // use_small_buffer is redundant information, but it seems necessary for
+    // the HIP compiler to generate warp-sync code.
+    assert(use_small_buffer == (buffer_ptr == nullptr));
+    if (use_small_buffer) {
       out = reinterpret_cast<T*>(small_buffer + offsets[idx]);
     } else {
       out = reinterpret_cast<T*>(buffer_ptr + offsets[idx]);
@@ -198,11 +204,12 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
       c10::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
 #endif
-      C10_CUDA_CHECK(cudaMemcpy(
+      at::cuda::memcpy_and_sync(
           graph_owned_buf,
           buf_tensor.data_ptr(),
           total_bytes,
-          cudaMemcpyHostToDevice));
+          cudaMemcpyHostToDevice,
+          0);
     }
 
     // Manage the ownership of buf with a cuda user object
@@ -255,16 +262,16 @@ struct TensorListMetadata {
   }
 
   // Convert a DevArrayPack to TensorListMetadata
-  __device__ __forceinline__ static TensorListMetadata<n> from_dev_array_pack(
-      DevArrayPack& pack) {
+  C10_HOST_DEVICE __forceinline__ static TensorListMetadata<n>
+  from_dev_array_pack(DevArrayPack& pack, bool use_small_buffer) {
     TensorListMetadata<n> tl{};
 #pragma unroll n
     for (auto d = 0; d < n; ++d) {
-      pack.get_array(tl.addresses[d], d);
+      pack.get_array(tl.addresses[d], d, use_small_buffer);
     }
-    pack.get_array(tl.numel_for_tensor, n);
-    pack.get_array(tl.block_to_tensor, n + 1);
-    pack.get_array(tl.block_to_chunk, n + 2);
+    pack.get_array(tl.numel_for_tensor, n, use_small_buffer);
+    pack.get_array(tl.block_to_tensor, n + 1, use_small_buffer);
+    pack.get_array(tl.block_to_chunk, n + 2, use_small_buffer);
     tl.start_tensor_this_launch = 0;
     return tl;
   }
@@ -318,11 +325,8 @@ struct FusedOptimizerTensorListMetadata {
   int start_tensor_this_launch;
 };
 
-// TODO(yifu): remove this once TensorListScalarListMetadata and
-// FusedOptimizerTensorListMetadata adopt DevArrayPack.
 template <typename T, typename U, typename... ArgTypes>
-C10_LAUNCH_BOUNDS_1(kBlockSize)
-__global__ void multi_tensor_apply_kernel(
+__device__ void multi_tensor_apply_dev(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
@@ -334,16 +338,23 @@ __global__ void multi_tensor_apply_kernel(
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void multi_tensor_apply_kernel(
+    T tensorListMeta,
+    U callable,
+    ArgTypes... args) {
+  multi_tensor_apply_dev(tensorListMeta, callable, args...);
+}
+
+template <typename T, typename U, typename... ArgTypes>
+C10_LAUNCH_BOUNDS_1(kBlockSize)
+__global__ void multi_tensor_apply_kernel(
     DevArrayPack pack,
     U callable,
     ArgTypes... args) {
   static_assert(
       sizeof(DevArrayPack) + sizeof(U) + (0 + ... + sizeof(ArgTypes)) <
       max_kernel_arg_size);
-  auto tensorListMeta = T::from_dev_array_pack(pack);
-  // Hand the chunk information to the user-supplied functor to process however
-  // it likes.
-  callable(kChunkSize, tensorListMeta, args...);
+  auto tensorListMeta = T::from_dev_array_pack(pack, true);
+  multi_tensor_apply_dev(tensorListMeta, callable, args...);
 }
 
 } // namespace
@@ -494,17 +505,35 @@ void multi_tensor_apply(
   }
 
   auto device = tensor_lists[0][0].device();
-  auto [dev_array_pack, buf_tensor] =
-      TensorListMetadata<depth>::make_dev_array_pack(
-          addresses, numel_for_tensor, block_to_tensor, block_to_chunk, device);
+  auto [pack, buf_tensor] = TensorListMetadata<depth>::make_dev_array_pack(
+      addresses, numel_for_tensor, block_to_tensor, block_to_chunk, device);
 
   if (block_to_tensor.size() > 0) {
-    multi_tensor_apply_kernel<TensorListMetadata<depth>>
-        <<<block_to_tensor.size(),
-           kBlockSize,
-           0,
-           at::cuda::getCurrentCUDAStream()>>>(
-            dev_array_pack, callable, args...);
+    const bool use_small_buffer = (pack.buffer_ptr == nullptr);
+    if (use_small_buffer) {
+      // With small buffer optimization, we convert the DevArrayPack to a
+      // TensorListMeta inside the kernel. This is because the small buffer is
+      // passed to the kernel by value and its device address is only available
+      // after the kernel is launched.
+      multi_tensor_apply_kernel<TensorListMetadata<depth>>
+          <<<block_to_tensor.size(),
+             kBlockSize,
+             0,
+             at::cuda::getCurrentCUDAStream()>>>(pack, callable, args...);
+    } else {
+      // Without small buffer optimization, we convert the DevArrayPack to a
+      // TensorListMeta before calling the kernel. This is not neccessary for
+      // CUDA, but the HIP compiler has trouble generating warp-sync code if
+      // "pack.buffer_ptr == nullptr" check is performed inside the kernel.
+      auto tensorListMeta =
+          TensorListMetadata<depth>::from_dev_array_pack(pack, false);
+      multi_tensor_apply_kernel<<<
+          block_to_tensor.size(),
+          kBlockSize,
+          0,
+          at::cuda::getCurrentCUDAStream()>>>(
+          tensorListMeta, callable, args...);
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }

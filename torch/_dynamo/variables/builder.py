@@ -106,6 +106,7 @@ from .distributed import (
     PlacementClassVariable,
     PlacementVariable,
     ProcessGroupVariable,
+    WorldMetaClassVariable,
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
@@ -664,6 +665,8 @@ class VariableBuilder:
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
+        elif WorldMetaClassVariable.is_group_member_type(value):
+            return WorldMetaClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return ProcessGroupVariable(value, source=self.source)
@@ -1563,11 +1566,7 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
-        torch._C._functorch._vmap_increment_nesting,
-        torch._C._functorch._vmap_decrement_nesting,
         torch._functorch.vmap._validate_and_get_batch_size,
-        torch._C._functorch._grad_increment_nesting,
-        torch._C._functorch._grad_decrement_nesting,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
@@ -1903,7 +1902,7 @@ def wrap_to_fake_tensor_and_record(
                 )
 
         tx.output.tracing_context.tensor_to_context[e] = symbolic_context
-        tx.output.tensor_weakref_to_sizes_strides[e] = {
+        tx.output.input_source_to_sizes_strides[source] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
         }

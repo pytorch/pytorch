@@ -1042,7 +1042,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -1116,6 +1116,19 @@ cdll.LoadLibrary("__lib_path__")
 
 
 @dataclasses.dataclass
+class VecNEON(VecISA):
+    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _macro = "-DCPU_CAPABILITY_NEON"
+    _arch_flags = ""  # Unused
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "neon"  # Unused
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "-DCPU_CAPABILITY_AVX512"
@@ -1178,6 +1191,9 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        return [VecNEON()]
+
     if sys.platform != "linux":
         return []
 
@@ -1348,7 +1364,7 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    macros = ""
+    macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
     build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -1389,7 +1405,6 @@ def get_include_and_linking_paths(
                                     lpaths[i] = os.path.join(path, root)
                                     lpaths.append(os.path.join(lpaths[i], "stubs"))
                                     break
-        macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
                 cap = str(vec_isa).upper()
@@ -1906,6 +1921,40 @@ def compile_file(
 _libgomp: Optional[CDLL] = None
 
 
+def custom_op_wrapper(op: str, *args):
+    # This function will be called from generated cpp wrapper code in the JIT mode.
+    # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
+    def convert_arg(arg):
+        if str(type(arg)) == "<class 'PyCapsule'>":
+            # No easy way to do isinstance check on PyCapsule
+            return torch._C._aoti.alloc_tensor_by_stealing_from_void_ptr(arg)
+        elif isinstance(arg, (list, tuple)):
+            return type(arg)(convert_arg(a) for a in arg)
+        else:
+            return arg
+
+    converted_args = [convert_arg(arg) for arg in args]
+
+    assert op.startswith("torch.ops."), (
+        op + " can not be called through custom_op_wrapper"
+    )
+    func = None
+    for i, s in enumerate(op.split(".")):
+        if i == 0:
+            func = importlib.import_module(s)
+        func = getattr(func, s)
+
+    assert callable(func), op + " can not be loaded through custom_op_wrapper"
+    result = func(*converted_args)
+    if isinstance(result, (list, tuple)):
+        for r in result:
+            assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+    else:
+        assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
+        return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
+
+
 class CppCodeCache:
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
@@ -2048,9 +2097,17 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
         )
-        return importlib.machinery.ExtensionFileLoader(
-            f"{key}.{cls.entry_function}", path
-        ).load_module()  # type: ignore[call-arg]
+        module_name = f"{key}.{cls.entry_function}"
+        try:
+            return sys.modules[module_name]
+        except KeyError:
+            pass
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        return module
 
     @classmethod
     def load_pybinding(
@@ -2757,5 +2814,7 @@ if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
     # compile workers created not being able to be shut down inside
     # shutdown_compile_workers(). This may cause significant QPS drop.
     log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+elif sys.version_info >= (3, 12):
+    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()
