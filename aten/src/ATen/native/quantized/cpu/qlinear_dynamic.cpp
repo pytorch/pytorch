@@ -791,7 +791,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
       TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"),
       TORCH_FN(QLinearDynamicFp16<false>::run));
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::linear_unpacked_dynamic_fp16"),
+      TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16_unpacked_weight"),
       TORCH_FN(QLinearUnpackedDynamicFp16::run));
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_fp16"),
@@ -800,26 +800,8 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 
 TORCH_LIBRARY_IMPL(quantized, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::linear_unpacked_dynamic_fp16"),
+      TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16_unpacked_weight"),
       TORCH_FN(QLinearUnpackedDynamicFp16::meta));
-}
-
-TORCH_LIBRARY_IMPL(quantized_wrapper, CPU, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("quantized_wrapper::wrapped_fbgemm_pack_gemm_matrix_fp16"),
-      wrapped_fbgemm_pack_gemm_matrix_fp16);
-  m.impl(
-      TORCH_SELECTIVE_NAME("quantized_wrapper::wrapped_fbgemm_linear_fp16_weight"),
-      wrapped_fbgemm_linear_fp16_weight);
-}
-
-TORCH_LIBRARY_IMPL(quantized_wrapper, Meta, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("quantized_wrapper::wrapped_fbgemm_pack_gemm_matrix_fp16"),
-      wrapped_fbgemm_pack_gemm_matrix_fp16_meta);
-  m.impl(
-      TORCH_SELECTIVE_NAME("quantized_wrapper::wrapped_fbgemm_linear_fp16_weight"),
-      wrapped_fbgemm_linear_fp16_weight_meta);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
@@ -827,6 +809,21 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"),
       TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_pack_gemm_matrix_fp16"),
+      wrapped_fbgemm_pack_gemm_matrix_fp16);
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_linear_fp16_weight"),
+      wrapped_fbgemm_linear_fp16_weight);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_pack_gemm_matrix_fp16"),
+      wrapped_fbgemm_pack_gemm_matrix_fp16_meta);
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_linear_fp16_weight"),
+      wrapped_fbgemm_linear_fp16_weight_meta);
 }
 
 } // namespace

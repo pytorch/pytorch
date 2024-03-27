@@ -3351,7 +3351,7 @@ class TestDynamicQuantizedOps(TestCase):
             (4, 7, 8),      # output_channels
         )
         for batch_size, input_channels, output_channels in options:
-            qlinear_dynamic = torch.ops.quantized.linear_unpacked_dynamic_fp16
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight
 
             x = torch.randn(batch_size, input_channels)
             w = torch.randn(output_channels, input_channels)
@@ -3369,7 +3369,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @skipIfNoFBGEMM
     def test_unpacked_qlinear_dynamic_fp16_opcheck(self):
-        qlinear_dynamic = torch.ops.quantized.linear_unpacked_dynamic_fp16.default
+        qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight.default
 
         x = torch.randn(4, 4, device='cpu')
         w = torch.randn(4, 4, device='cpu')
@@ -3385,8 +3385,8 @@ class TestDynamicQuantizedOps(TestCase):
             (4, 7),      # output_channels
         )
         for batch_size, input_channels, output_channels in options:
-            pack_op = torch.ops.quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16
-            linear_op = torch.ops.quantized_wrapper.wrapped_fbgemm_linear_fp16_weight
+            pack_op = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16
+            linear_op = torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight
 
             x = torch.randn(batch_size, input_channels)
             w = torch.randn(output_channels, input_channels)
@@ -3403,15 +3403,15 @@ class TestDynamicQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
         # We are not using opcheck over here because the output for the op we're testing
-        # (quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
+        # (_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
         # due to the C-struct it's procuding. This would fail the check when we're trying
         # to match the result between compiled and eager version.
         #
         # This is only a temporary solution, long term, we should be able to support PT2
         # with torchbind natively.
         def func(X, W, B):
-            packed_W = torch.ops.quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16(W)
-            return torch.ops.quantized_wrapper.wrapped_fbgemm_linear_fp16_weight(X, packed_W, B, W.size(0))
+            packed_W = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(W)
+            return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(X, packed_W, B, W.size(0))
 
         x = torch.randn(1, 4, device="cpu")
         w = torch.randn(4, 4, device="cpu")
