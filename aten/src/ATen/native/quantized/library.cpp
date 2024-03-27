@@ -149,6 +149,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_unpacked_dynamic_fp16(Tensor X, Tensor weight, Tensor bias) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_leaky_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i, float negative_slope) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_tanh(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
@@ -222,6 +223,14 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::prelu(Tensor qx, Tensor weight, float output_scale, int output_zero_point) -> Tensor"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::sigmoid(Tensor qx, float output_scale, int output_zero_point) -> Tensor"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::softmax(Tensor qx, int dim, float output_scale, int output_zero_point) -> Tensor"), {at::Tag::pt2_compliant_tag});
+}
+
+TORCH_LIBRARY(quantized_wrapper, m) {
+  // Since packed weights are not PT2-compliant yet, we create a set of ops that
+  // wraps around those linear functions that uses packed weights to make it
+  // PT2-compliant.
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized_wrapper::wrapped_fbgemm_pack_gemm_matrix_fp16(Tensor X) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized_wrapper::wrapped_fbgemm_linear_fp16_weight(Tensor X, Tensor weight, Tensor bias, int out_channel) -> Tensor Y"), {at::Tag::pt2_compliant_tag});
 }
 
 // According to #33294: The "_" prefix registration will be
