@@ -1031,9 +1031,8 @@ class CommonTemplate:
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
+                    # match ternary operator for scalar or blendv for vector
+                    if re.findall(r"\?.*:", code) or re.findall("blendv", code):
                         found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
