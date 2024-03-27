@@ -4,6 +4,7 @@ import weakref
 from typing import Dict, List
 
 import torch
+from torch.utils._pytree import tree_map_only
 
 from ..exc import unimplemented, Unsupported
 
@@ -150,11 +151,38 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return new_args, new_kwargs
 
     def map_sources_and_install_guards(self, tx):
+        from ..decorators import mark_static_address
+        from .builder import VariableBuilder
+        from .lazy import LazyVariableTracker
+
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
-        from .builder import VariableBuilder
-        from .lazy import LazyVariableTracker
+        # Tracing the _init_group is expensive. But we still have to insert the
+        # necessary guards for _init_group. So, we manually handle insertion of
+        # guards. We also want to mark all the tensors inside the state dict to
+        # be static address.
+
+        # Mark all the tensors in the state dict to be static address. This has
+        # to be done first because the variable builder relies on the static
+        # address annotation.
+        def mark_static(x):
+            mark_static_address(x, guard=False)
+
+        tree_map_only(torch.Tensor, mark_static, self.value.state)
+
+        # Recursively realize the variable trackers for optim.state and
+        # optim.param_groups, which recursively install the necessary guards.
+
+        # NB: Its necessary to install the guards for optim.state first.
+        # optim.state is a dict with parameters as keys. Therefore, we just put
+        # ID_MATCH on parameters, instead of TENSOR_MATCH. When we install the
+        # guards for param_groups later, VariableTrackerCache just ensures that
+        # we directly return the cached tensor variable tracker without
+        # inserting the TENSOR_MATCH guard.
+        state_vt = LazyVariableTracker.realize_all(
+            VariableBuilder(tx, AttrSource(self.source, "state"))(self.value.state)
+        )
 
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
@@ -162,6 +190,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             )
         )
 
+        # Populate self.grad_to_source and self.tensor_to_source so that we can
+        # manually update_list_args
         for g_ind, (group, group_vt) in enumerate(
             zip(self.value.param_groups, param_groups_vt.items)
         ):
@@ -181,16 +211,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
-        # state guards take a long time to generate
-        # so we manually generate them here
+        # We have to again iterate over the state dict to collect the
+        # tensor_to_source dict. This is used for the finalizer.
         state_source = AttrSource(self.source, "state")
-        install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for idx, (p, value) in enumerate(self.value.state.items()):
-            tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, p)
             p_state_source = GetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
-            install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
                     isinstance(v, torch.Tensor)
@@ -198,14 +225,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     and v not in self.tensor_to_source
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
-                elif v is None or isinstance(v, (bool, int, float, str)):
-                    install_guard(
-                        GetItemSource(p_state_source, k).make_guard(
-                            GuardBuilder.CONSTANT_MATCH
-                        )
-                    )
-                else:
-                    raise GuardInstallException()
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
