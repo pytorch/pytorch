@@ -5201,7 +5201,10 @@ def mutate_to(changed, val, unsafe_alias=False):
         assert isinstance(val, ir.StorageBox)
 
     if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+        changed_data.is_input_buffer()
+        # In AOTI, module parameters and buffers are not lifted as graph inputs
+        or changed_data.is_module_buffer()
+        or isinstance(changed_data.data, ir.NopKernel)
     ):
         # Fast path, just swing the data pointer
         val.realize()
