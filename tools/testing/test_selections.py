@@ -11,7 +11,7 @@ from tools.testing.test_run import ShardedTest, TestRun
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
-IS_SM86 = 'sm86' in os.getenv("BUILD_ENVIRONMENT", "")
+IS_SM86 = "sm86" in os.getenv("BUILD_ENVIRONMENT", "")
 
 # NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
 # to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
