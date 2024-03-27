@@ -207,17 +207,16 @@ def aot_dispatch_base(
 def _output_node(gm: torch.fx.GraphModule) -> torch.fx.Node:
     """Return the output node of a graph"""
     # reversed() since we expect output at end of graph
-    return next(n for n in reversed(gm.graph.nodes) if n.op == "output")
+    return next(reversed(gm.graph.find_nodes(op="output")))
 
 
 def _input_node(gm: torch.fx.GraphModule, i: int) -> torch.fx.Node:
     """Fetch the i-th placeholder in the graph"""
     seen = 0
-    for n in gm.graph.nodes:
-        if n.op == "placeholder":
-            if seen == i:
-                return n
-            seen += 1
+    for n in gm.graph.find_nodes(op="placeholder"):
+        if seen == i:
+            return n
+        seen += 1
     raise IndexError(f"input {i} does not exist, only {seen} inputs in graph")
 
 
@@ -285,7 +284,7 @@ def aot_dispatch_autograd(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
 
-            fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
+            fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
