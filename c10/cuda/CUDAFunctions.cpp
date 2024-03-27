@@ -6,6 +6,9 @@
 namespace c10::cuda {
 
 namespace {
+
+static bool cuda_initialized = false;
+
 // returns -1 on failure
 int32_t driver_version() {
   int driver_version = -1;
@@ -94,8 +97,7 @@ int device_count_impl(bool fail_if_no_driver) {
 } // namespace
 
 DeviceIndex device_count() noexcept {
-  // initialize number of devices only once
-  static int count = []() {
+  auto compute_it = []() {
     try {
       auto result = device_count_impl(/*fail_if_no_driver=*/false);
       TORCH_INTERNAL_ASSERT(
@@ -108,11 +110,20 @@ DeviceIndex device_count() noexcept {
       TORCH_WARN("CUDA initialization: ", ex.msg());
       return 0;
     }
-  }();
+  };
+
+  if (!cuda_initialized) {
+    return static_cast<DeviceIndex>(compute_it());
+  }
+
+  // initialize number of devices only once
+  static int count = compute_it();
   return static_cast<DeviceIndex>(count);
 }
 
+// This is only ever called during CUDA context initialization
 DeviceIndex device_count_ensure_non_zero() {
+  cuda_initialized = true;
   // Call the implementation every time to throw the exception
   int count = device_count_impl(/*fail_if_no_driver=*/true);
   // Zero gpus doesn't produce a warning in `device_count` but we fail here

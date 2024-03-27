@@ -46,8 +46,13 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 
 cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
   c10::call_once(init_flag, initCUDAContextVectors);
-  if (device == -1) device = c10::cuda::current_device();
-  AT_ASSERT(device >= 0 && device < num_gpus, "device=", device, ", num_gpus=", num_gpus);
+  if (device == -1) {
+    device = c10::cuda::current_device();
+  }
+  TORCH_CHECK(
+    device >= 0 && device < num_gpus,
+    "device=", device, ", num_gpus=", num_gpus
+  );
   c10::call_once(device_flags[device], initDeviceProperty, device);
   return &device_properties[device];
 }
