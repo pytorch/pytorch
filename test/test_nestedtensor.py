@@ -3666,7 +3666,7 @@ class TestNestedTensorSubclass(TestCase):
 
     @dtypes(torch.double, torch.half)
     @onlyCUDA
-    def test_device_dtype_transfer_maintains_offsets(self, device, dtype):
+    def test_device_dtype_transfer_updates_offsets(self, device, dtype):
         for tensor_list in self._get_example_tensor_lists():
             orig_device = torch.device("cpu")
             orig_dtype = torch.float32
@@ -3679,8 +3679,8 @@ class TestNestedTensorSubclass(TestCase):
             self.assertEqual(torch.int64, nt.offsets().dtype)
             nt = nt.to(device=device).to(dtype=dtype)
 
-            # offsets should still be int64 on the original device
-            self.assertEqual(orig_device, nt.offsets().device)
+            # offsets should still be int64 on the new device
+            self.assertEqual(nt.values().device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
 
     def test_unbind(self, device):
