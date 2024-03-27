@@ -92,6 +92,9 @@ class ProcessContext:
             process.sentinel: index for index, process in enumerate(processes)
         }
 
+    def alive_pids(self):
+        return [int(process.pid) for process in self.processes if process.is_alive()]
+
     def pids(self):
         return [int(process.pid) for process in self.processes]
 
