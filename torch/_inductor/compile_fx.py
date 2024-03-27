@@ -46,6 +46,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -706,7 +707,10 @@ def fx_codegen_and_compile(
                 # We'll put the output strides in the compiled graph so we
                 # can later return them to the caller via TracingContext
                 for out in graph.graph_outputs:
-                    if hasattr(out, "layout"):
+                    if (
+                        hasattr(out, "layout")
+                        and len(free_unbacked_symbols(out.layout.stride)) == 0
+                    ):
                         output_strides.append(
                             tuple(
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
@@ -717,6 +721,31 @@ def fx_codegen_and_compile(
 
             metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
+
+            if (
+                cudagraphs
+                and config.triton.cudagraph_skip_dynamic_graphs
+                and not V.graph.disable_cudagraphs_reason
+                and torch._inductor.utils.any_is_symbolic(*example_inputs)
+            ):
+                stack_trace = None
+                for node in gm.graph.nodes:
+                    meta_val = node.meta.get("val", None)
+                    if (
+                        node.op == "placeholder"
+                        or not isinstance(meta_val, torch.Tensor)
+                        or not torch._inductor.utils.any_is_symbolic(meta_val)
+                    ):
+                        continue
+
+                    if stack_trace := node.meta.get("stack_trace", None):
+                        break
+                disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
+                if stack_trace:
+                    disable = f"{disable} Found from {stack_trace}\n"
+                else:
+                    disable = f"{disable}\n"
+                V.graph.disable_cudagraphs_reason = disable
 
             if V.aot_compilation is True:
                 return compiled_fn

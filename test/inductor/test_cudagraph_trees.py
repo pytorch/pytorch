@@ -279,6 +279,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 captured_output[0]
             )
 
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        def test_skip_symbolic(self):
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            with capture_stderr() as captured_output:
+                foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
+
+            FileCheck().check(
+                "skipping cudagraphs due to graph with symbolic shapes inputs"
+            ).check("x + y").run(captured_output[0])
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         def test_mutation_on_inp(self, backend):
