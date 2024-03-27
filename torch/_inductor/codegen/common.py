@@ -34,6 +34,7 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
     unique,
 )
@@ -1247,11 +1248,11 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, indirect_assert, var, mask, size_map):
-        super().__init__(line)
+    def __init__(self, line, assert_fn, var, mask, size_map):
         self.var = var
         self.mask = mask
-        self.indirect_assert = indirect_assert
+        self.line = line
+        self.assert_fn = assert_fn
         self.size_map = size_map
 
     def __call__(self):
@@ -1261,26 +1262,31 @@ class IndirectAssertLine(DeferredLineBase):
         assert_min = (self.var.bounds.lower >= 0) != sympy.true
         assert_max = (self.var.bounds.upper < size) != sympy.true
 
-        lower = None
-        upper = None
+        # FooBar interview question
         if not (assert_min or assert_max):
             return None
         elif assert_min and assert_max:
-            lower = "0"
-            upper = size_str
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
+            cond_print = f"0 <= {self.var} < {size_str}"
         elif assert_min:
-            lower = "0"
+            cond = f"0 <= {self.var}"
+            cond_print = cond
         else:
             assert assert_max
-            upper = size_str
+            cond = f"{self.var} < {size_str}"
+            cond_print = cond
 
+        if self.mask:
+            cond = f"({cond}) | ~{self.mask}"
         return self.line.format(
-            assert_line=self.indirect_assert(self.var, lower, upper, self.mask)
+            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
         )
 
     def _new_line(self, line):
         return IndirectAssertLine(
-            line, self.indirect_assert, self.var, self.mask, self.size_map
+            line, self.assert_fn, self.var, self.mask, self.size_map
         )
 
 
@@ -1426,25 +1432,6 @@ class Kernel(CodeGen):
     def assert_function(self) -> str:
         raise NotImplementedError()
 
-    def indirect_assert(self, var, lower, upper, mask=None):
-        if lower and upper:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"({lower} <= {var}) & ({var} < {upper})"
-            cond_print = f"{lower} <= {var} < {upper}"
-        elif lower:
-            cond = f"{lower} <= {var}"
-            cond_print = cond
-        else:
-            assert upper
-            cond = f"{var} < {upper}"
-            cond_print = cond
-
-        if mask:
-            cond = f"({cond}) | ~{mask}"
-
-        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
-
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError()
 
@@ -1500,7 +1487,7 @@ class Kernel(CodeGen):
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, 0)
+                        lt = ops.lt(var, "0")
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
@@ -1519,10 +1506,13 @@ class Kernel(CodeGen):
                     if existing_size is not None:
                         size = sympy.Min(size, existing_size)
                     else:
+                        line = (
+                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
+                        )
                         self.compute.writeline(
                             IndirectAssertLine(
-                                "{assert_line}",
-                                self.indirect_assert,
+                                line,
+                                self.assert_function,
                                 var,
                                 mask,
                                 self.indirect_max_sizes,
@@ -1530,7 +1520,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return parent_handler.indirect_indexing(var, size, check)
+                return sympy_index_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1668,8 +1658,14 @@ class Kernel(CodeGen):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
+    # Load value as mask
+    is_load_as_mask: bool = False
+
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
+
+    # Load uint8/int8 value as float32
+    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)
