@@ -294,6 +294,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             torch._dynamo.reset()
 
+        @fresh_inductor_cache()
+        @torch._inductor.config.patch(max_autotune=True)
+        def test_benchmarking_inputs_from_params(self):
+            with torch.no_grad():
+                mod = torch.nn.Linear(256, 256).cuda()
+                inp = torch.rand([256, 256]).cuda()
+
+                out_eager = mod(inp)
+                self.assertEqual(out_eager, torch.compile(mod)(inp))
+
+                def epilogue_fusion(mod, x):
+                    return mod(x).relu()
+
+                out_eager = epilogue_fusion(mod, inp)
+                self.assertEqual(out_eager, torch.compile(epilogue_fusion)(mod, inp))
+
+                def aliased_inputs(mod, inp):
+                    return (mod.weight @ mod.weight.T).relu() + inp
+
+                out_eager = aliased_inputs(mod, inp)
+                self.assertEqual(out_eager, torch.compile(aliased_inputs)(mod, inp))
+
 
 if HAS_CPU and not torch.backends.mps.is_available():
 

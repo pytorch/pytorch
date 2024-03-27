@@ -21,6 +21,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import weakref
 from dataclasses import fields
 from datetime import datetime
 from io import StringIO
@@ -34,6 +35,7 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    Sequence,
     Set,
     TypeVar,
     Union,
@@ -170,6 +172,99 @@ def do_bench(*args, **kwargs):
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
+
+
+def get_primitive_bitwidth(dtype: torch.dtype):
+    if dtype.is_floating_point:
+        return torch.finfo(dtype).bits
+    else:
+        return torch.iinfo(dtype).bits
+
+
+def get_read_only_benchmark_value(
+    size: Sequence[int],
+    stride: Sequence[int],
+    dtype: torch.dtype = torch.float32,
+    device: Union[str, torch.device] = "cpu",
+    extra_size: int = 0,
+):
+    """
+    Generate a tensor that will be read-only from existing parameters.
+
+    XXX: mutating this tensor will cause incorrectness issues.
+    """
+
+    from .virtualized import V
+
+    # ints are often used for indexing, cant grap random allocation
+    if not V.graph or not dtype.is_floating_point:
+        return torch._dynamo.testing.rand_strided(
+            size, stride, dtype, device, extra_size
+        )
+
+    device: torch.device = (
+        device if not isinstance(device, str) else torch.device(device)
+    )
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(size, stride))
+        + 1
+        + extra_size
+    )
+    needed_bytes = needed_size * get_primitive_bitwidth(dtype)
+
+    tc = torch._guards.TracingContext.try_get()
+    tc_params: List[torch.Tensor] = [] if tc is None else tc.params_flat  # type: ignore[assignment]
+
+    gm = V.graph.module
+    for mod_tensor in itertools.chain(gm.parameters(), gm.buffers(), tc_params):
+        mod_tensor = (
+            mod_tensor.data if type(mod_tensor) is torch.nn.Parameter else mod_tensor
+        )
+        if type(mod_tensor) is not torch.Tensor or not torch._C._has_storage(
+            mod_tensor
+        ):
+            continue
+
+        # MM benchmarking can be sensitive to mantissa
+        # Dont take from integer tensors bc they may be sparse
+        if not mod_tensor.is_floating_point():
+            continue
+
+        if not mod_tensor.device == device:
+            continue
+
+        if not mod_tensor.untyped_storage().nbytes() >= needed_size:
+            continue
+
+        # We dont want to use the same storage for multiple example inputs,
+        # would distort timing.
+        stor_data_ptr = mod_tensor.untyped_storage().data_ptr()
+        if stor_data_ptr in V.graph.module_storages_in_benchmark_use:
+            continue
+
+        buffer = mod_tensor.new_empty([], dtype=dtype)
+        buffer.set_(
+            mod_tensor.untyped_storage(),
+            storage_offset=0,
+            size=[needed_size],
+            stride=[1],
+        )  # type: ignore[call-overload]
+        out_tensor = torch.as_strided(buffer, size, stride)
+
+        V.graph.module_storages_in_benchmark_use.add(stor_data_ptr)
+        dp_set_ref = weakref.ref(V.graph.module_storages_in_benchmark_use)
+
+        def remove_dp():
+            dp_set = dp_set_ref()
+            if dp_set is None:
+                return
+
+            dp_set.remove(stor_data_ptr)
+
+        weakref.finalize(out_tensor, remove_dp)
+        return out_tensor
+
+    return torch._dynamo.testing.rand_strided(size, stride, dtype, device, extra_size)
 
 
 @functools.lru_cache(None)

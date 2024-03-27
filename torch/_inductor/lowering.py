@@ -53,6 +53,7 @@ from .ir import (
 from .utils import (
     ceildiv,
     decode_device,
+    get_primitive_bitwidth,
     is_dynamic,
     is_pointwise_use,
     pad_listlike,
@@ -575,14 +576,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if x_dtype == dtype:
         return clone(x) if copy else x
 
-    def _get_primitive_bitwidth(dtype):
-        if dtype.is_floating_point:
-            return torch.finfo(dtype).bits
-        else:
-            return torch.iinfo(dtype).bits
-
-    src_bits = _get_primitive_bitwidth(x_dtype)
-    dst_bits = _get_primitive_bitwidth(dtype)
+    src_bits = get_primitive_bitwidth(x_dtype)
+    dst_bits = get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
         return fallback_handler(aten.view.dtype)(x, dtype)

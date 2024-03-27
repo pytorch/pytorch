@@ -54,6 +54,7 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
     get_max_y_grid,
+    get_read_only_benchmark_value,
     green_text,
     is_welford_reduction,
     next_power_of_2,
@@ -3880,18 +3881,45 @@ class TritonScheduling(BaseScheduling):
                 mutations=mutations,
                 index_dtype=index_dtype,
             )
-
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
+
+            kernel_args = kernel.args
+            _, call_args, _ = kernel_args.python_argdefs()
+
         else:
             template_node = nodes[0]
             epilogue_nodes = nodes[1:]
 
-            with config.patch("benchmark_kernel", True):
-                src_code = self.codegen_template(
-                    template_node, epilogue_nodes, only_gen_src_code=True
-                )
+            handler_fn = V.set_kernel_handler
+            rec_kernel = None
+
+            def record_kernel(kernel):
+                nonlocal rec_kernel
+                rec_kernel = kernel
+
+                return handler_fn(kernel)
+
+            try:
+                V.set_kernel_handler = record_kernel
+                with config.patch("benchmark_kernel", True):
+                    src_code = self.codegen_template(
+                        template_node, epilogue_nodes, only_gen_src_code=True
+                    )
+            finally:
+                V.set_kernel_handler = handler_fn
+
+            assert rec_kernel is not None
+            kernel_args = rec_kernel.args
+            _, call_args, _ = kernel_args.python_argdefs()
+
+        non_out_arg_indices = []
+        for i, arg in enumerate(call_args):
+            # in_out arguments get cloned before kernel invocation,
+            # as part of our benchmarking so any input is safe to use from params
+            if arg in kernel_args.input_buffers:
+                non_out_arg_indices.append(i)
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         mod = PyCodeCache.load(src_code)
@@ -3921,7 +3949,29 @@ class TritonScheduling(BaseScheduling):
         if ms is not None:
             return ms, mod.__file__
 
-        args = mod.get_args()
+        with torch._subclasses.FakeTensorMode():
+            fake_args = mod.get_args()
+
+        args = []
+        for i, fake_arg in enumerate(fake_args):
+            if not isinstance(fake_arg, torch.Tensor):
+                args.append(fake_arg)
+
+            gen_fn = (
+                get_read_only_benchmark_value
+                if i in non_out_arg_indices
+                else torch._dynamo.testing.rand_strided
+            )
+            args.append(
+                gen_fn(
+                    fake_arg.shape,
+                    fake_arg.stride(),
+                    dtype=fake_arg.dtype,
+                    device=fake_arg.device,
+                    extra_size=fake_arg.storage_offset(),
+                )
+            )
+
         call = mod.call
         wrapped_jit_function = mod.triton_
 

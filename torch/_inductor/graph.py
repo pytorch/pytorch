@@ -73,6 +73,7 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
+StorageDataPtr = int
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_module_code
@@ -322,6 +323,7 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
+        self.module_storages_in_benchmark_use: Set[StorageDataPtr] = set()
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
