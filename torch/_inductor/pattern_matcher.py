@@ -1239,9 +1239,7 @@ class PatternMatcherPass:
                 get_mutation_region_id, graph
             )
         count = 0
-        # Copy the graph nodes so that modifications to the graph are not observed
-        # during the pass
-        for node in reversed(list(graph.nodes)):
+        for node in reversed(graph.nodes):
             target = extract_target(node)
             if (
                 node.op in ["call_function", "call_method", "call_module"]
