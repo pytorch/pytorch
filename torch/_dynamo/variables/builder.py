@@ -638,6 +638,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch.nn.attention.SDPBackend):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return EnumVariable(value, source=self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
@@ -1389,6 +1392,8 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
+    # Avoid a circular import
+    from torch.nested._internal import sdpa  # noqa: F401
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tx, InstructionTranslatorBase)
@@ -1575,6 +1580,7 @@ def wrap_fx_proxy_cls(
         # results in a constant int
         torch._constrain_as_value,
         torch._constrain_as_size,
+        torch.nested._internal.sdpa._select_sdp_backend,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
@@ -1586,9 +1592,15 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, bool) and proxy.node.target in [
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
+        torch.backends.cuda.flash_sdp_enabled,
+        torch.backends.cuda.mem_efficient_sdp_enabled,
+        torch.backends.cuda.math_sdp_enabled,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, torch.nn.attention.SDPBackend):
+        proxy.node.meta["example_value"] = example_value
+        return EnumVariable(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

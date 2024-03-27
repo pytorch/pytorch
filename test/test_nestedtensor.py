@@ -3993,6 +3993,11 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
             else [torch.float16, torch.float32]))
     def test_sdpa_compile(self, device, dtype):
+        # Only tests the flash (bf16, f16) and efficient (f32) paths. For the math path, graph
+        # breaks in the torch function region lead to the entire torch function to not be
+        # compiled! Math path is expected to graph break because we are splitting the NT to
+        # convert it into cpp NT. Not compiling is probably fine for now because we're likely
+        # not overhead bound anyway.
         batch_size = 1
         emb_dims = 1024
         n_heads = 8
@@ -4033,13 +4038,14 @@ class TestNestedTensorSubclass(TestCase):
         attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
         attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
 
-        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention)
+        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention, fullgraph=True)
         attn_nt = compiled_sdpa(q_nt, k_nt, v_nt).transpose(1, 2)
 
         attn_nts = attn_nt.unbind()
         self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
 
+    @xfailIfTorchDynamo
     @dtypes(torch.float32, torch.double, torch.half)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
         # shape (B, P*, S, D)

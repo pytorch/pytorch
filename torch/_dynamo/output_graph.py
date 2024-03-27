@@ -1131,7 +1131,9 @@ class OutputGraph:
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
             self.tracing_context.fake_mode = backend_fake_mode
 
-        with self.restore_global_state():
+        # Disable user torch function subclasses while calling user compiler because
+        # Dynamo is responsible for handling inlining through __torch_function__.
+        with self.restore_global_state(), torch._C.DisableTorchFunctionSubclass():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 

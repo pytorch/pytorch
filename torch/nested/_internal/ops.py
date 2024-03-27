@@ -294,7 +294,7 @@ def jagged_torch_function(func, *args, **kwargs):
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
     # Handle flatten() here because it's CompositeImplicit.
-    if func.__name__ == "flatten":
+    if func is torch.flatten:
 
         def _flatten_sig(input, start_dim=0, end_dim=-1):
             pass
@@ -321,7 +321,7 @@ def jagged_torch_function(func, *args, **kwargs):
 
         return inp.reshape(*new_shape)
 
-    raise NotImplementedError(func)
+    return NotImplemented
 
 
 @register_jagged_func(
