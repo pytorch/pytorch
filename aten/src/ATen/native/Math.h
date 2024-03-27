@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <limits>
 #include <type_traits>
+#include "c10/util/BFloat16-math.h"
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -147,7 +148,7 @@ jiterator_also_stringify_as(jiterator_code(
 #define CENTRAL_RANGE 0.7
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+static inline typename std::enable_if<std::is_floating_point<T>::value || std::is_reduced_floating_point_v<T>, T>::type
 calc_erfinv(T y) {
 /* Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
