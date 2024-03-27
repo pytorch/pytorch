@@ -243,6 +243,7 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_custom_op_3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
@@ -396,7 +397,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")
