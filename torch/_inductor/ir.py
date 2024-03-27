@@ -83,6 +83,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+quantized_wrapper = torch.ops.quantized_wrapper
 
 """ [Note: Inductor IR]
 
@@ -4898,23 +4899,27 @@ has_c_shim = {
     aten.nonzero.default,
     aten.view.dtype,
     aten.view_as_real.default,
+    quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16.default,
+    quantized_wrapper.wrapped_fbgemm_linear_fp16_weight.default,
 }
 
 
-def get_aten_cpp_kernel_name(kernel):
+def get_cpp_kernel_name(kernel, namespace):
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
     # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
     #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    supported_namespace = {"aten": "at", "quantized_wrapper": "quantized_wrapper"}
     assert (
-        isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
-    ), "Invalid aten kernel"
+        namespace in supported_namespace
+    ), f"Unsupported namespace {namespace}. Currently only {supported_namespace.keys()} is supported"
+    assert isinstance(kernel, torch._ops.OpOverload), "Invalid kernel"
     opname = (
         kernel.__name__.split(".")[0]
         if kernel._overloadname == "default"
         else kernel.__name__.replace(".", "_")
     )
-    return f"at::_ops::{opname}::call"
+    return f"{supported_namespace[namespace]}::_ops::{opname}::call"
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -5243,8 +5248,9 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         kernel = self.op_overload
-        if kernel.namespace == "aten":  # type: ignore[union-attr]
-            # Aten Fallback Ops
+        static_fallback_ops = ["aten", "quantized_wrapper"]
+
+        if kernel.namespace in static_fallback_ops:  # type: ignore[union-attr]
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
                 if (
@@ -5261,7 +5267,7 @@ class FallbackKernel(ExternKernelAlloc):
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
                 else:
-                    self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
+                    self.cpp_kernel_name = get_cpp_kernel_name(kernel, kernel.namespace)
                     schema = kernel._schema
                     self.init_args_default_value(schema)
             else:

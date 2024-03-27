@@ -73,6 +73,7 @@ foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
 quantized_decomposed = torch.ops.quantized_decomposed
+quantized_wrapper = torch.ops.quantized_wrapper
 
 
 def assert_nyi(cond, msg):
@@ -1152,6 +1153,35 @@ def quantized_decomposed_dequantize_per_channel(
         dtype=torch.float32,
         inner_fn=inner_fn,
         ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16.default,
+    type_promotion_kind=None,
+)
+def wrapped_linear_pack_weight_fp16(weight):
+    curr_op = quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16.default
+
+    add_needs_realized_inputs(curr_op)
+    fallbacks.add(curr_op)
+
+    return pytree.tree_map(TensorBox.create, ir.FallbackKernel.create(curr_op, weight))
+
+
+@register_lowering(
+    quantized_wrapper.wrapped_fbgemm_linear_fp16_weight.default,
+    type_promotion_kind=None,
+)
+def linear_fp16_weight(input, weight, bias, out_channel):
+    curr_op = quantized_wrapper.wrapped_fbgemm_linear_fp16_weight.default
+
+    add_needs_realized_inputs(curr_op)
+    fallbacks.add(curr_op)
+
+    return pytree.tree_map(
+        TensorBox.create,
+        ir.FallbackKernel.create(curr_op, input, weight, bias, out_channel),
     )
 
 
