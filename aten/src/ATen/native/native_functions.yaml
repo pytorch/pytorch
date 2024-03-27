@@ -6171,6 +6171,19 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_jagged_copy
   autogen: _nested_view_from_jagged_copy.out
 
+- func: _nested_view_from_jagged_with_cache(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, int min_seqlen=-1, int max_seqlen=-1) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_view_from_jagged_with_cache_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, int min_seqlen=-1, int max_seqlen=-1) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_jagged_copy_with_cache
+  autogen: _nested_view_from_jagged_with_cache_copy.out
+
 - func: _nested_get_values(Tensor(a) self) -> Tensor(a)
   variants: function
   device_check: NoCheck
@@ -6196,6 +6209,16 @@
   dispatch: {}
 
 - func: _nested_get_ragged_idx(Tensor self) -> int
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_get_min_seqlen(Tensor self) -> int
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_get_max_seqlen(Tensor self) -> int
   variants: function
   device_check: NoCheck
   dispatch: {}

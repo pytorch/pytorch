@@ -1076,6 +1076,38 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     return NestedTensor(values, offsets, lengths=lengths, _ragged_idx=ragged_idx)
 
 
+@register_jagged_func(
+    torch.ops.aten._nested_view_from_jagged_with_cache.default,
+    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?",
+)
+def _nested_view_from_jagged_with_cache_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values, offsets, lengths = (
+        new_kwargs["input"],
+        new_kwargs["offsets"],
+        new_kwargs["lengths"],
+    )
+    ragged_idx = new_kwargs["ragged_idx"]
+    min_seqlen = new_kwargs["min_seqlen"]
+    max_seqlen = new_kwargs["min_seqlen"]
+    metadata_cache = {}
+    if min_seqlen > -1:
+        metadata_cache["_min_seqlen"] = min_seqlen
+    if max_seqlen > -1:
+        metadata_cache["_max_seqlen"] = max_seqlen
+
+    return NestedTensor(
+        values,
+        offsets,
+        lengths=lengths,
+        _ragged_idx=ragged_idx,
+        _metadata_cache=metadata_cache,
+    )
+
+
 @register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
 def _nested_get_offsets(func, *args, **kwargs):
     _, new_kwargs = normalize_function(

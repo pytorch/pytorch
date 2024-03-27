@@ -333,12 +333,12 @@ def jagged_from_list(
             ]
         )
 
-    ret_nt = nested_view_from_values_offsets(values, offsets)
-    ret_nt._metadata_cache = {
-        # compute this now since it's easy
-        "max_seqlen": max([t.shape[0] for t in tensors]),
-        "min_seqlen": min([t.shape[0] for t in tensors]),
-    }
+    # compute this now since it's easy
+    min_seqlen = min([t.shape[0] for t in tensors])
+    max_seqlen = max([t.shape[0] for t in tensors])
+    ret_nt = nested_view_from_values_offsets(
+        values, offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+    )
     return (ret_nt, offsets)  # type: ignore[return-value]
 
 
@@ -395,16 +395,19 @@ def jagged_from_tensor_and_lengths(
 
     if is_contiguous:
         ret_nt = nested_view_from_values_offsets(
-            values[offsets[0] : offsets[-1]], offsets - offsets[0]
+            values[offsets[0] : offsets[-1]],
+            offsets - offsets[0],
+            min_seqlen=min_seqlen,
+            max_seqlen=actual_max_seqlen,
         )
     else:
-        ret_nt = nested_view_from_values_offsets_lengths(values, offsets, length_list)
-
-    # populate metadata cache with computed seqlen extremes
-    ret_nt._metadata_cache = {
-        "max_seqlen": actual_max_seqlen,
-        "min_seqlen": min_seqlen,
-    }
+        ret_nt = nested_view_from_values_offsets_lengths(
+            values,
+            offsets,
+            length_list,
+            min_seqlen=min_seqlen,
+            max_seqlen=actual_max_seqlen,
+        )
 
     return (ret_nt, offsets, None if is_contiguous else length_list)
 
@@ -426,13 +429,17 @@ def _nt_view_dummy() -> torch.Tensor:
     return _dummy_instance
 
 
-def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
-    return torch._nested_view_from_jagged(
-        values, offsets, _nt_view_dummy(), None, ragged_idx
+def nested_view_from_values_offsets(
+    values, offsets, ragged_idx=1, min_seqlen=-1, max_seqlen=-1
+):
+    return torch._nested_view_from_jagged_with_cache(
+        values, offsets, _nt_view_dummy(), None, ragged_idx, min_seqlen, max_seqlen
     )  # type: ignore[return-value]
 
 
-def nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=1):
-    return torch._nested_view_from_jagged(
-        values, offsets, _nt_view_dummy(), lengths, ragged_idx
+def nested_view_from_values_offsets_lengths(
+    values, offsets, lengths, ragged_idx=1, min_seqlen=-1, max_seqlen=-1
+):
+    return torch._nested_view_from_jagged_with_cache(
+        values, offsets, _nt_view_dummy(), lengths, ragged_idx, min_seqlen, max_seqlen
     )  # type: ignore[return-value]
