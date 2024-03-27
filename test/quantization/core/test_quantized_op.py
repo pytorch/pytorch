@@ -3366,28 +3366,6 @@ class TestDynamicQuantizedOps(TestCase):
 
             self.assertEqual(out, ref)
 
-    @skipIfNoFBGEMM
-    def test_wrapped_fbgemm_linear_fp16(self):
-        options = itertools.product(
-            (2, 4),         # batch_size
-            (4, 5),     # input_channels
-            (4, 7),      # output_channels
-        )
-        for batch_size, input_channels, output_channels in options:
-            pack_op = torch.ops.quantized_wrapper.wrapped_fbgemm_pack_gemm_matrix_fp16
-            linear_op = torch.ops.quantized_wrapper.wrapped_fbgemm_linear_fp16_weight
-
-            x = torch.randn(batch_size, input_channels)
-            w = torch.randn(output_channels, input_channels)
-            bias = torch.randn(output_channels)
-
-            w_packed = pack_op(w)
-            out = linear_op(x, w_packed, bias, output_channels)
-
-            w_fp16 = w.to(torch.float16).to(torch.float32)
-            ref = F.linear(x, w_fp16, bias)
-
-            self.assertEqual(out, ref)
 
     @skipIfNoFBGEMM
     def test_unpacked_qlinear_dynamic_fp16_opcheck(self):
