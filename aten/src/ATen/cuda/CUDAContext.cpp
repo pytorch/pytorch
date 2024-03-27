@@ -46,8 +46,17 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 
 cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
   c10::call_once(init_flag, initCUDAContextVectors);
-  if (device == -1) device = c10::cuda::current_device();
-  AT_ASSERT(device >= 0 && device < num_gpus, "device=", device, ", num_gpus=", num_gpus);
+  if (device == -1) {
+    device = c10::cuda::current_device();
+  }
+  TORCH_CHECK(
+    device >= 0 && device < num_gpus,
+    "Could not getDeviceProperties of device ", static_cast<int>(device),
+    " as there are only ", static_cast<int>(num_gpus), " GPUs on this system.  "
+    "This could potentially because the environment variable CUDA_VISIBLE_DEVICES "
+    "was modified after querying torch.cuda.device_count().  See "
+    "https://github.com/pytorch/pytorch/issues/122085 for more details."
+  );
   c10::call_once(device_flags[device], initDeviceProperty, device);
   return &device_properties[device];
 }
