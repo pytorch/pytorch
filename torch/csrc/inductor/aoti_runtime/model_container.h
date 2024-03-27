@@ -218,7 +218,7 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
-  bool _is_tensor_constant(const std::string& constant_name) {
+  bool _is_tensor_constant(const std::string& constant_name) const {
     return constant_name.rfind("_tensor_constant", 0) == 0;
   }
   // This function updates the buffer for storing constants.
@@ -248,7 +248,7 @@ class AOTInductorModelContainer {
         auto it = constants_map.find(constant_name);
         if (it == constants_map.end()) {
           if (_is_tensor_constant(constant_name)) {
-            // tracing sometimes create tensors that are non-existent in
+            // tracing sometimes creates tensors that are non-existent in
             // original graph. We could skip those and do a direct copy.
             std::cerr << "[WARNING] Found constant " << constant_name
                       << " in model, but not provided by user!\n";
