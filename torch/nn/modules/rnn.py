@@ -213,6 +213,7 @@ class RNNBase(Module):
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn, recurse=True):
+        self._flat_weight_refs = []
         ret = super()._apply(fn, recurse)
 
         # Resets _flat_weights
