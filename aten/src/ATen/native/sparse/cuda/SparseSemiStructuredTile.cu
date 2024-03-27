@@ -207,7 +207,7 @@ __global__ void __launch_bounds__(32 /* num_threads */, 20)
 }
 
 template <typename Element, typename MetadataFormat>
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse24_sparsify_both_ways_typed(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse_semi_structured_tile_typed(
         const at::Tensor input,
         std::string algorithm)
 {
@@ -272,19 +272,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse24_sparsify_both_ways_t
       threads_masks);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile_autocast(
-  const Tensor input,
-  c10::string_view algorithm,
-  bool use_cutlass)
-{
-  c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::DispatchKey::Autocast);
-  auto exec_type = at::autocast::get_autocast_gpu_dtype();
-  return _sparse_semi_structured_tile(
-      at::autocast::cached_cast(exec_type, input),
-      algorithm,
-      use_cutlass);
-}
-
 // <packed, packed_meta_reordered, packed_trans, packed_trans_meta_reorderd, threads_masks>
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   const Tensor& input,
@@ -296,10 +283,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   {
     using ElementT = decltype(type);
     if (use_cutlass) {
-      return sparse24_sparsify_both_ways_typed<ElementT, MetadataCutlass>(input, algo);
+      return sparse_semi_structured_tile_typed<ElementT, MetadataCutlass>(input, algo);
     }
     else {
-      return sparse24_sparsify_both_ways_typed<ElementT, MetadataCuSparseLt>(input, algo);
+      return sparse_semi_structured_tile_typed<ElementT, MetadataCuSparseLt>(input, algo);
     }
   };
 

@@ -704,7 +704,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             meta_t,
             threads_masks,
         ) = torch._sparse_semi_structured_tile(x)
-        packed2, packed_t2 = torch.ops.sparse._semi_structured_apply(x, threads_masks)
+        packed2, packed_t2 = torch._sparse_semi_structured_apply(x, threads_masks)
         assert torch.allclose(packed, packed2)
         assert torch.allclose(packed_t, packed_t2)
 

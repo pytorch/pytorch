@@ -177,7 +177,6 @@ void named_algorithms(T callback) {
   callback(LargestValuesGreedy<IdentityOp>(), "largest_values_greedy");
   callback(Causal1122<IdentityOp>(), "causal1122");
   callback(LargestValuesGreedy<AbsOp>(), "largest_abs_values_greedy");
-
   // default one
   callback(LargestValuesGreedy<IdentityOp>(), "");
 }

@@ -7,6 +7,30 @@
 #include <c10/util/accumulate.h>
 #include <torch/library.h>
 
+#include <ATen/ScalarOps.h>
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
+#include <ATen/autocast_mode.h>
+#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
+#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAUtils.h>
+#include <ATen/Dispatch.h>
+#include <torch/library.h>
+#include <torch/types.h>
+
+#include <cuda_runtime.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/layout/layout.h>
+#include <cutlass/tensor_ref.h>
+#include <cutlass/epilogue/thread/linear_combination.h>
+#include <cutlass/epilogue/thread/linear_combination_relu.h>
+#include <cutlass/epilogue/thread/linear_combination_silu.h>
+
+#include <type_traits>
+#include <tuple>
 namespace at::native {
 
 template <typename KT>
@@ -82,7 +106,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
 }
 
 template <bool kIsMeta>
-std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(Tensor input, Tensor threads_masks, bool return_dense) // Returned by `_sparse_semi_structured_tile`
+std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(Tensor input, Tensor threads_masks) // Returned by `_sparse_semi_structured_tile`
 {
   TORCH_CHECK(
     input.scalar_type() == at::ScalarType::Half || input.scalar_type() == at::ScalarType::BFloat16,
