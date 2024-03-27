@@ -2750,32 +2750,6 @@ class CppVecKernelChecker(CppVecKernel):
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
-    def is_supported_cmp(self, node: torch.fx.Node):
-        def get_node_dtype(node):
-            if type(node) == torch.fx.Node:
-                opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-                return opt_ctx.dtype if opt_ctx else None
-            else:
-                return None
-
-        def get_cmp_dtypes(node: torch.fx.Node):
-            return get_node_dtype(node.args[-2]), get_node_dtype(node.args[-1])
-
-        assert len(node.args) >= 2
-        # cmp(x, y): y is a magic value like x >= 1
-        if type(node.args[-1]) in [int, float]:
-            return True
-        # cmp(x, y): x is a magic value like 1 >= y
-        if type(node.args[-2]) in [int, float]:
-            return False
-
-        left_dtype, right_dtype = get_cmp_dtypes(node)
-        if left_dtype is None or right_dtype is None:
-            # TODO(Eikan): To record, deduce and propagate the data type of every expression.
-            return True
-        else:
-            return left_dtype == right_dtype
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
