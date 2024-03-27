@@ -414,7 +414,8 @@ def forward(self, arg0_1, attr, arg1_1):
     return (getitem_3, add_1)""",  # noqa: B950
         )
 
-    def test_make_fx_tensor_queue_methods(self):
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_tensor_queue_methods(self, make_fx_tracing_mode):
         test = self
 
         class Model(torch.nn.Module):
@@ -445,7 +446,7 @@ def forward(self, arg0_1, attr, arg1_1):
         )
         x = torch.ones(2, 3)
         with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
-            gm = make_fx(mod, tracing_mode="fake")(tq, x)
+            gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
             self.assertEqual(self.tq_push_counter, 2)
             self.assertEqual(self.tq_pop_counter, 2)
             self.assertEqual(self.tq_size_counter, 2)
@@ -470,7 +471,10 @@ def forward(self, arg0_1, arg1_1):
             mod.check_tq_is_fake = False
             self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
 
-    def test_make_fx_tensor_queue_methods_fakify_internal_states(self):
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_tensor_queue_methods_fakify_internal_states(
+        self, make_fx_tracing_mode
+    ):
         test = self
 
         class Model(torch.nn.Module):
@@ -504,7 +508,7 @@ def forward(self, arg0_1, arg1_1):
         x = torch.ones(2, 3)
         with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
             prev_size = tq.size()
-            gm = make_fx(mod, tracing_mode="fake")(tq, x)
+            gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
             self.assertEqual(self.tq_push_counter, 0)
             self.assertEqual(self.tq_pop_counter, 2)
             self.assertEqual(self.tq_size_counter, 2)
