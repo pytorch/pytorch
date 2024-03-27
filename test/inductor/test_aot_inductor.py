@@ -20,7 +20,10 @@ from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
-from torch.testing._internal.common_quantization import skip_if_no_torchvision
+from torch.testing._internal.common_quantization import (
+    skip_if_no_torchvision,
+    skipIfNoFBGEMM,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
@@ -683,6 +686,23 @@ class AOTInductorTestsTemplate:
             },
             dynamic_shapes=dynamic_shapes,
         )
+
+    @skipIfNoFBGEMM
+    def test_quantized_linear(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_unpacked_dynamic_fp16(
+                    x, self.weight, self.bias
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -2343,6 +2363,8 @@ CUDA_TEST_FAILURES = {
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
     # no ABI shim fn for torch.sort; remove this when adding one
     "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
+    # quantized unsupported for GPU
+    "test_quantized_linear": fail_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
     "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),

@@ -27,6 +27,9 @@
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
@@ -663,6 +666,50 @@ AOTITorchError aoti_torch_mm_out(
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
     at::mm_out(*out_tensor, *self_tensor, *mat2_tensor);
   });
+}
+
+AOTITorchError aoti_torch_wrapped_fbgemm_pack_gemm_matrix_fp16(
+    AtenTensorHandle weight,
+    AtenTensorHandle* out) {
+#ifdef USE_FBGEMM
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+    auto packed_weight =
+        at::native::fbgemm_pack_gemm_matrix_fp16(*weight_tensor);
+
+    at::Tensor* out_tensor = new at::Tensor(std::move(packed_weight));
+    *out = tensor_pointer_to_tensor_handle(out_tensor);
+  });
+#else // USE_FBGEMM
+  LOG(ERROR)
+      << "This PyTorch installation was not built with FBGEMM operators\n";
+  return AOTI_TORCH_FAILURE;
+#endif // USE_FBGEMM
+}
+
+AOTITorchError aoti_torch_wrapped_fbgemm_linear_fp16_weight(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias,
+    int64_t out_channel,
+    AtenTensorHandle* out) {
+#ifdef USE_FBGEMM
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+
+    auto out_result = at::native::fbgemm_linear_fp16_weight_fp32_activation(
+        *input_tensor, *weight_tensor, *bias_tensor);
+
+    at::Tensor* out_tensor = new at::Tensor(std::move(out_result));
+    *out = tensor_pointer_to_tensor_handle(out_tensor);
+  });
+#else // USE_FBGEMM
+  LOG(ERROR)
+      << "This PyTorch installation was not built with FBGEMM operators\n";
+  return AOTI_TORCH_FAILURE;
+#endif // USE_FBGEMM
 }
 
 AOTITorchError aoti_torch_nonzero(
