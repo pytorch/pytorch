@@ -938,6 +938,10 @@ class OutputGraph:
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
+            # restore all the live local vars
+            self.add_output_instructions(
+                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+            )
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
@@ -952,6 +956,7 @@ class OutputGraph:
             )
             self.codegen_suffix(tx, stack_values, pass2)
 
+            stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -960,15 +965,21 @@ class OutputGraph:
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
+                    stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
-        # restore all the live local vars
-        self.add_output_instructions(
-            [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
-        )
+            # restore all the live local vars
+            self.add_output_instructions(
+                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+            )
+
+            if stored_graph_output_var:
+                self.add_output_instructions(
+                    [PyCodegen(tx).create_delete(graph_output_var)]
+                )
 
     def codegen_suffix(self, tx, stack_values, cg):
         if self.backward_state:
@@ -1092,7 +1103,9 @@ class OutputGraph:
             (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
             {},
         )
-        self.insert_deferred_runtime_asserts(root, name)
+        if not config.do_not_emit_runtime_asserts:
+            self.insert_deferred_runtime_asserts(root, name)
+
         # NB: deferred runtime asserts can keep graphargs live, so make sure
         # those are inserted before pruning
         self.remove_unused_graphargs()
@@ -1311,7 +1324,7 @@ class OutputGraph:
         )
 
         # We are going to mutate the dict
-        symbol_to_proxy = {}
+        symbol_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
         placeholders = set()
         last_placeholder = None
         for node in self.graph.nodes:
@@ -1330,6 +1343,33 @@ class OutputGraph:
 
         log.debug("needed_symbols = %s", needed_symbols)
 
+        def add_runtime_asserts(ras):
+            for ra in ras:
+                log.debug("inserting runtime assert %s", ra.expr)
+                # Need to process ALL free symbols, not just unbacked ones
+                fvs = free_symbols(ra.expr)
+                missing = fvs - symbol_to_proxy.keys()
+                if missing:
+                    i1 = sorted(missing, key=lambda x: str(x))[0]
+                    # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
+                    # assert self.shape_env.is_unbacked_symint(i1), i1
+                    ras_by_symbol.setdefault(i1, []).append(ra)
+                else:
+                    # Convert the sympy expression into a sequence of FX
+                    # nodes
+                    res = sympy_interp(
+                        PythonReferenceAnalysis, symbol_to_proxy, ra.expr
+                    ).node
+                    self.graph.call_function(
+                        torch.ops.aten._assert_scalar.default,
+                        # TODO: use ra.msg here, but it's pretty
+                        # useless right now
+                        (
+                            res,
+                            f"Deferred runtime assertion failed {ra.expr}",
+                        ),
+                    )
+
         for node in self.graph.nodes:
             # Placeholders can match symbols, but when we destructure them
             # with size we have to make sure we insert the nodes after all
@@ -1339,6 +1379,9 @@ class OutputGraph:
             ):
                 if "example_value" not in node.meta:
                     continue
+
+                if node not in placeholders:
+                    add_runtime_asserts(ras_by_symbol.pop(None, []))
 
                 defs = []
 
@@ -1453,31 +1496,7 @@ class OutputGraph:
                             ),
                         )
 
-                    for ra in ras:
-                        log.debug("inserting runtime assert %s", ra.expr)
-                        # Need to process ALL free symbols, not just unbacked ones
-                        fvs = free_symbols(ra.expr)
-                        missing = fvs - symbol_to_proxy.keys()
-                        if missing:
-                            i1 = sorted(missing, key=lambda x: str(x))[0]
-                            # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
-                            # assert self.shape_env.is_unbacked_symint(i1), i1
-                            ras_by_symbol.setdefault(i1, []).append(ra)
-                        else:
-                            # Convert the sympy expression into a sequence of FX
-                            # nodes
-                            res = sympy_interp(
-                                PythonReferenceAnalysis, symbol_to_proxy, ra.expr
-                            ).node
-                            self.graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                # TODO: use ra.msg here, but it's pretty
-                                # useless right now
-                                (
-                                    res,
-                                    f"Deferred runtime assertion failed {ra.expr}",
-                                ),
-                            )
+                    add_runtime_asserts(ras)
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
