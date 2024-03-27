@@ -33,7 +33,6 @@ class TestDynamoBenchmark(unittest.TestCase):
                 [
                     "-dcpu",
                     "--inductor",
-                    "--training",
                     "--performance",
                     "--only=BERT_pytorch",
                     "-n1",

@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/cpu/vec/vec_base.h>
 #include <array>
 
@@ -85,19 +83,11 @@ class VectorizedN {
     }
   }
 
-  template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
-  VectorizedN(const Vectorized<T>& val) : values({val}) {}
-
-  template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
-  inline operator Vectorized<T>() const {
-    return values[0];
-  }
-
-  inline const Vectorized<T>& operator[](int i) const {
+  const Vectorized<T>& operator[](int i) const {
     return values[i];
   }
 
-  inline Vectorized<T>& operator[](int i) {
+  Vectorized<T>& operator[](int i) {
     return values[i];
   }
 
@@ -142,10 +132,8 @@ class VectorizedN {
       int64_t count = size()) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::set(
-          a.values[i],
-          b.values[i],
-          std::min(count, (int64_t)Vectorized<T>::size()));
+      result.values[i] =
+          Vectorized<T>::set(a.values[i], b.values[i], std::min(count, Vectorized<T>::size()));
       count -= Vectorized<T>::size();
       if (count <= 0) {
         break;
@@ -166,8 +154,8 @@ class VectorizedN {
   static VectorizedN<T, N> loadu(const void* ptr, int64_t count) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::loadu(
-          ptr, std::min(count, (int64_t)Vectorized<T>::size()));
+      result.values[i] =
+          Vectorized<T>::loadu(ptr, std::min(count, Vectorized<T>::size()));
       ptr = static_cast<const T*>(ptr) + Vectorized<T>::size();
       count -= Vectorized<T>::size();
       if (count <= 0) {
@@ -186,7 +174,7 @@ class VectorizedN {
 
   void store(void* ptr, int count) const {
     for (int i = 0; i < N; ++i) {
-      values[i].store(ptr, std::min(count, (int)Vectorized<T>::size()));
+      values[i].store(ptr, std::min(count, Vectorized<T>::size()));
       ptr = static_cast<T*>(ptr) + Vectorized<T>::size();
       count -= Vectorized<T>::size();
       if (count <= 0) {
