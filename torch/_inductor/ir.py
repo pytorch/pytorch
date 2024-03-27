@@ -2633,6 +2633,9 @@ class Layout(IRNode):
         # If we do padding, the strides are not contiguous any more. Inductor
         # uses a much smaller threshold for persistent reduction this case and
         # generate potentially worse non-persistent reduction code.
+        #
+        # This change turnes HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+        # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
         align_stride_threshold = 1024
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
