@@ -1,3 +1,4 @@
+import bisect
 import itertools
 import logging
 import operator
@@ -332,25 +333,10 @@ class GraphLowering(torch.fx.Interpreter):
         self, needed_bytes: int, device: torch.device
     ) -> Optional[torch.Tensor]:
         sorted_tensors = self.tensors_for_benchmark_use[device]
-
-        def binary_search_needed_size():
-            left = 0
-            right = len(sorted_tensors) - 1
-            min_index = None
-
-            while left <= right:
-                mid = left + (right - left) // 2
-
-                if sorted_tensors[mid].untyped_storage().nbytes() > needed_bytes:
-                    min_index = mid
-                    right = mid - 1
-                else:
-                    left = mid + 1
-
-            return min_index
-
-        min_index = binary_search_needed_size()
-        if min_index is None:
+        min_index = bisect.bisect_left(
+            sorted_tensors, needed_bytes, key=lambda x: x.untyped_storage().nbytes()
+        )
+        if min_index == len(sorted_tensors):
             return None
 
         while (
@@ -366,11 +352,11 @@ class GraphLowering(torch.fx.Interpreter):
         self, gm: torch.fx.GraphModule
     ) -> Dict[torch.device, List[torch.Tensor]]:
         seen_dp = set()
-        tensors_to_use = []
 
         tc = torch._guards.TracingContext.try_get()
         tc_params: List[torch.Tensor] = [] if tc is None else tc.params_flat  # type: ignore[assignment]
 
+        tensors_by_device = defaultdict(list)
         for mod_tensor in itertools.chain(tc_params, gm.parameters(), gm.buffers()):
             mod_tensor = (
                 mod_tensor.data
@@ -383,7 +369,7 @@ class GraphLowering(torch.fx.Interpreter):
                 continue
 
             # MM benchmarking can be sensitive to mantissa
-            # Dont take from integer tensors bc they may be sparse
+            # Dont take from integer tensors bc they may be denormal
             if not mod_tensor.is_floating_point():
                 continue
 
@@ -391,18 +377,13 @@ class GraphLowering(torch.fx.Interpreter):
             if dp in seen_dp:
                 continue
 
-            tensors_to_use.append(mod_tensor)
+            tensors_by_device[mod_tensor.device].append(mod_tensor)
             seen_dp.add(dp)
 
-        sorted_tensors = sorted(
-            tensors_to_use, key=lambda x: x.untyped_storage().nbytes()
-        )
+        for device_tensors in tensors_by_device.values():
+            device_tensors.sort(key=lambda x: x.untyped_storage().nbytes())
 
-        sorted_by_device = defaultdict(list)
-        for t in sorted_tensors:
-            sorted_by_device[t.device].append(t)
-
-        return sorted_by_device
+        return tensors_by_device
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
