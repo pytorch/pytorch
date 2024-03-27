@@ -1582,11 +1582,10 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
     ),
     xfail(
         "nonzero",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "aten::_assert_async.msg",
-            "https://github.com/pytorch/pytorch/issues/112443",
-        ),
+        matcher=lambda sample: len(sample.input.shape) == 0
+        and sample.kwargs.get("as_tuple", False) is False,
+        reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     ),
     xfail(
         "scatter_add",
