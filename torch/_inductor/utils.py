@@ -897,6 +897,11 @@ class IndentedBuffer:
             for line in other_code.split("\n"):
                 self.writeline(line)
 
+    def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
+        res = IndentedBuffer(initial_indent=self._indent)
+        res._lines = [func(line) for line in self._lines]
+        return res
+
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
 

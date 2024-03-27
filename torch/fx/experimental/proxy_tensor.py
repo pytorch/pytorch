@@ -1101,6 +1101,7 @@ def make_fx(f,
                     allow_non_fake_inputs=_allow_non_fake_inputs,
                     shape_env=ShapeEnv(),
                     static_shapes=True,
+                    _allow_unsafe_data_ptr_access=False,
                 )
         elif tracing_mode == "symbolic":
             import torch._dynamo
@@ -1110,7 +1111,8 @@ def make_fx(f,
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=False,
                     allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=shape_env)
+                    shape_env=shape_env,
+                    _allow_unsafe_data_ptr_access=False)
             else:
                 shape_env = fake_tensor_mode.shape_env
                 assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
