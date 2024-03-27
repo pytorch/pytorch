@@ -551,7 +551,6 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -694,6 +693,13 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         if has_aux:
             return output_input, aux
         return output_input
+
+    # Dynamo does not support HOP composition if their inner function is
+    # annotated with @functools.wraps(...). We circumvent this issue by applying
+    # wraps only if we're not tracing with dynamo.
+    if not torch._dynamo.is_compiling():
+        wrapper_fn = wraps(func)(wrapper_fn)
+
     return wrapper_fn
 
 # NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
@@ -1163,7 +1169,6 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
-    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1211,6 +1216,13 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         if has_aux:
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
+
+    # Dynamo does not support HOP composition if their inner function is
+    # annotated with @functools.wraps(...). We circumvent this issue by applying
+    # wraps only if we're not tracing with dynamo.
+    if not torch._dynamo.is_compiling():
+        wrapper_fn = wraps(func)(wrapper_fn)
+
     return wrapper_fn
 
 

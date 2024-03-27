@@ -6424,7 +6424,8 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
         pin_memory=pin_memory,
     )
     new_tensor.detach_()
-    new_tensor.requires_grad_(requires_grad)
+    if requires_grad:
+        new_tensor.requires_grad_(requires_grad)
     return new_tensor
 
 
