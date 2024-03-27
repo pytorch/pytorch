@@ -273,21 +273,6 @@ class HigherOrderOperator(OperatorBase):
         # that PreDispatch key is still active. In that case, we just redispatch
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
-        # TODO (tmanlaibaatar) Make it generic fallback mechanism
-        def _(*args, **kwargs):
-            if _len_torch_dispatch_stack_pre_dispatch() == 0:
-                local_include_set = torch._C._dispatch_tls_local_include_set().remove(DispatchKey.PreDispatch)
-                local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
-                with torch._C._ForceDispatchKeyGuard(local_include_set, local_exclude_set):
-                    return self(*args, **kwargs)
-            raise AssertionError(
-                """
-                Can't directly invoke HOP implementation at PreDispatch key
-                if there are active modes on PreDispatch mode stack.
-                """
-            )
-
-        self.py_impl(torch._C.DispatchKey.PreDispatch)(_)
 
     def py_impl(self, k):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
