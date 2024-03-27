@@ -872,6 +872,11 @@ def _export(
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
             )
+        ep_non_strict.gm.meta["inline_constraints"] = {
+            k: v
+            for k, v in fake_mode.shape_env.var_to_range.items()
+            if free_unbacked_symbols(k)
+        }
         try:
             range_constraints = make_constraints(
                 fake_mode,
@@ -917,7 +922,7 @@ def _export(
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
-        return ExportedProgram(
+        exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
@@ -929,6 +934,11 @@ def _export(
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
         )
+        if len(range_constraints) > 0:
+            exported_program = exported_program._transform_do_not_use(
+                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
+            )
+        return exported_program
 
     gm_torch_level = _export_to_torch_ir(
         mod,
