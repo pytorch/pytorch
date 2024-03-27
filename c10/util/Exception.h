@@ -282,6 +282,11 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
+// Used for Accelerator memory errors.
+class C10_API AcceleratorOutOfMemoryError : public Error {
+  using Error::Error;
+};
+
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
 class C10_API DistError : public Error {

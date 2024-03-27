@@ -6,6 +6,7 @@
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/DeviceAccelerator.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -77,6 +78,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(AcceleratorOutOfMemoryError,                           \
+      THPException_AcceleratorOutOfMemoryError, retstmnt)                     \
   _CATCH_GENERIC_ERROR(                                                       \
       DistBackendError, THPException_DistBackendError, retstmnt)              \
   _CATCH_GENERIC_ERROR(                                                       \
@@ -136,9 +139,9 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistError,
-    *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError;
+    *THPException_OutOfMemoryError, *THPException_AcceleratorOutOfMemoryError,
+    *THPException_DistError, *THPException_DistBackendError,
+    *THPException_DistNetworkError, *THPException_DistStoreError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
