@@ -1,9 +1,9 @@
 # Owner(s): ["module: intel"]
 
+import itertools
 import math
 import sys
 import unittest
-import itertools
 
 import numpy as np
 
@@ -915,6 +915,7 @@ class TestBasicGEMM(TestCase):
             )
         )
         self.assertEqual(a, an)
+
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu")
 
