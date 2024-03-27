@@ -11,6 +11,7 @@ import sys
 import typing
 
 import torch._custom_ops as custom_ops
+import torch._library.utils as utils
 
 import torch.testing._internal.custom_op_db
 import torch.testing._internal.optests as optests
@@ -19,8 +20,8 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
+from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.custom_op_db import custom_op_db
 from typing import *  # noqa: F403
 
 
@@ -323,7 +324,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             optests.opcheck(op, (x,), {})
 
-    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
@@ -719,6 +720,40 @@ class TestCustomOp(CustomOpTestCaseBase):
             return list(itertools.product(examples, examples)) + []
         raise NotImplementedError(
             f"testrunner cannot generate instanstance of type {typ}"
+        )
+
+    def test_mangle_demangle(self):
+        examples = [
+            "__main__",
+            "__main__.foo",
+            "foo.bar.baz",
+            "X.Z.XZ.ZX.ZZ",
+            "Z0ZZ1ZZZ2",
+            "torch.testing._internal.custom_op_db.fn0",
+            "torch.testing._internal.custom_op_db.get_fn1.<locals>.fn1",
+            "torch.testing._internal.custom_op_db.get_fn2.<locals>.<lambda>@0xDEADBEEF",
+        ]
+
+        for value in examples:
+            mangled = utils.mangle(value)
+            self.assertTrue(mangled.isidentifier())
+            demangled = utils.demangle(mangled)
+            self.assertEqual(demangled, value)
+
+    def test_unique_name(self):
+        name = utils.unique_name(custom_op_db.fn0)
+        self.assertExpectedInline(name, """torch.testing._internal.custom_op_db.fn0""")
+
+        name = utils.unique_name(custom_op_db.fn1)
+        self.assertExpectedInline(
+            name, """torch.testing._internal.custom_op_db.get_fn1.<locals>.fn1"""
+        )
+
+        name = utils.unique_name(custom_op_db.fn2)
+        name = re.sub(r"0x.*", "0xDEADBEEF", name)
+        self.assertExpectedInline(
+            name,
+            """torch.testing._internal.custom_op_db.get_fn2.<locals>.<lambda>@0xDEADBEEF""",
         )
 
     def test_supported_return_types_single_return(self):
