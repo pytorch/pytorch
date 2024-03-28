@@ -71,7 +71,7 @@ atol_rtol_kw = {
 }
 
 def sparse24_largest_mask_2d(original):
-    sparse = SparseSemiStructuredTensorCUTLASS.from_dense_fast(original)
+    sparse = SparseSemiStructuredTensorCUTLASS.prune_dense(original)
     return sparse.to_dense().bool()
 
 def sparsify24_dense(original):
@@ -241,7 +241,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
 
         def fn(x, e):
-            y = SparseSemiStructuredTensorCUSPARSELT.from_dense_fast(x)
+            y = SparseSemiStructuredTensorCUSPARSELT.prune_dense(x)
             y = y.t()
             return x @ y
 
@@ -568,7 +568,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             dtype=dtype,
         )
         inp = F.pad(inp, (0, 128 - 4, 0, 128 - 4), "constant", 1)
-        sInp = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].from_dense_fast(inp, algorithm="largest_abs_values_greedy")
+        sInp = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].prune_dense(inp, algorithm="largest_abs_values_greedy")
 
         mask = sInp.to_dense() / inp
         assert mask[:4, :4].int().tolist() == [
@@ -606,7 +606,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         a = a.cuda().to(dtype)
         b = torch.randn([a.shape[1], 128], device="cuda", dtype=dtype)
 
-        a_sparse = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].from_dense_fast(a)
+        a_sparse = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].prune_dense(a)
 
         mask_dense = sparse24_largest_mask_2d(a).to(dtype)
 

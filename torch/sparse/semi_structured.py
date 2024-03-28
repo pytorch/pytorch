@@ -309,7 +309,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         raise NotImplementedError
 
     @classmethod
-    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+    def prune_dense(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
         raise NotImplementedError
 
 def to_sparse_semi_structured(
@@ -414,7 +414,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         )
 
     @classmethod
-    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+    def prune_dense(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
         (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
             original_tensor,
             algorithm=algorithm,
@@ -504,7 +504,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         )
 
     @classmethod
-    def from_dense_fast(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+    def prune_dense(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
         (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
             original_tensor,
             algorithm=algorithm,
