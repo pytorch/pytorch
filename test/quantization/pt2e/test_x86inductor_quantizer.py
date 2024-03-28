@@ -1475,7 +1475,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
         Test pattern of Attention like Block with X86InductorQuantizer.
         """
-        for annotate_matmul in [False, True]:
+        for annotate_matmul in [True, False]:
             with override_quantized_engine("x86"), torch.no_grad():
                 m = TestHelperModules.SelfAttnLikeModule(
                     input_dim=64 * 16,
@@ -1527,10 +1527,22 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                         torch.ops.aten.div.Tensor,
                         torch.ops.aten.softmax.int,
                     ]
-                self._test_quantizer(
+                _, _, convert_model = self._test_quantizer(
                     m,
                     example_inputs,
                     quantizer,
                     node_occurrence,
                     node_list,
                 )
+
+                for n in convert_model.graph.nodes:
+                    if (
+                        annotate_matmul
+                        and n.op == "call_function"
+                        and n.target is torch.ops.aten.linear.default
+                    ):
+                        self.assertTrue(len(list(n.users)) == 1)
+                        self.assertTrue(
+                            next(iter(n.users)).target is
+                            torch.ops.quantized_decomposed.quantize_per_tensor.default
+                        )
