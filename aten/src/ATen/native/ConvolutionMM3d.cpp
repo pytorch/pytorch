@@ -376,6 +376,11 @@ void slow_conv3d_backward_out_cpu_template(
     IntArrayRef stride,
     IntArrayRef padding,
     int64_t groups) {
+
+  TORCH_CHECK(kernel_size.size() >= 3, "kernel_size should be at least 3-dimensional");
+  TORCH_CHECK(padding.size() >= 3, "padding should be at least 3-dimensional");
+  TORCH_CHECK(stride.size() >= 3, "stride should be at least 3-dimensional");
+
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
   const int64_t kernel_width = kernel_size[2];
@@ -500,6 +505,10 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
   CheckedFrom c = "slow_conv3d_backward_parameters_cpu";
   auto grad_weight_arg = TensorArg(grad_weight, "grad_weight_arg", 0);
 
+  TORCH_CHECK(kernel_size.size() >= 3, "kernel_size should be at least 3-dimensional");
+  TORCH_CHECK(padding.size() >= 3, "padding should be at least 3-dimensional");
+  TORCH_CHECK(stride.size() >= 3, "stride should be at least 3-dimensional");
+
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
   const int64_t kernel_width = kernel_size[2];
@@ -560,6 +569,10 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+
+  TORCH_CHECK(kernel_size.size() >= 3, "kernel_size should be at least 3-dimensional");
+  TORCH_CHECK(padding.size() >= 3, "padding should be at least 3-dimensional");
+  TORCH_CHECK(stride.size() >= 3, "stride should be at least 3-dimensional");
 
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
