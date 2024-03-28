@@ -97,7 +97,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             if expected_split_norm_count > 0:
                 self.assertIn(
-                    "split_cat_pattern_normalization_pass_pre_grad", optimus_scuba_log
+                    "normalization_pass_pre_grad", optimus_scuba_log
                 )
             counters.clear()
 
@@ -275,7 +275,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             if expected_split_merged > 0:
                 self.assertIn(
-                    "split_cat_pattern_merge_splits_pass_pre_grad", optimus_scuba_log
+                    "merge_splits_pass_pre_grad", optimus_scuba_log
                 )
             counters.clear()
 
@@ -609,7 +609,10 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=False)
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={},
+    )
     def test_config_flag_is_respected(self):
         def split_with_cat(x):
             fs = torch.split(x, [4, 4, 24], dim=-1)
@@ -1174,7 +1177,7 @@ class TestSplitCatFxPasses(TestCase):
                 expected_stack_tahn_unbind_merged,
             )
             self.assertIn(
-                "split_cat_pattern_merge_getitem_cat_pass_pre_grad", optimus_scuba_log
+                "merge_getitem_cat_pass_pre_grad", optimus_scuba_log
             )
             counters.clear()
 

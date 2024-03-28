@@ -52,6 +52,9 @@ prims = torch.ops.prims
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
 
+PRE_GRAD_SPLIT_CAT_FUSIONS: Dict[str, Any] = dict()
+POST_GRAD_SPLIT_CAT_FUSIONS: Dict[str, Any] = dict()
+
 
 class Multiple:
     pass
@@ -1152,7 +1155,7 @@ def register_lowering_pattern(
 
 
 def register_graph_pattern(
-    pattern: PatternExpr, extra_check=_return_true, *, pass_dict, prepend=False
+    pattern: PatternExpr, extra_check=_return_true, *, pass_dict, prepend=False, pre_grad=True, optimus=False
 ):
     """
     Register a pattern that runs a function on the FX graph, allowing
@@ -1165,6 +1168,12 @@ def register_graph_pattern(
             pattern=pattern, extra_check=extra_check, handler=handler
         ).register(pass_dict, prepend=prepend)
         return handler
+    # we only log the patterns for the split cat fusions
+    if optimus:
+        if pre_grad:
+            PRE_GRAD_SPLIT_CAT_FUSIONS[pass_dict.pass_name] = pass_dict
+        else:
+            POST_GRAD_SPLIT_CAT_FUSIONS.append[pass_dict.pass_name] = pass_dict
 
     return decorator
 

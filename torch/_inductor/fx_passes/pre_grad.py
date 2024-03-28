@@ -20,31 +20,18 @@ from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
     PatternMatcherPass,
+    PRE_GRAD_SPLIT_CAT_FUSIONS,
     stable_topological_sort,
 )
 from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
+from .split_cat import construct_pattern_matcher_passes
 
 log = logging.getLogger(__name__)
 
-normalization_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="normalization_pass"
-)
-merge_splits_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_splits_pass"
-)
-split_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="split_cat_pass"
-)
-unbind_stack_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="unbind_stack_pass"
-)
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
-)
-merge_getitem_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
 )
 
 fuse_split_linear_add_pass = PatternMatcherPass(
@@ -76,14 +63,8 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
-pattern_matcher_passes: List[PatternMatcherPass] = [
-    normalization_pass,
-    merge_getitem_cat_pass,
-    merge_splits_pass,
-    split_cat_pass,
-    unbind_stack_pass,
-    efficient_conv_bn_eval_pass,
-]
+pattern_matcher_passes = construct_pattern_matcher_passes(PRE_GRAD_SPLIT_CAT_FUSIONS)
+print("PRE_GRAD_SPLIT_CAT_FUSIONS: ", PRE_GRAD_SPLIT_CAT_FUSIONS)
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     merge_getitem_cat_pass_aten,
     merge_splits_pass_aten,
@@ -192,6 +173,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
+            optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
             inductor_before_change = copy.deepcopy(counters["inductor"])
             group_batch_fusion_passes(gm.graph, pre_grad=True)
             if counters["inductor"] != inductor_before_change:
@@ -199,11 +181,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                     gm.graph
                 )
             for pattern_matcher_pass in pattern_matcher_passes:
+                print("pattern_matcher_pass: ", pattern_matcher_pass.pass_name)
                 inductor_before_change = copy.deepcopy(counters["inductor"])
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if counters["inductor"] != inductor_before_change:
                     optimus_scuba_log[
-                        f"split_cat_pattern_{pattern_matcher_pass.pass_name}_pre_grad"
+                        f"{pattern_matcher_pass.pass_name}_pre_grad"
                     ] = upload_graph(gm.graph)
 
     if config.pre_grad_custom_pass is not None:
@@ -211,6 +194,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
+    optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
 
     if (
         config.pattern_matcher

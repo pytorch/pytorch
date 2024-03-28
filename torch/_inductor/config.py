@@ -98,7 +98,7 @@ post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = N
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
-# Optimize away split cat patterns (Experimental)
+# Deprecated
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
@@ -113,7 +113,7 @@ group_fusion = False
 # Deprecated
 batch_fusion = True
 
-# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Pre grad fusion and options in order, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
 pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_linear": {},
@@ -122,9 +122,15 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_tanh": {},
     "batch_relu": {},
     "batch_sigmoid": {},
+    "normalization_pass": {},
+    "merge_getitem_cat_pass": {},
+    "merge_splits_pass": {},
+    "split_cat_pass": {},
+    "unbind_stack_pass": {},
+    "efficient_conv_bn_eval_pass": {},
 }
 
-# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
 post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 

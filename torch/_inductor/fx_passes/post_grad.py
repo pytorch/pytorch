@@ -39,6 +39,7 @@ from ..pattern_matcher import (
     Match,
     MULTIPLE,
     PatternMatcherPass,
+    POST_GRAD_SPLIT_CAT_FUSIONS,
     register_graph_pattern,
     stable_topological_sort,
 )
@@ -46,6 +47,7 @@ from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes
+from .pre_grad import construct_pattern_matcher_passes
 from .reinplace import reinplace_inplaceable_ops
 
 
@@ -53,6 +55,9 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+pattern_matcher_passes = construct_pattern_matcher_passes(
+    POST_GRAD_SPLIT_CAT_FUSIONS
+)
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),
@@ -61,7 +66,6 @@ pass_patterns = [
 ]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
-decompose_mm_pass = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -85,6 +89,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
+        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         inductor_before_change = copy.deepcopy(counters["inductor"])
         group_batch_fusion_passes(gm.graph, pre_grad=False)
         if counters["inductor"] != inductor_before_change:
@@ -92,9 +97,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
+        for pattern in pattern_matcher_passes:
+            print("pattern: ", pattern.pass_name)
+            inductor_before_change = copy.deepcopy(counters["inductor"])
+            pattern.apply(gm.graph)  # type: ignore[arg-type]
+            if counters["inductor"] != inductor_before_change:
+                optimus_scuba_log[f"{pattern.pass_name}_post_grad"] = upload_graph(
+                    gm.graph
+                )
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
-        decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
@@ -118,6 +130,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     decompose_auto_functionalized(gm.graph)
 
     gm.recompile()
+    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
 
