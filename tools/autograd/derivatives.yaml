@@ -1015,7 +1015,7 @@
   self: zeros_like(grad)
   result: self_t.zero_()
 
-- name: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+- name: logsumexp(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: logsumexp_backward(grad, self, result, dim, keepdim)
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
 

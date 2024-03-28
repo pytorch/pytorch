@@ -790,13 +790,13 @@ def log_softmax(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def logsumexp(
-    self: TensorLikeType, dim: DimsType, keepdim: bool = False
+    self: TensorLikeType, dim: DimsType = (), keepdim: bool = False
 ) -> TensorLikeType:
     if not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.amax(self, dim, keepdim=len(dim) > 0)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
