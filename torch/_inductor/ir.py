@@ -6934,8 +6934,8 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         bias = args[2] if self.has_bias else const_args[0]
         w_scale, w_zp, other = args[-3], args[-2], args[-1]
         if self.x_scale_zp_are_tensors:
-            assert len(args) >= 4
-            x_scale, x_zp = args[-4], args[-3]
+            assert len(args) >= 5
+            x_scale, x_zp = args[-5], args[-4]
             (
                 o_inv_scale,
                 o_zp,
