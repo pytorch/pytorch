@@ -103,7 +103,7 @@ TEST(ITensorListRefTest, Boxed_GetConstRefTensor) {
   const List<at::Tensor> boxed(vec);
   at::ITensorListRef list(boxed);
   static_assert(
-      std::is_same<decltype(*list.begin()), const at::Tensor&>::value,
+      std::is_same_v<decltype(*list.begin()), const at::Tensor&>,
       "Accessing elements from List<Tensor> through a ITensorListRef should be const references.");
   EXPECT_TRUE(boxed[0].is_same(*list.begin()));
   EXPECT_TRUE(boxed[1].is_same(*(++list.begin())));
@@ -113,7 +113,7 @@ TEST(ITensorListRefTest, Unboxed_GetConstRefTensor) {
   auto vec = get_tensor_vector();
   at::ITensorListRef list(vec);
   static_assert(
-      std::is_same<decltype(*list.begin()), const at::Tensor&>::value,
+      std::is_same_v<decltype(*list.begin()), const at::Tensor&>,
       "Accessing elements from ArrayRef<Tensor> through a ITensorListRef should be const references.");
   EXPECT_TRUE(vec[0].is_same(*list.begin()));
   EXPECT_TRUE(vec[1].is_same(*(++list.begin())));

@@ -351,6 +351,8 @@ static ideep::attr_t create_attr_by_post_op(
       return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
     } else if (unary_post_op == "hardswish") {
       return ideep::attr_t::fuse_hardswish();
+    } else if (unary_post_op == "swish") {
+      return ideep::attr_t::fuse_swish();
     } else {
       TORCH_CHECK(
           unary_post_op == "none",
