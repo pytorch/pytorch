@@ -3836,15 +3836,15 @@ class ShapeEnv:
         if upper < 2 and symbol in self.size_like:
             upper = 2
 
-        # If the range is refined to singleton, set replacement
-        if lower == upper:
-            self._set_replacement(symbol, lower, "range_refined_to_singleton")
-
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
             self.var_to_range[symbol] = ValueRanges(lower, upper)
         else:
             self.var_to_range[symbol] &= ValueRanges(lower, upper)
+
+        # If the range is refined to singleton, set replacement
+        if lower == upper:
+            self._set_replacement(symbol, lower, "range_refined_to_singleton")
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
