@@ -6735,9 +6735,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                std::string post_op_name,
+                c10::string_view post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
-                std::string post_op_algorithm)"""
+                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
