@@ -3,7 +3,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -162,7 +162,6 @@ class CppWrapperCpu(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
                 #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
                 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-                #include <stdio.h>
                 """
             )
             if V.graph.aot_mode:
@@ -870,12 +869,11 @@ class CppWrapperCpu(WrapperCodeGen):
             for x in V.graph.graph_outputs
         ]
 
-    def generate_return(self, output_refs):
+    def generate_return(self, output_refs: List[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph and config.use_minimal_arrayref_interface
         )  # For brevity.
-        print('in generate_return in CppWrapper, arr_iface=', arr_iface)
 
         def use_thread_local_cached_output_tensor(idx, output):
             cached_output_name = f"cached_output_{next(self.cached_output_id)}"
@@ -910,7 +908,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
 
-        output2idx = {}
+        output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if config.abi_compatible:
                 output_buffer = V.graph.graph_outputs[idx]
@@ -987,7 +985,6 @@ class CppWrapperCpu(WrapperCodeGen):
                 with self.wrapper_call.indent():
                     use_thread_local_cached_output_tensor(idx, output)
                 self.wrapper_call.writeline("}")
-
 
             else:
                 assert (
