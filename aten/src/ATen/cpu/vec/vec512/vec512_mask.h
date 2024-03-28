@@ -111,11 +111,8 @@ struct VecMaskCast<int, 1, float, 1> {
 template <typename dst_t>
 struct VecMaskCast<dst_t, 1, int64_t, 2> {
   static inline VecMask<dst_t, 1> apply(const VecMask<int64_t, 2>& vec_mask) {
-    auto low = _mm512_cvtepi64_epi32(vec_mask[0]);
-    auto high = _mm512_cvtepi64_epi32(vec_mask[1]);
-    return VecMask<int, 1>(Vectorized<int>(_mm512_inserti32x8(
-                               _mm512_castsi256_si512(low), high, 1)))
-        .cast<dst_t, 1>();
+    auto int_vec = convert<int, 1, int64_t, 2>(VectorizedN<int64_t, 2>(vec_mask));
+    return VecMask<int, 1>(int_vec).cast<dst_t, 1>();
   }
 };
 

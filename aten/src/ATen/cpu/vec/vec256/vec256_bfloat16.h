@@ -31,6 +31,28 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   cvtbf16_fp32(lo, o1);
   cvtbf16_fp32(hi, o2);
 }
+
+static inline __m128i cvtfp32_bf16(const __m256& src) {
+  __m256i value = _mm256_castps_si256(src);
+  __m256i nan = _mm256_set1_epi32(0xffff);
+  __m256i mask = _mm256_castps_si256(_mm256_cmp_ps(src, src, _CMP_ORD_Q));
+  __m256i ones = _mm256_set1_epi32(0x1);
+  __m256i vec_bias = _mm256_set1_epi32(0x7fff);
+  // uint32_t lsb = (input >> 16) & 1;
+  auto t_value = _mm256_and_si256(_mm256_srli_epi32(value, 16), ones);
+  // uint32_t rounding_bias = 0x7fff + lsb;
+  t_value = _mm256_add_epi32(t_value, vec_bias);
+  // input += rounding_bias;
+  t_value = _mm256_add_epi32(t_value, value);
+  // input = input >> 16;
+  t_value = _mm256_srli_epi32(t_value, 16);
+  // Check NaN before converting back to bf16
+  t_value = _mm256_blendv_epi8(nan, t_value, mask);
+  t_value = _mm256_packus_epi32(t_value, t_value);   // t[4-7] t[4-7] t[0-4] t[0-4]
+  t_value = _mm256_permute4x64_epi64(t_value, 0xd8); // 11     01     10     00
+  return _mm256_castsi256_si128(t_value);
+}
+
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
@@ -78,6 +100,11 @@ static inline void cvtfp16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i hi = _mm256_extractf128_si256(a, 1);
   cvtfp16_fp32(lo, o1);
   cvtfp16_fp32(hi, o2);
+}
+
+static inline __m128i cvtfp32_fp16(const __m256& src) {
+  return _mm256_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 static inline __m256i cvtfp32_fp16(const __m256& a, const __m256& b) {

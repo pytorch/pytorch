@@ -100,6 +100,11 @@ static inline void cvtfp16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
   cvtfp16_fp32(hi, o2);
 }
 
+static inline __m256i cvtfp32_fp16(const __m512& src) {
+  return _mm512_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+}
+
 static inline __m512i cvtfp32_fp16(const __m512& a, const __m512& b) {
   __m256i lo = _mm512_cvtps_ph(
       a, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));

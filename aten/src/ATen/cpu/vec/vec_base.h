@@ -1115,3 +1115,4 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
 // additional headers for more operations that depend on vec_base
 #include <ATen/cpu/vec/vec_n.h>
 #include <ATen/cpu/vec/vec_mask.h>
+#include <ATen/cpu/vec/vec_convert.h>
