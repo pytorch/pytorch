@@ -82,7 +82,9 @@ default_quantizable_ops = propagation_quantizable_ops | {
 
 # A superset of default_quantizable_ops includes operators support the int8 data type
 # but not enabled by default recipe of X86InductorQuantizer.
-quantizable_ops = default_quantizable_ops
+quantizable_ops = default_quantizable_ops | {
+    torch.ops.aten.matmul.default,
+}
 
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
@@ -443,6 +445,7 @@ class X86InductorQuantizer(Quantizer):
         # Step1: Recipe of fusion patterns like conv/linear.
         self._annotate_conv2d_fusion_pattern(model)
         self._annotate_linear_fusion_pattern(model)
+        self._annotate_matmul(model)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -695,6 +698,24 @@ class X86InductorQuantizer(Quantizer):
                 # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
                 self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
+
+    def _annotate_matmul(self, model: torch.fx.GraphModule):
+        if config := self._get_operator_type(torch.ops.aten.matmul.default):
+            for node in model.graph.nodes:
+                if node.target == torch.ops.aten.matmul.default and not _is_annotated(
+                    [node]
+                ):
+                    input_qspec_map = {}
+                    matmul_node = node
+                    for input_node in matmul_node.args:
+                        input_qspec_map[input_node] = get_input_act_qspec(config)
+                    matmul_node.meta[
+                        QUANT_ANNOTATION_KEY
+                    ] = _X86InductorQuantizationAnnotation(
+                        input_qspec_map=input_qspec_map,
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
 
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
