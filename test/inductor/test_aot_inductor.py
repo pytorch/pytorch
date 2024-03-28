@@ -311,6 +311,21 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
+    def test_amp_cpu(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+
+            def forward(self, y):
+                return torch.nn.functional.linear(y, self.weight)
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+
+        with config.patch({"fallback_random": True}):
+            with torch.cpu.amp.autocast():
+                self.check_model(Model(self.device), example_inputs)
+
     def test_missing_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
