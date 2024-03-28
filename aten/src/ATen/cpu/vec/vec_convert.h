@@ -37,7 +37,7 @@ template <
     int dst_n,
     typename src_t,
     int src_n,
-    std::enable_if_t<src_n != 1 && dst_n != 1, int> = 0>
+    std::enable_if_t<dst_n != 1, int> = 0>
 inline VectorizedN<dst_t, dst_n> convert(const VectorizedN<src_t, src_n>& src) {
   return VecConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
@@ -47,7 +47,7 @@ template <
     int dst_n,
     typename src_t,
     int src_n,
-    std::enable_if_t<src_n != 1 && dst_n == 1, int> = 0>
+    std::enable_if_t<dst_n == 1, int> = 0>
 inline Vectorized<dst_t> convert(const VectorizedN<src_t, src_n>& src) {
   return VecConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
