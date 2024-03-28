@@ -253,9 +253,13 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.parametrizations.weight.original': torch.nn.Parameter(torch.tensor([[1.0]])),
                       'l1.bias': torch.tensor([0.0]),
                       'buffer': torch.tensor([0.0])}
+
         with self.assertRaisesRegex(RuntimeError, "shapes cannot be multiplied"):
-            x = torch.rand((4, 5))  # to work, it should be of size (1, 1)
-            functional_call(module, parameters, x)  # this call will fail because x is the wrong size
+            @torch._dynamo.disable
+            def _error_case():
+                x = torch.rand((4, 5))  # to work, it should be of size (1, 1)
+                functional_call(module, parameters, x)  # this call will fail because x is the wrong size
+            _error_case()
 
         # verify that the spectral normalization is still applied
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))

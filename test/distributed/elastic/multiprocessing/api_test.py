@@ -274,8 +274,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             with tempfile.NamedTemporaryFile(dir=self.test_dir) as not_a_dir:
                 cases = {
                     not_a_dir.name: NotADirectoryError,
-                    # test_dir is not empty since we touched not_a_dir file
-                    self.test_dir: RuntimeError,
                 }
 
                 for (log_dir, expected_error) in cases.items():

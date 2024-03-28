@@ -1969,6 +1969,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    def test_issue111522(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, y):
+            return x + y.a
+
+        class A:
+            a = 2
+
+        self.assertEqual(f(torch.zeros(2), A()), torch.full([2], 2.0))
+
+        del A.a
+
+        # graph break on missing attr
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            f(torch.zeros(2), A())
+
     def test_dict_list_values(self):
         def inner_fn(args):
             return [x[1].shape for x in args]
@@ -2079,6 +2095,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_m.forward(listy)
 
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_issue111918(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            x = x + 1
+            y = x.item()
+            if y > 2:
+                return x * 2
+            else:
+                return x * 3
+
+        x = torch.tensor([3.0])
+        fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
+
+        torch._dynamo.reset()
+        fn = torch.compile(fn, fullgraph=True, backend="eager")
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            fn(x)
 
     def test_vdd_duplicate_error(self):
         def fn(a, dt):
@@ -3543,6 +3582,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
+    def test_randint_out_dynamic(self):
+        def randint_fn(high, size, out):
+            return torch.randint(high, size, out=out)
+
+        opt_model = torch.compile(randint_fn)
+
+        out1 = torch.empty(10, dtype=torch.int32)
+        opt_model(17, (10,), out1)
+
+        out2 = torch.empty(12, dtype=torch.int32)
+        opt_model(17, (12,), out2)
+
     @requires_cuda
     def test_guard_default_device(self):
         try:
@@ -3795,7 +3846,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_deferred_runtime_asserts(self):
-        @torch.compile(backend="aot_eager", fullgraph=True)
+        @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
             torch._check_is_size(y)
@@ -4095,6 +4146,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, x)
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_arange_in_bounds(self):
+        # see https://github.com/pytorch/pytorch/issues/113002
+        class PaddingNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, lengths):
+                max_seq_len = lengths.max().item()
+                row_vector = torch.arange(0, max_seq_len, 1)
+                matrix = torch.unsqueeze(lengths, dim=-1)
+                mask = row_vector < matrix
+                mask = mask.type(torch.float32)
+                mask_3d_btd = mask[:, :, None]
+                return mask_3d_btd
+
+        model = PaddingNet()
+        lengths = torch.tensor([5, 4, 4, 4], dtype=torch.int32)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(model)
+        opt_fn(lengths)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_user_ctor_ctx_manager_custom_init(self):
         class UserCtxManager:
             def __init__(self, x):
@@ -4216,6 +4291,94 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # This should recompile
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dont_aggressively_write_assert(self):
+        record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(dynamic=True, backend=record_graph)
+        def f(x):
+            assert x.shape[0] > 3
+            assert x[0].sum() > 0
+            assert 1 % (x.shape[0] // 2) != 0
+            assert 32 * (x.shape[0] // 2) ** 2 - 16 * (x.shape[0] // 2) != 0
+            return x.cos()
+
+        f(torch.ones(6, 4))
+        graph = record_graph.graphs[0]
+        # It is bit annoying that we generate useless statements for
+        # shape guards, but DCE should be able to remove them since t
+        # there is no backed assert on them. The reason this is ok is
+        # because dynamo will only skip the assert statement, but not
+        # the instructions before it.
+        self.assertExpectedInline(
+            str(graph.code).strip(),
+            """\
+def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    size = l_x_.size()
+    getitem = size[0];  size = None
+    gt = getitem > 3;  getitem = None
+    getitem_2 = l_x_[0]
+    sum_1 = getitem_2.sum();  getitem_2 = None
+    gt_1 = sum_1 > 0;  sum_1 = None
+    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
+    size_1 = l_x_.size()
+    getitem_3 = size_1[0];  size_1 = None
+    floordiv = getitem_3 // 2;  getitem_3 = None
+    mod = 1 % floordiv;  floordiv = None
+    ne = mod != 0;  mod = None
+    size_2 = l_x_.size()
+    getitem_5 = size_2[0];  size_2 = None
+    floordiv_1 = getitem_5 // 2;  getitem_5 = None
+    pow_1 = floordiv_1 ** 2;  floordiv_1 = None
+    mul = 32 * pow_1;  pow_1 = None
+    size_3 = l_x_.size()
+    getitem_7 = size_3[0];  size_3 = None
+    floordiv_2 = getitem_7 // 2;  getitem_7 = None
+    mul_1 = 16 * floordiv_2;  floordiv_2 = None
+    sub = mul - mul_1;  mul = mul_1 = None
+    ne_1 = sub != 0;  sub = None
+    cos = l_x_.cos();  l_x_ = None
+    return (cos,)""",
+        )
+        for node in graph.graph.nodes:
+            if "example_value" in node.meta and isinstance(
+                node.meta["example_value"], torch._subclasses.fake_tensor.FakeTensor
+            ):
+                shape_env = node.meta["example_value"].fake_mode.shape_env
+                lower_ranges = [val.lower for val in shape_env.var_to_range.values()]
+                self.assertTrue(lower_ranges == [4, 2])
+
+        @torch.compile(dynamic=True, backend=record_graph)
+        def f_fail(x):
+            assert x.shape[0] < 3
+
+        # We graph-break here, so the failure should be eager
+        with self.assertRaisesRegex(AssertionError, ""):
+            f_fail(torch.ones(6, 4))
+
+    def test_super_in_staticmethod(self):
+        class A:
+            @staticmethod
+            def foo():
+                return super().__init__()
+
+        def fn(obj):
+            return obj.foo()
+
+        obj = A()
+
+        try:
+            fn(obj)
+        except Exception as e:
+            orig_str = str(e)
+        self.assertIn("no arguments", orig_str)
+
+        try:
+            torch.compile(backend="eager")(fn)(obj)
+        except Exception as e:
+            compiled_str = str(e)
+        self.assertEqual(orig_str, compiled_str)
 
 
 if __name__ == "__main__":

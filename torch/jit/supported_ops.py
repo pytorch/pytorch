@@ -276,7 +276,9 @@ def _get_global_builtins():
         if len(schemas) > 0:
             schematized_ops.append("")
         else:
-            table_row = f'":any:`{fn}`", "{schemaless_op_explanations[fn]}"'
+            table_row = (
+                f'":external+python:py:obj:`{fn}`", "{schemaless_op_explanations[fn]}"'
+            )
             schemaless_ops.append(table_row)
 
     schematized_ops_str = "\n".join(schematized_ops)

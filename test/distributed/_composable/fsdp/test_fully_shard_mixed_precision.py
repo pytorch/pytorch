@@ -15,7 +15,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
-    check_1d_sharded_parity,
+    check_sharded_parity,
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
@@ -108,7 +108,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 param_bf16.detach().copy_(param_fp32)
 
             self.assertEqual(fsdp_loss, ref_loss)
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
@@ -160,7 +160,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 param_bf16.detach().copy_(param_fp32)
 
             self.assertEqual(fsdp_loss, ref_loss)
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
 
     def _test_reduce_dtype_bf16_reduce(self, reshard_after_forward: Union[bool, int]):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
@@ -195,7 +195,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
 
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):

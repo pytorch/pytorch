@@ -387,7 +387,13 @@ struct NCCLTraceBuffer {
                 // buffer this entry will be located to
                 // update state information
     size_t pg_id_;
-    size_t seq_id_; // as tracked by the process group
+
+    // Both seq_id_ and op_id_ are per_pg incrementing counters
+    // seq_id refers to actual kernel launches (e.g. 1 per coalesced group)
+    // op_id refers to logical operations (e.g. one per op inside coalesced
+    // group)
+    size_t seq_id_;
+    size_t op_id_;
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
@@ -432,6 +438,7 @@ struct NCCLTraceBuffer {
   c10::optional<size_t> record(
       size_t pg_id,
       size_t seq_id,
+      size_t op_id,
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
@@ -448,6 +455,7 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         seq_id,
+        op_id,
         std::move(profiling_name),
         std::move(traceback),
         std::move(start),
@@ -586,11 +594,12 @@ struct NCCLTraceBuffer {
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.3";
+    c10::IValue version_val = "1.4";
     c10::IValue pg_config_key = "pg_config";
     c10::IValue record_id_key = "record_id";
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
+    c10::IValue op_id_key = "op_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
@@ -627,6 +636,7 @@ struct NCCLTraceBuffer {
       dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(seq_id_key, int64_t(e.seq_id_));
+      dict.insert(op_id_key, int64_t(e.op_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
       if (e.duration_) {
