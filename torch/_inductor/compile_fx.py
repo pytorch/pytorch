@@ -1367,7 +1367,12 @@ def compile_fx(
             unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+
+        # disable amp as in aot_dispatch_autograd
+        disable_amp = torch._C._is_any_autocast_enabled()
+        context = torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
+
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
