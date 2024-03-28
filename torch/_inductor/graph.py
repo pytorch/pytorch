@@ -1048,6 +1048,8 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided.default,
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
+                torch.ops.aten.resize.default,
+                torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
             is_input_for_as_strided = any(
