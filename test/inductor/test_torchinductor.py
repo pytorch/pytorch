@@ -4995,6 +4995,23 @@ class CommonTemplate:
         out = foo_opt(inp)
         self.assertEqual(inp.storage(), out.storage())
 
+    def test_contiguous_layout(self):
+        # https://github.com/pytorch/pytorch/issues/117743
+        def fn(x1, x2, x3):
+            y = torch.add(x1, x2).permute([0, 3, 1, 2])
+            return y @ x3
+
+        inp_1 = torch.rand([1, 576, 576, 16], device=self.device)
+        inp_2 = torch.rand([16], device=self.device)
+        inp_3 = torch.rand([1, 16, 576, 48], device=self.device)
+        inp = (inp_1, inp_2, inp_3)
+        fn_opt = torch.compile(fn)
+        out_expected = fn(*inp)
+        out_actual = fn_opt(*inp)
+
+        self.assertEqual(out_expected, out_actual)
+        self.assertEqual(out_expected.stride(), out_actual.stride())
+
     def test_index_select(self):
         def fn(a, b):
             return (
