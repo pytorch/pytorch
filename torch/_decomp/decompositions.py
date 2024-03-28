@@ -4783,6 +4783,15 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+@register_decomposition(aten.resize_as_)
+def resize_as_(self, other, memory_format=None):
+    if memory_format is None:
+        memory_format = torch.contiguous_format
+    if memory_format == torch.preserve_format:
+        memory_format = suggest_memory_format(other)
+    return aten.resize_(self, other.shape, memory_format=memory_format)
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

@@ -1115,7 +1115,6 @@ aten::replication_pad3d_backward.grad_input
 aten::resize
 aten::resize.out
 aten::resize_
-aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out
 aten::resize_as_sparse_

@@ -8749,6 +8749,16 @@ class CommonTemplate:
                 self, fn, x, y_size, memory_format, inplace=False
             )
 
+    def test_inplace_resize(self):
+        def fn(x, size, memory_format):
+            torch.ops.aten.resize_(x, size, memory_format=memory_format)
+            return x
+
+        for x, y_size, memory_format in CommonTemplate._cases_resize_common():
+            CommonTemplate._check_resize_common(
+                self, fn, x, y_size, memory_format, inplace=True
+            )
+
     @staticmethod
     def _cases_resize_as_common():
         for x, y_size, memory_format in CommonTemplate._cases_resize_common():
@@ -8774,15 +8784,14 @@ class CommonTemplate:
             )
 
     def test_inplace_resize_as(self):
-        def fn(x, y):
-            x.resize_as_(y)
+        def fn(x, y, memory_format):
+            torch.ops.aten.resize_as_(x, y, memory_format=memory_format)
             return x
 
-        x = torch.randn(2, 3)
-        y = torch.randn(200, 300)
-        x_clone = x.clone()
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x, y), opt_fn(x_clone, y))
+        for x, y, memory_format in CommonTemplate._cases_resize_as_common():
+            CommonTemplate._check_resize_common(
+                self, fn, x, y, memory_format, inplace=True
+            )
 
     def test_erfc(self):
         def fn(x):

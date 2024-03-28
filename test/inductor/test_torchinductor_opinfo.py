@@ -211,8 +211,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "resize_": {b8, f16, f32, f64, i32, i64},
-    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
@@ -247,8 +245,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 # intentionally not handled
 intentionally_not_handled = {
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
-    "resize_": {b8, f16, f32, f64, i32, i64},
-    "resize_as_": {b8, f16, f32, f64, i32, i64},
 }
 
 inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)

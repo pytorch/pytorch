@@ -719,12 +719,6 @@ class TensorVariable(VariableTracker):
         )
         return ConstantVariable.create(None)
 
-    def method_resize_(self, *args, **kwargs):
-        unimplemented("Tensor.resize_")
-
-    def method_resize_as_(self, *args, **kwargs):
-        unimplemented("Tensor.resize_as_")
-
     def method_set_(self, *args, **kwargs):
         if len(args) > 1:
             # torch.Tensor.set_() has several overloads.
