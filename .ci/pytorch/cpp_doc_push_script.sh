@@ -23,7 +23,7 @@ echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
 fi
 
 # Argument 1: Where to copy the built documentation for Python API to
-# (pytorch.github.io/$install_path)
+# (docs/$install_path)
 install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
 if [ -z "$install_path" ]; then
 echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
