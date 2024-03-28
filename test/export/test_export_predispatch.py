@@ -5,7 +5,6 @@ try:
 except ImportError:
     import test_export
     import testing
-from torch.export import export
 from torch.export._trace import _export
 
 test_classes = {}
