@@ -1,5 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/Normalization.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
@@ -12,6 +14,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_batch_norm_with_update_native.h>
+#include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/batch_norm_backward_elemt_native.h>
 #include <ATen/ops/batch_norm_backward_reduce_native.h>
 #include <ATen/ops/batch_norm_elemt_native.h>
@@ -19,8 +23,12 @@
 #include <ATen/ops/batch_norm_gather_stats_with_counts_native.h>
 #include <ATen/ops/batch_norm_stats_native.h>
 #include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/cudnn_batch_norm.h>
+#include <ATen/ops/cudnn_batch_norm_backward.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/from_blob.h>
+#include <ATen/ops/miopen_batch_norm.h>
+#include <ATen/ops/miopen_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/scalar_tensor.h>
@@ -473,6 +481,54 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   return std::make_tuple(output, save_mean, save_invstd);
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cuda(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  Tensor output, save_mean, save_var, reserve;
+
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, /*training*/true, eps);
+  if (backend == BatchNormBackend::Cudnn) {
+    std::tie(output, save_mean, save_var, reserve) =
+        at::cudnn_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  } else if (backend == BatchNormBackend::Miopen) {
+    reserve = at::empty({0}, input.options().dtype(kByte));
+    std::tie(output, save_mean, save_var) =
+        at::miopen_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  } else {
+    reserve = at::empty({0}, input.options().dtype(kByte));
+    std::tie(output, save_mean, save_var) =
+        batch_norm_cuda(input, weight_opt, bias_opt, running_mean, running_var, /*training*/true, momentum, eps);
+  }
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cuda_out(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps,
+    Tensor& out, Tensor& save_mean, Tensor& save_var, Tensor& reserve) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, /*training*/true, eps);
+  if (backend == BatchNormBackend::Cudnn) {
+    std::tie(out, save_mean, save_var, reserve) =
+        at::cudnn_batch_norm_out(out, save_mean, save_var, reserve, input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  } else if (backend == BatchNormBackend::Miopen) {
+    std::tie(out, save_mean, save_var) =
+        at::miopen_batch_norm_out(out, save_mean, save_var, input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  } else {
+    std::tie(out, save_mean, save_var) =
+      batch_norm_cuda_out(input, weight_opt, bias_opt, running_mean, running_var, /*update*/true, momentum, eps, out, save_mean, save_var);
+  }
+  return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(out, save_mean, save_var, reserve);
+}
+
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
   return batch_norm_cuda(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
 }
@@ -487,6 +543,28 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_cuda_out(const Tensor& s
 
 std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
   return batch_norm_cuda_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_invstd);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cuda(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+  const Tensor& dummy_bias = at::empty(1);
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
+  const Tensor& save_var = c10::value_or_else(save_var_opt, [] {return Tensor();});
+
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, dummy_bias, running_mean, running_var, /*training*/true, eps);
+
+  if (backend == BatchNormBackend::Cudnn) {
+    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps, reserve);
+  } else if (backend == BatchNormBackend::Miopen) {
+    return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps);
+  } else {
+    return batch_norm_backward_cuda(grad_output, input, weight, running_mean, running_var, save_mean, save_var, update, eps, grad_input_mask);
+  }
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
