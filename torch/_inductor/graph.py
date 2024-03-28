@@ -269,7 +269,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
-        self.constants_name_mapping: Dict[str, str] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -676,12 +675,20 @@ class GraphLowering(torch.fx.Interpreter):
             user.realize()
 
     def get_original_value_of_constant(self, name: str):
-        orig_name = get_cloned_parameter_buffer_name(self.constants_name_mapping[name])
-        if orig_name in self.module.meta:
-            return self.module.meta[orig_name]
-        if name in self.constants:
-            return self.constants[name]
-        raise AssertionError(name + " not found as a graph constant")
+        """
+        In AOTI, module buffers may have been mutated during the tracing and compilation.
+        Thus we need to read from previously stored original buffers, to make sure the
+        generated model.so uses correct initial values.
+        """
+        assert name in self.allocated_constant_name and name in self.constants, (
+            "Can not find the original value for " + name
+        )
+        orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
+        return (
+            self.module.meta[orig_name]
+            if orig_name in self.module.meta
+            else self.constants[name]
+        )
 
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
@@ -697,7 +704,6 @@ class GraphLowering(torch.fx.Interpreter):
                     ):
                         return constant_name
 
-            orig_name = name
             if name is None:
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
@@ -712,7 +718,6 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
-            self.constants_name_mapping[name] = orig_name
             self.constant_reprs[name] = (
                 f"{data.device!r} {data.dtype!r} "
                 f"{tuple(data.size())!r} {tuple(data.stride())!r} "

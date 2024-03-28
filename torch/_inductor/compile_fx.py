@@ -166,17 +166,15 @@ def _unlift_graph(mod, gm, graph_signature):
     lifted_inputs = []
 
     # In AOTI, module parameters and buffers are not lifted as graph inputs.
-    # As a result, mutation to parameters and buffers has side effect which
-    # makes their initial values different from Eager. So we clone them
+    # As a result, mutation to buffers has side effect which makes their initial
+    # values different from Eager. So we clone them here as a copy.
+    # We are not cloning for parameters, although it will be needed if we want to
+    # support training.
     for node in placeholder_nodes:
         node_name = node.name
         if node_name in graph_signature.inputs_to_parameters:
             parameter_name = graph_signature.inputs_to_parameters[node_name]
             lifted_inputs.append(parameter_name)
-
-            gm.meta[get_cloned_parameter_buffer_name(parameter_name)] = state_dict[
-                parameter_name
-            ].clone()
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
