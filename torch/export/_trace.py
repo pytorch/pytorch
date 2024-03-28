@@ -28,6 +28,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
+from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
@@ -41,6 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
@@ -312,6 +314,29 @@ def _restore_state_dict(
     traced_module.recompile()
 
 
+def _get_module_hierarchy(mod: torch.nn.Module) -> Dict[str, str]:
+    return {
+        name: type(m).__name__ for name, m in mod.named_modules(remove_duplicate=False)
+    }
+
+
+def _make_module_call_graph(
+    module_hierarchy: Dict[str, str],
+    in_spec: TreeSpec,
+    out_spec: TreeSpec,
+    module_call_signatures: Dict[str, ModuleCallSignature],
+) -> List[ModuleCallEntry]:
+    ret = [
+        ModuleCallEntry(fqn=fqn, signature=module_call_signatures.get(fqn))
+        for fqn in module_hierarchy
+    ]
+    assert ret[0].fqn == ""
+    ret[0].signature = ModuleCallSignature(
+        inputs=[], outputs=[], in_spec=in_spec, out_spec=out_spec
+    )
+    return ret
+
+
 def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
@@ -457,6 +482,14 @@ def _export_non_strict(
 
         gm = replace_set_grad_with_hop_pass(gm)
 
+    # Remove nn_module_stack metadata from all placeholders/inputs nodes.
+    for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                node.meta.pop("nn_module_stack", None)
+
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
@@ -596,6 +629,36 @@ def _rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
+    """
+    Perform nn_module_stack checks on the graph.
+    Current constraints:
+        For the top level graph:
+        - populated for 'call_function', 'get_attr'
+        - None for 'placeholder', 'output'
+        For submodule graphs:
+        - None for 'placeholder', output'
+
+    TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
+    """
+    # Check top-level graph for all nodes, all graphs for placeholder & output nodes
+    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.nodes:
+            if node.op in ["call_function", "get_attr"]:
+                if i == 0:
+                    if node.meta.get("nn_module_stack", None) is None:
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+            elif node.op in ["placeholder", "output"]:
+                if node.meta.get("nn_module_stack", None):
+                    raise SpecViolationError(
+                        f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                    )
+
+
 def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
     op_count = 0
     op_set = set()
@@ -613,12 +676,13 @@ def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
 
 
 _EXPORT_FLAGS: Optional[Set[str]] = None
+_EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        global _EXPORT_FLAGS
+        global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
         try:
             start = time.time()
             ep = fn(*args, **kwargs)
@@ -641,6 +705,7 @@ def _log_export_wrapper(fn):
             raise e
         finally:
             _EXPORT_FLAGS = None
+            _EXPORT_MODULE_HIERARCHY = None
 
         return ep
 
@@ -699,7 +764,9 @@ def _export(
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
 
-    global _EXPORT_FLAGS
+    global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
+    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
+
     flags = set()
     flags.add("strict" if strict else "non_strict")
     flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
@@ -809,6 +876,8 @@ def _export(
             range_constraints = make_constraints(
                 fake_mode,
                 equalities_inputs,
+                dynamic_shapes if dynamic_shapes else [],
+                ep_non_strict.sig.input_specs,
                 original_signature,
                 ep_non_strict.gm,
             )
@@ -847,23 +916,16 @@ def _export(
             gm = res.graph_module
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+        _verify_nn_module_stack(gm)
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
             state_dict=mod.state_dict(keep_vars=True),
             range_constraints=range_constraints,
-            module_call_graph=[
-                ModuleCallEntry(
-                    "",
-                    ModuleCallSignature(
-                        inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=out_spec
-                    ),
-                )
-            ]
-            + [
-                ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()
-            ],
+            module_call_graph=_make_module_call_graph(
+                _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
+            ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
         )
@@ -902,8 +964,8 @@ def _export(
                     attr, static_shapes=True
                 )
 
-    # When aot_export lifts the params, we lose the nn_module_stack
-    # and source_fn from the param nodes as they are treated as fresh inputs
+    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
+    # from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
     params_buffers_to_node_meta = {}
     for node in gm_torch_level.graph.nodes:
@@ -972,6 +1034,10 @@ def _export(
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
+
+    # Don't copy over nn_module_stack metadata for params/buffers nodes
+    for metadata in params_buffers_to_node_meta.values():
+        metadata.pop("nn_module_stack", None)
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -1043,21 +1109,19 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
+    _verify_nn_module_stack(gm)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
         graph_signature=export_graph_signature,
         state_dict=mod.state_dict(keep_vars=True),
         range_constraints=range_constraints,
-        module_call_graph=[
-            ModuleCallEntry(
-                "",
-                ModuleCallSignature(
-                    inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec
-                ),
-            )
-        ]
-        + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
+        module_call_graph=_make_module_call_graph(
+            _EXPORT_MODULE_HIERARCHY,
+            orig_in_spec,
+            orig_out_spec,
+            module_call_signatures,
+        ),
         example_inputs=(args, kwargs),
         constants=constants,
     )
