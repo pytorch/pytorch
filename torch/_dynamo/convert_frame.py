@@ -13,6 +13,8 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
+# from torch.autograd import skip_grad_layout_contract
+
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
 )
@@ -442,7 +444,8 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 
 @_use_lazy_graph_module(config.use_lazy_graph_module)
-@maybe_cprofile
+# @skip_grad_layout_contract()
+# @maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],

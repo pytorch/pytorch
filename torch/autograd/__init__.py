@@ -6,6 +6,7 @@ for which gradients should be computed with the ``requires_grad=True`` keyword.
 As of now, we only support autograd for floating point :class:`Tensor` types (
 half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
+import contextlib
 import warnings
 from typing import Any, Callable, cast, List, Optional, Sequence, Tuple, Union
 
@@ -513,3 +514,13 @@ is_view_replay_enabled = torch._C._is_view_replay_enabled
 torch._C._add_docstr(
     is_view_replay_enabled, "Returns True if view-replay is currently enabled."
 )
+
+
+@contextlib.contextmanager
+def skip_grad_layout_contract(skip=True):
+    try:
+        old = torch._C._autograd._get_skip_grad_layout_contract()
+        torch._C._autograd._set_skip_grad_layout_contract(skip)
+        yield
+    finally:
+        torch._C._autograd._set_skip_grad_layout_contract(old)

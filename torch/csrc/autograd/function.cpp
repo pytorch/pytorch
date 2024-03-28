@@ -20,6 +20,16 @@
 namespace torch {
 namespace autograd {
 
+bool skip_grad_layout_contract = false;
+
+void setSkipGradLayoutContract(bool skip) {
+  skip_grad_layout_contract = skip;
+}
+
+bool getSkipGradLayoutContract() {
+  return skip_grad_layout_contract;
+}
+
 // The current evaluating node. This is useful to assign the current node as a
 // parent of new nodes created during the evaluation of this node in anomaly
 // mode.

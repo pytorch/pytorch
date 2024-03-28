@@ -19,6 +19,8 @@
 namespace torch {
 namespace autograd {
 
+extern bool skip_grad_layout_contract;
+
 #define CHECK_RESULT(RESULT, VAR)                                          \
   if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || \
         VAR.is_sparse_csr())) {                                            \
@@ -124,7 +126,7 @@ struct TORCH_API AccumulateGrad : public Node {
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
           at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
-          (new_grad.is_mkldnn() ||
+          (skip_grad_layout_contract || new_grad.is_mkldnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
         // not sparse

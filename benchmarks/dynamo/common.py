@@ -639,6 +639,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
+    # torch._C._autograd._set_skip_grad_layout_contract(True)
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(
@@ -659,7 +660,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
-            with maybe_mark_profile(p=p, mark="expected"):
+            with maybe_mark_profile(p=p, mark="expected"), torch.autograd.skip_grad_layout_contract(False):
                 timings[rep, 0], expected_output = timed(
                     model,
                     model_iter_fn,
@@ -672,9 +673,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
+            # TODO figure out the correct way to apply torch.autograd.skip_grad_layout_contract()
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
                 args.compiled_autograd
-            ):
+            ): # , torch.autograd.skip_grad_layout_contract(False): why this cause eager opitmizer being used?
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,

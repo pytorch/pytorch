@@ -117,6 +117,8 @@ TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
 """
 
+DEFAULT_ALIGN = 16
+
 
 def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
@@ -186,6 +188,7 @@ def stride_order2fill_order(order):
     """
     Convert stride order to fill order
     For channel last format,
+
     stride order = [3, 0, 2, 1] and fill order = [1, 3, 2, 0]
     """
     lookup = {pos: idx for idx, pos in enumerate(order)}
@@ -1782,19 +1785,31 @@ def is_storage_and_layout(x):
 def is_contiguous_storage_and_layout(x):
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
+        # pad the stride here so we will NOT claim an tensor as contiguous
+        # if a padding is gonna happen.
+        if layout.should_pad_strides():
+            layout.pad_strides()
         return layout.is_contiguous()
     except NotImplementedError:
         return False
 
 
-def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=None):
-    """Try to simplify x into a StorageBox and a Layout"""
+def as_storage_and_layout(
+    x, freeze=True, want_contiguous=False, stride_order=None, allow_padding=False
+):
+    """
+    Try to simplify x into a StorageBox and a Layout.
+
+    allow_padding only affect how we apply stride_order. When allow_padding
+    is True, we can add padding when applying the stride_order.
+    """
     if isinstance(x, TensorBox):
         return as_storage_and_layout(
             x.data,
             freeze=freeze,
             want_contiguous=want_contiguous,
             stride_order=stride_order,
+            allow_padding=allow_padding,
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
@@ -1802,7 +1817,9 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
                 x.data.freeze_layout()
                 assert x.data.layout.is_contiguous()
             elif stride_order is not None:
-                x.data.freeze_layout_with_stride_order(stride_order)
+                x.data.freeze_layout_with_stride_order(
+                    stride_order, allow_padding=allow_padding
+                )
             else:
                 x.data.decide_layout()
         return x, x.data.layout
@@ -2571,7 +2588,101 @@ class Layout(IRNode):
         order = [len(order)] + order
         return self.is_stride_ordered(order)
 
+    @staticmethod
+    def _pad_strides(in_strides, size, align=DEFAULT_ALIGN):
+        """
+        The padding does not change stride order but makes sure all non 1 strides
+        are multiple of align.
+        """
+        if len(in_strides) == 0:
+            return in_strides
+
+        current_fx_node = V.get_current_node()
+        if hasattr(current_fx_node, "meta") and current_fx_node.meta.get("dislike_padding", False):
+            return in_strides
+
+        # get_stride_order does not work with dynamic shape. Also we can not
+        # statically decide if a padding is needed or how much padding we should
+        # do for dynamic shape.
+        #
+        # Skip padding the strides for dynamic shape for now.
+        if not all(
+            isinstance(s, (int, sympy.Integer))
+            for s in itertools.chain(in_strides, size)
+        ):
+            return in_strides
+
+        stride_order = get_stride_order(in_strides)
+        fill_order = stride_order2fill_order(stride_order)
+
+        new_strides = [0 for _ in range(len(in_strides))]
+        # since way pad when the layout is flexible, we can decide the
+        # smallest stride to be 1.
+        new_strides[fill_order[0]] = 1
+
+        # don't align an too small stride since that cause too much memory increase.
+        # Pick heuristic value 320 since for alignement=16, that results in at most 5% memory increase.
+        #
+        # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
+        # with gaps in between. That causes less coalesced GPU memory access!
+        # align_stride_threshold = 320
+
+        # Further raise the threshold to 1024 to avoid interfere with persistent reduction.
+        # Let's say a inner reduction has a row size 513. Inductor will generate
+        # persistent reduction code.
+        # If we do padding, the strides are not contiguous any more. Inductor
+        # uses a much smaller threshold for persistent reduction this case and
+        # generate potentially worse non-persistent reduction code.
+        #
+        # This change turnes HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+        # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
+        align_stride_threshold = 1024
+        for rank, idx in enumerate(fill_order[1:], start=1):
+            prev_idx = fill_order[rank - 1]
+            stride = new_strides[prev_idx] * size[prev_idx]
+
+            if stride > align_stride_threshold and stride % align != 0:
+                stride = (stride + align - 1) // align * align
+            new_strides[idx] = stride
+
+        return new_strides
+
+    def need_padding(self, align=DEFAULT_ALIGN):
+        assert self._stride is not None
+        for s in self._stride:
+            if s > 1 and s % align != 0:
+                return True
+        return False
+
+    def pad_strides(self):
+        if not config.pad_fixed_layout:
+            assert isinstance(self, FlexibleLayout)
+        assert self._stride is not None
+        self._stride = self._pad_strides(self._stride, self.size)
+
+    def should_pad_strides(self):
+        return config.comprehensive_padding and (
+            config.pad_fixed_layout or isinstance(self, FlexibleLayout)
+        )
+
     def as_fixed(self):
+        if (
+            config.debug_fixed_layout
+            and isinstance(self, FixedLayout)
+            and self.need_padding()
+        ):
+            import traceback
+
+            trace, instance_cnt = fixed_layout_creation_stack_traces[id(self)]
+            traceback.print_list(trace)
+            print(f"instance_cnt {instance_cnt}")
+            breakpoint()
+        if not config.pad_fixed_layout:
+            if isinstance(self, FixedLayout):
+                return self
+
+        if self.should_pad_strides():
+            self.pad_strides()
         return FixedLayout(
             self.device,
             self.dtype,
@@ -2599,6 +2710,11 @@ class Layout(IRNode):
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type, return-value]
 
 
+if config.debug_fixed_layout:
+    fixed_layout_creation_stack_traces = {}  # type: ignore[var-annotated]
+    fixed_layout_instance_cnt = itertools.count()
+
+
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
@@ -2619,6 +2735,13 @@ class FixedLayout(Layout):
             stride,
             offset,  # type: ignore[arg-type]
         )
+
+        if config.debug_fixed_layout:
+            instance_count = next(fixed_layout_instance_cnt)
+            fixed_layout_creation_stack_traces[id(self)] = (
+                traceback.extract_stack(),
+                instance_count,
+            )
 
     def make_indexer(self):
         """A closure containing math to read a given element"""
@@ -2690,30 +2813,40 @@ class FlexibleLayout(Layout):
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
-    def as_stride_order(self, order):
+    def as_stride_order(self, order, allow_padding=False):
+        new_stride = self.stride_ordered(self.size, order)
+        if self.should_pad_strides() and allow_padding:
+            new_stride = self._pad_strides(new_stride, self.size)
+
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.stride_ordered(self.size, order),
+            new_stride,
             self.offset,
         )
 
     def as_fill_order(self, order):
+        new_stride = self.fill_ordered(self.size, order)
+        if self.should_pad_strides():
+            new_stride = self._pad_strides(new_stride, self.size)
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.fill_ordered(self.size, order),
+            new_stride,
             self.offset,
         )
 
     def as_same_order(self, stride):
+        new_stride = self.same_ordered(self.size, stride)
+        if self.should_pad_strides():
+            new_stride = self._pad_strides(new_stride, self.size)
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.same_ordered(self.size, stride),
+            new_stride,
             self.offset,
         )
 
@@ -2904,9 +3037,9 @@ class Buffer(IRNode):
         if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
-    def freeze_layout_with_stride_order(self, order):
+    def freeze_layout_with_stride_order(self, order, allow_padding=False):
         assert isinstance(self.layout, FlexibleLayout)
-        self.layout = self.layout.as_stride_order(order)
+        self.layout = self.layout.as_stride_order(order, allow_padding=allow_padding)
 
     def freeze_layout_with_fill_order(self, order):
         assert isinstance(self.layout, FlexibleLayout)
@@ -4050,7 +4183,7 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_stride_order(cls, x, order):
+    def require_stride_order(cls, x, order, allow_padding=False):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
@@ -4061,7 +4194,11 @@ class ExternKernel(InputsKernel):
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
-                    x, freeze=True, want_contiguous=False, stride_order=order
+                    x,
+                    freeze=True,
+                    want_contiguous=False,
+                    stride_order=order,
+                    allow_padding=allow_padding,
                 )
                 return x
             elif isinstance(
@@ -4090,11 +4227,17 @@ class ExternKernel(InputsKernel):
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
-                return cls.require_stride_order(x, order)
+                return cls.require_stride_order(x, order, allow_padding=allow_padding)
             except NotImplementedError:
                 pass
         x = cls.copy_input(x)
-        as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
+        as_storage_and_layout(
+            x,
+            freeze=True,
+            want_contiguous=False,
+            stride_order=order,
+            allow_padding=allow_padding,
+        )
         assert is_stride_order_storage_and_layout(x, order)
         return x
 

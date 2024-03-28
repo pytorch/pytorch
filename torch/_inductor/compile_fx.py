@@ -306,6 +306,22 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     return False
 
 
+def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
+    """
+    TODO: for CPU backend, enable comprehensive padding causes some unit tests
+    fail due to changing number of generated kernels. Skip for now.
+    """
+    all_cpu = not any(
+        t.device.type == "cuda" for t in example_inputs if isinstance(t, torch.Tensor)
+    )
+
+    if config.comprehensive_padding and all_cpu:
+        perf_hint_log.warning("Skip comprehensive padding on CPU")
+        return config.patch(comprehensive_padding=False)
+    else:
+        return contextlib.nullcontext()
+
+
 @DebugContext.wrap
 def count_bytes_inner(
     gm: torch.fx.GraphModule,
@@ -320,7 +336,9 @@ def count_bytes_inner(
         _recursive_post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
+    with V.set_graph_handler(graph), V.set_real_inputs(
+        example_inputs
+    ), maybe_disable_comprehensive_padding(example_inputs):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
@@ -374,6 +392,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+# @skip_grad_layout_contract()
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -664,7 +683,9 @@ def fx_codegen_and_compile(
             optimus_scuba_log,
         )
 
-    with V.set_fake_mode(fake_mode):
+    with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
+        example_inputs
+    ):
         const_output_index = None
         const_graph = None
         const_code = None
@@ -1135,6 +1156,7 @@ def fw_compiler_freezing(
 
 
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+# @skip_grad_layout_contract()
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1143,6 +1165,7 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+    torch._C._autograd._set_skip_grad_layout_contract(True)
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(
@@ -1333,7 +1356,7 @@ def compile_fx(
         )
 
     @dynamo_utils.dynamo_timed
-    @dynamo_utils.maybe_cprofile
+    # @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
         return inner_compile(

@@ -405,6 +405,17 @@ kernel_name_max_ops = 10
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
+# Control if we will do padding for pointwise/reductions
+comprehensive_padding = (
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
+)
+# XXX: Just for testing. Will remove before landing.
+pad_fixed_layout = os.environ.get("TORCHINDUCTOR_PAD_FIXED_LAYOUT") == "1"
+
+# Record the stacktrace when creating a FixedLayout. Used to figure out
+# if we are too conservative to make a layout fixed rather than flexible
+debug_fixed_layout = os.environ.get("TORCHINDUCTOR_DEBUG_FIXED_LAYOUT") == "1"
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
@@ -531,7 +542,7 @@ class cpp:
 # config specific to codegen/triton.py
 class triton:
     # Use cudagraphs on output code
-    cudagraphs = False
+    cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
