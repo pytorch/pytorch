@@ -21,6 +21,10 @@
 #include <cmath>
 #include <functional>
 
+#if USE_ROCM
+#include <aotriton/flash.h>
+#endif
+
 /**
 * Note [SDPA Runtime Dispatch]
 * SDPA relies on a runtime dispatch mechanism to select the appropriate
@@ -182,32 +186,18 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
-  auto dprops = at::cuda::getCurrentDeviceProperties();
 #if USE_ROCM
-  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-  static const char *over_arch = [] {
-    auto rc = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
-    if (rc) {
-        TORCH_WARN("SDPA functions only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
-                   "Later changes to this environment variable with os.environ "
-                   "(or other methods) will not affect SDPA function's behavior.");
-    }
-    return rc;
-  }();
-  const char* real_arch = dprops->gcnArchName;
-  const char* arch = over_arch ? over_arch : real_arch;
-  if (mi200 != arch) {
-    if (debug) {
-      TORCH_WARN(
-          "Flash attention only supports gpu architecture gfx90a, for now. Attempting to run on a ",
-          arch,
-          ".",
-          over_arch ? " This is overrided by PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE. Real architecture is " : "",
-          over_arch ? real_arch : "");
-    }
-    return false;
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+      auto dprops = at::cuda::getCurrentDeviceProperties();
+      if (debug) {
+          TORCH_WARN(
+                  "Flash attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
+      }
+      return false;
   }
 #else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
