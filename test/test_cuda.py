@@ -2913,8 +2913,8 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
             for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD,
-                                                                            torch.optim.Adadelta), (False, True),
-                                                                           (False, True), (0, 0.1))
+                                                                            torch.optim.Adadelta, torch.optim.RMSprop),
+                                                                           (False, True), (False, True), (0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2928,7 +2928,7 @@ exit(2)
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
                                                                  torch.optim.ASGD, torch.optim.Adamax,
                                                                  torch.optim.NAdam, torch.optim.RAdam,
-                                                                 torch.optim.Adadelta), (True, False)):
+                                                                 torch.optim.Adadelta, torch.optim.RMSprop), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
