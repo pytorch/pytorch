@@ -296,6 +296,24 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available(),
         ),
         BaseTest(
+            "test_qlinear_gelu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qlinear_add",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qlinear_add_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
             "test_qlinear_dequant_promotion",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),

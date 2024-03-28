@@ -6860,6 +6860,225 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
 
 
+class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        has_bias=True,
+        x_scale_zp_are_tensors=False,
+    ):
+        """
+        if bias is not None
+            - inputs = [x, w, b, weight_scale, weight_zp, x2]
+            - const_args is: [x_scale, x_zp, o_inv_scale, o_zp,
+              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, weight_scale, weight_zp, x2]
+            - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
+              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = has_bias
+        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            python_kernel_name=(
+                "torch.ops.onednn.qlinear_pointwise.binary_tensor"
+                if x_scale_zp_are_tensors
+                else "torch.ops.onednn.qlinear_pointwise.binary"
+            ),
+            cpp_kernel_name="onednn::qlinear_pointwise",
+        )
+        self.cpp_kernel_overload_name = (
+            "binary_tensor" if x_scale_zp_are_tensors else "binary"
+        )
+        self.cpp_kernel_key = "qlinear_pointwise_binary"
+        x_scale_type_str, x_zp_type_str = (
+            ("at::Tensor", "at::Tensor")
+            if x_scale_zp_are_tensors
+            else ("double", "int64_t")
+        )
+        self.cpp_op_schema = f"""
+            at::Tensor(
+                at::Tensor act,
+                {x_scale_type_str} act_scale,
+                {x_zp_type_str} act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::optional<at::Tensor> other,
+                double other_scale,
+                int64_t other_zero_point,
+                c10::string_view binary_post_op,
+                double binary_alpha,
+                c10::string_view unary_post_op,
+                torch::List<c10::optional<at::Scalar>> unary_post_op_args,
+                c10::string_view unary_post_op_algorithm)"""
+
+    def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        w_scale, w_zp, other = args[-3], args[-2], args[-1]
+        if self.x_scale_zp_are_tensors:
+            assert len(args) >= 4
+            x_scale, x_zp = args[-4], args[-3]
+            (
+                o_inv_scale,
+                o_zp,
+                output_dtype,
+                other_scale,
+                other_zp,
+                binary_attr,
+                alpha,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-10:]
+        else:
+            assert len(const_args) >= 8
+            (
+                x_scale,
+                x_zp,
+                o_inv_scale,
+                o_zp,
+                output_dtype,
+                other_scale,
+                other_zp,
+                binary_attr,
+                alpha,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-12:]
+
+        codegen_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            o_inv_scale,
+            o_zp,
+            output_dtype,
+            other,
+            other_scale,
+            other_zp,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        )
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.get_kernel_name(),
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        x_scale: float,
+        x_zp: int,
+        weight: "TensorBox",  # packed_weight
+        w_scale: "TensorBox",
+        w_zp: "TensorBox",
+        bias: "TensorBox",
+        o_inv_scale: float,
+        output_zero_point: int,
+        output_dtype,
+        other: "TensorBox",
+        other_scale,
+        other_zp,
+        binary_attr,
+        alpha,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
+    ):
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            req_stride_order,
+        ) = _prepare_linear_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+        )
+
+        if isinstance(x_scale, TensorBox) and isinstance(x_zp, TensorBox):
+            x_scale.realize()
+            x_zp.realize()
+            inputs = inputs + [x_scale, x_zp]
+            x_scale_zp_are_tensors = True
+        else:
+            assert isinstance(x_scale, float) and isinstance(x_zp, int)
+            constant_args = constant_args + [x_scale, x_zp]
+            x_scale_zp_are_tensors = False
+        w_scale.realize()
+        w_zp.realize()
+        inputs = inputs + [w_scale, w_zp]
+        if binary_attr == "sum":
+            other = cls.require_stride_order(other, req_stride_order)
+        inputs.append(other)
+        constant_args = constant_args + [
+            o_inv_scale,
+            output_zero_point,
+            output_dtype,
+            other_scale,
+            other_zp,
+            binary_attr,
+            alpha,
+            unary_attr,
+            may_convert_to_optional(unary_scalars),
+            unary_algorithm,
+        ]
+
+        if binary_attr == "sum":
+            packed = QLinearPointwiseBinaryPT2E(
+                layout=NoneLayout(other.get_device()),
+                inputs=inputs,
+                constant_args=constant_args,
+                has_bias=(bias is not None),
+                x_scale_zp_are_tensors=x_scale_zp_are_tensors,
+            )
+            mark_node_as_mutating(packed, other)
+            # Return other since it has been inplace changed.
+            return packed.inputs[-1]
+
+        return QLinearPointwiseBinaryPT2E(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            has_bias=(bias is not None),
+            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
+        )
+
+
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """

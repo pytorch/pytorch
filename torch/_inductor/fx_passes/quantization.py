@@ -447,18 +447,121 @@ def _register_quantized_linear_lowering(
     return qlinear
 
 
-def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
-    # Check if it's a valid Conv Binary Pattern:
-    # * qconv2d_pointwise should only has one users
-    # * Extra input of binary node comes from dequant pattern
+def _register_quantized_linear_binary_lowering(
+    pattern,
+    pass_number,
+    computation_op,
+    output_dtype,
+    binary_unary_attr,
+):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_qlinear_binary_optimization_pattern(output_dtype),
+        pass_number=pass_number,
+    )
+    def qlinear_binary(match: Match, *args, **kwargs):
+        # Activation QParams
+        x, x_scale, x_zp = (
+            kwargs["x"],
+            kwargs["x_scale"],
+            kwargs["x_zp"],
+        )
+        # x2 is not quantized for linear
+        x2 = (
+            kwargs["accum"]
+            if binary_unary_attr.binary_op_name == "sum"
+            else kwargs["other"]
+        )
+        x2_scale = 1.0
+        x2_zp = 0
+        # Weight QParams
+        packed_weight, w_scale, w_zp = (
+            kwargs["packed_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+        # bias
+        b = kwargs["b"] if "b" in kwargs else None
+        # Output QParams
+        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
+        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+
+        x2.realize()
+        from .mkldnn_fusion import _can_be_inplace
+
+        if binary_unary_attr.binary_op_name == "sum":
+            assert _can_be_inplace(
+                x2
+            ), "QLinear Binary Inplace Fusion requires accum is not an alias or mutation."
+
+        # if we have reached the end of graph and AMP(bf16) is on, there is not a data type conversion
+        # node at the end. Then the output dtype will be fp32, which is wrong. So, here we check the output
+        # dtype of the original linear in the matched pattern and also the dtype of accum
+        out_dtype = output_dtype
+        if (
+            output_dtype
+            and kwargs["output_dtype"] == x2.dtype
+            and output_dtype != x2.dtype
+        ):
+            assert binary_unary_attr.binary_op_name == "sum"
+            out_dtype = x2.dtype
+
+        computation_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            b,
+            o_inv_scale,
+            o_zero_point,
+            out_dtype,
+            x2,
+            x2_scale,
+            x2_zp,
+            binary_unary_attr.binary_op_name,
+            binary_unary_attr.alpha,
+            binary_unary_attr.unary_op_name,
+            binary_unary_attr.scalars_attr,
+            binary_unary_attr.algorithm_attr,
+        )
+        counters["inductor"]["qlinear_binary_matcher_count"] += 1
+        counters["inductor"]["qlinear_binary_matcher_nodes"] += len(match.nodes)
+        return L[computation_op](*computation_args)
+
+    return qlinear_binary
+
+
+def _is_valid_qconv_binary_optimization_pattern(output_dtype):
+    return _is_valid_quantized_op_binary_optimization_pattern(
+        torch.ops.onednn.qconv2d_pointwise, output_dtype
+    )
+
+
+def _is_valid_qlinear_binary_optimization_pattern(output_dtype):
+    return _is_valid_quantized_op_binary_optimization_pattern(
+        torch.ops.onednn.qlinear_pointwise,
+        output_dtype,
+        # we don't insert q-dq for extra input due to accuracy issues
+        extra_input_from_dequant=False,
+    )
+
+
+def _is_valid_quantized_op_binary_optimization_pattern(
+    qop, output_dtype, extra_input_from_dequant=True
+):
+    # Check if it's a valid Binary Pattern for qconv2d and qlinear:
+    # * qop_pointwise should only has one users
+    # * If extra_input_from_dequant is True, extra input of binary node should come from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
     # * the two inputs of binary node should have the same shape
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
     def fn(match):
-        compute_node = filter_nodes(match.nodes, torch.ops.onednn.qconv2d_pointwise)[0]
-        # qconv2d_pointwise should only have one user
+        compute_node = filter_nodes(match.nodes, qop)[0]
+        # qop_pointwise should only have one user
         if len(compute_node.users) != 1:
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
@@ -470,8 +573,10 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
                     extra_input_of_binary_node = arg
                     break
             assert extra_input_of_binary_node is not None
+            if not isinstance(extra_input_of_binary_node, torch.fx.Node):
+                return False
             # Extra input of binary node comes from dequant pattern
-            if (not isinstance(extra_input_of_binary_node, torch.fx.Node)) or (
+            if extra_input_from_dequant and (
                 extra_input_of_binary_node.target != aten.mul.Tensor
             ):
                 return False
@@ -499,9 +604,13 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
         from .mkldnn_fusion import _get_remaining_users
 
         extra_input_of_pattern = (
-            match.kwargs["accum"]
-            if output_dtype is None
-            else match.kwargs["accum_after_dequant"]
+            match.kwargs["other"]
+            if "other" in match.kwargs
+            else (
+                match.kwargs["accum"]
+                if output_dtype is None or (not extra_input_from_dequant)
+                else match.kwargs["accum_after_dequant"]
+            )
         )
         if (
             len(
@@ -528,7 +637,7 @@ def _register_quantized_conv_binary_lowering(
 ):
     @register_lowering_pattern(
         pattern,
-        extra_check=_is_valid_quantized_conv_binary_optimization_pattern(output_dtype),
+        extra_check=_is_valid_qconv_binary_optimization_pattern(output_dtype),
         pass_number=pass_number,
     )
     def qconv_binary(match: Match, *args, **kwargs):
@@ -896,6 +1005,115 @@ def _register_quantization_binary_fusion():
                 torch.bfloat16 if int8_mixed_bf16_with_inplace_add else torch.float32,
                 binary_unary_attr,  # binary_unary_attr
             )
+
+        # QLinear
+        # Note: the extra input of binary op is not quantized by recipe
+        for x_scale_zp_are_tensors in (False, True):
+            qlinear_binary_op = (
+                torch.ops.onednn.qlinear_pointwise.binary_tensor
+                if x_scale_zp_are_tensors
+                else torch.ops.onednn.qlinear_pointwise.binary
+            )
+            # Priority 1 to match: QLinear Binary or Binary-Unary pattern with int8 output
+            qlinear_binary_replace_patterns = {
+                BinaryUnaryAttr(
+                    "add", 1.0, "none", [], ""
+                ): generate_pattern_with_output_quant(
+                    generate_pattern_with_binary(
+                        aten.add.Tensor,
+                        get_qlinear_pt2e_pattern(x_scale_zp_are_tensors),
+                        KeywordArg("other"),
+                        # The data type convert node (bf16 -> fp32 before quant) is included
+                        # in the output quant pattern, so here we don't need to put it in the
+                        # binary pattern again.
+                        int8_mixed_bf16_with_inplace_add=False,
+                    ),
+                    dtype=torch.bfloat16
+                    if int8_mixed_bf16_with_inplace_add
+                    else torch.float32,
+                ),
+                BinaryUnaryAttr(
+                    "add", 1.0, "relu", [], ""
+                ): generate_pattern_with_output_quant(
+                    generate_pattern_with_unary(
+                        generate_pattern_with_binary(
+                            aten.add.Tensor,
+                            get_qlinear_pt2e_pattern(x_scale_zp_are_tensors),
+                            KeywordArg("other"),
+                            # The data type convert node (bf16 -> fp32 before quant) is included
+                            # in the output quant pattern. It is not before the unary op.
+                            int8_mixed_bf16_with_inplace_add=False,
+                        ),
+                        aten.relu.default,
+                    ),
+                    dtype=torch.bfloat16
+                    if int8_mixed_bf16_with_inplace_add
+                    else torch.float32,
+                ),
+            }
+            for binary_unary_attr, patterns in qlinear_binary_replace_patterns.items():
+                _register_quantized_linear_binary_lowering(
+                    patterns,
+                    0,  # pass_number
+                    qlinear_binary_op,  # computation_op
+                    None,  # output_dtype
+                    binary_unary_attr,  # binary_unary_attr
+                )
+
+            # Priority 2 to match: QLinear Binary-Unary pattern with fp32/bfloat16 output
+            binary_replace_float_out_patterns = {
+                BinaryUnaryAttr(
+                    "sum", 1.0, "relu", [], ""
+                ): generate_pattern_with_unary(
+                    generate_pattern_with_binary(
+                        aten.add.Tensor,
+                        get_qlinear_pt2e_pattern(x_scale_zp_are_tensors),
+                        KeywordArg("accum"),
+                        int8_mixed_bf16_with_inplace_add,
+                    ),
+                    aten.relu.default,
+                ),
+            }
+
+            for (
+                binary_unary_attr,
+                patterns,
+            ) in binary_replace_float_out_patterns.items():
+                _register_quantized_linear_binary_lowering(
+                    patterns,
+                    0 if int8_mixed_bf16_with_inplace_add else 1,  # pass_number
+                    qlinear_binary_op,  # computation_op
+                    torch.bfloat16
+                    if int8_mixed_bf16_with_inplace_add
+                    else torch.float32,
+                    binary_unary_attr,
+                )
+
+            # Priority 3: QLinear Binary pattern with fp32/bfloat16 output
+            binary_replace_float_out_patterns = {
+                BinaryUnaryAttr(
+                    "sum", 1.0, "none", [], ""
+                ): generate_pattern_with_binary(
+                    aten.add.Tensor,
+                    get_qlinear_pt2e_pattern(x_scale_zp_are_tensors),
+                    KeywordArg("accum"),
+                    int8_mixed_bf16_with_inplace_add,
+                ),
+            }
+
+            for (
+                binary_unary_attr,
+                patterns,
+            ) in binary_replace_float_out_patterns.items():
+                _register_quantized_linear_binary_lowering(
+                    patterns,
+                    1 if int8_mixed_bf16_with_inplace_add else 2,  # pass_number
+                    qlinear_binary_op,  # computation_op
+                    torch.bfloat16
+                    if int8_mixed_bf16_with_inplace_add
+                    else torch.float32,
+                    binary_unary_attr,
+                )
 
 
 def _is_valid_quantized_maxpool2d_optimization_pattern():
