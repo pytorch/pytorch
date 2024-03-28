@@ -386,7 +386,7 @@ class profile:
     def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
-        trace_start_us = result.trace_start_us()
+        trace_start_ns = result.trace_start_ns()
         mem_records = [
             [evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME
         ]
@@ -424,9 +424,9 @@ class profile:
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
                 continue
-            rel_start_us = kineto_event.start_us() - trace_start_us
-            rel_end_us = rel_start_us + kineto_event.duration_us()
-            abs_end_us = kineto_event.start_us() + kineto_event.duration_us()
+            rel_start_ns = kineto_event.start_ns() - trace_start_ns
+            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
+            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
 
             cpu_memory_usage = 0
             cuda_memory_usage = 0
@@ -434,7 +434,7 @@ class profile:
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_us(), abs_end_us
+                    kineto_event.start_ns() / 1000, abs_end_ns / 1000
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     cuda_memory_usage += _cuda_memory_usage(mem_record[0])
@@ -450,8 +450,8 @@ class profile:
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
-                start_us=rel_start_us,
-                end_us=rel_end_us,
+                start_us=rel_start_ns / 1000,
+                end_us=rel_end_ns / 1000,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
@@ -513,14 +513,14 @@ class profile:
                         f_evt.thread = fe.thread
 
         def createFunctionEventForMemoryEvents(evt):
-            rel_start_us = evt.start_us() - trace_start_us
+            rel_start_ns = evt.start_ns() - trace_start_ns
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
-                start_us=rel_start_us,
-                end_us=rel_start_us,  # no duration
+                start_us=rel_start_ns / 1000,
+                end_us=rel_start_ns / 1000,  # no duration
                 fwd_thread=evt.start_thread_id(),
                 input_shapes=[],
                 stack=[],

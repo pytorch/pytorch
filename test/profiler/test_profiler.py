@@ -2725,11 +2725,11 @@ class MockKinetoEvent:
     def name(self) -> str:
         return self._name
 
-    def start_us(self) -> int:
-        return self._start_us
+    def start_ns(self) -> int:
+        return self._start_us * 1000
 
-    def duration_us(self) -> int:
-        return self._duration_us
+    def duration_ns(self) -> int:
+        return self._duration_us * 1000
 
     def linked_correlation_id(self) -> int:
         return self._linked_correlation_id
@@ -2874,10 +2874,10 @@ class TestExperimentalUtils(TestCase):
             kineto_events = [{
                 '_name':
                 e.name,
-                '_start_us':
-                e.start_us(),
-                '_duration_us':
-                e.duration_us(),
+                '_start_ns':
+                e.start_ns(),
+                '_duration_ns':
+                e.duration_ns(),
                 '_linked_correlation_id':
                 e.linked_correlation_id(),
                 '_device_type':
