@@ -10,6 +10,7 @@ import math
 import operator
 import typing
 import copyreg
+import re
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -1973,8 +1974,16 @@ class GraphModuleDeserializer:
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
+            # Helper function that splits strings by commas except for those
+            # encapsulated by parens, which are valid traces.
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
             nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
+                import_nn_module_stack(*metadata_split(item))
                 for item in nn_module_stack_str.split(ST_DELIMITER)
             )
             ret["nn_module_stack"] = nn_module_stack
