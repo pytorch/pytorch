@@ -173,13 +173,14 @@ def _unlift_graph(mod, gm, graph_signature):
         if node_name in graph_signature.inputs_to_parameters:
             parameter_name = graph_signature.inputs_to_parameters[node_name]
             lifted_inputs.append(parameter_name)
-            gm._parameters[
-                get_cloned_parameter_buffer_name(parameter_name)
-            ] = state_dict[parameter_name].clone()
+
+            gm.meta[get_cloned_parameter_buffer_name(parameter_name)] = state_dict[
+                parameter_name
+            ].clone()
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
-            gm._buffers[get_cloned_parameter_buffer_name(buffer_name)] = state_dict[
+            gm.meta[get_cloned_parameter_buffer_name(buffer_name)] = state_dict[
                 buffer_name
             ].clone()
         else:
@@ -673,7 +674,7 @@ def fx_codegen_and_compile(
             "inductor_post_grad_graph",
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
-        optimus_scuba_log["inductor_post_grad"] = counters["inductor"]
+        optimus_scuba_log["inductor"] = counters["inductor"]
         signpost_event(
             "optimus",
             "compile_fx.post_grad_passes",
@@ -1225,12 +1226,6 @@ def compile_fx(
             )
 
         model_ = _recursive_pre_grad_passes(model_, example_inputs_)
-        optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
-        signpost_event(
-            "optimus",
-            "compile_fx.pre_grad_passes",
-            optimus_scuba_log,
-        )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(

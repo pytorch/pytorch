@@ -698,7 +698,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 ), f"input {name=} cannot be symbolic"
                 self.write_input_output_info("inputs_info_", idx, name)
 
-            for idx, (name, tensor) in enumerate(V.graph.constants.items()):
+            for idx, name in enumerate(V.graph.constants.keys()):
+                tensor = V.graph.get_original_value_of_constant(name)
                 assert isinstance(tensor, torch.Tensor)
                 self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
                 self.prefix.writeline(

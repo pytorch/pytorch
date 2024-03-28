@@ -1010,13 +1010,13 @@ class AOTInductorTestsTemplate:
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
-                self.register_buffer("foo", torch.ones(4, 4, device=device))
+                self.register_buffer("foo", torch.randn(4, 4, device=device))
 
             def forward(self, x):
                 self.foo.add_(1)
                 return self.foo + x
 
-        example_inputs = (torch.randn(4, 4, device=self.device),)
+        example_inputs = (torch.rand(4, 4, device=self.device),)
         torch._export.aot_compile(Model(self.device), example_inputs)
         self.check_model(Model(self.device), example_inputs)
 
@@ -1030,7 +1030,7 @@ class AOTInductorTestsTemplate:
                 self.bar.mul_(2)
                 return x + self.bar
 
-        example_inputs = (torch.zeros(10, device=self.device),)
+        example_inputs = (torch.randn(10, device=self.device),)
         self.check_model(Model(self.device), example_inputs)
 
     @skipIfRocm

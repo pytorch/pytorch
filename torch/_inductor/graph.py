@@ -66,7 +66,12 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_cloned_parameter_buffer_name,
+    get_sympy_Expr_dtype,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -264,7 +269,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
-        self.constants_orig_names: Dict[str, str] = {}
+        self.constants_name_mapping: Dict[str, str] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -670,6 +675,14 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
+    def get_original_value_of_constant(self, name: str):
+        orig_name = get_cloned_parameter_buffer_name(self.constants_name_mapping[name])
+        if orig_name in self.module.meta:
+            return self.module.meta[orig_name]
+        if name in self.constants:
+            return self.constants[name]
+        raise AssertionError(name + " not found as a graph constant")
+
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
             if not config.aot_inductor.use_runtime_constant_folding:
@@ -699,7 +712,7 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
-            self.constants_orig_names[name] = orig_name
+            self.constants_name_mapping[name] = orig_name
             self.constant_reprs[name] = (
                 f"{data.device!r} {data.dtype!r} "
                 f"{tuple(data.size())!r} {tuple(data.stride())!r} "

@@ -532,10 +532,6 @@ def get_kernel_metadata(node_schedule, wrapper):
     return metadata, "\n".join(detailed_metadata)
 
 
-def get_cloned_parameter_buffer_name(name: str):
-    return name + "__original__"
-
-
 def dominated_nodes(
     initial_queue: Iterable[torch.fx.Node], skip_filter=None
 ) -> Set[torch.fx.Node]:
@@ -1484,3 +1480,7 @@ def collect_defined_kernels(kernel_list):
 
     with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
         yield
+
+
+def get_cloned_parameter_buffer_name(name: str):
+    return name + "__original__"
