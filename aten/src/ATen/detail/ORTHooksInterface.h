@@ -19,6 +19,10 @@ struct TORCH_API ORTHooksInterface {
   virtual std::string showConfig() const {
     TORCH_CHECK(false, "Cannot query detailed ORT version information.", ORT_HELP);
   }
+
+  virtual const Generator& getDefaultORTGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get default ORT generator without ORT Extension for Pytorch. ", ORT_HELP);
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
