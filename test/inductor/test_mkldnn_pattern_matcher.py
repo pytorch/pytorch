@@ -1515,9 +1515,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_count"], 4
                 )
+                nodes_per_match = 8 if int8_mixed_bf16 else 6
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    4 * nodes_per_match,
+                )
                 # 2. Qlinear Binary Unary fusion in post-grad fusion pass * 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_count"], 2
+                )
+                # matched patter1 = [qlinear, add, (relu), (convert dtype), [quant patten]], len(quant pattern) = 6
+                # matched patter2 = [qlinear, add, (relu)]
+                self.assertEqual(
+                    counters["inductor"]["qlinear_binary_matcher_nodes"],
+                    10 + int8_mixed_bf16 + 2 * use_relu,
                 )
 
             for is_qat in [False, True]:
