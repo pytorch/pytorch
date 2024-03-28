@@ -1141,7 +1141,7 @@ class expectedFailure:
 
         @wraps(fn)
         def efail_fn(slf, *args, **kwargs):
-            if not hasattr(slf, "device_type") and hasattr(slf, "device") and isinstance(getattr(slf, "device"), str):
+            if not hasattr(slf, "device_type") and hasattr(slf, "device") and isinstance(slf.device, str):
                 target_device_type = slf.device
             else:
                 target_device_type = slf.device_type
