@@ -29,7 +29,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch._dynamo import compiled_autograd
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
 # from torchviz import make_dot
@@ -153,12 +153,20 @@ def init():
     # simple_mlp + unbalanced -> works
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
-    test_case = "simple_seq_module"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
+    test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
     balanced = False
+    mixed_precision = True
     if balanced:
         hidden_dim = 1234
     else:
         hidden_dim = 1235
+    if mixed_precision:
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        fsdp_config = {"mp_policy": mp_policy}
+    else:
+        fsdp_config = {}
     mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)
@@ -170,7 +178,7 @@ def init():
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim, device=device_type),
         )
-        fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True)
+        fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "simple_seq_module":  # this causes `len(splits) == 1` which is an interesting case for `replace_foreach_all_gather_copy_out_pattern` FX pass.
         class SimpleModule(nn.Module):
             def __init__(self, device: torch.device):
@@ -181,11 +189,14 @@ def init():
                 return torch.matmul(x, self.param)
 
         model = nn.Sequential(*[SimpleModule(torch.device("cuda")) for _ in range(1)])
+        for mod in model:
+            fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "nested_fully_shard":
         model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])
         for mlp in model:
-            fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
-        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+            fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     # else:
     #     # FSDP1
     #     fsdp_kwargs = {
