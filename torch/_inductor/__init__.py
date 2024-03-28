@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -86,6 +86,73 @@ def aot_compile(
     return compile_fx_aot(
         gm,
         example_inputs,
+        config_patches=options,
+    )
+
+
+def aot_compile_ep(
+    exported_program,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    options: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    AOT-Inductor compile an ExportedProgram into a shared library.
+
+    Args:
+        exported_program: torch.export.ExportedProgram
+        args: Example positional inputs
+        kwargs: Optional example keyword inputs
+        options: Optional dict of config options
+    """
+    from torch.export import ExportedProgram
+    from .compile_fx import compile_fx_aot
+    from torch._inductor import config
+    config.is_predispatch = True
+
+
+    assert isinstance(exported_program, torch.export.ExportedProgram)
+
+    # We will serialize the pytree info into the .so as constant strings
+    in_spec = exported_program.module_call_graph[0].signature.in_spec
+    out_spec = exported_program.module_call_graph[0].signature.out_spec
+
+    serialized_in_spec = pytree.treespec_dumps(in_spec)
+    serialized_out_spec = pytree.treespec_dumps(out_spec)
+
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
+
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, kwargs or {})
+    )
+    flat_example_inputs = tuple(x[1] for x in flat_args_with_path)
+
+    if received_spec != in_spec:
+        raise ValueError(  # noqa: TRY200
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}"
+        )
+
+    gm = exported_program.module()
+    gm.graph._codegen = torch.fx.graph.CodeGen()
+
+    return compile_fx_aot(
+        gm,  # type: ignore[arg-type]
+        flat_example_inputs,  # type: ignore[arg-type]
         config_patches=options,
     )
 
