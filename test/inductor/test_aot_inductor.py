@@ -2172,10 +2172,10 @@ class AOTInductorTestsTemplate:
         class Model(torch.nn.Module):
             def forward(self, x):
                 squared = x * x
-                no_op_contig = squared.contiguous()         # alias
-                no_op_reshape = squared.reshape(squared.shape)    # alias
+                contig = squared.contiguous()  # alias
+                reshaped = squared.reshape(squared.shape)  # alias
                 cubed = x * x * x
-                return squared, contig, no_op_reshape, cubed
+                return squared, contig, reshaped, cubed
 
         x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
         model = Model()
@@ -2192,11 +2192,10 @@ class AOTInductorTestsTemplate:
             )
         actual = model(x)
         self.assertTrue(same(result, actual))
-        # squared.contiguous() should alias squared
+        # squared, contig and reshaped alias the same tensor.
         self.assertTrue(result[0].data_ptr() == result[1].data_ptr())
-        # squared.reshape(squared.shape) should alias squared
         self.assertTrue(result[0].data_ptr() == result[2].data_ptr())
-        # sanity check that cubed isn't aliasing squared
+        # but cubed shouldn't be an alias.
         self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
 
     def test_runtime_checks_shape_failed(self):
