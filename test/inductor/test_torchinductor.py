@@ -1031,9 +1031,8 @@ class CommonTemplate:
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
+                    # match ternary operator for scalar or blendv for vector
+                    if re.findall(r"\?.*:", code) or re.findall("blendv", code):
                         found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -10101,6 +10100,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
 
         @patch("torch._inductor.config.comment_origin", True)
+        @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self):
@@ -10153,7 +10153,6 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         res = re.search(r"seq_nr:(\d+)", line)
                         if res:
                             seq_nr_set.add(int(res.group(1)))
-
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
