@@ -367,7 +367,6 @@ def gen_functions_declarations(
     # convert kernel index to BackendIndex. This is because we can't handle ETKernelIndex yet.
     # TODO larryliu: evaluate if this code is still needed. If yes let it handle ETKernelIndex.
 
-    dispatch_key = DispatchKey.CPU
     backend_index = kernel_index._to_backend_index()
 
     ns_grouped_functions = defaultdict(list)
