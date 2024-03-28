@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -8,9 +8,10 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.device_mesh import DeviceMesh
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_leaves,
         tree_map_only,
         TreeSpec,
     )
@@ -198,7 +199,7 @@ class RuntimeSchemaInfo:
     static_kwargkey: Optional[List[str]] = None
     # each op can decide if it wants to use pytree flatten/unflatten during operator
     # eager execution, by default we don't need to do flatten/unflatten, only if the
-    # op indicate it needs to, this is to accelate eager performance.
+    # op indicate it needs to, this is to accelerate eager performance.
     needs_pytree: bool = False
 
 
@@ -236,6 +237,12 @@ class OpSchema:
         """
         # filter out non-relevant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
+        if self.schema_info is not None and self.schema_info.needs_pytree:
+            return tuple(
+                item
+                for item in tree_leaves(self.args_schema)
+                if isinstance(item, DTensorSpec)
+            )
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
@@ -382,7 +389,14 @@ class OpSchema:
         suggestion_args_spec = self.args_spec
         new_arg_schema: List[object] = []
         idx_of_args_spec = 0
-        for arg in origin_schema.args_schema:
+        if (
+            origin_schema.schema_info is not None
+            and origin_schema.schema_info.needs_pytree
+        ):
+            args_schema: Sequence[Any] = tree_leaves(origin_schema.args_schema)
+        else:
+            args_schema = origin_schema.args_schema
+        for arg in args_schema:
             if isinstance(arg, DTensorSpec):
                 new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
                 idx_of_args_spec += 1

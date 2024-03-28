@@ -634,9 +634,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
             assert isinstance(compiled_fn, torch.fx.GraphModule)
             return compiled_fn, fw_metadata
 
-        if not hasattr(compiled_fn, "_boxed_call"):
-            compiled_fn = make_boxed_func(compiled_fn)
-
         return compiled_fn
 
 
