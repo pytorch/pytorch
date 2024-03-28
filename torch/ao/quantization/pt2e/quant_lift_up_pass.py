@@ -2,6 +2,8 @@ import torch
 from torch.fx.node import map_arg
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
+
+# Only for per tensor quant since permute may changes the channel idx
 _QUANTIZE_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.default,
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
@@ -17,7 +19,11 @@ _VIEW_OPS = [
 class QuantLiftUp(PassBase):
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
-            if node.op == "call_function" and node.target in _QUANTIZE_OPS:
+            if (
+                node.op == "call_function"
+                and node.target in _QUANTIZE_OPS
+                and len(node.all_input_nodes) == 1
+            ):
                 quant_node = node
                 input_node_of_quant = quant_node.args[0]
 

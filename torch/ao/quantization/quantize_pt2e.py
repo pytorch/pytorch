@@ -237,10 +237,10 @@ def convert_pt2e(
     pm = PassManager([DuplicateDQPass()])
     model = pm(model).graph_module
 
-    pm = PassManager([QuantLiftUp()])
+    pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 
-    pm = PassManager([PortNodeMetaForQDQ()])
+    pm = PassManager([QuantLiftUp()])
     model = pm(model).graph_module
 
     if fold_quantize:
