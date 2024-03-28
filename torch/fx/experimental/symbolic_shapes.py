@@ -3843,8 +3843,8 @@ class ShapeEnv:
             self.var_to_range[symbol] &= ValueRanges(lower, upper)
 
         # If the range is refined to singleton, set replacement
-        if lower == upper:
-            self._set_replacement(symbol, lower, "range_refined_to_singleton")
+        if self.var_to_range[symbol].is_singleton():
+            self._set_replacement(symbol, self.var_to_range[symbol].lower, "range_refined_to_singleton")
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
