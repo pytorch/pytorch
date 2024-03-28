@@ -149,6 +149,7 @@ def _svd_lowrank(
     if M is None:
         M_t = None
     else:
+        M = M.broadcast_to(A.size())
         M_t = _utils.transpose(M)
     A_t = _utils.transpose(A)
 
