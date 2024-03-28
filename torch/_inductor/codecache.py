@@ -2814,5 +2814,7 @@ if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
     # compile workers created not being able to be shut down inside
     # shutdown_compile_workers(). This may cause significant QPS drop.
     log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+elif sys.version_info >= (3, 12):
+    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()

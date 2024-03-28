@@ -739,14 +739,25 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
     return visible_devices[idx]
 
 
-@lru_cache(maxsize=1)
+_cached_device_count: Optional[int] = None
+
+
 def device_count() -> int:
     r"""Return the number of GPUs available."""
+    global _cached_device_count
     if not _is_compiled():
         return 0
+    if _cached_device_count is not None:
+        return _cached_device_count
     # bypass _device_count_nvml() if rocm (not supported)
     nvml_count = -1 if torch.version.hip else _device_count_nvml()
-    return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    # NB: Do not cache the device count prior to CUDA initialization, because
+    # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
+    # setting prior to CUDA initialization.
+    if _initialized:
+        _cached_device_count = r
+    return r
 
 
 def get_arch_list() -> List[str]:

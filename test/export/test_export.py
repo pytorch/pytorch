@@ -114,6 +114,11 @@ def foo_functional(x):
     a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
     return a.cos()
 
+NON_STRICT_SUFFIX = "_non_strict"
+
+def is_non_strict_test(test_name):
+    return test_name.endswith(NON_STRICT_SUFFIX)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
@@ -1429,7 +1434,6 @@ class TestExport(TestCase):
         self.assertEqual(len(input_shapes), 9)
         self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
-    @testing.expectedFailureNonStrict
     def test_error_does_not_reference_eager_fallback(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -1441,9 +1445,13 @@ class TestExport(TestCase):
                     return x.sin()
 
         fn_ddo = Module()
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, r"^(?!.*fall back to eager).*"
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+            error_msg = r"Could not guard on data-dependent expression"
+        else:
+            error = torchdynamo.exc.UserError
+            error_msg = r"^(?!.*fall back to eager).*"
+        with self.assertRaisesRegex(error, error_msg):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
     def test_pytree_register_data_class(self):
@@ -1584,7 +1592,6 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
-    @testing.expectedFailureSerDerPreDispatch  # tracked via: T181382045
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -1795,7 +1802,6 @@ def forward(self, arg_0):
     return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )
 
-    @testing.expectedFailureNonStrict
     def test_constrain_value_with_symfloat(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1804,8 +1810,9 @@ def forward(self, arg_0):
                 return y + n
 
         fn = Module()
+        error = ValueError if is_non_strict_test(self._testMethodName) else torch._dynamo.exc.TorchRuntimeError
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
+            error,
             "Constraining SymFloat or Symbool is nyi",
         ):
             _ = export(fn, (torch.rand(2, 2), torch.rand(2, 3)))
@@ -1825,7 +1832,6 @@ def forward(self, arg_0):
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
 
-    @testing.expectedFailureNonStrict
     def test_constrain_size_with_constrain_value(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1954,7 +1960,6 @@ def forward(self, arg_0):
             )
         )
 
-    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
@@ -2010,7 +2015,6 @@ def forward(self, arg_0):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
-    @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
@@ -2409,7 +2413,6 @@ def forward(self, arg_0):
             torch.allclose(exported.module()(torch.ones(7, 5)), re_exported_v2.module()(torch.ones(7, 5)))
         )
 
-    @testing.expectedFailureNonStrict
     def test_constrain_as_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2419,10 +2422,13 @@ def forward(self, arg_0):
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Tried to use data-dependent value in the subsequent computation",
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+            error_msg = r"Could not guard on data-dependent expression"
+        else:
+            error = torch._dynamo.exc.UserError
+            error_msg = r"Tried to use data-dependent value in the subsequent computation"
+        with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
 
     def test_train_eval_on_exported_preautograd_module(self):
@@ -2672,7 +2678,6 @@ def forward(self, arg_0):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

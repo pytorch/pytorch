@@ -1867,7 +1867,6 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
-    # Temporary until we get proper support for python 3.12
     if sys.version_info >= (3, 12):
         raise RuntimeError("Dynamo is not supported on Python 3.12+")
 

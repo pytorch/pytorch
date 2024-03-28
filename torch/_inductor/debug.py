@@ -328,16 +328,17 @@ class DebugContext:
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
-        if os.path.exists(new_path):
-            shutil.rmtree(new_path)
+        from filelock import FileLock
+
         try:
-            shutil.copytree(self._path, new_path)
-            self._path = new_path
+            with FileLock(f"{new_path}.lock"):
+                if os.path.exists(new_path):
+                    shutil.rmtree(new_path)
+                shutil.copytree(self._path, new_path)
         except OSError:
             log.warning(
                 "Failed to copy debug files from %s to %s", self._path, new_path
             )
-            pass
 
     def fopen(self, filename: str, write_mode: str = "w", *args, **kwargs):
         assert self._path

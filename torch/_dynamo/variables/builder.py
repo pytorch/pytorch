@@ -1502,15 +1502,31 @@ def wrap_fx_proxy_cls(
                     ConstantVariable.create(None, **options),
                 )
             else:
+                proxy_i = proxy.tracer.create_proxy(
+                    kind="call_function",
+                    target=operator.getitem,
+                    args=(proxy, i),
+                    kwargs={},
+                )
+
+                if "source" in options:
+                    source = options["source"]
+                    options_i = options.copy()
+                    options_i["source"] = GetItemSource(
+                        base=source, index=i, index_is_slice=False
+                    )
+                else:
+                    # use the same options object as parent
+                    options_i = options
+
+                # WARNING: this assumes the same target_cls as this tuple/list call
                 unpacked.append(
                     wrap_fx_proxy_cls(
-                        target_cls,
-                        tx,
-                        proxy.tracer.create_proxy(
-                            "call_function", operator.getitem, (proxy, i), {}
-                        ),
+                        target_cls=target_cls,
+                        tx=tx,
+                        proxy=proxy_i,
                         example_value=val,
-                        **options,
+                        **options_i,
                     )
                 )
         if isinstance(example_value, torch.Size):
