@@ -219,6 +219,8 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
+    # functorch/hessian
+    "torch._functorch.eager_transforms.hessian": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._constrain_as_value": UserFunctionVariable,
@@ -1990,6 +1992,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.resolve_conj",
         "torch.resolve_neg",
         "torch.result_type",
+        "torch.rms_norm",
         "torch.rnn_relu_cell",
         "torch.rnn_relu",
         "torch.rnn_tanh_cell",
@@ -2184,7 +2187,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._wrap_all_tensors_to_functional",
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.functionalize",
-        "torch._functorch.eager_transforms.hessian",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.linearize",
         "torch._functorch.eager_transforms.noop",
@@ -3253,6 +3255,21 @@ FBCODE_SKIP_DIRS = {
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
 
+# TODO(yanboliang, anijain2305) - There are a few concerns that we should
+# resolve
+# 1) Audit if torchrec/distributed is even required in FBCODE_SKIPS_DIR
+# 2) To inline just one file but skip others in a directory, we could use
+# manual_torch_name_rule_map but this one is hard because FBCODE can add unusual
+# names like torch_package.
+# So, this is a stop gap solution till then.
+FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = {
+    "torchrec/distributed/types.py",
+}
+FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
+    f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
+)
+
+
 def _recompile_re():
     global SKIP_DIRS_RE
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
@@ -3295,7 +3312,11 @@ def check_file(filename, is_inlined_call=False):
             False,
             "inlined according trace_rules.MOD_INLINELIST",
         )
-    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
+    if (
+        is_fbcode
+        and bool(FBCODE_SKIP_DIRS_RE.match(filename))
+        and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
+    ):
         return SkipResult(
             True,
             "skipped according trace_rules.FBCODE_SKIP_DIRS",
