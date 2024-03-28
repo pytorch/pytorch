@@ -450,13 +450,13 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
   std::vector<std::vector<Tensor>> unbound;
-  for (auto iter = batched_tensor_inputs.begin(); iter != batched_tensor_inputs.end(); ++iter) {
-    auto *batched_impl = maybeGetBatchedImpl(*iter);
+  for (auto const &batched_tensor_input: batched_tensor_inputs) {
+    auto *batched_impl = maybeGetBatchedImpl(batched_tensor_input);
     TORCH_INTERNAL_ASSERT(batched_impl->value().is_nested() || batched_impl->bdim() == 0,
         "Fallback not supported for mixed nested / non-nested arguments without bdim=0");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = batched_impl->value().unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "Fallback not supported for differently-sized nested arguments");
     }
