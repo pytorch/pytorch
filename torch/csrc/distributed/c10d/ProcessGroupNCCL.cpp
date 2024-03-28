@@ -1266,17 +1266,32 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
+          int timeOutRank = -1;
+          try {
+            auto vec = globalStore_->get(std::string(TIMEOUT_DUMP));
+            TORCH_CHECK_WITH(
+                DistBackendError,
+                vec.size() == sizeof(int),
+                "Invalid size for the timeout rank ID");
+            std::memcpy(&timeOutRank, vec.data(), vec.size());
+          } catch (const std::exception& e) {
+            LOG(ERROR)
+                << "Failed to get timeout rank ID from the global store.";
+          }
           errorMsg = c10::str(
               logPrefix(),
-              "Received a global timeout from another rank and will ",
-              "start to dump the debug info. ",
+              "Received a global timeout from another rank ",
+              timeOutRank,
+              ", and will start to dump the debug info. ",
               "Last enqueued NCCL work: ",
               lastEnqueuedSeq_,
               ", last completed NCCL work: ",
               lastCompletedSeq_,
               ".");
           exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a collective timeout on some other rank and notified current rank. ",
+              "ProcessGroupNCCL's watchdog detected a collective timeout from another rank ",
+              timeOutRank,
+              " and notified the current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
               "sizes used across ranks, the order of collectives is not same for all ranks ",
               "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1579,7 +1594,10 @@ void ProcessGroupNCCL::watchdogHandler() {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
-              std::vector<uint8_t> vec(1);
+              int rank = globalRank();
+              auto vec = std::vector<uint8_t>(
+                  reinterpret_cast<uint8_t*>(&rank),
+                  reinterpret_cast<uint8_t*>(&rank) + sizeof(int));
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
