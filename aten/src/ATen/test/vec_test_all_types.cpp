@@ -1,6 +1,6 @@
 #include <ATen/test/vec_test_all_types.h>
 #include <c10/util/irange.h>
-#include "c10/util/Half.h"
+#include <c10/util/Half.h>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -558,7 +558,7 @@ namespace {
         UVT tolerance = getDefaultTolerance<UVT>();
         // double: 2e+305  float: 4e+36 (https://sleef.org/purec.xhtml#eg)
         // Half not available in Sleef, but we set max at 4e+4.
-        UVT maxCorrect = std::is_same<UVT, c10::Half>::value ? (UVT)4e+4 : (std::is_same<UVT, float>::value ? (UVT)4e+36 : (UVT)2e+305);
+        UVT maxCorrect = std::is_same_v<UVT, c10::Half> ? (UVT)4e+4 : (std::is_same_v<UVT, float> ? (UVT)4e+36 : (UVT)2e+305);
         TestingCase<vec> testCase = TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance})
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)0, (UVT)1000 }}, true, tolerance})
