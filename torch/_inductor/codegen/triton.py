@@ -410,33 +410,31 @@ texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
 
 
+def triton_type_name(dtype):
+    if dtype == torch.bool:
+        return "tl.int1"
+    elif dtype == torch.float8_e4m3fn:
+        return "tl.float8e4nv"
+    elif dtype == torch.float8_e5m2:
+        return "tl.float8e5"
+    elif dtype == torch.float8_e4m3fnuz:
+        return "tl.float8e4b8"
+    elif dtype == torch.float8_e5m2:
+        return "tl.float8e5b16"
+    base = str(dtype).split(".")[-1]
+    return f"tl.{base}"
+
+
 def triton_compute_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int1"
-    elif triton_type_name in ("float16", "bfloat16"):
-        # float16 math is done in float32 inside the kernel
-        triton_type_name = "float32"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5b16"
-    return f"tl.{triton_type_name}"
+    if dtype in (torch.float16, torch.bfloat16):
+        dtype = torch.float32
+    return triton_type_name(dtype)
 
 
 def triton_store_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int8"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    return f"tl.{triton_type_name}"
+    if dtype == torch.bool:
+        dtype = torch.int8
+    return triton_type_name(dtype)
 
 
 def triton_acc_type(dtype):
@@ -529,23 +527,34 @@ class TritonOverrides(OpOverrides):
             # to work around llvm uint conversion semantics
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
-        return f"{x}.to({triton_compute_type(dtype)})"
+
+        dst_ty = triton_type_name(dtype)
+        compute_ty = triton_compute_type(dtype)
+        if dst_ty != compute_ty and not config.triton.enable_cast_elision:
+            return f"{x}.to({dst_ty})"
+        return f"{x}.to({compute_ty})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
-        triton_dtype = triton_compute_type(dtype)
+        src_ty = triton_type_name(src_dtype)
+        src_compute_ty = triton_compute_type(src_dtype)
+
+        dst_ty = triton_compute_type(dtype)
+        dst_compute_ty = triton_compute_type(dtype)
+
         # We may promote float16 or bfloat16 to float32 and cause the
         # bitwidth of dtype to be different from the input tensor (i.e. float32).
         # In such as case, we will have to convert the input tensor to
         # its src_type, perform bitcast, and then convert the bit-casted
         # tensor back to float to ensure we use values with the right precision.
-        if src_dtype in (torch.float16, torch.bfloat16):
-            triton_src_dtype = str(src_dtype).split(".")[-1]
-            cast_x = f"{x}.to(tl.{triton_src_dtype})"
-            cast_x = f"{cast_x}.to({triton_dtype}, bitcast=True)"
-            return f"{cast_x}.to(tl.float32)"
-        else:
-            return f"{x}.to({triton_dtype}, bitcast=True)"
+        if src_ty != src_compute_ty:
+            x = f"{x}.to({src_ty})"
+
+        x = f"{x}.to({dst_ty}, bitcast=True)"
+
+        if dst_ty != dst_compute_ty:
+            x = f"{x}.to(dst_compute_ty)"
+        return cast_x
 
     @staticmethod
     def _shaped_constant(value, dtype, shape):

@@ -639,6 +639,11 @@ class triton:
     # Allow ptxas to generate fma instructions
     enable_fp_fusion = False
 
+    # Allow eliding casts to half precision dtypes
+    # e.g. x.to(torch.float16).to(torch.float32) may become x.to(torch.float16)
+    # This improves performance but may diverge from eager results
+    enable_cast_elision = False
+
 
 class aot_inductor:
     # AOTInductor output path
