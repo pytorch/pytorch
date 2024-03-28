@@ -271,6 +271,12 @@ class EventList(list):
         ]
 
     def export_stacks(self, path: str, metric: str):
+        # Support passing more meaningful names for privateuse1 users
+        metric = (
+            metric.replace(self._use_device, "privateuse1")
+            if self._use_device
+            else metric
+        )
         if metric not in self.supported_export_stacks_metrics():
             raise ValueError(
                 "metric should be one of: "
@@ -598,7 +604,7 @@ class FunctionEvent(FormattedTimesMixin):
                 [child.privateuse1_time_total for child in self.cpu_children]
             )
         else:
-            assert self.device_type == DeviceType.CUDA
+            assert self.device_type == DeviceType.PrivateUse1
             return self.privateuse1_time_total
 
     @property
@@ -866,7 +872,10 @@ def _build_table(
         event.self_privateuse1_memory_usage > 0 for event in events
     )
     use_device = events[0].use_device
-    if not use_device and (has_privateuse1_mem or has_privateuse1_time):
+    # Running on PrivateUse1 device with profiler but not enable
+    # ProfilerActivity.PrivateUse1 can also catch privateuse1 memory usage.
+    # Here only need to check has_privateuse1_time if not use_device.
+    if not use_device and has_privateuse1_time:
         raise RuntimeError(
             "use_device is None, but there is private device performance data."
         )
@@ -877,6 +886,8 @@ def _build_table(
     )
 
     if sort_by is not None:
+        # Support sorting by more meaningful names for privateuse1 users
+        sort_by = sort_by.replace(use_device, "privateuse1") if use_device else sort_by
         events = EventList(
             sorted(events, key=lambda evt: getattr(evt, sort_by), reverse=True),
             use_cuda=has_cuda_time,
@@ -950,7 +961,7 @@ def _build_table(
                     "Self CUDA Mem",
                 ]
             )
-        if has_privateuse1_mem:
+        if use_device and has_privateuse1_mem:
             privateuse1 = use_device.upper()
             headers.extend(
                 [
@@ -1131,7 +1142,7 @@ def _build_table(
                         _format_memory(evt.self_cuda_memory_usage),
                     ]
                 )
-            if has_privateuse1_mem:
+            if use_device and has_privateuse1_mem:
                 row_values.extend(
                     [
                         # PrivateUse1 Mem Total
