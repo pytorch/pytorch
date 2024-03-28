@@ -3,6 +3,8 @@ from typing import Any, Callable, List, no_type_check
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable
+from torch.distributed.utils import _DeviceModule
+from torch._utils import _get_device_module
 from functools import partial
 from dataclasses import dataclass
 
@@ -38,12 +40,14 @@ class _OptimizerHookState:
 
 @dataclass
 class _OptimInBackwardHookState:
-    optim_stream: torch.cuda.Stream
+    optim_stream: torch.Stream
     wait_for_optim_stream_enqueued: bool
+    device_module: _DeviceModule = torch.cuda  # type: ignore[assignment]
 
 @no_type_check
 def _apply_optim_in_backward_hook(
-    gradient_is_bucket_view: bool
+    gradient_is_bucket_view: bool,
+    device_type: str
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Register hook to apply the optimizer in backward.
@@ -52,9 +56,11 @@ def _apply_optim_in_backward_hook(
     optimizer with backward pass, DDP will run the below hook to run optimizer
     step for parameters after gradient communication has taken place.
     """
+    device_module = _get_device_module(device_type)
     optim_in_bwd_state = _OptimInBackwardHookState(
-        optim_stream=torch.cuda.Stream(),
+        optim_stream=device_module.Stream(),
         wait_for_optim_stream_enqueued=False,
+        device_module=device_module,
     )
 
     def apply_optim_in_backward_hook(
@@ -66,7 +72,7 @@ def _apply_optim_in_backward_hook(
         reducer, process_group = ddp_inst.reducer, ddp_inst.process_group
         fut = reducer._run_allreduce_hook(bucket)
         optimizer_stream = optim_stream_state.optim_stream
-        with torch.cuda.stream(optimizer_stream):
+        with optim_stream_state.device_module.stream(optimizer_stream):
             fut.wait()
             # Apply gradient division since C++ side only allreduces and does
             # not average. TODO: (rohan-varma) the div factor may be different
@@ -93,7 +99,7 @@ def _apply_optim_in_backward_hook(
         # enqueue a callback to wait for this optimizer stream at the end of
         # backward and set all DDP managed grads to None.
         def wait_for_optim_stream_callback():
-            torch.cuda.current_stream().wait_stream(
+            optim_stream_state.device_module.current_stream().wait_stream(
                 optim_stream_state.optim_stream
             )
             # Set DDP managed grads to None
