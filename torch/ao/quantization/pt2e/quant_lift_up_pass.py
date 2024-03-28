@@ -17,6 +17,40 @@ _VIEW_OPS = [
 
 
 class QuantLiftUp(PassBase):
+    """
+    Lift up the quant node before view like nodes. It can benefit performance
+    of Attention like block. For example, we have the pattern as:
+
+             DQ
+    DQ       LINEAR
+    LINEAR   VIEW
+    VIEW     PERMUTE
+    PERMUTE  TRANSPOSE
+    Q        Q
+    DQ       DQ
+       Matmul
+        DIV
+        ADD
+      SOFTMAX
+
+    We want to lift up the the quant nodes from matmul before view like nodes
+    as the output of Linear node.
+
+             DQ
+    DQ       LINEAR
+    LINEAR   Q
+    Q        VIEW
+    VIEW     PERMUTE
+    PERMUTE  TRANSPOSE
+    DQ       DQ
+       Matmul
+        DIV
+        ADD
+      SOFTMAX
+
+    It produces a DQ->LINEAR->Q pattern which can be fused by backend.
+    """
+
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
             if (
