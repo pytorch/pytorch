@@ -921,14 +921,14 @@ static at::Tensor linear_int8_with_onednn_weight(
     double output_scale,
     int64_t output_zero_point,
     c10::optional<c10::ScalarType> output_dtype,
-    c10::optional<at::Tensor> accum, // accum for binary post-op
-    double accum_scale,
-    int64_t accum_zero_point,
-    const std::string& binary_post_op, // e.g. "none", "add"
+    c10::optional<at::Tensor> other, // extra input for binary post-op
+    double other_scale,
+    int64_t other_zero_point,
+    const c10::string_view& binary_post_op, // e.g. "none", "sum", "add"
     double binary_alpha,
-    const std::string& unary_post_op, // e.g. "none", "relu"
+    const c10::string_view& unary_post_op, // e.g. "none", "relu"
     torch::List<c10::optional<at::Scalar>>& unary_post_op_args,
-    std::string& unary_post_op_algorithm) {
+    c10::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
   output_scale = 1.0f / output_scale;
@@ -941,28 +941,41 @@ static at::Tensor linear_int8_with_onednn_weight(
   TORCH_CHECK(
       binary_alpha == 1.0f, "onednn qlinear: alpha != 1 for binary post op is not yet supported.");
   bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
-  if (fp32_output || bfloat16_output) {
+  bool bf16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
+  if (fp32_output || bf16_output) {
     TORCH_CHECK(
         output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
-  if (accum.has_value()) {
-    if (fp32_output || bfloat16_output) {
+  if (binary_post_op != "none") {
+    /* Supported cases for binary post op:
+      +-------------------+--------------+---------------+
+      | Extra input dtype | Output dtype | Post op       |
+      +-------------------+--------------+---------------+
+      | Fp32/bf16         | fp32/bf16    | sum           |
+      +-------------------+--------------+---------------+
+      | Fp32/bf16         | int8         | add           |
+      +-------------------+--------------+---------------+
+      | int8              | fp32/bf16    | not supported |
+      +-------------------+--------------+---------------+
+      | int8              | int8         | sum           |
+      +-------------------+--------------+---------------+
+    */
+    TORCH_CHECK(other.has_value(), "onednn qlinear: the extra input is missing for post op ", binary_post_op);
+    if (fp32_output || bf16_output) {
+      TORCH_CHECK(binary_post_op != "add", "onednn qlinear: use post op sum instead of binary add ",
+          "when output dtype is float or bfloat16.");
       TORCH_CHECK(
-          accum.value().scalar_type() == output_dtype.value(),
-          "onednn qlinear: the dtype of accum for binary post op should be ", output_dtype.value(),
-          " (same as output dtype), but got ", accum.value().scalar_type()
+          other_scale == 1.0f && other_zero_point == 0,
+          "onednn qlinear: expect extra input scale = 1.0 and zero point = 0 when output dtype is ", output_dtype.value(),
+          ", but got ", other_scale, " and ", other_zero_point, ", respectively"
       );
+    }
+    if (binary_post_op == "sum") {
+      auto expected_dtype = output_dtype.has_value() ? output_dtype.value() : c10::kByte;
       TORCH_CHECK(
-          accum_scale == 1.0f && accum_zero_point == 0,
-          "onednn qlinear: expect accum scale = 1.0 and zero point = 0 when output dtype is ", output_dtype.value(),
-          ", but got ", accum_scale, " and ", accum_zero_point, ", respectively"
-      );
-    } else {
-      TORCH_CHECK(
-          accum.value().scalar_type() == c10::kByte,
-          "onednn qlinear: the dtype of accum for binary post op should be uint8 (same as output dtype)",
-          ", but got ", accum.value().scalar_type()
+          other.value().scalar_type() == expected_dtype,
+          "onednn qlinear: the dtype of extra input for binary post op should be ", expected_dtype,
+          " (same as output dtype), but got ", other.value().scalar_type()
       );
     }
   }
@@ -993,71 +1006,45 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  at::Tensor output = accum.has_value() ?
-      accum.value() :
+  at::Tensor output = binary_post_op == "sum" ?
+      other.value() :
       at::empty(
         dst_dims,
         device(c10::kCPU)
-            .dtype(fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte))
+            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : c10::kByte))
       );
   if (output.numel() == 0) {
     return output;
   }
   tensor dst = at::native::itensor_view_from_dense(output);
+  static tensor empty_tensor;
+  static tensor::desc empty_tensor_desc;
+  tensor src1 = binary_post_op == "add" ?
+      at::native::itensor_view_from_dense(other.value().reshape({-1, other.value().size(dim - 1)})) :
+      empty_tensor;
 
   // Create onednn primitive
   auto src_desc = tensor::desc(src_dims, ideep::data_type::u8, ideep::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
-  auto dst_dtype = dst.get_data_type(); // determined by output_dtype or accum dtype
+  auto dst_dtype = dst.get_data_type();
   auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
   auto bias_desc = with_bias ?
       tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
-      tensor::desc();
+      empty_tensor_desc;
   // Get op attr for primitive
   // Note: output_scale & output_zero_point are for re-quantization of the final output.
-  // And accum_scale & accum_zero_point are for dequantization of accum.
-  auto op_attr = [&]() -> ideep::attr_t {
-    if (binary_post_op == "none") {
-      if (unary_post_op == "relu") {
-        return ideep::attr_t::fuse_relu();
-      } else if (unary_post_op == "leaky_relu") {
-        TORCH_CHECK(
-            unary_post_op_args.size() == 1,
-            "onednn qlinear: expect one argument for post op leaky_relu but got ", unary_post_op_args.size(), " args");
-        auto alpha = unary_post_op_args[0].get().toOptional<at::Scalar>().value().to<float>();
-        return ideep::attr_t::fuse_relu_v2(alpha);
-      } else if (unary_post_op == "tanh") {
-        return ideep::attr_t::fuse_tanh();
-      } else if (unary_post_op == "gelu") {
-        TORCH_CHECK(
-            unary_post_op_algorithm == "none" || unary_post_op_algorithm == "tanh",
-            "onednn qlinear: algorithm for post op gelu must be none or tanh but got ", unary_post_op_algorithm);
-        auto post_algorithm = unary_post_op_algorithm == "none" ?
-          dnnl::algorithm::eltwise_gelu_erf :
-          dnnl::algorithm::eltwise_gelu_tanh;
-        return ideep::attr_t::fuse_gelu_v2(0.f, 0.f, post_algorithm);
-      } else {
-        TORCH_CHECK(
-            unary_post_op == "none",
-            "onednn qlinear: unsupported unary post op ", unary_post_op);
-      }
-    } else if (binary_post_op == "add") {
-      if (unary_post_op == "none") {
-        return ideep::attr_t::fuse_sum(accum_scale, accum_zero_point);
-      } else if (unary_post_op == "relu") {
-        return ideep::attr_t::residual_with_sum_zero_point(accum_scale, accum_zero_point);
-      } else {
-        TORCH_CHECK(
-            false,
-            "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op add");
-      }
-    } else {
-      TORCH_CHECK(
-          false,
-          "onednn qlinear: unsupported binary post op ", binary_post_op);
-    }
-    return ideep::attr_t();
-  }();
+  // And other_scale & other_zero_point are for dequantization of other.
+  auto other_desc = binary_post_op == "add" ? src1.get_desc() : empty_tensor_desc;
+  auto op_attr = onednn_utils::create_attr_by_post_op(
+    binary_post_op,
+    binary_alpha,
+    other_scale,
+    other_zero_point,
+    other_desc,
+    unary_post_op,
+    unary_post_op_args,
+    unary_post_op_algorithm
+  );
   if (input_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
   }
@@ -1108,6 +1095,9 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   if (output_zero_point != 0) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
+  }
+  if (binary_post_op == "add") {
+    args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
   primitive.execute(ideep::stream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
@@ -1211,17 +1201,17 @@ class QLinearOnednn final {
       double output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
-      std::string post_op_name,
+      c10::string_view post_op_name,
       torch::List<c10::optional<at::Scalar>> post_op_args,
-      std::string post_op_algorithm) {
+      c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    c10::optional<at::Tensor> accumu = c10::nullopt;
-    static const std::string binary_post_op = "none";
+    static c10::optional<at::Tensor> other = c10::nullopt;
+    static const c10::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
-        accumu, /*accumu scale*/1.0, /*accumu zp*/0,
+        other, /*other scale*/1.0, /*other zp*/0,
         binary_post_op, /*binary alpha*/1.0,
         post_op_name, post_op_args, post_op_algorithm
     );
@@ -1240,19 +1230,19 @@ class QLinearOnednn final {
       double output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
-      std::string post_op_name,
+      c10::string_view post_op_name,
       torch::List<c10::optional<at::Scalar>> post_op_args,
-      std::string post_op_algorithm) {
+      c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
-    c10::optional<at::Tensor> accumu = c10::nullopt;
-    static const std::string binary_post_op = "none";
+    static c10::optional<at::Tensor> other = c10::nullopt;
+    static const c10::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
-        accumu, /*accumu scale*/1.0, /*accumu zp*/0,
+        other, /*other scale*/1.0, /*other zp*/0,
         binary_post_op, /*binary alpha*/1.0,
         post_op_name, post_op_args, post_op_algorithm
     );
@@ -1271,20 +1261,20 @@ class QLinearOnednn final {
       double output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
-      c10::optional<at::Tensor> accum, // accum for binary post-op
-      double accum_scale,
-      int64_t accum_zero_point,
-      std::string binary_post_op, // e.g. "none", "add"
+      c10::optional<at::Tensor> other, // extra input for binary post-op
+      double other_scale,
+      int64_t other_zero_point,
+      c10::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
-      std::string unary_post_op, // e.g. "none", "relu"
+      c10::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<c10::optional<at::Scalar>> unary_post_op_args,
-      std::string unary_post_op_algorithm) {
+      c10::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
-        accum, accum_scale, accum_zero_point,
+        other, other_scale, other_zero_point,
         binary_post_op, binary_alpha,
         unary_post_op, unary_post_op_args, unary_post_op_algorithm
     );
@@ -1303,14 +1293,14 @@ class QLinearOnednn final {
       double output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
-      c10::optional<at::Tensor> accum, // accum for binary post-op
-      double accum_scale,
-      int64_t accum_zero_point,
-      std::string binary_post_op, // e.g. "none", "add"
+      c10::optional<at::Tensor> other, // extra input for binary post-op
+      double other_scale,
+      int64_t other_zero_point,
+      c10::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
-      std::string unary_post_op, // e.g. "none", "relu"
+      c10::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<c10::optional<at::Scalar>> unary_post_op_args,
-      std::string unary_post_op_algorithm) {
+      c10::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
@@ -1318,7 +1308,7 @@ class QLinearOnednn final {
         act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
-        accum, accum_scale, accum_zero_point,
+        other, other_scale, other_zero_point,
         binary_post_op, binary_alpha,
         unary_post_op, unary_post_op_args, unary_post_op_algorithm
     );
