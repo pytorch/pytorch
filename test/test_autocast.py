@@ -224,6 +224,7 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         torch.clear_autocast_cache = self.old_clear_cache
         return super().__exit__(exc_type, exc_val, exc_tb)
 
+
 @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
 class TestAutocastGPU(TestCase):
     def test_cast_cache_is_global(self):
@@ -246,7 +247,6 @@ class TestAutocastGPU(TestCase):
         self.assertEqual(mode.dtype_cast_counter, 1)
 
     def test_cache_disabled(self):
-
         data = torch.randn(2, 3).cuda()
         weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
 
@@ -280,6 +280,47 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+class TestAutocastMixed(TestCase):
+    def test_autocast_mixed(self):
+        cpu = torch.randn(3, 3)
+        gpu = torch.randn(3, 3, device="cuda:0")
+
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            r_cpu = torch.mm(cpu, cpu)
+            self.assertEqual(r_cpu.dtype, torch.float)
+
+            r_gpu = torch.mm(gpu, gpu)
+            self.assertEqual(r_gpu.dtype, torch.float16)
+
+            r_cpu = torch.mm(cpu, cpu)
+            self.assertEqual(r_cpu.dtype, torch.float)
+
+    def test_autocast_nested(self):
+        cpu = torch.randn(3, 3)
+        gpu = torch.randn(3, 3, device="cuda:0")
+
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            r_cpu = torch.mm(cpu, cpu)
+            self.assertEqual(r_cpu.dtype, torch.float)
+
+            r_gpu = torch.mm(gpu, gpu)
+            self.assertEqual(r_gpu.dtype, torch.float16)
+
+            with torch.autocast(device_type='cpu', dtype=torch.float16):
+                r_cpu = torch.mm(cpu, cpu)
+                self.assertEqual(r_cpu.dtype, torch.float16)
+
+                r_gpu = torch.mm(gpu, gpu)
+                self.assertEqual(r_gpu.dtype, torch.float16)
+
+            r_cpu = torch.mm(cpu, cpu)
+            self.assertEqual(r_cpu.dtype, torch.float)
+
+            r_gpu = torch.mm(gpu, gpu)
+            self.assertEqual(r_gpu.dtype, torch.float16)
 
 
 if __name__ == '__main__':

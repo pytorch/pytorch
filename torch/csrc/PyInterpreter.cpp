@@ -1,5 +1,6 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <ATen/core/dispatch/DispatchKeyExtractor.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
@@ -353,6 +354,17 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   auto cache = py::dict(torch_api_function_overload.attr("_dispatch_cache"));
   if (cache.ptr() == nullptr) {
     throw python_error();
+  }
+
+  // If the Functionality Key located on the leftmost side of ks has a
+  // corresponding callback function, it means that there is additional
+  // calculation for the functionality Key.
+  // Currently only used by Autocast, as AutocastFunctionality acts as
+  // a Per Backend Functionality key, which is not sufficient to determine
+  // which backend is enabled.
+  auto found = getDKFuncMaps().find(ks.highestFunctionalityKey());
+  if (found != getDKFuncMaps().end()) {
+    ks = found->second(ks);
   }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();

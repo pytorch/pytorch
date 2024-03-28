@@ -1,13 +1,14 @@
 #pragma once
 
-#include <cstdint>
+#include <ATen/core/Variadic.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
-#include <c10/util/Bitset.h>
-#include <c10/core/DispatchKeySet.h>
-#include <c10/util/irange.h>
-#include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
+#include <c10/core/DispatchKeySet.h>
+#include <c10/util/Bitset.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
+#include <cstdint>
 
 namespace c10 {
 
@@ -109,6 +110,36 @@ namespace detail {
 }
 
 /**
+ * This is used to register callback of specific key to PyTorch for
+ * computing DispatchKeySet additionally, currently only AutocastFunctionality
+ * is allowed to register.
+ *
+ * DispatchKeySet get_ds_by_autocast(c10::DispatchKeySet ks) {
+ *   ...
+ *   return ks;
+ * }
+ *
+ * Usage: REGISTER_DISPATCHKEYSET_FUNC(DispatchKey::AutocastFunctionality,
+ * get_ds_by_autocast
+ *
+ */
+
+using DispatchKeySetFuncType = std::function<DispatchKeySet(DispatchKeySet)>;
+
+TORCH_API ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>&
+getDKFuncMaps();
+
+class TORCH_API DSFuncRegistry {
+ public:
+  explicit DSFuncRegistry(
+      DispatchKey key,
+      const DispatchKeySetFuncType func);
+};
+
+#define REGISTER_DISPATCHKEYSET_FUNC(dispatchkey, function) \
+  static auto temp##function = DSFuncRegistry(dispatchkey, function);
+
+/**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
  * a list of arguments for an operator call.
  *
@@ -142,6 +173,30 @@ public:
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
+  DispatchKeySet getDispatchKeySet(DispatchKeySet ks) const {
+    // Keys that are fallthrough should be skipped
+    if (requiresBitsetPerBackend_) {
+      auto backend_idx = ks.getBackendIndex();
+      ks = impl::computeDispatchKeySet(
+          ks, nonFallthroughKeysPerBackend_[backend_idx]);
+    } else {
+      ks = impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    }
+
+    // If the Functionality Key located on the leftmost side of ks has a
+    // corresponding callback function, it means that there is additional
+    // calculation for the functionality Key.
+    // Currently only used by Autocast, as AutocastFunctionality acts as
+    // a Per Backend Functionality key, which is not sufficient to determine
+    // which backend is enabled.
+    auto found = getDKFuncMaps().find(ks.highestFunctionalityKey());
+    if (found != getDKFuncMaps().end()) {
+      ks = found->second(ks);
+    }
+
+    return ks;
+  }
+
   DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
@@ -164,25 +219,15 @@ public:
         }
       }
     });
-    // Keys that are fallthrough should be skipped
-    if (requiresBitsetPerBackend_) {
-      auto backend_idx = ks.getBackendIndex();
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
-    } else {
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
-    }
+
+    return getDispatchKeySet(ks);
   }
 
-  template<class... Args>
+  template <class... Args>
   DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
-    // Keys that are fallthrough should be skipped
-    if (requiresBitsetPerBackend_) {
-      auto backend_idx = ks.getBackendIndex();
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
-    } else {
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
-    }
+
+    return getDispatchKeySet(ks);
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);

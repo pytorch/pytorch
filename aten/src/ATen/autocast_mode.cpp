@@ -1,65 +1,66 @@
 #include <ATen/autocast_mode.h>
 
-#include <mutex>
 #include <ATen/CachedTensorUtils.h>
+#include <ATen/core/dispatch/DispatchKeyExtractor.h>
 #include <c10/util/flat_hash_map.h>
+#include <mutex>
 
 namespace at::autocast {
 
 bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
+  return is_backend_autocast_enabled(BackendComponent::CUDABit);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
+  set_autocast_backend(BackendComponent::CUDABit, new_enabled);
 }
 
 bool is_cpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
+  return is_backend_autocast_enabled(BackendComponent::CPUBit);
 }
 
 void set_cpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
+  set_autocast_backend(BackendComponent::CPUBit, new_enabled);
 }
 
 bool is_xpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXPU);
+  return is_backend_autocast_enabled(BackendComponent::XPUBit);
 }
 
 void set_xpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
+  set_autocast_backend(BackendComponent::XPUBit, new_enabled);
 }
 
 bool is_ipu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastIPU);
+  return is_backend_autocast_enabled(BackendComponent::IPUBit);
 }
 
 void set_ipu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastIPU, !new_enabled);
+  set_autocast_backend(BackendComponent::IPUBit, new_enabled);
 }
 
 bool is_hpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
+  return is_backend_autocast_enabled(BackendComponent::HPUBit);
 }
 
 void set_hpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
+  set_autocast_backend(BackendComponent::HPUBit, new_enabled);
 }
 
 bool is_xla_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
+  return is_backend_autocast_enabled(BackendComponent::XLABit);
 }
 
 void set_xla_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
+  set_autocast_backend(BackendComponent::XLABit, new_enabled);
 }
 
 bool is_privateuseone_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
+  return is_backend_autocast_enabled(BackendComponent::PrivateUse1Bit);
 }
 
 void set_privateuseone_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1, !new_enabled);
+  set_autocast_backend(BackendComponent::PrivateUse1Bit, new_enabled);
 }
 
 namespace {
@@ -114,6 +115,9 @@ thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 
 // autocast_privateuseone_dtype is the lower_precision_fp used by AutocastPrivateUse1.
 thread_local at::ScalarType autocast_privateuseone_dtype = at::kHalf;
+
+// backend bitset to indict which backend is enabled for autocast
+thread_local uint16_t autocast_backend_bitset = 0;
 }
 
 void clear_cache() {
@@ -191,6 +195,72 @@ bool is_autocast_cache_enabled() {
 
 void set_autocast_cache_enabled(bool enabled) {
   cache_enabled = enabled;
+}
+
+bool is_any_autocast_enabled() {
+  return autocast_backend_bitset;
+}
+
+bool is_backend_autocast_enabled(BackendComponent backend) {
+  return autocast_backend_bitset & (1 << static_cast<uint8_t>(backend));
+}
+
+uint16_t get_autocast_backend() {
+  return autocast_backend_bitset;
+}
+
+// DispatchKey::AutocastFunctionality can be removed when only no backend is set.
+void set_autocast_backend(BackendComponent backend, bool enable) {
+  if (enable) {
+    if (!is_any_autocast_enabled()) {
+      c10::impl::tls_set_dispatch_key_excluded(
+          DispatchKey::AutocastFunctionality, false);
+    }
+    autocast_backend_bitset |= 1 << static_cast<uint8_t>(backend);
+
+  } else {
+    autocast_backend_bitset &= ~(1 << static_cast<uint8_t>(backend));
+    if (!is_any_autocast_enabled()) {
+      c10::impl::tls_set_dispatch_key_excluded(
+          DispatchKey::AutocastFunctionality, true);
+    }
+  }
+}
+
+ExcludeAutocastGuard::ExcludeAutocastGuard() {
+  backend_ = get_autocast_backend();
+  autocast_backend_bitset &= ~backend_;
+
+  if (!is_any_autocast_enabled()) {
+    c10::impl::tls_set_dispatch_key_excluded(
+        DispatchKey::AutocastFunctionality, true);
+  }
+}
+
+ExcludeAutocastGuard::ExcludeAutocastGuard(BackendComponent backend)
+    : backend_(1 << static_cast<uint8_t>(backend)) {
+  set_autocast_backend(backend, false);
+}
+
+ExcludeAutocastGuard::~ExcludeAutocastGuard() {
+  if (!is_any_autocast_enabled()) {
+    c10::impl::tls_set_dispatch_key_excluded(
+        DispatchKey::AutocastFunctionality, false);
+  }
+
+  autocast_backend_bitset |= backend_;
+}
+
+// If the backend located on the leftmost side of ks is not in autocast_backend_bitset,
+// it means that autocast is not enabled for this backend, then remove the
+// DispatchKey::AutocastFunctionality from the ks.
+DispatchKeySet get_ks_by_autocast(c10::DispatchKeySet ks) {
+  auto backend = ks.highestBackendKey();
+  if (!is_backend_autocast_enabled(backend)) {
+    ks = ks.remove(c10::DispatchKey::AutocastFunctionality);
+  }
+
+  return ks;
 }
 
 // Overload to catch Tensor args
@@ -516,6 +586,12 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(index_copy, dimname, promote)
 
 }
+
+// Register callback of AutocastFunctionality to PyTorch to additional
+// compute DispatchKeySet when needed.
+REGISTER_DISPATCHKEYSET_FUNC(
+    DispatchKey::AutocastFunctionality,
+    get_ks_by_autocast);
 
 } // namespace
 } // namespace at::autocast

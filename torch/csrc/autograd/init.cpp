@@ -53,7 +53,7 @@ struct DisableFuncTorch {
 };
 
 struct DisableAutocast {
-  c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
+  at::autocast::ExcludeAutocastGuard guard_;
 };
 
 struct EnableTorchFunction {
@@ -501,9 +501,7 @@ static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
-      at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled() || at::autocast::is_hpu_enabled()) {
+  if (at::autocast::is_any_autocast_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

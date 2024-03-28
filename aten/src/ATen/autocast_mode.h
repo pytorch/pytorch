@@ -43,6 +43,25 @@ TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
 TORCH_API void set_autocast_privateuseone_dtype(at::ScalarType dtype);
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
+TORCH_API bool is_any_autocast_enabled();
+TORCH_API bool is_backend_autocast_enabled(BackendComponent backend);
+TORCH_API uint16_t get_autocast_backend();
+TORCH_API void set_autocast_backend(BackendComponent backend, bool enable);
+TORCH_API DispatchKeySet get_ks_by_autocast(c10::DispatchKeySet ks);
+
+class C10_API ExcludeAutocastGuard final {
+ public:
+  explicit ExcludeAutocastGuard();
+  explicit ExcludeAutocastGuard(BackendComponent backend);
+  ExcludeAutocastGuard(const ExcludeAutocastGuard&) = delete;
+  ExcludeAutocastGuard operator=(const ExcludeAutocastGuard&) = delete;
+  ExcludeAutocastGuard(ExcludeAutocastGuard&&) = delete;
+  ExcludeAutocastGuard operator=(ExcludeAutocastGuard&&) = delete;
+  ~ExcludeAutocastGuard();
+
+ private:
+  uint16_t backend_;
+};
 
 namespace {
 inline bool is_autocast_eligible(
@@ -71,26 +90,26 @@ inline bool is_autocast_eligible(
 }
 } // namespace
 
-inline DispatchKey get_autocast_dispatch_key_from_device_type(
+inline BackendComponent get_autocast_backend_from_device_type(
     c10::DeviceType device_type) {
   switch (device_type) {
-    case c10::DeviceType::CUDA:
-      return DispatchKey::Autocast;
     case c10::DeviceType::CPU:
-      return DispatchKey::AutocastCPU;
+      return BackendComponent::CPUBit;
+    case c10::DeviceType::CUDA:
+      return BackendComponent::CUDABit;
     case c10::DeviceType::XPU:
-      return DispatchKey::AutocastXPU;
+      return BackendComponent::XPUBit;
     case c10::DeviceType::IPU:
-      return DispatchKey::AutocastIPU;
+      return BackendComponent::IPUBit;
     case c10::DeviceType::HPU:
-      return DispatchKey::AutocastHPU;
+      return BackendComponent::HPUBit;
     case c10::DeviceType::XLA:
-      return DispatchKey::AutocastXLA;
+      return BackendComponent::XLABit;
     case c10::DeviceType::PrivateUse1:
-      return DispatchKey::AutocastPrivateUse1;
+      return BackendComponent::PrivateUse1Bit;
     default:
       throw std::runtime_error(
-          "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
+          "unknown device type for autocast in get_autocast_backend_from_device_type");
   }
 }
 
@@ -368,8 +387,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    auto backend = get_autocast_backend_from_device_type(device_type);
+    ExcludeAutocastGuard no_autocast(backend);
     return (*F)(cached_cast(
         get_lower_precision_fp_from_device_type(device_type),
         args,
@@ -392,8 +411,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    auto backend = get_autocast_backend_from_device_type(device_type);
+    ExcludeAutocastGuard no_autocast(backend);
     return (*F)(cached_cast(at::kFloat, args, device_type)...);
   }
 };
@@ -413,8 +432,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    auto backend = get_autocast_backend_from_device_type(device_type);
+    ExcludeAutocastGuard no_autocast(backend);
     if (firstarg_is_eligible(device_type, args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -441,8 +460,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    auto backend = get_autocast_backend_from_device_type(device_type);
+    ExcludeAutocastGuard no_autocast(backend);
     at::ScalarType out_type =
         type_from_firstarg(device_type, at::kFloat, args...);
     return (*F)(args..., out_type);
@@ -464,8 +483,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    auto backend = get_autocast_backend_from_device_type(device_type);
+    ExcludeAutocastGuard no_autocast(backend);
     auto to_type = promote_type(
         get_lower_precision_fp_from_device_type(device_type),
         device_type,
