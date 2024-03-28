@@ -283,6 +283,13 @@ class X86InductorQuantizer(Quantizer):
         self.global_config = quantization_config
         return self
 
+    def set_config_for_operator_type(
+        self, operator_type: str, quantization_config: QuantizationConfig
+    ):
+        warnings.warn(
+            "The function set_config_for_operator_type has been deprecated. Please use set_operator_type instead."
+        )
+
     def set_operator_type(
         self,
         operator_type: torch._ops.OpOverloadPacket,
@@ -296,7 +303,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self
 
-    def get_operator_type(
+    def _get_operator_type(
         self,
         operator_type: torch._ops.OpOverloadPacket,
     ) -> Optional[QuantizationConfig]:
@@ -676,7 +683,7 @@ class X86InductorQuantizer(Quantizer):
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_fusion_pattern(self, model: torch.fx.GraphModule):
-        if config := self.get_operator_type(torch.ops.aten.conv2d.default):
+        if config := self._get_operator_type(torch.ops.aten.conv2d.default):
             if config.is_qat:
                 # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
                 self._annotate_qat_conv2d_fusion_pattern(model, config)
@@ -686,14 +693,14 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_conv2d(model, config)
 
     def _annotate_linear_fusion_pattern(self, model: torch.fx.GraphModule):
-        if config := self.get_operator_type(torch.ops.aten.linear.default):
+        if config := self._get_operator_type(torch.ops.aten.linear.default):
             if config.input_activation and not config.input_activation.is_dynamic:
                 # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
                 self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
 
     def _annotate_matmul(self, model: torch.fx.GraphModule):
-        if config := self.get_operator_type(torch.ops.aten.matmul.default):
+        if config := self._get_operator_type(torch.ops.aten.matmul.default):
             for node in model.graph.nodes:
                 if node.target == torch.ops.aten.matmul.default and not _is_annotated(
                     [node]
@@ -909,7 +916,7 @@ class X86InductorQuantizer(Quantizer):
             (node.target in propagation_quantizable_ops)
             and (not _is_any_annotated([node]))
             and (node.op == "call_function")
-            and (quantization_config := self.get_operator_type(node.target))  # type: ignore[arg-type]
+            and (quantization_config := self._get_operator_type(node.target))  # type: ignore[arg-type]
         ):
 
             def is_all_inputs_connected_to_quantized_op(input_nodes):
@@ -976,7 +983,7 @@ class X86InductorQuantizer(Quantizer):
         if (
             (node.target in int8_in_int8_out_ops)
             and (_is_any_annotated([node]))
-            and (quantization_config := self.get_operator_type(node.target))  # type: ignore[arg-type]
+            and (quantization_config := self._get_operator_type(node.target))  # type: ignore[arg-type]
         ):
             if node.target == torch.ops.aten.max_pool2d.default:
                 maxpool_node = node
