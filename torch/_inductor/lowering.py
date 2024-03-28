@@ -205,7 +205,8 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "dtype")
+                if isinstance(a, (Number, sympy.Expr))
+                or getattr(a, "dtype", None) is not None
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -5943,7 +5944,7 @@ def with_effects(token, op, *args, **kwargs):
     if result is None:
         return (effectful_kernel,)
 
-    result = pytree.tree_map_only(torch.Tensor, TensorBox.create, result)
+    result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
     if not isinstance(result, (list, tuple)):
         return (effectful_kernel, result)
     else:

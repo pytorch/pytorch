@@ -734,6 +734,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
+        self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -765,11 +766,6 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
 
-        if self.is_token():
-            # HACK? Do not add tokens to the input of the inductor generated callable.
-            return tensor
-
-        self.graph_input_names.append(target)
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
@@ -884,8 +880,6 @@ class GraphLowering(torch.fx.Interpreter):
             result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
 
-        num_tokens = len([x for x in result if isinstance(x, ir.EffectfulKernel)])
-
         assert all(
             isinstance(
                 x,
@@ -921,8 +915,7 @@ class GraphLowering(torch.fx.Interpreter):
                     self.match_insignificant_strides(r, fx_node.meta["val"].stride())
                 )
 
-        # HACK? Remove the tokens from the outputs
-        self.graph_outputs = result_correct_strides[num_tokens:]
+        self.graph_outputs = result_correct_strides
 
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
@@ -1422,10 +1415,3 @@ class GraphLowering(torch.fx.Interpreter):
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
         )
-
-    def is_token(self):
-        for user in self.current_node.users:
-            if user.target.__name__ == "with_effects":
-                if user.args[0] == self.current_node:
-                    return True
-        return False

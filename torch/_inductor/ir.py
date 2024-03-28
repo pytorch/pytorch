@@ -7293,7 +7293,7 @@ class EffectfulKernel(FallbackKernel):
         kwargs=None,
     ):
         super().__init__(
-            layout,
+            NoneLayout(layout.device),
             kernel,
             tensor_args,
             nontensor_args,
