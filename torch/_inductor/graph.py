@@ -65,6 +65,7 @@ from .lowering import (
     needs_realized_inputs,
     unsupported_output_tensor,
 )
+from torch._prims_common import make_channels_last_strides_for
 from .sizevars import SizeVarAllocator
 from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
 from .virtualized import V
@@ -941,7 +942,37 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self):
+        def is_channels_last_contiguous(size, stride):
+            ndim = len(size)
+            if ndim != 4:
+                return False
+            for left, right, size in zip(
+                stride,
+                make_channels_last_strides_for(size),
+                size  # type: ignore[arg-type]
+            ):
+                if size != 1 and left != right:
+                    return False
+            return True
+
         for buf in self.buffers:
+            # When the input is in channels last format,
+            # adjust the buffer stride to channels last in advance
+            if isinstance(buf.layout, ir.FlexibleLayout) and len(buf.layout.size) == 4:
+                is_cl_contig = False
+                for example_input in self.example_inputs:
+                    if not is_channels_last_contiguous(list(example_input.shape), example_input.stride()):
+                        is_cl_contig = False
+                        break
+                    else:
+                        is_cl_contig = True
+
+                if is_cl_contig:
+                    stride_order = ir.NHWC_STRIDE_ORDER
+                    fill_order = ir.stride_order2fill_order(stride_order)
+                    buf.layout = ir.FlexibleLayout(
+                        buf.layout.device, buf.layout.dtype, buf.layout.size, fill_order)
+
             buf.decide_layout()
 
     @contextmanager

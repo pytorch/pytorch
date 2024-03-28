@@ -3181,7 +3181,7 @@ class ComputedBuffer(Buffer):
 
     def get_fill_order(self):
         """
-        If our layout is still flexible, try to determine the stride order based on stride orders of reads.
+        If our layout is still flexible, try to determine the stride order based on stride orders of reads and writes.
 
         TODO(jansel): A better algorithm here would look at downstream consumers of this
                       value and try to do global graph-level layout optimization.
@@ -3191,37 +3191,36 @@ class ComputedBuffer(Buffer):
             (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
-            reads = self.get_read_writes().reads
-            reads_bufs = [
+            read_writes = self.get_read_writes().reads | self.get_read_writes().writes
+            read_writes_bufs = [
                 V.graph.name_to_buffer[r.name]
                 if r.name in V.graph.name_to_buffer.keys()
                 else None
-                for r in reads
+                for r in read_writes
             ]
-            # only consider reads to buffer of same size
+            # only consider read_writes to buffer of same size
             # ignore StarDeps because they don't contribute stride information
             assert all(
                 isinstance(r, (dependencies.StarDep, dependencies.MemoryDep))
-                for r in reads
+                for r in read_writes
             )
-            reads = [
+            read_writes = [
                 sympy_subs(
                     r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
                 )
-                for r in reads
+                for r in read_writes
                 if isinstance(r, dependencies.MemoryDep)
             ]
 
-            if reads:
+            if read_writes:
                 if isinstance(self.data, Scan):
                     indices = self.data.reindex(index_vars, reduction_vars)
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
+                    V.graph.sizevars.stride_hints(expr, indices) for expr in read_writes  # type: ignore[arg-type]
                 ]
                 from .scheduler import pick_loop_order
-
                 return pick_loop_order(stride_lengths, self.get_size())
 
         return None
@@ -3352,9 +3351,9 @@ class ComputedBuffer(Buffer):
             reduce_vars, support_vars, reduce_size
         )
 
-        # remember the reordering if not have loop collapse.
-        if len(iter_ranges) == len(index_vars):
-            self.iter_reordering_reindex = iter_reordering_reindex
+        # # remember the reordering if not have loop collapse.
+        # if len(iter_ranges) == len(index_vars):
+        #     self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
