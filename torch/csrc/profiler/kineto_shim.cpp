@@ -1,7 +1,6 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
-#include <ATen/Context.h>
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
@@ -331,17 +330,6 @@ void logInvariantViolation(
 namespace autograd {
 namespace profiler {
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
-  // gpu_device is for returning currently used device type for Activity
-  // such as concurrent kernel or gpu memory operations
-  // It should be one of registered non-CPU device, so we can init it with
-  // CPU as a invalid value for checking.
-  c10::DeviceType gpu_device = c10::DeviceType::CPU;
-  if (at::hasCUDA() || at::hasMTIA())
-    gpu_device = c10::DeviceType::CUDA;
-  else if (at::hasXPU())
-    gpu_device = c10::DeviceType::XPU;
-  else if (c10::get_privateuse1_backend() != "privateuseone")
-    gpu_device = c10::DeviceType::PrivateUse1;
   // fallthrough
   switch (activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
@@ -352,18 +340,22 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
-      TORCH_CHECK(
-          gpu_device != c10::DeviceType::CPU,
-          "Kineto GPU Activity Type enabled, but no available gpu device was found."
-          "Kineto allowed GPU device must be one of {CUDA, MTIA or XPU}");
-      return gpu_device;
+      // PrivateUse1 kineto backend reuse above ActivityTypes,
+      // If PrivauseUse1 backend enabled, this should return
+      // c10::DeviceType::PrivateUse1.
+      c10::DeviceType device_type = []() {
+        if (c10::get_privateuse1_backend() != "privateuseone") {
+          return c10::DeviceType::PrivateUse1;
+        }
+        return c10::DeviceType::CUDA;
+      }();
+      return device_type;
     case libkineto::ActivityType::CPU_OP:
     case libkineto::ActivityType::USER_ANNOTATION:
     case libkineto::ActivityType::EXTERNAL_CORRELATION:
     case libkineto::ActivityType::CUDA_RUNTIME:
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
-    case libkineto::ActivityType::XPU_RUNTIME:
     case libkineto::ActivityType::MTIA_RUNTIME:
     case libkineto::ActivityType::PYTHON_FUNCTION:
     case libkineto::ActivityType::CUDA_DRIVER:

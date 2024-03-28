@@ -382,7 +382,7 @@ def synchronize(device: _device_t = None) -> None:
             if :attr:`device` is ``None`` (default).
     """
     _lazy_init()
-    device = _get_device_index(device)
+    device = _get_device_index(device, optional=True)
     return torch._C._xpu_synchronize(device)
 
 

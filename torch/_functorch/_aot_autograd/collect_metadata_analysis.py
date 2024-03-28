@@ -48,6 +48,44 @@ zip = strict_zip
 log = logging.getLogger(__name__)
 
 
+# Note [Tangents must be contiguous]
+# We force tangents to be contiguous today.
+# The idea is that we are technically making a guess about the strides of our tangents,
+# while we trace out the joint.
+# Today, we force this guess to be correct by additioanlly calling contiguous()
+# on all tangents at runtime.
+# In the future, you could imagine lifting this restriction, since these contiguous()
+# calls can have noticeable perf overhead depending on the model.
+def coerce_tangent(x):
+    if not isinstance(x, Tensor):
+        return x
+    out = x.detach().contiguous()
+    # Note [Tangents must be contiguous, Part 2]
+    # In the same way that "what strides do we assigns to our tangents" is a question
+    # that we can not answer (and therefore have to guess) as we trace the backward ahead-of-time,
+    # The same applies to any tensor subclass metadata, when we have tangents that are subclasses.
+    # To handle this situation, we have two new methods that a tensor subclass can implement:
+    # (1) __coerce_tangent_metadata__(self)
+    #     Given a subclass with "non-standard" metadata, turn it into a new subclass with "normal" metadata.
+    #     The main example here is a DTensor with the "_Partial" placement.
+    #     If we have a forward output with a _Partial placement, and corresponding tangent
+    #     with a Replicate/Shard placement, we have no way to convert the tangent "back" to a _Partial placement.
+    #     This method lets us avoid the problem entirely by allowing subclasses to ensure that we can never
+    #     have a tangent with "problematic" metadata, that we cannot convert to.
+    # (1) __coerce_same_metadata_as_tangent__(self, target)
+    #     Given a subclass, and a target subclass with differing metadata,
+    #     convert self to have the same metadata as the target.
+    #     With DTensor being the main example, we can use this to convert a DTensor with a Replicate()
+    #     placement into one with a Shard() placement, in the case that we "guessed wrong",
+    #     and traced tangents with a Shard() placement at compile time.
+    #
+    if is_traceable_wrapper_subclass(out) and hasattr(
+        out, "__coerce_tangent_metadata__"
+    ):
+        return out.__coerce_tangent_metadata__()
+    return out
+
+
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
 #
@@ -105,7 +143,8 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        with disable_above, FunctionalTensorMode():
+        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
@@ -565,6 +604,11 @@ from a multi-output view call"
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
         )
+        # See Note [Tangents must be contiguous]
+        traced_tangents = pytree.tree_map(
+            coerce_tangent,
+            traced_tangents,
+        )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
         f_mutated_inputs = [
@@ -618,6 +662,7 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
+            tokens=mode._tokens,
         )
         return metadata
 

@@ -735,23 +735,6 @@ Tensor cudnn_convolution_relu(
             output_t.options().device_opt(),
             output_t.options().pinned_memory_opt());
 
-#ifdef AT_CUDNN_CONV_BIAS_RELU_FALLBACK
-  raw_cudnn_convolution_add_relu_fallback_out(
-      output_t,
-      input,
-      weight,
-      output_t, // use output_t as z to satisfy CUDNN API
-      0, // alpha
-      _bias,
-      stride,
-      padding,
-      dilation,
-      groups,
-      benchmark, // benchmark
-      false, // deterministic
-      allow_tf32 // allow_tf32
-  );
-#else // AT_CUDNN_CONV_BIAS_RELU_FALLBACK
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input,
@@ -767,7 +750,6 @@ Tensor cudnn_convolution_relu(
       false, // deterministic
       allow_tf32 // allow_tf32
   );
-#endif
 
   return output_t;
 }
@@ -813,23 +795,6 @@ Tensor cudnn_convolution_add_relu(
             output_t.options().device_opt(),
             output_t.options().pinned_memory_opt());
 
-#ifdef AT_CUDNN_CONV_BIAS_RELU_FALLBACK
-  raw_cudnn_convolution_add_relu_fallback_out(
-      output_t,
-      input,
-      weight,
-      z,
-      _alpha,
-      _bias,
-      stride,
-      padding,
-      dilation,
-      groups,
-      benchmark,
-      false, // deterministic
-      allow_tf32 // allow_tf32
-  );
-#else // AT_CUDNN_CONV_BIAS_RELU_FALLBACK
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input,
@@ -845,7 +810,6 @@ Tensor cudnn_convolution_add_relu(
       false, // deterministic
       allow_tf32 // allow_tf32
   );
-#endif // AT_CUDNN_CONV_BIAS_RELU_FALLBACK
 
   return output_t;
 }
