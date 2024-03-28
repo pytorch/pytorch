@@ -541,8 +541,8 @@ def run_test(
             # returned when the binary is not a C++ test executable, but 4 can
             # also be returned if the file fails before running any tests. All
             # binary files under build/bin that are not C++ test at the time of
-            # this writing have been excluded, but should be added to the list
-            # of exclusions in tools/testing/discover_tests.py
+            # this writing have been excluded and new ones should be added to
+            # the list of exclusions in tools/testing/discover_tests.py
             ret_code = 0 if ret_code == 5 else ret_code
 
     if options.pipe_logs and print_log:
