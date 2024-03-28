@@ -79,7 +79,7 @@ KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
     NAdam: KernelCounts(multitensor=2, singletensor=8),
-    Rprop: KernelCounts(multitensor=1, singletensor=4),
+    Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=1, singletensor=4),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
