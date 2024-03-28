@@ -307,6 +307,18 @@ if(INTERN_BUILD_ATEN_OPS)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
+  if(COMPILER_HAS_ARM_SVE)
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
+    LIST(APPEND CPU_CAPABILITY_NAMES "SVE256")
+    #Currently CLANG16 compiler has a bug which needs it to be compiled with -O2 optimization.
+    #This bug is resolved starting from CLANG17 compiler version.
+    if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+    else()
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+    endif()
+  endif(COMPILER_HAS_ARM_SVE)
+
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
