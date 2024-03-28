@@ -13,11 +13,6 @@
 
 #define ONEDNN_SUPPORT_DETERMINISTIC (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=4)
 
-#define XPU_ONEDNN_EXEC(prim, stream, ...)                               \
-{                                                                        \
-  auto e = dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__); \
-}
-
 namespace at::native::onednn {
 
 static inline dnnl::memory::format_tag get_dnnl_default_format(
