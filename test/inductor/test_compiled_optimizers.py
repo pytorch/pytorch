@@ -427,13 +427,8 @@ class CompiledOptimizerTests(TestCase):
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
-<<<<<<< HEAD
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
-    test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
-=======
-    test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
->>>>>>> origin/main
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
