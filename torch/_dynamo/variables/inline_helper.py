@@ -118,8 +118,8 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
             )
 
     # Perform a dead code elimination
-    fx_g.graph.eliminate_dead_code()
-    fx_g.recompile()
+    # fx_g.graph.eliminate_dead_code()
+    # fx_g.recompile()
 
     # print("\nfx code")
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
