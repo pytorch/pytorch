@@ -609,8 +609,10 @@ class InputReader:
         self.real_args.append(t)
 
         if dynamic_sizes is not None:
-            symbolic_context = torch.fx.experimental.symbolic_shapes.StatelessSymbolicContext(
-                dynamic_sizes=dynamic_sizes
+            symbolic_context = (
+                torch.fx.experimental.symbolic_shapes.StatelessSymbolicContext(
+                    dynamic_sizes=dynamic_sizes
+                )
             )
             self.tracing_context.tensor_to_context[t] = symbolic_context
         else:

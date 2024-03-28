@@ -409,8 +409,9 @@ def repro_minify(options, mod, load_args):
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
-    with torch.cuda.amp.autocast(enabled=options.autocast), \
-         torch._guards.tracing(reader.tracing_context):
+    with torch.cuda.amp.autocast(enabled=options.autocast), torch._guards.tracing(
+        reader.tracing_context
+    ):
         opt_mod(*reader.real_args)
 
 
@@ -426,8 +427,9 @@ def repro_run(options, mod, load_args):
         # TODO: disable clone
         assert same_two_models(mod, mod, args), "Eager itself failed"
 
-        with torch.cuda.amp.autocast(enabled=options.autocast), \
-             torch._guards.tracing(reader.tracing_context):
+        with torch.cuda.amp.autocast(enabled=options.autocast), torch._guards.tracing(
+            reader.tracing_context
+        ):
             if not same_two_models(mod, opt_mod, args):
                 raise AccuracyError("Dynamo failed")
     else:

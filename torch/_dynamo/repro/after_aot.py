@@ -16,7 +16,6 @@ from typing import Any, Callable, Dict, Union
 import torch
 import torch.fx as fx
 import torch.nn as nn
-import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -137,7 +136,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     fx.GraphModule(gm, orig_graph),
                     real_inputs,
                     tracing_context,
-                    compiler_name
+                    compiler_name,
                 )
 
             if config.repro_level == 4:
@@ -216,7 +215,9 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(gm, args, tracing_context, *, stable_output=False, save_dir=None):
+def generate_compiler_repro_string(
+    gm, args, tracing_context, *, stable_output=False, save_dir=None
+):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -314,7 +315,9 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(gm, args, tracing_context, compiler_name, *, accuracy=None):
+def dump_compiler_graph_state(
+    gm, args, tracing_context, compiler_name, *, accuracy=None
+):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -324,7 +327,13 @@ def dump_compiler_graph_state(gm, args, tracing_context, compiler_name, *, accur
     )
     with open(file_name, "w") as fd:
         save_graph_repro(
-            fd, gm, args, tracing_context, compiler_name, save_dir=subdir, accuracy=accuracy
+            fd,
+            gm,
+            args,
+            tracing_context,
+            compiler_name,
+            save_dir=subdir,
+            accuracy=accuracy,
         )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
@@ -349,7 +358,9 @@ def dump_to_minify(gm, args, tracing_context, compiler_name: str):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro(out, gm, args, tracing_context, compiler_name, save_dir=subdir, command="minify")
+    save_graph_repro(
+        out, gm, args, tracing_context, compiler_name, save_dir=subdir, command="minify"
+    )
     return helper_for_dump_minify(out.getvalue())
 
 
@@ -456,7 +467,13 @@ def inductor_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(
-    fx_g, real_args, example_args, check_str=None, *, require_fp64=False, ignore_non_fp=False
+    fx_g,
+    real_args,
+    example_args,
+    check_str=None,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
 ):
     from torch._inductor.compile_fx import compile_fx_inner
 
