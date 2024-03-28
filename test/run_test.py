@@ -1559,7 +1559,7 @@ def run_tests(
         "pytest_shard_custom.py",
     ]
     for conftest_file in conftest_files:
-        cpp_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
+        cpp_file = os.path.join(CPP_TESTS_DIR, conftest_file)
         if (
             options.cpp
             and os.path.exists(CPP_TESTS_DIR)
