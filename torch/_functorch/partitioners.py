@@ -793,6 +793,7 @@ def min_cut_rematerialization_partition(
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
 
+        # NB: "recompute" == 0 means that must save this node.
         if node.meta.get("recompute", None) == 0:
             return True
 
@@ -857,7 +858,8 @@ def min_cut_rematerialization_partition(
     def ban_recomputation_if_allowed(node):
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
-        # NB: "recompute" == 0 means it's not banned from recomputing
+        # NB: "recompute" > 0 means that user annotation has asked us to
+        # recompute it
         if node.meta.get("recompute", 0) > 0:
             return False
 
