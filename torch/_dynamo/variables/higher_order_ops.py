@@ -17,6 +17,7 @@ from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
@@ -322,10 +323,10 @@ def speculate_subgraph(
     enable_grad=None,
     # NOTE [argument `set_subgraph_inputs`]
     # set_subgraph_inputs controls what how to construct subgraphs' placeholders from sub_args.
-    # 1. if your HOP supports arbitrary inputs, use set_subtraph_inputs="automatic" (most recommended).
+    # 1. if your HOP supports arbitrary inputs, use set_subgraph_inputs="automatic" (most recommended).
     # 2. if your HOP supports only Tensor and symnode inputs, use set_subgraph_inputs="flatten_manual" (recommended).
     # If sub_args contain Pytree structure (e.g. dict/list/tuple/set), the sub_args will be flattened first.
-    # Then the flattend args are manually set as subgraph's placeholders.
+    # Then the flattened args are manually set as subgraph's placeholders.
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
@@ -498,7 +499,9 @@ def add_subgraph(tx, source, name, gm):
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
-    def __init__(self, value, source: Optional[Source] = None, **kwargs):
+    def __init__(
+        self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
+    ):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
@@ -519,6 +522,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "templated_attention":
+            return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1457,6 +1462,98 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         kwargs = dict(kwargs)
         fn = kwargs.pop("fn")
         return fn.call_function(tx, args, kwargs)
+
+
+class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @staticmethod
+    def normalize_to_kwargs(args, kwargs):
+        if len(args) == 3:
+            return args, kwargs
+        elif len(args) > 3:
+            return args[:3], {"score_mod": args[3]}
+        else:
+            raise NotImplementedError(
+                f"Expected 3 or 4 arguments but got {len(args)}.\n"
+            )
+
+    def create_wrapped_node(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx: InstructionTranslator = tx
+
+        score = args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
+
+        def create_scalar():
+            return args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
+
+        bhmn = [create_scalar() for _ in range(4)]
+        new_args = [score, *bhmn]
+        function = kwargs["score_mod"]
+        (
+            (body_output, body_treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            function,
+            new_args,
+            {},  # expect only args no kwargs for now
+            description="templated_attention",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+        )
+
+        body_name = add_subgraph(
+            tx,
+            self.source,
+            "templated_attention",
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+            # torch.fx.GraphModule({}, body_graph)
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        # It is possible that the score-mod function captures some free variables that are not
+        # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
+        # We then need to create proxies for this + the inputs.
+
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_output.as_proxy(),
+        )
+
+        return proxy_args, {}, example_value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        norm_args, norm_kwargs = self.normalize_to_kwargs(args, kwargs)
+        p_args, p_kwargs, example_value = self.create_wrapped_node(
+            tx, norm_args, norm_kwargs
+        )
+
+        # Store the invocation as a call
+        # Norm_kwargs contains the score_function and we dont want to proxy this because
+        # Proxying user defined functions is not supported.
+        inp_args, _ = proxy_args_kwargs(norm_args, {})
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=inp_args + p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=example_value,
+        )
 
 
 class AutogradFunctionApplyVariable(VariableTracker):

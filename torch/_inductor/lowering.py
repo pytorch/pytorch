@@ -2421,7 +2421,8 @@ make_fallback(aten._to_sparse)
 
 # Needs dimname support
 make_fallback(aten.zeros.names)
-
+# TODO registre HOP lowering for tempalted attention
+# make_fallback(aten.scaled_dot_product_attention)
 
 # 6) Pattern-matched
 make_fallback(
