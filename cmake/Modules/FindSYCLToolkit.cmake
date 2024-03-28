@@ -56,6 +56,13 @@ find_library(
   NO_DEFAULT_PATH
 )
 
+find_library(
+  OCL_LIBRARY
+  NAMES OpenCL
+  HINTS ${SYCL_LIBRARY_DIR}
+  NO_DEFAULT_PATH
+)
+
 if((NOT SYCL_INCLUDE_DIR) OR (NOT SYCL_LIBRARY_DIR) OR (NOT SYCL_LIBRARY))
   set(SYCL_FOUND False)
   set(SYCL_REASON_FAILURE "SYCL library is incomplete!!")
