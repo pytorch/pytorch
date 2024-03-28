@@ -96,7 +96,8 @@ Reducer::Reducer(
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
-    int64_t first_bucket_bytes_cap)
+    int64_t first_bucket_bytes_cap,
+    bool use_float_for_local_used_map)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -118,7 +119,8 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
-      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
+      first_bucket_bytes_cap_(first_bucket_bytes_cap),
+      use_float_for_local_used_map_(use_float_for_local_used_map) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -286,7 +288,8 @@ bool Reducer::ddp_graph_static() {
 void Reducer::initialize_local_used_map() {
   const auto variable_count = params_.size();
   at::TensorOptions options;
-  options = options.dtype(at::kInt);
+  options = use_float_for_local_used_map_ ? options.dtype(at::kFloat)
+                                          : options.dtype(at::kInt);
 
   // Deliberately don't pin the memory even if local_used_map_dev_ will
   // be cuda. See Note [local_used_map_ -> local_used_map_dev copying]

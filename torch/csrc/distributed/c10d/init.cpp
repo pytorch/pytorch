@@ -495,7 +495,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               bool,
               bool,
               std::unordered_map<size_t, std::string>,
-              int64_t>(),
+              int64_t,
+              bool>(),
           py::arg("params"),
           py::arg("bucket_indices"),
           py::arg("per_bucket_size_limits"),
@@ -507,6 +508,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
           py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
+          py::arg("use_float_for_local_used_map") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_forward",
