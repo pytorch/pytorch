@@ -108,7 +108,6 @@ Non-linear activation functions
     instance_norm
     layer_norm
     local_response_norm
-    rms_norm
     normalize
 
 .. _Link 1: https://arxiv.org/abs/1611.00712
