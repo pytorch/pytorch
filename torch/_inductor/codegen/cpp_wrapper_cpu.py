@@ -975,7 +975,7 @@ class CppWrapperCpu(WrapperCodeGen):
                             if output in output2idx:
                                 src_idx = output2idx[output]
                                 self.wrapper_call.writeline(
-                                    f"aoti_torch_alias_tensor(output_handles[{src_idx}], &output_handles[{idx}]);"
+                                    f"output_handles[{idx}] = output_handles[{src_idx}];"
                                 )
                             else:
                                 self.wrapper_call.writeline(
