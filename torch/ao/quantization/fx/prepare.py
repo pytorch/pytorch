@@ -207,7 +207,7 @@ def _create_obs_or_fq_from_qspec(
         kwargs = _get_observer_kwargs(quantization_spec)
         observer_ctr = FixedQParamsObserver.with_args(**kwargs)
         if is_qat:
-            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)
+            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)()
         else:
             return observer_ctr()
 

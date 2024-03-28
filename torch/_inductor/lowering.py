@@ -13,6 +13,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.create_parameter_op import _bind_nn_parameter
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -35,7 +36,7 @@ from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import core_aten_decompositions, decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
@@ -300,6 +301,23 @@ def _register_lowering(
         return out
 
     aten_fn = get_overloads(aten_fn)
+    core_aten_ops = core_aten_decompositions()
+
+    for fn in aten_fn:
+        if not isinstance(fn, torch._ops.OpOverload):
+            continue
+
+        if torch._C.DispatchKey.Autograd in fn.py_kernels:
+            if len(get_decompositions([fn])) < 1:
+                raise RuntimeError(
+                    "Function with Autograd dispatch key in python kernels should have a decomposition"
+                )
+            if fn not in core_aten_ops.keys():
+                raise RuntimeError(
+                    f"Trying to register a lowering for {str(fn)}, which has a "
+                    "py_impl Autograd key. A function with py_impl Autograd dispatch "
+                    "key should be in core_aten_ops and should not have a lowering."
+                )
 
     lowerings.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
@@ -369,7 +387,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
                 return ir.Constant(x, dtype, decode_device(None))
 
         return [const_func(x) for x in inputs]
-    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
+    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
@@ -566,9 +584,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
-        raise NotImplementedError(
-            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
-        )
+        # fallback to aten eager implementation for differing bitwidths
+        return fallback_handler(aten.view.dtype)(x, dtype)
 
     def _to_dtype_bitcast(x):
         # Because we may promote tensor type from float16 or bfloat16
@@ -935,11 +952,10 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1):
+def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1319,7 +1335,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
-def split(x, sizes, dim=0):
+def split(x, sizes, dim=0, clamp=True):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
@@ -1332,14 +1348,14 @@ def split(x, sizes, dim=0):
     start = 0
     for size in sizes:
         end = start + size
-        result.append(slice_(x, dim, start, end))
+        result.append(slice_(x, dim, start, end, clamp=clamp))
         start = end
     return result
 
 
 @register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
-    return split(x, sizes, dim)
+    return split(x, sizes, dim, clamp=False)
 
 
 @register_lowering(aten.unbind, type_promotion_kind=None)
@@ -2096,8 +2112,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            low,
-            high,
+            ops.index_expr(low, torch.int64),
+            ops.index_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -2205,13 +2221,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        if not meta_val.is_cuda:
-            return arg
 
         stride_order = ir.get_stride_order(meta_val.stride())
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if not meta_val.is_cuda:
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
@@ -2260,8 +2277,6 @@ make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
 make_fallback(aten.max_pool3d_with_indices)  # @isuruf (can this one be implemented?)
-make_fallback(aten.cummax)  # @isuruf
-make_fallback(aten.cummin)  # @isuruf
 
 
 # 1) Easy
@@ -3261,7 +3276,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(self),
+        ir.MutationLayoutSHOULDREMOVE(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
@@ -3471,7 +3486,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         )
         buffer = ir.ComputedBuffer(
             None,
-            ir.MutationLayout(self),
+            ir.MutationLayoutSHOULDREMOVE(self),
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
@@ -3489,7 +3504,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(self),
+        ir.MutationLayoutSHOULDREMOVE(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
@@ -3497,101 +3512,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if ndim == 0:
         self = view(self, [])
     return self
-
-
-def upsample_nearestnd(
-    x,
-    output_size,
-    scales_x: Tuple[Optional[float], ...],
-    n: int = 2,
-    exact: bool = False,
-):
-    x.realize_hint()  # elements are reused
-    x_loader = x.make_loader()
-    i_sizes = x.get_size()[-n:]
-    batch = x.get_size()[:-n]
-    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
-
-    assert len(scales_x) == n
-    o_sizes = output_size
-
-    inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
-    for i, scale in enumerate(scales_x):
-        if scale is not None:
-            inv_scales[i] = 1.0 / scale
-
-    def scale_fn(x, scale, size):
-        # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
-        #                            = floor(scale * (output_index + 0.5))
-        # Nearest: input_index = floor(scale * output_index)
-        x = ops.index_expr(x, torch.float32)
-        if exact:
-            x = ops.add(x, ops.constant(0.5, torch.float32))
-        x = ops.mul(x, ops.constant(scale, torch.float32))
-        x = ops.to_dtype(x, torch.int32)
-        return ops.indirect_indexing(x, size, check=False)
-
-    def fn(idx):
-        x = idx[-n:]
-        b = idx[:-n]
-        return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
-        )
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=[*batch, *o_sizes],
-    )
-
-
-@register_lowering(aten.upsample_nearest1d.default)
-def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
-    return upsample_nearestnd(x, output_size, (scales,), n=1)
-
-
-@register_lowering(aten._upsample_nearest_exact1d.default)
-def _upsample_nearest_exact1d(x, output_size, scales: Optional[float] = None):
-    return upsample_nearestnd(x, output_size, (scales,), n=1, exact=True)
-
-
-@register_lowering(aten.upsample_nearest2d.default)
-def upsample_nearest2d(
-    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
-):
-    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
-
-
-@register_lowering(aten._upsample_nearest_exact2d.default)
-def _upsample_nearest_exact2d(
-    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
-):
-    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2, exact=True)
-
-
-@register_lowering(aten.upsample_nearest3d.default)
-def upsample_nearest3d(
-    x,
-    output_size,
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
-):
-    return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
-
-
-@register_lowering(aten._upsample_nearest_exact3d.default)
-def _upsample_nearest_exact3d(
-    x,
-    output_size,
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
-):
-    return upsample_nearestnd(
-        x, output_size, (scales_d, scales_h, scales_w), n=3, exact=True
-    )
 
 
 def _create_constants(*args, dtype):
@@ -5042,8 +4962,8 @@ def _make_scan_inner(x, *, axis, dtype):
 
     return dict(
         device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=x.make_loader(),
+        dtypes=(x.get_dtype(),),
+        inner_fns=(x.make_loader(),),
         size=x.get_size(),
         axis=axis,
     )
@@ -5288,7 +5208,9 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayout.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
+    ir.MutationLayoutSHOULDREMOVE.realize_into(
+        val, changed_data, unsafe_alias=unsafe_alias
+    )
     return changed
 
 
@@ -5411,6 +5333,8 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
 fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
+fallback_cummax = fallback_handler(aten.cummax.default)
+fallback_cummin = fallback_handler(aten.cummin.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5425,8 +5349,13 @@ def cumsum(x, axis=None, dtype=None):
         dtype = dtype or x.get_dtype()
         return to_dtype(x, dtype, copy=True)
 
+    def combine_fn(a_tuple, b_tuple):
+        (a,) = a_tuple
+        (b,) = b_tuple
+        return (ops.add(a, b),)
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(0,))
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -5444,8 +5373,13 @@ def cumprod(x, axis=None, dtype=None):
         dtype = dtype or x.get_dtype()
         return to_dtype(x, dtype, copy=True)
 
+    def combine_fn(a_tuple, b_tuple):
+        (a,) = a_tuple
+        (b,) = b_tuple
+        return (ops.mul(a, b),)
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(1,))
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
@@ -5453,11 +5387,13 @@ def cumprod(x, axis=None, dtype=None):
 
 @register_lowering(aten.logcumsumexp)
 def logcumsumexp(x, dim):
-    def log_add_exp_helper(a, b):
+    def log_add_exp_helper(a_tuple, b_tuple):
+        (a,) = a_tuple
+        (b,) = b_tuple
         min_v = ops.minimum(a, b)
         max_v = ops.maximum(a, b)
         mask = (min_v != max_v) | (~ops.isinf(min_v))
-        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
+        return (ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a),)
 
     dtype = x.get_dtype()
     if len(x.get_size()) == 0:
@@ -5465,10 +5401,76 @@ def logcumsumexp(x, dim):
         return clone(x)
 
     kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
+    (result,) = ir.Scan.create(
+        **kwargs, combine_fn=log_add_exp_helper, inits=(float("-inf"),)
+    )
     if result is None:
         return fallback_logcumsumexp(x, dim=dim)
     return result
+
+
+@register_lowering(aten.cummax, type_promotion_kind=None)
+def cummax(x, axis=None):
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        return clone(x), torch.empty_like(x, dtype=torch.int64)
+
+    dtype = x.get_dtype()
+    combine_fn = ir.get_reduction_combine_fn(
+        "argmax", dtype=dtype, arg_break_ties_left=False
+    )
+
+    min_value = (
+        False
+        if dtype is torch.bool
+        else (
+            torch.finfo(dtype).min
+            if dtype.is_floating_point
+            else torch.iinfo(dtype).min
+        )
+    )
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    kwargs["dtypes"] = (dtype, torch.int64)
+    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    values, indices = ir.Scan.create(
+        **kwargs, combine_fn=combine_fn, inits=(min_value, 0)
+    )
+    if values is None:
+        return fallback_cummax(x, dim=axis)
+    return values, indices
+
+
+@register_lowering(aten.cummin, type_promotion_kind=None)
+def cummin(x, axis=None):
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        return clone(x), torch.empty_like(x, dtype=torch.int64)
+
+    dtype = x.get_dtype()
+    combine_fn = ir.get_reduction_combine_fn(
+        "argmin", dtype=dtype, arg_break_ties_left=False
+    )
+
+    max_value = (
+        True
+        if dtype is torch.bool
+        else (
+            torch.finfo(dtype).max
+            if dtype.is_floating_point
+            else torch.iinfo(dtype).max
+        )
+    )
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    kwargs["dtypes"] = (dtype, torch.int64)
+    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    values, indices = ir.Scan.create(
+        **kwargs, combine_fn=combine_fn, inits=(max_value, 0)
+    )
+    if values is None:
+        return fallback_cummin(x, dim=axis)
+    return values, indices
 
 
 @register_lowering(aten.prod)
@@ -5847,19 +5849,34 @@ def resize_storage_bytes_(variable, new_size):
     return variable
 
 
+@register_lowering(_bind_nn_parameter)
+def create_nn_parameter(self, placeholder):
+    self.realize()
+    return TensorBox.create(ir.BindNNParameter(self, placeholder))
+
+
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+    from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    ir.UserDefinedTritonKernel(
+        kernel_idx=kernel_idx,
+        grid=grid,
+        kernel_args={**kwargs, **constant_args},
+    )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
 @register_lowering(triton_kernel_wrapper_functional)
-def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+def triton_kernel_wrap(
+    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+):
     new_kwargs = {}
     for name, value in kwargs.items():
         if isinstance(value, ir.TensorBox):
@@ -5881,7 +5898,12 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
                 value = clone_preserve_reinterpret_view(value)
         new_kwargs[name] = value
 
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
+    return triton_kernel_wrap_(
+        kernel_idx=kernel_idx,
+        constant_args_idx=constant_args_idx,
+        grid=grid,
+        kwargs=new_kwargs,
+    )
 
 
 @register_lowering(torch.ops.higher_order.cond)
@@ -5893,6 +5915,18 @@ def cond(pred, true_fn, false_fn, operands):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.while_loop)
+def while_loop(cond_fn, body_fn, operands):
+    if any(map(is_triton, operands)):
+        msg = "control flow operator: torch.while_loop."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.WhileLoop.create(cond_fn, body_fn, operands)
     return list(map(TensorBox.create, result))
 
 
@@ -6084,3 +6118,4 @@ import_submodule(kernel)
 from . import quantized_lowerings
 
 quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
