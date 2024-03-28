@@ -4234,14 +4234,13 @@ class TestQuantizedLinear(TestCase):
                     elif post_op == "gelu":
                         y_ref = F.gelu(y_ref, approximate=post_op_algo)
                     qy_ref = torch.quantize_per_tensor(y_ref, used_y_scale, used_y_zp, torch.quint8)
-                elif post_op in ("add", "add_relu"):
+                elif post_op in ("sum", "sum_relu"):
                     x2_int8 = torch.randint(0, 4, y_ref.size())
                     x2 = x2_scale * ((x2_int8 - x2_zp).float())
                     qx2 = torch.quantize_per_tensor(
                         x2, scale=x2_scale, zero_point=x2_zp, dtype=torch.quint8
                     )
-                    unary_post_op = "relu" if post_op == "add_relu" else "none"
-                    unary_post_op_args
+                    unary_post_op = "relu" if post_op == "sum_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
                     accum = qx2.int_repr() if output_dtype is None else qx2.dequantize()
                     if bfloat16_out:
@@ -4249,7 +4248,25 @@ class TestQuantizedLinear(TestCase):
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
                         b, 1.0 / used_y_scale, used_y_zp, output_dtype,
-                        accum, x2_scale, x2_zp, "add", binary_alpha,
+                        accum, x2_scale, x2_zp, "sum", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
+                    y_ref = y_ref + x2 * binary_alpha
+                    if unary_post_op == "relu":
+                        y_ref = F.relu(y_ref)
+                    qy_ref = torch.quantize_per_tensor(y_ref, used_y_scale, used_y_zp, torch.quint8)
+                elif post_op in ("add", "add_relu"):
+                    used_y_scale, used_y_zp = 1.0, 0
+                    if output_dtype is not None:
+                        # Only support int8 output
+                        continue
+                    x2 = torch.randn(y_ref.size()) * 10
+                    unary_post_op = "relu" if post_op == "add_relu" else "none"
+                    binary_alpha = 1.0  # we only support alpha=1.0 now
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        x2, 1.0, 0, "add", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
                     y_ref = y_ref + x2 * binary_alpha
@@ -4292,6 +4309,16 @@ class TestQuantizedLinear(TestCase):
         qlinear = torch.ops.onednn.qlinear_pointwise
         post_op_algorithms = ['none', 'tanh']
         self._test_qlinear_pt2e_helper(qlinear, "gelu", post_op_algorithms=post_op_algorithms)
+
+    @skipIfNoONEDNN
+    def test_qlinear_sum_pt2e(self):
+        qlinear = torch.ops.onednn.qlinear_pointwise.binary
+        self._test_qlinear_pt2e_helper(qlinear, "sum")
+
+    @skipIfNoONEDNN
+    def test_qlinear_sum_relu_pt2e(self):
+        qlinear = torch.ops.onednn.qlinear_pointwise.binary
+        self._test_qlinear_pt2e_helper(qlinear, "sum_relu")
 
     @skipIfNoONEDNN
     def test_qlinear_add_pt2e(self):
