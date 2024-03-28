@@ -604,6 +604,16 @@ AOTITorchError aoti_torch_assign_tensors_out(
   });
 }
 
+AOTITorchError aoti_torch_alias_tensor(
+    AtenTensorHandle src,
+    AtenTensorHandle* ret_dst // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_dst = new_tensor_handle(
+        at::_ops::alias::call(*tensor_handle_to_tensor_pointer(src)));
+  });
+}
+
 AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
