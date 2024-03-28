@@ -604,7 +604,7 @@ class FunctionEvent(FormattedTimesMixin):
                 [child.privateuse1_time_total for child in self.cpu_children]
             )
         else:
-            assert self.device_type == DeviceType.CUDA
+            assert self.device_type == DeviceType.PrivateUse1
             return self.privateuse1_time_total
 
     @property

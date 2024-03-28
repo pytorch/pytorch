@@ -339,7 +339,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_USER_ANNOTATION:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
     // TODO: T151322015
-    case libkineto::ActivityType::MTIA_CCP_EVENTS:
+    case libkineto::ActivityType::MTIA_CCP_EVENTS: {
       // PrivateUse1 kineto backend reuse above ActivityTypes,
       // If PrivauseUse1 backend enabled, this should return
       // c10::DeviceType::PrivateUse1.
@@ -350,6 +350,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
         return c10::DeviceType::CUDA;
       }();
       return device_type;
+    }
     case libkineto::ActivityType::CPU_OP:
     case libkineto::ActivityType::USER_ANNOTATION:
     case libkineto::ActivityType::EXTERNAL_CORRELATION:
