@@ -4,9 +4,10 @@
 import copy
 import itertools
 import numpy as np
-import unittest
 import operator
 import random
+import sys
+import unittest
 from typing import NamedTuple, List
 
 import torch
@@ -3402,6 +3403,10 @@ class TestDynamicQuantizedOps(TestCase):
 
     @skipIfNoFBGEMM
     def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
+        # RuntimeError: Dynamo is not supported on Python 3.12+
+        if sys.version_info > (3, 12):
+            return
+
         # We are not using opcheck over here because the output for the op we're testing
         # (_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
         # due to the C-struct it's procuding. This would fail the check when we're trying
