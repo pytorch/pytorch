@@ -62,6 +62,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "_nested_get_values",
     "_nested_view_from_buffer",
     "_nested_view_from_jagged",
+    "_nested_view_from_jagged_with_cache",
 ]
 
 VIEW_FUNCTIONS = {
