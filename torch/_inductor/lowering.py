@@ -36,7 +36,7 @@ from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import core_aten_decompositions, decompositions, get_decompositions
+from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
@@ -301,23 +301,6 @@ def _register_lowering(
         return out
 
     aten_fn = get_overloads(aten_fn)
-    core_aten_ops = core_aten_decompositions()
-
-    for fn in aten_fn:
-        if not isinstance(fn, torch._ops.OpOverload):
-            continue
-
-        if torch._C.DispatchKey.Autograd in fn.py_kernels:
-            if len(get_decompositions([fn])) < 1:
-                raise RuntimeError(
-                    "Function with Autograd dispatch key in python kernels should have a decomposition"
-                )
-            if fn not in core_aten_ops.keys():
-                raise RuntimeError(
-                    f"Trying to register a lowering for {str(fn)}, which has a "
-                    "py_impl Autograd key. A function with py_impl Autograd dispatch "
-                    "key should be in core_aten_ops and should not have a lowering."
-                )
 
     lowerings.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
@@ -3512,6 +3495,101 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if ndim == 0:
         self = view(self, [])
     return self
+
+
+def upsample_nearestnd(
+    x,
+    output_size,
+    scales_x: Tuple[Optional[float], ...],
+    n: int = 2,
+    exact: bool = False,
+):
+    x.realize_hint()  # elements are reused
+    x_loader = x.make_loader()
+    i_sizes = x.get_size()[-n:]
+    batch = x.get_size()[:-n]
+    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
+
+    assert len(scales_x) == n
+    o_sizes = output_size
+
+    inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    for i, scale in enumerate(scales_x):
+        if scale is not None:
+            inv_scales[i] = 1.0 / scale
+
+    def scale_fn(x, scale, size):
+        # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
+        #                            = floor(scale * (output_index + 0.5))
+        # Nearest: input_index = floor(scale * output_index)
+        x = ops.index_expr(x, torch.float32)
+        if exact:
+            x = ops.add(x, ops.constant(0.5, torch.float32))
+        x = ops.mul(x, ops.constant(scale, torch.float32))
+        x = ops.to_dtype(x, torch.int32)
+        return ops.indirect_indexing(x, size, check=False)
+
+    def fn(idx):
+        x = idx[-n:]
+        b = idx[:-n]
+        return x_loader(
+            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
+        )
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=[*batch, *o_sizes],
+    )
+
+
+@register_lowering(aten.upsample_nearest1d.default)
+def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1)
+
+
+@register_lowering(aten._upsample_nearest_exact1d.default)
+def _upsample_nearest_exact1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1, exact=True)
+
+
+@register_lowering(aten.upsample_nearest2d.default)
+def upsample_nearest2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten._upsample_nearest_exact2d.default)
+def _upsample_nearest_exact2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2, exact=True)
+
+
+@register_lowering(aten.upsample_nearest3d.default)
+def upsample_nearest3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
+
+
+@register_lowering(aten._upsample_nearest_exact3d.default)
+def _upsample_nearest_exact3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(
+        x, output_size, (scales_d, scales_h, scales_w), n=3, exact=True
+    )
 
 
 def _create_constants(*args, dtype):
