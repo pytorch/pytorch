@@ -605,8 +605,8 @@ def _device_put(x: TensorBox, device: torch.device):
     return to_device(x, device, copy=True)
 
 
-@register_lowering(aten.bmm, type_promotion_kind=None)
-def _bmm_fallback(self: TensorBox, batch2: TensorBox):
+@register_lowering(aten.bmm.default, type_promotion_kind=None)
+def fallback_bmm(self: TensorBox, batch2: TensorBox):
     # Make the inputs of bmm contiguous
     # because bmm cpu implementation does contiguous() if not
     # this is to avoid additional copies in bmm
