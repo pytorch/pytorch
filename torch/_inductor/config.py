@@ -284,6 +284,10 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
+benchmark_multi_templates = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+)
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -531,6 +535,10 @@ class triton:
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
+
+    # Should we skip cudagraphing graphs with dynamic shape inputs
+    # If False, we will re-record a graph for each unique set of shape inputs
+    cudagraph_skip_dynamic_graphs = False
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
