@@ -10,6 +10,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <torch/library.h>
+#include <FusionUtils.h>
 
 using namespace dnnl;
 using namespace at::native;
@@ -315,7 +316,7 @@ Attr get_onednn_conv_sum_attr(
     IntArrayRef stride_,
     IntArrayRef padding_,
     IntArrayRef dilation_,
-    Tensor& accumu,
+    const Tensor& accumu,
     double scale,
     Tensor& output,
     bool& is_fused,
@@ -360,6 +361,71 @@ Attr get_onednn_conv_sum_attr(
   if (force_inplace) {
     // If sizes are the same, post sum is used.
     output = accumu;
+    attr.append_post_sum(/* sum_scale */ 1.f);
+  } else {
+    // If sizes are different, post binary is used.
+    attr.append_post_binary(attr.kind_with_binary_add, accumu);
+  }
+
+  if (scale != 1.f)
+    attr.append_post_eltwise(
+        /* scale */ 1.f,
+        /* alpha */ scale,
+        /* beta */ 0.f,
+        attr.kind_with_linear);
+
+  return attr;
+}
+
+Attr get_onednn_conv_sum_attr_(
+  const Tensor& input_r,
+  const Tensor& weight_r,
+  IntArrayRef stride_,
+  IntArrayRef padding_,
+  IntArrayRef dilation_,
+  Tensor& accumu,
+  double scale,
+  bool& is_fused,
+  Attr attr = Attr(),
+  bool force_inplace=false){
+    is_fused = true;
+  if (scale == 0.f)
+    return attr;
+
+  auto ndim = input_r.ndimension();
+  auto output_size = conv_dst_tz(
+      ndim,
+      input_r.sizes(),
+      weight_r.sizes(),
+      padding_,
+      padding_,
+      stride_,
+      dilation_);
+  MemoryFormat mem_fmt = at::MemoryFormat::Contiguous;
+  bool propagate_channels_last =
+      is_smf_channels_last(input_r) || is_smf_channels_last(weight_r);
+  if (propagate_channels_last)
+    mem_fmt = get_cl_tag_by_ndim(ndim);
+
+  Tensor out = at::empty(output_size, input_r.options().memory_format(mem_fmt));
+  if (!onednn::binary_valid(out, accumu)) {
+    is_fused = false;
+    return attr;
+  }
+
+  // For post-sum and post-binary-add, onednn needs sum/binary scale=1.f
+  // Thus we need the following transformation
+  // conv(src, wei) + scale * accumu
+  // scale * (1/scale * conv(src, wei) + sum (or binary))
+  if (scale != 1.f)
+    attr.append_post_eltwise(
+        /* scale */ 1.f,
+        /* alpha */ 1.f / scale,
+        /* beta */ 0.f,
+        attr.kind_with_linear);
+
+  if (force_inplace) {
+    // If sizes are the same, post sum is used.
     attr.append_post_sum(/* sum_scale */ 1.f);
   } else {
     // If sizes are different, post binary is used.
@@ -711,10 +777,160 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
+Tensor convolution_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+  Attr att;
+  att = construct_unary_attr(attr, scalars, algorithm, att);
+  const Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  std::vector<int64_t> output_padding = {0};
+
+  return _convolution(
+      input_t,
+      weight_t,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /*transposed*/ false,
+      output_padding,
+      groups,
+      att);
+}
+
+Tensor convolution_pointwise_binary(
+    const Tensor& input_t,
+    const Tensor& other_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view binary_attr,
+    c10::optional<at::Scalar> alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
+  Tensor output;
+  Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  // Step1: Construct binary attr
+  Attr attr;
+  bool is_fused = true;
+  if (binary_attr != "add") {
+    attr = construct_binary_attr(binary_attr, alpha, other_t, attr);
+  } else {
+    attr = get_onednn_conv_sum_attr(
+        input_t,
+        weight_t,
+        stride,
+        padding,
+        dilation,
+        other_t,
+        alpha.has_value() ? alpha.value().toFloat() : 1.f,
+        output,
+        /*is_fused*/ is_fused,
+        attr);
+  }
+
+  // Step2: Append unary attr
+  if (unary_attr.has_value())
+    attr = construct_unary_attr(
+        unary_attr.value(), unary_scalars, unary_algorithm, attr);
+
+  Tensor res = _convolution_out(
+      output,
+      input_t,
+      weight_t,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /*transpoced*/ false,
+      {{0, 0}},
+      groups,
+      attr);
+
+  // Step3: Run conv
+  return res;
+}
+
+Tensor& convolution_pointwise_binary_(
+    Tensor& other_t,
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view binary_attr,
+    c10::optional<at::Scalar> alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
+  Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  // Step1: Construct binary attr
+  Attr attr;
+  bool is_fused = true;
+  if (binary_attr != "add") {
+    attr = construct_binary_attr(binary_attr, alpha, other_t, attr);
+  } else {
+    attr = get_onednn_conv_sum_attr_(
+        input_t,
+        weight_t,
+        stride,
+        padding,
+        dilation,
+        other_t,
+        alpha.has_value() ? alpha.value().toFloat() : 1.f,
+        /*is_fused*/ is_fused,
+        attr,
+        /*force_inplace*/ true);
+  }
+
+  // Step2: Append unary attr
+  if (unary_attr.has_value())
+    attr = construct_unary_attr(
+        unary_attr.value(), unary_scalars, unary_algorithm, attr);
+
+  _convolution_out(
+      other_t,
+      input_t,
+      weight_t,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /*transpoced*/ false,
+      {{0, 0}},
+      groups,
+      attr);
+
+  // Step3: Run conv
+  return other_t;
+}
+
 TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("convolution_overrideable", TORCH_FN(convolution_overrideable));
   m.impl("convolution_backward_overrideable", TORCH_FN(convolution_backward_overrideable));
 }
+
+
+TORCH_LIBRARY_IMPL(mkldnn, XPU, m){
+  m.impl(TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"), TORCH_FN(convolution_pointwise));
+  m.impl(TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"), TORCH_FN(convolution_pointwise_binary));
+  m.impl(TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"), TORCH_FN(convolution_pointwise_binary_));
+}
+
 
 } // namespace xpu
 } // namespace at::native
