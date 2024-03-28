@@ -433,6 +433,8 @@ class FakeTensor(torch.Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
+        if not fake_mode._allow_unsafe_data_ptr_access:
+            torch._C._set_throw_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -454,9 +456,12 @@ class FakeTensor(torch.Tensor):
             in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            device = torch.device(
-                f"{device.type}:{getattr(torch, device.type).current_device()}"
-            )
+            if getattr(torch, device.type).is_initialized():
+                device = torch.device(
+                    f"{device.type}:{getattr(torch, device.type).current_device()}"
+                )
+            else:
+                device = torch.device(f"{device.type}:0")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -683,38 +688,6 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     )
 
 
-@dataclass(frozen=True)
-class _ShapeEnvSettings:
-    """
-    Encapsulates all shape env settings that could potentially affect
-    FakeTensor dispatch. Used when creating dispatch cache keys.
-    """
-
-    allow_scalar_outputs: bool
-    allow_dynamic_output_shape_ops: bool
-    assume_static_by_default: bool
-    specialize_zero_one: bool
-    duck_shape: bool
-    prefer_deferred_runtime_asserts_over_guards: bool
-
-    def __init__(self, env: "ShapeEnv"):
-        # Initialize this way because the class is frozen (to enable hashing):
-        object.__setattr__(self, "allow_scalar_outputs", env.allow_scalar_outputs)
-        object.__setattr__(
-            self, "allow_dynamic_output_shape_ops", env.allow_dynamic_output_shape_ops
-        )
-        object.__setattr__(
-            self, "assume_static_by_default", env.assume_static_by_default
-        )
-        object.__setattr__(self, "specialize_zero_one", env.specialize_zero_one)
-        object.__setattr__(self, "duck_shape", env.duck_shape)
-        object.__setattr__(
-            self,
-            "prefer_deferred_runtime_asserts_over_guards",
-            env.prefer_deferred_runtime_asserts_over_guards,
-        )
-
-
 class _DispatchCacheKey(list):
     """
     Key for the FakeTensor dispatch cache. Inspired by (copied from)
@@ -788,8 +761,10 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        _allow_unsafe_data_ptr_access=True,
     ):
         log.debug("create_mode 0x%x", id(self))
+        self._allow_unsafe_data_ptr_access = _allow_unsafe_data_ptr_access
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         if static_shapes is not None:
@@ -995,9 +970,9 @@ class FakeTensorMode(TorchDispatchMode):
             # mode is the same.
             torch.is_inference_mode_enabled(),
             # Shape env settings could affect behavior. One example seen in the wild:
-            # Disasllowing dynamic shapes can introduce a DynamicOutputShapeException
+            # Disallowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
-            _ShapeEnvSettings(self.shape_env) if self.shape_env else None,
+            self.shape_env.settings if self.shape_env else None,
         )
         return _DispatchCacheKey(key_values)
 
