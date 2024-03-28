@@ -58,8 +58,8 @@ from torch.testing._internal.common_cuda import (
 
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
-    get_desired_device_type_test_bases,
     expectedFailureXPU,
+    get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -6287,7 +6287,6 @@ class CommonTemplate:
                 torch.ones(64, 512),
             ],
             check_lowp=check_lowp,
-
         )
 
     def test_scatter3(self):
@@ -8928,7 +8927,7 @@ class CommonTemplate:
         def foo_cuda(x):
             return 3 * x
 
-        def foo_cuda(x):
+        def foo_xpu(x):
             return 3 * x
 
         def foo_meta(x):
@@ -9537,7 +9536,7 @@ if HAS_CPU and RUN_CPU:
     class CpuTests(TestCase):
         common = check_model
         device = "cpu"
-        device_type=device
+        device_type = device
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
@@ -9551,7 +9550,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
     class GPUTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
-        device_type=device
+        device_type = device
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
@@ -10249,13 +10248,13 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
+
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.gru = torch.nn.GRU(16, 16, batch_first=True)
 
             def forward(self, x):
-
                 return self.gru(x)
 
         @expectedFailureXPU
