@@ -633,6 +633,9 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        if torch.xpu.is_available():
+            test_bases.append(XPUTestBase)
+
         device_type = torch._C._get_privateuse1_backend_name()
         device_mod = getattr(torch, device_type, None)
         if hasattr(device_mod, "is_available") and device_mod.is_available():
@@ -1385,6 +1388,9 @@ def expectedFailureCPU(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
+
+def expectedFailureXPU(fn):
+    return expectedFailure('xpu')(fn)
 
 def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure('meta')(fn))

@@ -34,7 +34,7 @@ HAS_CUDA = torch.cuda.is_available() and has_triton()
 
 HAS_XPU = torch.xpu.is_available() and has_triton()
 
-HAS_GPU = HAS_CUDA
+HAS_GPU = HAS_CUDA or HAS_XPU
 
 GPUS = ["cuda", "xpu"]
 
