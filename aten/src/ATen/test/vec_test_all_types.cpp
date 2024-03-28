@@ -68,6 +68,8 @@ namespace {
     class FunctionalTestsReducedFloat : public ::testing::Test {};
     template <typename T>
     class InfiniteTests : public ::testing::Test {};
+    template <typename T>
+    class VecConvertTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -116,6 +118,7 @@ namespace {
 #endif
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
+    TYPED_TEST_SUITE(VecConvertTests, RealFloatIntTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1619,6 +1622,55 @@ namespace {
       ASSERT_TRUE(vec_nan.has_inf_nan()) << "Test failed for NAN\n";
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
+    }
+    TYPED_TEST(VecConvertTests, Convert) {
+      using vec = TypeParam;
+      using src_t = ValueType<TypeParam>;
+      constexpr auto N = vec::size();
+    #define TEST_CONVERT_TO(dst_t)                                     \
+      do {                                                             \
+        CACHE_ALIGN src_t x[N];                                        \
+        CACHE_ALIGN dst_t y[N];                                        \
+        CACHE_ALIGN dst_t ref[N];                                      \
+        auto seed = TestSeed();                                        \
+        ValueGen<src_t> generator(src_t(-100), src_t(100), seed);      \
+        for (const auto i : c10::irange(N)) {                          \
+          x[i] = generator.get();                                      \
+        }                                                              \
+        for (const auto i : c10::irange(N)) {                          \
+          ref[i] = static_cast<dst_t>(x[i]);                           \
+        }                                                              \
+        auto x_vec = vec::loadu(x);                                    \
+        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
+        constexpr int num_dst_elements =                               \
+            std::min(N, at::vec::Vectorized<dst_t>::size());           \
+        y_vec.store(y, num_dst_elements);                              \
+        for (const auto i : c10::irange(num_dst_elements)) {           \
+          ASSERT_EQ(y[i], ref[i])                                      \
+              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+        }                                                              \
+        constexpr int dst_n = N / num_dst_elements;                    \
+        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
+            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
+        y_vec_n.store(y, N);                                           \
+        for (const auto i : c10::irange(N)) {                          \
+          ASSERT_EQ(y[i], ref[i])                                      \
+              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+        }                                                              \
+      } while (0)
+      TEST_CONVERT_TO(int8_t);
+      TEST_CONVERT_TO(uint8_t);
+      TEST_CONVERT_TO(int16_t);
+      TEST_CONVERT_TO(uint16_t);
+      TEST_CONVERT_TO(int32_t);
+      TEST_CONVERT_TO(uint32_t);
+      TEST_CONVERT_TO(int64_t);
+      TEST_CONVERT_TO(uint64_t);
+      TEST_CONVERT_TO(c10::BFloat16);
+      TEST_CONVERT_TO(c10::Half);
+      TEST_CONVERT_TO(float);
+      TEST_CONVERT_TO(double);
+    #undef TEST_CONVERT_TO
     }
 
 #else
