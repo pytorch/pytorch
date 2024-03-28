@@ -10022,6 +10022,21 @@ fn
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
 
+    def test_view_recompiles(self):
+        def fn(x):
+            return x.sin().cos()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        x_nonview = torch.rand((5, 4))
+        opt_fn(x_nonview)
+        self.assertEqual(cnts.frame_count, 1)
+
+        x_view = torch.rand(22).as_strided((5, 4), (4, 1), 2)
+        opt_fn(x_view)
+        self.assertEqual(cnts.frame_count, 2)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

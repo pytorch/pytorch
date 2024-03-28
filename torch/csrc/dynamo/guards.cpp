@@ -78,7 +78,8 @@ class TensorCheck {
         requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
         strides_(std::move(dynamic_dims_strides)),
-        dim_(static_cast<int64_t>(sizes_.size())) {
+        dim_(static_cast<int64_t>(sizes_.size())),
+        is_view_(v.is_view()) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
     // we just treat this as optional?
   }
@@ -111,6 +112,9 @@ class TensorCheck {
           return false;
         }
       }
+    }
+    if (is_view_ != v.is_view()) {
+      return false;
     }
     return true;
   }
@@ -171,6 +175,12 @@ class TensorCheck {
         return fail_reason.str();
       }
     }
+    const auto& is_view = v.is_view();
+    if (is_view != is_view_) {
+      fail_reason << "is_view mismatch. expected is_view=" << is_view_
+                  << ", actual is_view=" << is_view;
+      return fail_reason.str();
+    }
     return "";
   }
 
@@ -189,6 +199,13 @@ class TensorCheck {
   std::vector<std::optional<c10::SymInt>> strides_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
+  // Views can have non-zero storage offset; non-views can't. This is useful
+  // for knowing alignment. Note - ideally we'd guard on storage_offset, but
+  // this can result in more recompiles than we'd like. Whether a tensor is a
+  // view is less likely to change, although sometimes we'll have views that
+  // are always N-byte aligned (which we wouldn't be able to detect with the
+  // current view-guards).
+  bool is_view_;
 };
 
 typedef std::vector<TensorCheck> ChecksList;

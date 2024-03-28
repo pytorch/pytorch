@@ -799,17 +799,19 @@ def get_input_idxs_to_check(
     inputs: Union[List[torch.Tensor], Sequence[int]],
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
-    def is_aligned(storage_offset, dtype):
+    def is_aligned(input):
+        # See Note: [Input Alignment handling in Inductor]
+        if input._is_view() and not config.assume_aligned_inputs:
+            return False
+        storage_offset = input.storage_offset()
+        dtype = input.dtype
         return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
     ids_to_check = []
     for i, input in enumerate(inputs):
         if (
             isinstance(input, torch.Tensor)
-            and (
-                i not in static_input_idxs
-                or not is_aligned(input.storage_offset(), input.dtype)
-            )
+            and (i not in static_input_idxs or not is_aligned(input))
             and input.device.type == "cuda"
         ):
             ids_to_check.append(i)
@@ -834,10 +836,7 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    if config.assume_aligned_inputs:
-        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
-    else:
-        inputs_to_check = []
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
