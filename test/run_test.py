@@ -590,7 +590,7 @@ def run_test_retries(
             timeout=timeout,
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
-        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+        ret_code = 0 if ret_code == 5 else ret_code
         if ret_code == 0:
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
