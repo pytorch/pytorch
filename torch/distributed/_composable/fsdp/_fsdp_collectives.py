@@ -193,21 +193,10 @@ def foreach_reduce_scatter_copy_in(
     reduce_scatter_input: torch.Tensor,
     world_size: int,
 ) -> None:
-    grad_views: List[torch.Tensor] = []
-    grads_to_copy: List[torch.Tensor] = []
-    padded_grad_slices: List[torch.Tensor] = []
-    for grad in unsharded_grads:
-        grad_size = grad.size()
-        dim0_padded_size = _get_dim0_padded_size(grad_size, world_size)
-        if dim0_padded_size != grad_size:
-            padded_grad = grad.new_empty(dim0_padded_size)
-            padded_grad_slices.append(padded_grad[: grad.size(0)])
-            grads_to_copy.append(grad)
-            grad = padded_grad
-        grad_views.append(grad.view(world_size, -1))
-    if padded_grad_slices:
-        torch._foreach_copy_(padded_grad_slices, grads_to_copy)
-    torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
+    reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    torch._chunk_cat(
+        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+    )
 
 
 def _reduce_scatter(
