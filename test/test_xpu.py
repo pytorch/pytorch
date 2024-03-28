@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyXPU,
     OpDTypes,
