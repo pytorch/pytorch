@@ -1566,7 +1566,7 @@ def run_tests(
             and os.path.isdir(CPP_TESTS_DIR)
             and not os.path.exists(cpp_file)
         ):
-            shutil.copy(os.path.join(test_directory, file), cpp_file)
+            shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
     def handle_error_messages(failure: Optional[TestFailure]):
         if failure is None:
