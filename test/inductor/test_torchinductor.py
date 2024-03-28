@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     parametrize,
+    serialTest,
     skipIfRocm,
     subtest,
     TEST_WITH_ASAN,
@@ -9138,6 +9139,7 @@ class CommonTemplate:
     @config.patch(
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
+    @serialTest()
     def test_large_block_sizes(self):
         """
         Inductor will try triton configs like x = 64 and y = 1024 which will

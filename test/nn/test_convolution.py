@@ -15,7 +15,7 @@ from torch.testing._internal.common_dtype import floating_types_and, floating_an
 from torch.testing._internal.common_utils import run_tests, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_SCIPY, TEST_WITH_ROCM, \
     download_file, parametrize as parametrize_test, subtest, \
-    instantiate_parametrized_tests, set_default_dtype
+    instantiate_parametrized_tests, set_default_dtype, serialTest
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_nn import NNTestCase, _test_module_empty_input
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -1890,6 +1890,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest('12GB')
+    @serialTest()
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
         # that is, it does not crash. The correctness of fallback implementation should be
@@ -1944,6 +1945,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest('12GB')
     @skipIfRocmVersionLessThan((6, 0))
+    @serialTest()
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -1969,6 +1971,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @largeTensorTest('12GB')
+    @serialTest(TEST_CUDA)
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)

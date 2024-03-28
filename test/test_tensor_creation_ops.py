@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
     set_default_dtype, set_default_tensor_type,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo, serialTest)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -2677,6 +2677,7 @@ class TestTensorCreation(TestCase):
 
     @onlyCUDA
     @largeTensorTest('16GB')
+    @serialTest()
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)

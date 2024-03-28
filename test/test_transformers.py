@@ -34,6 +34,8 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     IS_WINDOWS,
     TEST_WITH_TORCHDYNAMO,
+    decorateIf,
+    serialTest,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -2795,6 +2797,10 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
+    @decorateIf(
+        serialTest(),
+        lambda params: params["seq_len_q"] >= 2048 and params["seq_len_k"] >= 2048
+    )
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str):
