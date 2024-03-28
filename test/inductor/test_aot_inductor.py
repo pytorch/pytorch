@@ -2464,6 +2464,7 @@ if not IS_FBCODE:
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
+            "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
             "test_simple": fail_minimal_arrayref_interface(is_skip=True),
             "test_small_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_with_no_triton_profiler": fail_minimal_arrayref_interface(
