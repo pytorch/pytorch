@@ -1763,26 +1763,30 @@ def register_onednn_fusion_ops():
             o_inv_scale,
             o_zero_point,
             output_dtype,
-            accum: TensorBox,
-            accum_scale,
-            accum_zp,
+            x2: TensorBox,
+            x2_scale,
+            x2_zp,
             binary_attr,
             alpha,
             unary_attr,
             unary_scalars,
             unary_algorithmm,
         ):
-            if (
-                binary_attr == "add"
-                and output_dtype in [torch.float32, torch.bfloat16]
-                and accum.get_dtype() in [torch.float32, torch.bfloat16]
-                and accum.get_dtype() != output_dtype
-            ):
-                # For int8-mixed-bf16 quantization and inplace add,
-                # there is case when accum dtype is float32 but output dtype is bfloat16.
-                # Since the accum will be inplaced changed with post op sum,
-                # we will do accum dtype convertion here.
-                accum = to_dtype(accum, output_dtype)
+            if binary_attr == "sum":
+                if output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ] and x2.get_dtype() in [torch.float32, torch.bfloat16]:
+                    if x2.get_dtype() != output_dtype:
+                        # For int8-mixed-bf16 quantization and inplace add,
+                        # there is case when accum dtype is float32 but output dtype is bfloat16.
+                        # Since the accum will be inplaced changed with post op sum,
+                        # we will do accum dtype convertion here.
+                        x2 = to_dtype(x2, output_dtype)
+                else:
+                    assert (
+                        x2.get_dtype() == output_dtype
+                    ), "dtype of accum for qlinear post op sum should be the same as output"
             return TensorBox.create(
                 ir.QLinearPointwiseBinaryPT2E.create(
                     x,
@@ -1795,9 +1799,9 @@ def register_onednn_fusion_ops():
                     o_inv_scale,
                     o_zero_point,
                     output_dtype,
-                    accum,
-                    accum_scale,
-                    accum_zp,
+                    x2,
+                    x2_scale,
+                    x2_zp,
                     binary_attr,
                     alpha,
                     unary_attr,
