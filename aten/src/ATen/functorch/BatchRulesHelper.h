@@ -28,7 +28,7 @@ namespace at::functorch {
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
-TORCH_API Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x);
+TORCH_API Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x);
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
