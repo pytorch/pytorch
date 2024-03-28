@@ -24,7 +24,6 @@ def run_tests(needs=()):
         TEST_WITH_TORCHDYNAMO
         or IS_WINDOWS
         or TEST_WITH_CROSSREF
-        or sys.version_info >= (3, 12)
     ):
         return  # skip testing
 
