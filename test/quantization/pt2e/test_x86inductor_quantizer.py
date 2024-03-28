@@ -1346,3 +1346,105 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
                 is_qat=True,
             )
+
+    @skipIfNoX86
+    def test_filter_conv2d_recipe(self):
+        """
+        Test removing conv2d from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_operator_type(torch.ops.aten.conv2d.default, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            }
+            node_list = [
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.relu.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_filter_linear_recipe(self):
+        """
+        Test removing linear from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.LinearUnaryModule(
+                use_bias=True,
+                postop=nn.ReLU,
+            ).eval()
+            example_inputs = (torch.randn(2, 4),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_operator_type(torch.ops.aten.linear.default, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            }
+            node_list = [
+                torch.ops.aten.linear.default,
+                torch.ops.aten.relu.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_filter_maxpool2d_recipe(self):
+        """
+        Test removing maxpool2d from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_operator_type(torch.ops.aten.max_pool2d.default, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.relu.default,
+                torch.ops.aten.max_pool2d.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
