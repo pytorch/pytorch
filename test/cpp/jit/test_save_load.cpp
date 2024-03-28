@@ -263,6 +263,18 @@ TEST(SerializationTest, ParentDirNotExist) {
       "Parent directory ./doesnotexist does not exist.");
 }
 
+TEST(SerializationTest, DriverDirectoryCheck) {
+#ifdef WIN32
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        // highly unlikely a path like this would exist
+        torch::save(t, "Z:\\file.pt");
+      },
+      "Parent directory Z:\\ does not exist.");
+#endif
+}
+
 TEST(SerializationTest, CalculateNecessaryArgsTest) {
   auto schema = torch::schema(
       "sync_stream(int stream_id = -1) -> ()",
