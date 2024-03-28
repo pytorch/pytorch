@@ -283,7 +283,7 @@ class _WrappedCall:
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
-        tb_repr = traceback.format_exc()
+        tb_repr = torch._dynamo.disable(traceback.format_exc)()
         custom_msg = (
             "Call using an FX-traced Module, "
             f"line {err_lineno} of the traced Module's "
