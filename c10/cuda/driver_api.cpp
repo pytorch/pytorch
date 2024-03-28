@@ -60,7 +60,7 @@ DriverAPI create_driver_api() {
 
 void* DriverAPI::get_nvml_handle() {
   static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-  return (USE_ROCM)?nullptr:nvml_hanle;
+  return nvml_hanle;
 }
 
 C10_EXPORT DriverAPI* DriverAPI::get() {
