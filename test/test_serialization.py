@@ -25,9 +25,11 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
     set_default_load_endianness, LoadEndianness
 
 from torch.testing._internal.common_utils import (
-    IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
-    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
-    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval)
+    IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, TestCase, IS_WINDOWS,
+    TEST_DILL, TEST_WITH_TORCHDYNAMO, run_tests, download_file, BytesIOContext,
+    TemporaryFileName, parametrize, instantiate_parametrized_tests,
+    AlwaysWarnTypedStorageRemoval,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -396,18 +398,22 @@ class SerializationMixin:
                     f"`{compressed_indices_name}[[]..., 0[]] == 0` is not satisfied."):
                 y = torch.load(f)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "under construction")
     def test_serialization_sparse_csr_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
             torch.Tensor.to_sparse_csr, torch.Tensor.crow_indices, torch.Tensor.col_indices)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "under construction")
     def test_serialization_sparse_csc_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
             torch.Tensor.to_sparse_csc, torch.Tensor.ccol_indices, torch.Tensor.row_indices)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "under construction")
     def test_serialization_sparse_bsr_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
             lambda x: x.to_sparse_bsr((1, 1)), torch.Tensor.crow_indices, torch.Tensor.col_indices)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "under construction")
     def test_serialization_sparse_bsc_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
             lambda x: x.to_sparse_bsc((1, 1)), torch.Tensor.ccol_indices, torch.Tensor.row_indices)

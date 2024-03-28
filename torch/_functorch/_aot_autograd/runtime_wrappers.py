@@ -16,6 +16,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._guards import DuplicateInputs, TracingContext
 from torch._prims_common import CUDARngStateHelper
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.multiprocessing.reductions import StorageWeakRef
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -877,7 +878,7 @@ def merge_view_inputs(
     base_args = []
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
-        if isinstance(inpt, Tensor):
+        if isinstance(inpt, Tensor) and not is_sparse_any(inpt):
             storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
