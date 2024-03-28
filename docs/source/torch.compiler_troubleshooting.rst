@@ -612,21 +612,26 @@ that are encountered. Here is an example usage:
        if b.sum() < 0:
            b = b * -1
        return x * b
-   explanation, out_guards, graphs, ops_per_graph, break_reasons, explanation_verbose = (
-       dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
-   )
+   explanation = dynamo.explain(toy_example)(torch.randn(10), torch.randn(10))
    print(explanation_verbose)
    """
-   Dynamo produced 3 graphs, with 2 graph breaks and 6 ops.
-    Break reasons:
-   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
-      File "t2.py", line 16, in toy_example
-       print("woo")
-
-   2. generic_jump
-      File "t2.py", line 17, in toy_example
-       if b.sum() < 0:
-    """
+   Graph Count: 3
+   Graph Break Count: 2
+   Op Count: 5
+   Break Reasons:
+     Break Reason 1:
+       Reason: builtin: print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+       User Stack:
+         <FrameSummary file foo.py, line 5 in toy_example>
+     Break Reason 2:
+       Reason: generic_jump TensorVariable()
+       User Stack:
+         <FrameSummary file foo.py, line 6 in torch_dynamo_resume_in_toy_example_at_5>
+   Ops per Graph:
+     ...
+   Out Guards:
+     ...
+   """
 
 Outputs include:
 
@@ -634,7 +639,7 @@ Outputs include:
 - ``graphs`` - a list of graph modules which were successfully traced.
 - ``ops_per_graph`` - a list of lists where each sublist contains the ops that are run in the graph.
 
-To throw an error on the first graph break encountered, use the ``nopython``
+To throw an error on the first graph break encountered, use the ``fullgraph``
 mode. This mode disables TorchDynamo’s Python fallback, and only
 succeeds if the entire program is convertible into a single graph. Example
 usage:
@@ -644,7 +649,7 @@ usage:
    def toy_example(a, b):
       ...
 
-   compiled_toy = torch.compile(toy_example, fullgraph=True, backend=<compiler>)
+   compiled_toy = torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 
 Excessive Recompilation
 -----------------------
