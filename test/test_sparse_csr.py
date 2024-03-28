@@ -1417,6 +1417,20 @@ class TestSparseCSR(TestCase):
                                         r"tensor sparse size \(.*,.*\) must be divisible by given blocksize \(.*,.*\)"):
                 block_t = t.to_sparse_bsr((5, 5))
 
+    @onlyCUDA
+    @dtypes(torch.double)
+    @all_sparse_compressed_layouts()
+    def test_csr_empty_like_device_mismatch(self, device, dtype, layout):
+        cpu = torch.rand((10, 10)).to_sparse_csr()
+        cuda = torch.empty_like(cpu, device='cuda')
+        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[cuda.layout]
+        torch._validate_sparse_compressed_tensor_args(compressed_indices_mth(cuda),
+                                                      plain_indices_mth(cuda),
+                                                      cuda.values(),
+                                                      cuda.shape,
+                                                      cuda.layout)
+        self.assertEqual(cpu.shape, cuda.shape)
+
     # TODO: Support auto generation of device check for sparse tensors
     # See: https://github.com/pytorch/pytorch/issues/59058
     @onlyCUDA
