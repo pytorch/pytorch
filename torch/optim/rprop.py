@@ -335,7 +335,7 @@ def _multi_tensor_rprop(
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
         assert all((p.is_cuda and step.is_cuda) or (p.is_xla and step.is_xla) for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
+            "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes, state_steps])
     for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes, grouped_state_steps), _) in grouped_tensors.values():
