@@ -369,7 +369,7 @@ class PaddingTest(TestCase):
 
         self.run_acc_and_perf_test(model, inputs)
 
-    def test_longformer(self):
+    def test_longformer(self, bs=4):
         from transformers import AutoConfig, AutoModelForMaskedLM
         config = AutoConfig.from_pretrained("allenai/longformer-base-4096")
         model = AutoModelForMaskedLM.from_config(config)
@@ -378,7 +378,6 @@ class PaddingTest(TestCase):
         #   "input_ids": [4, 1024]
         #   "labels": [4, 1024]
         vocab_size = model.config.vocab_size
-        bs = 4
         seq_length = 1024
         def geninp():
             return torch.randint(0, vocab_size, (bs, seq_length), dtype=torch.int64, requires_grad=False)
@@ -388,6 +387,12 @@ class PaddingTest(TestCase):
         }
 
         self.run_acc_and_perf_test(model, input_dict)
+
+    def test_longformer_small_bs(self):
+        """
+        The model exists in both HF and TB. In TB it uses a samller batch size.
+        """
+        self.test_longformer(bs=2)
         
     def test_nvidia_deeprecommender(self):
         # SELU
