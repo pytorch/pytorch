@@ -1311,7 +1311,7 @@ class WrapperCodeGen(CodeGen):
             import triton
 
         if isinstance(s, SymTypes):
-            return pexpr(sympy.expand(repr(s)))
+            return pexpr(s.node.expr)
         elif isinstance(s, sympy.Expr):
             return pexpr(s)
         elif isinstance(s, (tuple, list)):
