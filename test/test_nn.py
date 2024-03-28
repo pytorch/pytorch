@@ -9755,6 +9755,15 @@ class TestNNDeviceType(NNTestCase):
         del x
         self.assertTrue(torch.allclose(out, out_ref))
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_replicatepad_64bit_indexing(self, device, dtype):
+        conv = torch.nn.Conv1d(128, 128, 3, 1, 1, padding_mode="replicate", device=device, dtype=dtype)
+        x = torch.randn(size=(256 * 448 * 2, 128, 96), dtype=dtype, device=device)
+        y = conv(x)
+        torch.mean(y).backward()
+
     def _slow_masked_softmax(self, input, mask):
         exp = torch.exp(input)
         exp = exp * mask
@@ -12583,7 +12592,7 @@ if __name__ == '__main__':
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
-    @largeTensorTest("41GB" if TEST_WITH_ROCM else "30GB", "cuda")
+    @largeTensorTest("42GB", "cuda")
     def test_softmax_forward_64bit_indexing(self, device):
         batch_size = 70
         seq_len = 2048
