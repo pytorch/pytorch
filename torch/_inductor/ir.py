@@ -6929,6 +6929,12 @@ class StorageBox(MutableBox):
             return self.data.get_name() in V.graph.graph_inputs
         return False
 
+    def is_module_buffer(self):
+        return (
+            isinstance(self.data, (ConstantBuffer))
+            and self.data.get_name() in V.graph.constants
+        )
+
     def realize(self):
         if isinstance(
             self.data,

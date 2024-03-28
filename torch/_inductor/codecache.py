@@ -46,7 +46,12 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, developer_warning, is_linux
+from torch._inductor.utils import (
+    cache_dir,
+    developer_warning,
+    get_cloned_parameter_buffer_name,
+    is_linux,
+)
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -1681,7 +1686,7 @@ class AotCodeCompiler:
 
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
+                " .data=.lrodata,alloc,load,data,contents"
                 f" {consts_o} {consts_o}"
             )
             log.debug("aot constant obj command: %s", cmd)
@@ -1801,11 +1806,20 @@ class AotCodeCompiler:
 
                 return bytes(raw_array.contents)
 
-            aot_constants = b"".join(
-                _to_bytes(tensor)
-                for name, tensor in graph.constants.items()
-                if name not in graph.folded_constants
-            )
+            constant_tensors = []
+            original_parameters_buffers = {
+                **dict(graph.module.named_parameters()),
+                **dict(graph.module.named_buffers()),
+            }
+            for name in graph.constants.keys():
+                if name in graph.folded_constants:
+                    continue
+                key = get_cloned_parameter_buffer_name(graph.constants_orig_names[name])
+                assert key in original_parameters_buffers, (
+                    key + " is not found as a cloned parameter or buffer"
+                )
+                constant_tensors.append(_to_bytes(original_parameters_buffers[key]))
+            aot_constants = b"".join(constant_tensors)
             consts_o = {
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,

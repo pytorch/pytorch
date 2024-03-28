@@ -264,6 +264,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
+        self.constants_orig_names: Dict[str, str] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -683,6 +684,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ):
                         return constant_name
 
+            orig_name = name
             if name is None:
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
@@ -697,6 +699,7 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
+            self.constants_orig_names[name] = orig_name
             self.constant_reprs[name] = (
                 f"{data.device!r} {data.dtype!r} "
                 f"{tuple(data.size())!r} {tuple(data.stride())!r} "
