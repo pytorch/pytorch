@@ -253,29 +253,51 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
 
     device_type = get_device_type()
     device = torch.device(device_type)
+    # note: without initializing this mesh, the following local_tensor will be put on
+    # device cuda:0.
+    device_mesh = init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
 
     # manually create the embedding table's local shards
     num_embeddings = 8
     embedding_dim = 16
     emb_table_shape = torch.Size([num_embeddings, embedding_dim])
-    local_shard_shape = emb_table_shape  # each rank holds a complete table
-    table_to_local_shard = {}  # map {table_id: local shard of table_id}
+
+    # for table i, if the current rank holds the table, then the local shard is
+    # a LocalShardsWrapper containing the tensor; otherwise the local shard is
+    # an empty torch.Tensor
+    table_to_shards = {}  # map {table_id: local shard of table_id}
+    table_to_local_tensor = {}  # map {table_id: local tensor of table_id}
     # create 4 embedding tables and place them on different ranks
     # each rank will hold one complete table, and the dict will store
     # the corresponding local shard.
     for i in range(world_size):
-        local_shard = torch.randn(*local_shard_shape, device=device)
-        # embedding table i is placed on rank i
-        table_to_local_shard[i] = (
-            local_shard if rank == i else torch.empty(0, device=device)
+        # tensor
+        local_tensor = (
+            torch.randn(*emb_table_shape, device=device)
+            if rank == i
+            else torch.empty(0, device=device)
         )
+        table_to_local_tensor[i] = local_tensor
+        # tensor shape
+        local_shard_shape = local_tensor.shape
+        # tensor offset
+        local_shard_offset = (0, 0)
+        # wrap local shards into a wrapper
+        local_shards = (
+            LocalShardsWrapper(
+                [TensorShard(local_tensor, local_shard_shape, local_shard_offset)]
+            )
+            if rank == i
+            else local_tensor
+        )
+        table_to_shards[i] = local_shards
 
     ###########################################################################
     # example 1: transform local_shards into DTensor
     table_to_dtensor = {}  # same purpose as _model_parallel_name_to_sharded_tensor
     table_wise_sharding_placements = [Replicate()]  # table-wise sharding
 
-    for table_id, local_shard in table_to_local_shard.items():
+    for table_id, local_shards in table_to_shards.items():
         # create a submesh that only contains the rank we place the table
         # note that we cannot use ``init_device_mesh'' to create a submesh
         # so we choose to use the `DeviceMesh` api to directly create a DeviceMesh
@@ -290,7 +312,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
         # DTensor would assume even sharding and compute shape/stride based on the
         # assumption. Torchrec needs to pass in this information explicitely.
         dtensor = DTensor.from_local(
-            local_shard,
+            local_shards,
             device_submesh,
             table_wise_sharding_placements,
             run_check=False,
@@ -311,9 +333,18 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
 
     ###########################################################################
     # example 2: transform DTensor into torch.Tensor
-    for table_id, local_shard in table_to_local_shard.items():
-        dtensor_local_shard = table_to_dtensor[table_id].to_local()
-        assert torch.equal(dtensor_local_shard, local_shard)
+    for table_id, local_tensor in table_to_local_tensor.items():
+        # important: note that DTensor.to_local() always returns an empty torch.Tensor
+        # no matter what was passed to DTensor._local_tensor.
+        dtensor_local_shards = table_to_dtensor[table_id].to_local()
+        if rank == table_id:
+            assert isinstance(dtensor_local_shards, LocalShardsWrapper)
+            dtensor_shard = dtensor_local_shards[0]
+            assert torch.equal(dtensor_shard.tensor, local_tensor)  # unwrap tensor
+            assert dtensor_shard.shard_size == emb_table_shape  # unwrap shape
+            assert dtensor_shard.shard_offset == (0, 0)  # unwrap offset
+        else:
+            assert dtensor_local_shards.numel() == 0
 
 
 def run_example(rank, world_size, example_name):
