@@ -119,6 +119,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     # print(lazy_format_graph_code("before reinplace_inplaceable_ops: ", gm))
     reinplace_inplaceable_ops(gm.graph)
+    # is_bwd_graph = False
+    # for n in gm.graph.nodes:
+    #     if n.op == "placeholder" and not n.target.startswith("primals_"):
+    #         is_bwd_graph = True
+    #         break
+    # if not is_bwd_graph:
     fsdp_fx_passes.remove_no_use_slice(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
     fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
     fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(gm)
