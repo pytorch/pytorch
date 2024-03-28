@@ -1,6 +1,5 @@
 #include <vector>
 
-#include <detail/oneDNN.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/ops/full.h>
@@ -9,6 +8,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>
 
 using namespace dnnl;
@@ -326,7 +326,7 @@ Attr get_onednn_conv_sum_attr(
     return attr;
 
   auto ndim = input_r.ndimension();
-  auto output_size = conv_dst_tz(
+  auto output_size = conv_dst_size(
       ndim,
       input_r.sizes(),
       weight_r.sizes(),
@@ -451,7 +451,7 @@ Tensor _convolution_out(
   if (transposed_) {
     // create output and propagate memory format
     if (!output_r.defined()) {
-      auto dst_tz = deconv_dst_tz(
+      auto dst_tz = deconv_dst_size(
           input.sizes(),
           weight.sizes(),
           params.padding,
@@ -493,7 +493,7 @@ Tensor _convolution_out(
 
     // create output and propagate memory format
     if (! output_r.defined()) {
-      auto dst_tz = conv_dst_tz(
+      auto dst_tz = conv_dst_size(
           input.ndimension(),
           input.sizes(),
           weight.sizes(),
@@ -503,7 +503,7 @@ Tensor _convolution_out(
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
     }
-    output = onednn::convolution(
+    onednn::convolution(
         output,
         input,
         weight,

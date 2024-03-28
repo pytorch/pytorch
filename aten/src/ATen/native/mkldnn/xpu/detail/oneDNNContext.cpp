@@ -19,4 +19,9 @@ GpuStreamManager& GpuStreamManager::Instance() {
   return myInstance;
 }
 
+bool set_onednn_verbose(int level) {
+  dnnl::status rs = dnnl::set_verbose(level);
+  return rs == dnnl::status::success;
+}
+
 } // namespace at::native::onednn
