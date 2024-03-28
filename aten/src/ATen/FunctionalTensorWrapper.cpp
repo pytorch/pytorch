@@ -484,8 +484,8 @@ c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) 
   }
   return c10::nullopt;
 }
-c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+c10::List<::std::optional<Tensor>> to_functional_tensor(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_functional_tensor(t_list[i]));
@@ -536,8 +536,8 @@ std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
   }
   return outputs;
 }
-c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+c10::List<::std::optional<Tensor>> from_functional_tensor(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
@@ -572,7 +572,7 @@ void sync(ITensorListRef t_list) {
     sync(t);
   }
 }
-void sync(const c10::List<c10::optional<Tensor>>& t_list) {
+void sync(const c10::List<::std::optional<Tensor>>& t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
   }
@@ -652,7 +652,7 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
-bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
+bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
