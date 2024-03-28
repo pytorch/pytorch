@@ -368,7 +368,7 @@ class Proxy:
             indexed_item = proxied_value[i]
 
     For a more detailed description into the Proxy internals, check out
-    the "Proxy" section in `torch/fx/OVERVIEW.md`
+    the "Proxy" section in `torch/fx/README.md`
     """
 
     @compatibility(is_backward_compatible=True)
