@@ -200,7 +200,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, operands):
 
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(mode, cond_fn, body_fn, operands):
-    return body_fn(*operands)
+    with mode:
+        return body_fn(*operands)
 
 
 @while_loop_op.py_functionalize_impl

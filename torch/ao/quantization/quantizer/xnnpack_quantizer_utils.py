@@ -329,12 +329,12 @@ def _annotate_conv(
     return annotated_partitions
 
 
-@register_annotator("conv_relu")
-def _annotate_conv_relu(
+def _do_annotate_conv_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[List[List[Node]]]:
+    is_conv_transpose: bool = False,
+):
     annotated_partitions = []
     for n in gm.graph.nodes:
         if n.op != "call_function" or n.target not in [
@@ -344,14 +344,21 @@ def _annotate_conv_relu(
             continue
         relu_node = n
         maybe_conv_node = n.args[0]
-        if (
-            not isinstance(maybe_conv_node, Node)
-            or maybe_conv_node.op != "call_function"
-            or maybe_conv_node.target
-            not in [
+        # TODO: refactor with is_conv_node and is_conv_transpose_node
+        if is_conv_transpose:
+            conv_ops = [
+                torch.ops.aten.conv_transpose1d,
+                torch.ops.aten.conv_transpose2d.input,
+            ]
+        else:
+            conv_ops = [
                 torch.ops.aten.conv1d.default,
                 torch.ops.aten.conv2d.default,
             ]
+        if (
+            not isinstance(maybe_conv_node, Node)
+            or maybe_conv_node.op != "call_function"
+            or maybe_conv_node.target not in conv_ops
         ):
             continue
         conv_node = maybe_conv_node
@@ -390,6 +397,28 @@ def _annotate_conv_relu(
     return annotated_partitions
 
 
+@register_annotator("conv_relu")
+def _annotate_conv_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    return _do_annotate_conv_relu(
+        gm, quantization_config, filter_fn, is_conv_transpose=False
+    )
+
+
+@register_annotator("conv_transpose_relu")
+def _annotate_conv_transpose_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    return _do_annotate_conv_relu(
+        gm, quantization_config, filter_fn, is_conv_transpose=True
+    )
+
+
 @register_annotator("conv_bn")
 def _annotate_conv_bn(
     gm: torch.fx.GraphModule,
@@ -416,11 +445,42 @@ def _annotate_conv_bn_relu(
     return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=True)
 
 
+@register_annotator("conv_transpose_bn")
+def _annotate_conv_transpose_bn(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    """
+    Find conv_transpose + batchnorm parititions
+    Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+    """
+    return _do_annotate_conv_bn(
+        gm, quantization_config, filter_fn, has_relu=False, is_conv_transpose=True
+    )
+
+
+@register_annotator("conv_transpose_bn_relu")
+def _annotate_conv_transpose_bn_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    """
+    Find conv_transpose + batchnorm + relu parititions
+    Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+    """
+    return _do_annotate_conv_bn(
+        gm, quantization_config, filter_fn, has_relu=True, is_conv_transpose=True
+    )
+
+
 def _do_annotate_conv_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]],
     has_relu: bool,
+    is_conv_transpose: bool = False,
 ) -> List[List[Node]]:
     """
     Given a function that takes in a `conv_fn` and returns a conv-bn[-relu] pattern,
@@ -454,22 +514,28 @@ def _do_annotate_conv_bn(
     gm.recompile()
 
     matches = []
-    combinations = [
-        (F.conv1d, _conv1d_bn_example_inputs),
-        (F.conv2d, _conv2d_bn_example_inputs),
-    ]
+    if is_conv_transpose:
+        combinations = [
+            (F.conv_transpose1d, _conv1d_bn_example_inputs),
+            (F.conv_transpose2d, _conv2d_bn_example_inputs),
+        ]
+    else:
+        combinations = [
+            (F.conv1d, _conv1d_bn_example_inputs),  # type: ignore[list-item]
+            (F.conv2d, _conv2d_bn_example_inputs),  # type: ignore[list-item]
+        ]
 
     # Add `is_cuda` and `relu_is_inplace` dimensions
-    combinations = itertools.product(
+    combinations = itertools.product(  # type: ignore[assignment]
         combinations,
         [True, False] if torch.cuda.is_available() else [False],  # is_cuda
         [True, False] if has_relu else [False],  # relu_is_inplace
     )
 
     # Match against all conv dimensions and cuda variants
-    for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:
-        pattern = get_pattern(conv_fn, relu_is_inplace)
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)
+    for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
+        pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
