@@ -581,7 +581,6 @@ def compile_fx_inner(
     )
 
     # aot autograd needs to know to pass in inputs as a list
-    compiled_graph._boxed_call = True
     return compiled_graph
 
 

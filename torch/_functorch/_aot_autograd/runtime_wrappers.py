@@ -71,13 +71,20 @@ def create_runtime_wrapper(
 ):
     num_tokens = len(runtime_metadata.tokens)
 
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
+    assert not getattr(compiled_fn, "_boxed_call", False)
 
-    def runtime_wrapper(*args):
+    def runtime_wrapper(args):
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         if num_tokens > 0:
-            args = (*[torch.empty(0)] * num_tokens, *args)
+            old_args = args
+            args = (*[torch.empty(0)] * num_tokens, *old_args)
+            old_args.clear()
+
+        # keep an extra ref around, we need these later
+        stashed_args = {}
+        for output_info in runtime_metadata.output_info:
+            if output_info.base_idx is not None:
+                stashed_args[output_info.base_idx + num_tokens] = args[output_info.base_idx + num_tokens]
 
         if trace_joint:
             args_ = list(args)
@@ -96,18 +103,24 @@ def create_runtime_wrapper(
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
+
+            # TODO: only for compiled autograd
+            steal_args = True
+
             if torch.is_grad_enabled():
                 with torch.no_grad():
                     all_outs = call_func_at_runtime_with_args(
                         compiled_fn,
                         args,
                         disable_amp=disable_amp,
+                        steal_args=steal_args,
                     )
             else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
                     disable_amp=disable_amp,
+                    steal_args=steal_args,
                 )
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -235,14 +248,14 @@ def create_runtime_wrapper(
 
                 o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = args[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = stashed_args[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
                         aliased_base_tensor, o_, o_grad
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = args[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = stashed_args[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
                     continue

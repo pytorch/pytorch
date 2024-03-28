@@ -85,6 +85,7 @@ def _get_autocast_states():
 
 
 def make_boxed_func(f):
+    assert False
     def g(args):
         return f(*args)
 
@@ -109,18 +110,7 @@ def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False)
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
-        if hasattr(f, "_boxed_call"):
-            out = normalize_as_list(f(args))
-        else:
-            # TODO: Please remove soon
-            # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-            warnings.warn(
-                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
-                "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
-            )
-            out = normalize_as_list(f(*args))
-    return out
+        return normalize_as_list(f(args))
 
 
 # Inspired by autodidax (thanks!)

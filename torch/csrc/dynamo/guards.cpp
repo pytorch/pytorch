@@ -693,6 +693,23 @@ static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* _force_decref(PyObject* dummy, PyObject* args) {
+  PyObject* item = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &item)) {
+    return Py_None;
+  }
+  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    return Py_None;
+  }
+
+  std::cout << "_force_decref Py_REFCNT=" << Py_REFCNT(item) << std::endl;
+  while (Py_REFCNT(item) > 3) {
+    Py_DECREF(item);
+  }
+  return Py_None;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
@@ -701,6 +718,7 @@ static PyMethodDef _methods[] = {
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
+    {"_force_decref", _force_decref, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
