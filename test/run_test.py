@@ -1556,7 +1556,7 @@ def run_tests(
     # full-fledge ptest plugin instead
     conftest_files = [
         "conftest.py",
-        # "pytest_shard_custom.py",
+        "pytest_shard_custom.py",
     ]
     for conftest_file in conftest_files:
         cpp_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
