@@ -8,12 +8,25 @@ from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
+    set_model_state_dict,
     StateDictOptions,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
 from torch.utils._pytree import tree_all_only
+
+
+class ModelWithBuffers(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin1 = nn.Linear(4, 4)
+        self.lin2 = nn.Linear(4, 4)
+        self.register_buffer(
+            "non_persistent_buffer", torch.randn((4,)), persistent=False
+        )
+        self.register_buffer("persistent_buffer", torch.randn((4,)), persistent=True)
+        self.weight = nn.Parameter(torch.randn((4, 4)))
 
 
 class TestFullyShardWithDistributedStateDict(FSDPTest):
@@ -93,6 +106,16 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             self.assertTrue(tree_all_only((torch.Tensor, DTensor), is_cpu, osd))
         else:
             self.assertEqual(dsd, {})
+
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_model_with_buffers(self):
+        model = ModelWithBuffers()
+        model = torch.compile(model)
+
+        sharded_sd = get_model_state_dict(model)
+        self.assertTrue("non_persistent_buffer" not in sharded_sd)
+        self.assertTrue("persistent_buffer" in sharded_sd)
+        set_model_state_dict(model, sharded_sd)
 
 
 if __name__ == "__main__":

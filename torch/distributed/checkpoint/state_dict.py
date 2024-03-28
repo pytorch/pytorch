@@ -121,9 +121,9 @@ class StateDictOptions:
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
-    fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
-    ] = field(default_factory=dict)
+    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]] = (
+        field(default_factory=dict)
+    )
     all_fqns: Set[str] = field(default_factory=set)
     submodule_prefixes: Set[str] = field(default_factory=set)
     handle_model: bool = True
@@ -207,11 +207,12 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
-    ] = {}
+    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[Set[str], torch.Tensor]] = (
+        {}
+    )
     all_fqns = set()
-    for name, param in chain(model.named_parameters(), model.named_buffers()):
+
+    for name, param in model.state_dict().items():
         fqns = _get_fqns(model, name)
         fqn_param_mapping[param] = fqns
         for fqn in fqns:
@@ -406,7 +407,7 @@ def _load_model_state_dict(
     if not info.handle_model or not state_dict:
         return _IncompatibleKeys({}, {})
 
-    for key, _ in chain(model.named_parameters(), model.named_buffers()):
+    for key in model.state_dict().keys():
         fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
             model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
