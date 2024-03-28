@@ -531,7 +531,7 @@ class TritonOverrides(OpOverrides):
         dst_ty = triton_type_name(dtype)
         compute_ty = triton_compute_type(dtype)
         if dst_ty != compute_ty and not config.triton.enable_cast_elision:
-            return f"{x}.to({dst_ty})"
+            x = f"{x}.to({dst_ty})"
         return f"{x}.to({compute_ty})"
 
     @staticmethod
@@ -554,7 +554,7 @@ class TritonOverrides(OpOverrides):
 
         if dst_ty != dst_compute_ty:
             x = f"{x}.to(dst_compute_ty)"
-        return cast_x
+        return x
 
     @staticmethod
     def _shaped_constant(value, dtype, shape):
