@@ -2781,6 +2781,18 @@ class CPUReproTests(TestCase):
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(a)
 
+    @torch.no_grad()
+    @torch._inductor.config.patch(freezing=True)
+    def test_issue122380(self):
+        def func(x):
+            t1 = torch.unbind(x)
+            t2 = torch.stack(t1, dim=1)
+            t3 = torch.tanh(t2)
+            return t3
+
+        x = torch.randn(2, 3, 4)
+        self.assertEqual(torch.compile(func)(x), func(x))
+
     def test_ir_node_str(self):
         @torch.compile
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -3527,8 +3539,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO: support vectorized int64 masked load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
