@@ -16,6 +16,9 @@
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
 #endif
 
@@ -725,6 +728,57 @@ class QLinearUnpackedDynamicFp16 final {
 #endif // USE_FBGEMM
 };
 
+at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16(const at::Tensor weight) {
+#ifdef USE_FBGEMM
+  TORCH_CHECK(
+      weight.dim() == 2,
+      "fbgemm weight packing only packs matrices not vectors.");
+  return at::native::fbgemm_pack_gemm_matrix_fp16(weight);
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16_meta(const at::Tensor weight) {
+#ifdef USE_FBGEMM
+  // Strictly speaking this is not correct. However we do not know the exact
+  // size of the packed matrix as it's being maintained by the object itself,
+  // therefore we return the view we have here.
+  return at::empty({8}, weight.options().dtype(at::kByte));
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor wrapped_fbgemm_linear_fp16_weight(at::Tensor input, const at::Tensor weight, const at::Tensor bias, int64_t out_channel) {
+#ifdef USE_FBGEMM
+  return at::native::fbgemm_linear_fp16_weight(input, weight, bias);
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor wrapped_fbgemm_linear_fp16_weight_meta(at::Tensor input, const at::Tensor weight, const at::Tensor bias, int64_t out_channel) {
+#ifdef USE_FBGEMM
+  // For the meta function, we need users to provide the dimension explicitly
+  // as we don't have access to the weight.
+  auto out_sizes = input.sym_sizes().vec();
+  if (out_channel == -1) {
+    out_sizes.pop_back();
+  } else {
+    out_sizes.back() = out_channel;
+  }
+  return at::empty_symint(out_sizes, input.options());
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   register_linear_params();
   m.impl(
@@ -755,6 +809,21 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"),
       TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_pack_gemm_matrix_fp16"),
+      wrapped_fbgemm_pack_gemm_matrix_fp16);
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_linear_fp16_weight"),
+      wrapped_fbgemm_linear_fp16_weight);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_pack_gemm_matrix_fp16"),
+      wrapped_fbgemm_pack_gemm_matrix_fp16_meta);
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::wrapped_fbgemm_linear_fp16_weight"),
+      wrapped_fbgemm_linear_fp16_weight_meta);
 }
 
 } // namespace
