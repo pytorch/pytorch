@@ -12,7 +12,7 @@ from torch.distributed._tensor import Shard
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, test_compiled_fsdp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -99,6 +99,7 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_clip_grad_norm_1d(self):
         for norm_type in (2, 1, float("inf")):
             torch.manual_seed(42)

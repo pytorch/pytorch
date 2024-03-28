@@ -17,10 +17,10 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
-    FSDPTestMultiThread,
     MLP,
     patch_reduce_scatter,
     reduce_scatter_with_assert,
+    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import run_tests
 
@@ -198,12 +198,13 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
 
-class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
+class TestFullyShardMixedPrecisionCasts(FSDPTest):
     @property
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_float16_on_one_submodule(self):
         x = torch.zeros(2, 100, device="cuda")
 
@@ -257,7 +258,8 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         self.assertEqual(forward_inputs[model.c1].dtype, torch.float16)
         self.assertEqual(forward_inputs[model.c2].dtype, torch.float32)
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_submodules_with_external_inputs(self):
         self.run_subtests(
             {"enable_submodule_cast": [False, True]},
@@ -311,13 +313,15 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             torch.float16 if enable_submodule_cast else torch.float32,
         )
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    @test_compiled_fsdp()
     def test_norm_modules_bf16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         self._test_norm_modules(mp_policy)
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_norm_modules_fp16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
         self._test_norm_modules(mp_policy)

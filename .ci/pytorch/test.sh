@@ -300,6 +300,8 @@ test_inductor_distributed() {
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_param_registration_after_forward
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_param_registration_after_backward
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume
   pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype

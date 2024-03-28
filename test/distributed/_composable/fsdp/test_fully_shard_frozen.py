@@ -23,6 +23,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
     patch_register_post_backward_hook_backward,
     reduce_scatter_with_assert,
+    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import run_tests
 
@@ -131,6 +132,7 @@ class TestFullyShardFrozen(FSDPTest):
                 self.assertTrue(backward_count >= num_mlps - 1)
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_train_mixed_requires_grad_across_groups(self):
         """
         Tests training parity with DDP when mixing frozen and non-frozen
@@ -209,6 +211,7 @@ class TestFullyShardFrozen(FSDPTest):
             self.assertTrue(backward_count >= num_linears - 1)
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_multi_forward_mixed_requires_grad(self):
         """
         Tests training parity with DDP when having trainable and frozen modules

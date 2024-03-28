@@ -992,6 +992,12 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
+    def perThreadSetUp(self):
+        torch._dynamo.reset()
+
+    def perThreadTearDown(self):
+        torch._dynamo.reset()
+
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
@@ -1059,7 +1065,9 @@ class FSDPTest(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         dist.barrier()
 
+        torch._dynamo.reset()
         self.run_test(test_name, pipe)
+        torch._dynamo.reset()
 
         dist.barrier()
 
@@ -1324,8 +1332,32 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
+            torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+            for handle_id, hook in args[0]._forward_pre_hooks.items():
+                if (
+                    hook.__module__ == "torch.distributed._composable.fsdp._fsdp_state"
+                    and hook.__name__ == "_pre_forward"
+                ):
+                    args[0]._forward_pre_hooks[handle_id] = torch.compiler.disable(hook)
+
+            for handle_id, hook in args[0]._forward_hooks.items():
+                if (
+                    hook.__module__ == "torch.distributed._composable.fsdp._fsdp_state"
+                    and hook.__name__ == "_post_forward"
+                ):
+                    args[0]._forward_hooks[handle_id] = torch.compiler.disable(hook)
+
+            # avoid mapping module to FSDPManagedNNModuleVariable
+            # since we are skipping FSDP hooks
+            for module in args[0].modules():
+                for fsdp_dynamo_attr in [
+                    "_is_fsdp_managed_module",
+                    "_fsdp_use_orig_params",
+                ]:
+                    if hasattr(module, fsdp_dynamo_attr):
+                        delattr(module, fsdp_dynamo_attr)
+
             args[0].compile()
-        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
 
     class FullyShardPatch(Enum):
         # apply ``partial`` in order to use ``Enum.value``
@@ -1341,23 +1373,16 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                 if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
-                imported_fully_shard = (
-                    f"{func.__module__}.{original_fully_shard.__name__}"
-                )
-                with mock.patch(
-                    imported_fully_shard,
-                    fully_shard_patch.value,
-                ):
-                    func(*args, **kwargs)
-                    torch.distributed.barrier()
-                # mock.patch.__exit__ does not work with multi-thread
-                # thread 1 set {func.__module__}.fully_shard
-                # thread 2 read {func.__module__}.fully_shard and thought it is original
-                # hence we manually reset them after __exit__
-                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
-                setattr(
-                    import_path(), original_fully_shard.__name__, original_fully_shard
-                )
+
+                # fully_shard is imported as a global
+                # through `from ... import fully_shard`
+                func.__globals__[
+                    original_fully_shard.__name__
+                ] = fully_shard_patch.value
+                func(*args, **kwargs)
+                # other threads use patched func before this thread restores
+                torch.distributed.barrier()
+                func.__globals__[original_fully_shard.__name__] = original_fully_shard
 
         return wrapper
 
