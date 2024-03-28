@@ -204,6 +204,11 @@ class GraphLowering(torch.fx.Interpreter):
                 "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
             )
 
+        if get_scheduling_for_device("xpu") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,

@@ -39,12 +39,14 @@ from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
     cmp,
+    device_need_guard,
     free_symbol_has,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
     green_text,
     is_collective,
+    is_gpu,
     is_wait,
     red_text,
     sympy_product,
@@ -581,7 +583,7 @@ class BaseSchedulerNode:
             layout = self.node.get_layout()
             dtype = self.node.get_dtype()
 
-        if "cuda" != layout.device.type:
+        if not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
@@ -2340,7 +2342,7 @@ class Scheduler:
 
     def create_backend(self, device: torch.device):
         assert (
-            device.type != "cuda" or device.index is not None
+            not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.add_device_info(device)
 
@@ -2348,13 +2350,15 @@ class Scheduler:
         if device_scheduling is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if device.type == "cuda" and not has_triton():
-            device_props = torch.cuda.get_device_properties(device)
-            if device_props.major < 7:
+        if not has_triton():
+            if (
+                device.type == "cuda"
+                and (device_props := torch.cuda.get_device_properties(device)).major < 7
+            ):
                 raise RuntimeError(
                     f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                 )
-            else:
+            elif is_gpu(device.type):
                 raise RuntimeError(
                     "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
@@ -2407,13 +2411,14 @@ class Scheduler:
                 ):
                     self.flush()
                 if device != self.current_device:
-                    if device.type == "cuda":
-                        if self.current_device and self.current_device.type == "cuda":
-                            V.graph.wrapper_code.codegen_device_guard_exit()
+                    if self.current_device and device_need_guard(
+                        self.current_device.type
+                    ):
+                        V.graph.wrapper_code.codegen_device_guard_exit()
+                    if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-                    elif self.current_device and self.current_device.type == "cuda":
-                        V.graph.wrapper_code.codegen_device_guard_exit()
+
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -2444,7 +2449,7 @@ class Scheduler:
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
 
-        if self.current_device and self.current_device.type == "cuda":
+        if self.current_device and device_need_guard(self.current_device.type):
             # exit the outermost CUDA device guard. this is
             # important for nested indentation codegen-ing.
             V.graph.wrapper_code.codegen_device_guard_exit()
