@@ -1243,16 +1243,21 @@ class PatternMatcherPass:
                 get_mutation_region_id, graph
             )
         count = 0
-        for node in sorted(
-            itertools.chain.from_iterable(
-                (
-                    graph.find_nodes(op=op, target=target, sort=False)
-                    for op, target in self.patterns
-                )
-            ),
-            reverse=True,
-        ):
+        nodes = []
+        has_call_module = False
+        for op, target in self.patterns:
+            if op == "call_module":
+                has_call_module = True
+            else:
+                nodes.append(graph.find_nodes(op=op, target=target, sort=False))
+        if has_call_module:
+            nodes.append(graph.find_nodes(op="call_module", sort=False))
+        for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
             target = extract_target(node)
+            if node.op == "call_module":
+                if (node.op, target) not in self.patterns:
+                    continue
+
             # conservatively not applying pattern for cpu input,
             # since some of the patterns induce codegen and split nodes.
             # Note: we will only skip cpu compute if disable_cpp_codegen=True
