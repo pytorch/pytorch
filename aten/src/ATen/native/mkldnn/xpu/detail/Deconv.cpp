@@ -1,8 +1,8 @@
-#pragma once
-
+#include <c10/xpu/XPUFunctions.h>
 #include <ATen/ATen.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 
@@ -136,7 +136,7 @@ deconv_get_plain_md(
   return {src_usr_md, wgh_usr_md, dst_usr_md};
 }
 
-static void deconvolution(
+sycl::event deconvolution(
     at::Tensor& dst,
     const at::Tensor& src,
     const at::Tensor& wgh,
@@ -146,7 +146,8 @@ static void deconvolution(
     IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
-    Attr& attr) {
+    Attr& attr,
+    const std::vector<sycl::event>& deps) {
   auto engine =
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
@@ -222,11 +223,12 @@ static void deconvolution(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   auto deconv_fwd = dnnl::deconvolution_forward(deconv_fwd_pd);
-  XPU_ONEDNN_EXEC(deconv_fwd, stream, args);
+  sycl::event deconv_event = dnnl::sycl_interop::execute(deconv_fwd, stream, args, deps);
+  return deconv_event;
 
 }
 
-static void deconvolution_backward_data(
+sycl::event deconvolution_backward_data(
     at::Tensor& diff_src,
     const at::Tensor& diff_dst,
     const at::Tensor& weight,
@@ -234,7 +236,8 @@ static void deconvolution_backward_data(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups,
-    bool bias_defined) {
+    bool bias_defined,
+    const std::vector<sycl::event>& deps) {
   auto engine =
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
@@ -314,10 +317,12 @@ static void deconvolution_backward_data(
   // execute primitive
   auto deconv_backward_data =
       dnnl::deconvolution_backward_data(deconv_backward_data_pd);
-  XPU_ONEDNN_EXEC(deconv_backward_data, stream, args);
+  sycl::event deconv_bwd_data_event = dnnl::sycl_interop::execute(deconv_backward_data, stream, args, deps);
+  return deconv_bwd_data_event;
+
 }
 
-static void deconvolution_backward_weights(
+sycl::event deconvolution_backward_weights(
     at::Tensor& diff_wgh,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
@@ -325,7 +330,8 @@ static void deconvolution_backward_weights(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    const std::vector<sycl::event>& deps) {
   auto engine =
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
@@ -410,7 +416,9 @@ static void deconvolution_backward_weights(
 
   // execute primitive
   auto deconv_bwd_w = dnnl::deconvolution_backward_weights(deconv_bwd_w_pd);
-  XPU_ONEDNN_EXEC(deconv_bwd_w, stream, args);
+
+  sycl::event deconv_bwd_w_event = dnnl::sycl_interop::execute(deconv_bwd_w, stream, args, deps);
+  return deconv_bwd_w_event;
 
 }
 
