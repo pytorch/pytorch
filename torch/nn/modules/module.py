@@ -13,6 +13,7 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -802,8 +803,12 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+
+            # subclasses may have multiple child tensors so we need to use swap_tensors
+            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+
             param_grad = param.grad
-            if should_use_swap_tensors:
+            if p_should_use_swap_tensors:
                 try:
                     if param_grad is not None:
                         # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
@@ -829,7 +834,7 @@ class Module:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                if should_use_swap_tensors:
+                if p_should_use_swap_tensors:
                     grad_applied.requires_grad_(param_grad.requires_grad)
                     try:
                         torch.utils.swap_tensors(param_grad, grad_applied)
