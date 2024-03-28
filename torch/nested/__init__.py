@@ -170,11 +170,8 @@ Example::
             requires_grad=requires_grad,
             pin_memory=pin_memory)
     elif layout == torch.jagged:
-        # Need to:
-        #   * Detach tensors to discard autograd history
-        #   * Wrap lists of scalars as tensors
-        list_of_tensors = [t.detach() if isinstance(t, Tensor) else torch.as_tensor(t)
-                           for t in tensor_list]
+        # Need to wrap lists of scalars as tensors
+        list_of_tensors = [t if isinstance(t, Tensor) else torch.as_tensor(t) for t in tensor_list]
 
         from torch.nested._internal.nested_tensor import jagged_from_list
 
