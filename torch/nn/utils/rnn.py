@@ -403,10 +403,18 @@ def unpad_sequence(
     padded_sequences: Tensor,
     lengths: Tensor,
     batch_first: bool = False,
+    inplace: bool = True,
 ) -> List[Tensor]:
     r"""Unpad padded Tensor into a list of variable length Tensors.
 
     ``unpad_sequence`` unstacks padded Tensor into a list of variable length Tensors.
+
+    The input ``padded_sequences`` can be of size ``T x B x *``.
+    If ``batch_first`` is ``True``, ``B x T x *`` input is expected.
+
+    `B` is batch size.
+    `T` is length of the longest sequence.
+    `*` is any number of trailing dimensions, including none.
 
     Example:
         >>> from torch.nn.utils.rnn import pad_sequence, unpad_sequence
@@ -428,6 +436,8 @@ def unpad_sequence(
         padded_sequences (Tensor): padded sequences.
         lengths (Tensor): length of original (unpadded) sequences.
         batch_first (bool, optional): whether batch dimension first or not. Default: False.
+        inplace (bool, optional): If ``True``, ``padded_sequences`` will be transposed
+            into ``B x T x *`` format in-place when ``batch_first`` is ``False``. Default: ``True``.
 
     Returns:
         a list of :class:`Tensor` objects
@@ -435,7 +445,10 @@ def unpad_sequence(
     unpadded_sequences = []
 
     if not batch_first:
-        padded_sequences.transpose_(0, 1)
+        if inplace:
+            padded_sequences.transpose_(0, 1)
+        else:
+            padded_sequences = padded_sequences.transpose(0, 1)
 
     max_length = padded_sequences.shape[1]
     idx = torch.arange(max_length, device=lengths.device)
