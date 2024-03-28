@@ -2141,13 +2141,12 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
-
     def test_non_contiguous_output_alias(self):
-        # Test x.contiguous() where x is non-contiguous.
+        # Test return x, x.contiguous() where x is non-contiguous.
         class Model(torch.nn.Module):
             def forward(self, x):
                 squared = x * x
-                transposed = squared.t()    # non-contiguous
+                transposed = squared.t()  # non-contiguous
                 contig = transposed.contiguous()
                 return transposed, contig
 
@@ -2168,13 +2167,15 @@ class AOTInductorTestsTemplate:
         # contiguous() should create a new tensor
         self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
 
-    def test_contiguous_output_alias(self):
-        # Test x.contiguous() where x is already contiguous.
+    def test_multiple_output_alias(self):
+        # Test when mutliple outputs alias the same tensor
         class Model(torch.nn.Module):
             def forward(self, x):
                 squared = x * x
-                contig = squared.contiguous()
-                return squared, contig
+                no_op_contig = squared.contiguous()         # alias
+                no_op_reshape = squared.reshape(squared.shape)    # alias
+                cubed = x * x * x
+                return squared, contig, no_op_reshape, cubed
 
         x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
         model = Model()
@@ -2191,8 +2192,12 @@ class AOTInductorTestsTemplate:
             )
         actual = model(x)
         self.assertTrue(same(result, actual))
-        # contigous() shuold re-use the tensor
+        # squared.contiguous() should alias squared
         self.assertTrue(result[0].data_ptr() == result[1].data_ptr())
+        # squared.reshape(squared.shape) should alias squared
+        self.assertTrue(result[0].data_ptr() == result[2].data_ptr())
+        # sanity check that cubed isn't aliasing squared
+        self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
 
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
