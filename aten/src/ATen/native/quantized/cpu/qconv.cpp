@@ -1634,10 +1634,8 @@ static at::Tensor _quantized_convolution_onednn(
     }
   }
   static ideep::tensor::desc dummy_accum_desc;
-  static auto none_str_view = c10::string_view("none");
-  static auto empty_str_view = c10::string_view("");
   ideep::attr_t op_attr = onednn_utils::create_attr_by_post_op(
-    binary_attr.has_value() ? binary_attr.value() : none_str_view,
+    binary_attr.has_value() ? binary_attr.value() : "none",
     binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
     accum_scale,
     accum_zero_point,
