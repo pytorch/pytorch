@@ -606,6 +606,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     bool training,
     c10::optional<Generator> generator,
     Tensor& output) {
+  TORCH_CHECK(self.sizes() == noise.sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sizes(), " noise.shape = ", noise.sizes())
   if (training) {
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
