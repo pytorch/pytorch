@@ -1,4 +1,5 @@
-#pragma once
+
+#include <c10/xpu/XPUFunctions.h>
 
 #include <ATen/ATen.h>
 #include <ATen/record_function.h>
@@ -10,13 +11,14 @@
 
 namespace at::native::onednn {
 
-static inline void matmul(
+sycl::event matmul(
     at::Tensor& result,
     const at::Tensor& mat1,
     const at::Tensor& mat2,
     const at::Tensor& b_raw,
     bool m2_trans,
-    Attr attr) {
+    Attr attr,
+    const std::vector<sycl::event>& deps) {
   int64_t dims = result.dim();
   TORCH_CHECK(
       dims == 2 || dims == 3,
@@ -231,10 +233,12 @@ static inline void matmul(
     args.insert({DNNL_ARG_BIAS, bias_m});
   }
 
-  XPU_ONEDNN_EXEC(matmul_p, stream, args);
+  sycl::event matmul_event = dnnl::sycl_interop::execute(matmul_p, stream, args, deps);
 
   if (!dst.is_same(result))
     result.copy_(dst);
+
+  return matmul_event;
 }
 
 } // namespace at::native::onednn

@@ -1,4 +1,4 @@
-#pragma once
+#include <c10/xpu/XPUFunctions.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/grad_mode.h>
@@ -155,7 +155,7 @@ static std::tuple<
   return {src_usr_md, wgh_usr_md, dst_usr_md};
 }
 
-static at::Tensor convolution(
+sycl::event convolution(
     at::Tensor& dst,
     const at::Tensor& src,
     const at::Tensor& wgh,
@@ -165,7 +165,8 @@ static at::Tensor convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    Attr& attr) {
+    Attr& attr,
+    const std::vector<sycl::event>& deps) {
   auto engine =
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
@@ -243,12 +244,12 @@ static at::Tensor convolution(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   auto conv_forward = dnnl::convolution_forward(conv_fwd_pd);
-  XPU_ONEDNN_EXEC(conv_forward, stream, args);
+  auto conv_fwd_event = dnnl::sycl_interop::execute(conv_forward, stream, args, deps);
 
-  return dst;
+  return conv_fwd_event;
 }
 
-static void convolution_backward_weights(
+sycl::event convolution_backward_weights(
     at::Tensor& diff_wgh,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
@@ -258,7 +259,8 @@ static void convolution_backward_weights(
     IntArrayRef padding_back_bottom_right,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    const std::vector<sycl::event>& deps) {
   auto engine =
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
@@ -344,11 +346,12 @@ static void convolution_backward_weights(
 
   // execute primitive
   auto conv_bwd_w = dnnl::convolution_backward_weights(conv_bwd_w_pd);
-  XPU_ONEDNN_EXEC(conv_bwd_w, stream, args);
+  sycl::event conv_bwd_w_event = dnnl::sycl_interop::execute(conv_bwd_w, stream, args, deps);
 
+  return conv_bwd_w_event;
 }
 
-static void convolution_backward_data(
+sycl::event convolution_backward_data(
     at::Tensor& diff_src,
     const at::Tensor& diff_dst,
     const at::Tensor& weight,
@@ -357,7 +360,8 @@ static void convolution_backward_data(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    bool bias_defined) {
+    bool bias_defined,
+    const std::vector<sycl::event>& deps) {
   auto engine =
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
@@ -439,7 +443,8 @@ static void convolution_backward_data(
   // execute primitive
   auto conv_backward_data =
       dnnl::convolution_backward_data(conv_backward_data_pd);
-  XPU_ONEDNN_EXEC(conv_backward_data, stream, args);
+  auto conv_backward_data_event = dnnl::sycl_interop::execute(conv_backward_data, stream, args, deps);
+  return conv_backward_data_event;
 
 }
 
