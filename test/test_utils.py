@@ -101,7 +101,6 @@ class TestCheckpoint(TestCase):
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
     def test_checkpoint_trigger(self):
-        self.assertTrue(1 == 2)
 
         class Net(nn.Module):
 
