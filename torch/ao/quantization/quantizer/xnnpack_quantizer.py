@@ -211,7 +211,15 @@ def _get_module_name_filter(module_name: str):
         # }
         # get_attr nodes doesn't have nn_module_stack?
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        names = [n[len("L['self'].") :] for n, klass in nn_module_stack.values()]
+
+        def _normalize_path(n):
+            prefix = 0
+            # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
+            if n.startswith("L['self']."):
+                prefix = len("L['self'].")
+            return n[prefix:]
+
+        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
         return module_name in names
 
     return module_name_filter
