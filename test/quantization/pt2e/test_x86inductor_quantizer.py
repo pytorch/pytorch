@@ -1369,14 +1369,17 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_filter_conv2d(self):
+    def test_filter_conv2d_recipe(self):
+        """
+        Test removing conv2d from default recipe of X86InductorQuantizer.
+        """
         with override_quantized_engine("x86"), torch.no_grad():
             m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
             example_inputs = (torch.randn(2, 3, 16, 16),)
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._remove_quantizable_op(torch.ops.aten.conv2d.default)
+            quantizer.set_operator_type(torch.ops.aten.conv2d.default, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
@@ -1398,7 +1401,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_filter_linear(self):
+    def test_filter_linear_recipe(self):
+        """
+        Test removing linear from default recipe of X86InductorQuantizer.
+        """
         with override_quantized_engine("x86"), torch.no_grad():
             m = TestHelperModules.LinearUnaryModule(
                 use_bias=True,
@@ -1408,7 +1414,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._remove_quantizable_op(torch.ops.aten.linear.default)
+            quantizer.set_operator_type(torch.ops.aten.linear.default, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
@@ -1430,14 +1436,17 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_filter_maxpool2d(self):
+    def test_filter_maxpool2d_recipe(self):
+        """
+        Test removing maxpool2d from default recipe of X86InductorQuantizer.
+        """
         with override_quantized_engine("x86"), torch.no_grad():
             m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
             example_inputs = (torch.randn(2, 3, 16, 16),)
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._remove_quantizable_op(torch.ops.aten.max_pool2d.default)
+            quantizer.set_operator_type(torch.ops.aten.max_pool2d.default, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
@@ -1483,7 +1492,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
                 if annotate_matmul:
-                    quantizer._add_quantizable_op(torch.ops.aten.matmul.default)
+                    quantizer.set_operator_type(torch.ops.aten.matmul.default, quantizer.global_config)
 
                 node_occurrence = {
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 5 if annotate_matmul else 1,
