@@ -1814,7 +1814,7 @@ class AotCodeCompiler:
             for name in graph.constants.keys():
                 if name in graph.folded_constants:
                     continue
-                key = get_cloned_parameter_buffer_name(name)
+                key = get_cloned_parameter_buffer_name(graph.constants_orig_names[name])
                 assert key in original_parameters_buffers, (
                     key + " is not found as a cloned parameter or buffer"
                 )
@@ -1933,6 +1933,40 @@ def compile_file(
 
 
 _libgomp: Optional[CDLL] = None
+
+
+def custom_op_wrapper(op: str, *args):
+    # This function will be called from generated cpp wrapper code in the JIT mode.
+    # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
+    def convert_arg(arg):
+        if str(type(arg)) == "<class 'PyCapsule'>":
+            # No easy way to do isinstance check on PyCapsule
+            return torch._C._aoti.alloc_tensor_by_stealing_from_void_ptr(arg)
+        elif isinstance(arg, (list, tuple)):
+            return type(arg)(convert_arg(a) for a in arg)
+        else:
+            return arg
+
+    converted_args = [convert_arg(arg) for arg in args]
+
+    assert op.startswith("torch.ops."), (
+        op + " can not be called through custom_op_wrapper"
+    )
+    func = None
+    for i, s in enumerate(op.split(".")):
+        if i == 0:
+            func = importlib.import_module(s)
+        func = getattr(func, s)
+
+    assert callable(func), op + " can not be loaded through custom_op_wrapper"
+    result = func(*converted_args)
+    if isinstance(result, (list, tuple)):
+        for r in result:
+            assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+    else:
+        assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
+        return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
 class CppCodeCache:
@@ -2794,5 +2828,7 @@ if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
     # compile workers created not being able to be shut down inside
     # shutdown_compile_workers(). This may cause significant QPS drop.
     log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+elif sys.version_info >= (3, 12):
+    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()
