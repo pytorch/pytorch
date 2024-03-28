@@ -166,6 +166,32 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
+def scatter(
+    self: torch.Tensor,
+    scatter_list: Optional[List[torch.Tensor]],
+    src: int,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    """
+    Scatters the list of data tensor to all processes in the given process group.
+
+    Args:
+        self (Tensor): dummy tensor of correct size to receive tensor.
+        scatter_list (List[Tensor]): list of tensors to scatter. Must be None on ranks 1+.
+        src (int): Source rank
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    Returns:
+        Copy of dummy tensor with the broadcasted tensor.
+    """
+    group_name = _resolve_group_name(group, tag)
+    if scatter_list is None:
+        scatter_list = []
+    tensor = torch.ops._c10d_functional.scatter(self, scatter_list, src, group_name)
+    return _maybe_wrap_tensor(tensor)
+
+
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -796,6 +822,14 @@ def _broadcast_meta(self, *args):
     return torch.empty_like(self)
 
 
+def _scatter_meta(self, *args):
+    return torch.empty_like(self)
+
+
+def _scatter__meta(self, *args):
+    pass
+
+
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self)
 
@@ -933,6 +967,8 @@ if not torch._running_with_deploy():
         _all_gather_into_tensor_coalesced_native_meta,
         "Meta",
     )
+    _c10_lib_impl.impl("scatter", _scatter_meta, "Meta")
+    _c10_lib_impl.impl("scatter_", _scatter__meta, "Meta")
     _c10_lib_impl.impl(
         "reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta"
     )
