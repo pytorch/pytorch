@@ -192,7 +192,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @requires_cuda
     def test_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2284,7 +2283,6 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
-    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
@@ -2389,6 +2387,7 @@ if not IS_FBCODE:
             "test_addmm": fail_minimal_arrayref_interface(is_skip=True),
             "test_aliased_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
             "test_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
+            "test_constant_folding": fail_minimal_arrayref_interface(is_skip=True),
             "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
@@ -2494,7 +2493,6 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
-        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
