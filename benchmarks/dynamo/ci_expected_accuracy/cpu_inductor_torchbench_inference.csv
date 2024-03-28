@@ -54,47 +54,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,164
+detectron2_fasterrcnn_r_101_c4,pass,51
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,163
+detectron2_fasterrcnn_r_101_dc5,pass,51
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,172
+detectron2_fasterrcnn_r_101_fpn,pass,55
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,113
+detectron2_fasterrcnn_r_50_c4,pass,51
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,112
+detectron2_fasterrcnn_r_50_dc5,pass,51
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,121
+detectron2_fasterrcnn_r_50_fpn,pass,55
 
 
 
-detectron2_fcos_r_50_fpn,pass,97
+detectron2_fcos_r_50_fpn,pass,38
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,182
+detectron2_maskrcnn_r_101_c4,fail_accuracy,66
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,192
+detectron2_maskrcnn_r_101_fpn,pass,73
 
 
 
-detectron2_maskrcnn_r_50_c4,pass,131
+detectron2_maskrcnn_r_50_c4,pass,66
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,141
+detectron2_maskrcnn_r_50_fpn,pass,73
 
 
 
