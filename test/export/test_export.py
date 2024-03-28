@@ -956,6 +956,32 @@ class TestExport(TestCase):
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
 
+    @unittest.expectedFailure
+    def test_crop_like(self):
+        # https://fb.workplace.com/groups/1405155842844877/posts/8195050017188725/
+
+        # Minimal crop code copied from https://github.com/pytorch/vision/blob/main/torchvision/transforms/v2/functional
+        class CropLike(torch.nn.Module):
+            def forward(self, image, crop_height, crop_width):
+                c, image_height, image_width = image.shape
+                crop_top = int(round((image_height - crop_height) / 2.0))
+                crop_left = int(round((image_width - crop_width) / 2.0))
+                return image[..., crop_top : crop_top + crop_height, crop_left : crop_left + crop_width]
+
+        crop = CropLike()
+        imagew = Dim("width")
+        imageh = Dim("height")
+        dynamic_dims = {
+            "image": {0: None, 1: imageh, 2: imagew},
+            "crop_height": None,
+            "crop_width": None,
+        }
+        args = (torch.rand(3, 512, 512), 150, 150)
+        ecrop = export(crop, args=args, dynamic_shapes=dynamic_dims)
+
+        args = (torch.rand(3, 700, 700), 150, 150)
+        self.assertEqual(ecrop.module()(*args), ecrop(*args))
+
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):

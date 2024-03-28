@@ -24,6 +24,7 @@ from .functions import (
     Round,
     RoundDecimal,
     TrueDiv,
+    Trunc,
     Where,
 )
 
@@ -51,6 +52,7 @@ def handlers():
         TrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "div",
+        Trunc: "trunc",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
