@@ -195,7 +195,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 //     args[i] = func(args[i], i - begin, true)
 //   args[i] = func(args[i], i - begin)
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
-    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func);
+    const std::bitset<64> use_flag_relative, const std::function<Tensor(const Tensor&, bool)>& func);
 
 std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begin, int64_t end);
 
