@@ -4166,6 +4166,26 @@ class TestNestedTensorSubclass(TestCase):
         output = f(nt)
         self.assertEqual(output._metadata_cache, cache)
 
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_to_padded_tensor(self, device, dtype):
+        nt = torch.nested.nested_tensor([
+            torch.randn(2, 8, device=device, dtype=dtype),
+            torch.randn(3, 8, device=device, dtype=dtype),
+            torch.randn(4, 8, device=device, dtype=dtype),
+            torch.randn(5, 8, device=device, dtype=dtype),
+            torch.randn(6, 8, device=device, dtype=dtype),
+            torch.randn(7, 8, device=device, dtype=dtype),
+            torch.randn(8, 8, device=device, dtype=dtype),
+        ], layout=torch.jagged)
+
+        PADDING_VAL = 4.2
+        expected_padded = nt._values.new_full((7, 8, 8), PADDING_VAL)
+        for i, component in enumerate(nt.unbind()):
+            expected_padded[i, :component.shape[0]].copy_(component)
+
+        padded = nt.to_padded_tensor(PADDING_VAL)
+        self.assertEqual(expected_padded, padded)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

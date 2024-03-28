@@ -6116,6 +6116,18 @@
     CUDA: nested_from_padded_cuda
   autogen: _nested_from_padded.out
 
+# - func: _nested_jagged_to_padded(Tensor values, Tensor offsets, float padding=0.0, SymInt[]? output_size=None, int ragged_idx=1) -> Tensor
+#   device_check: NoCheck
+#   dispatch:
+#     NestedTensorCUDA: _nested_jagged_to_padded
+#   autogen: _nested_jagged_to_padded.out
+
+# - func: _nested_jagged_from_padded(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1) -> Tensor
+#   device_check: NoCheck
+#   dispatch:
+#     CPU, CUDA: _nested_jagged_from_padded
+#   autogen: _nested_jagged_from_padded.out
+
 # These private functions are temporary. They will be updated/deleted when nested tensors switch to using SymInts for their metadata representation
 - func: _nested_tensor_size(Tensor self) -> Tensor
   variants: method

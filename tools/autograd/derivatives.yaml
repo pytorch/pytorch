@@ -2785,6 +2785,7 @@
   cpu_nested_shape_example: non_differentiable
 
 - name: to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
+  # self: "(self.layout() == at::kJagged ? at::_nested_jagged_from_padded(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_ragged_idx(self)) : at::_nested_from_padded(grad, self._nested_tensor_size()))"
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 

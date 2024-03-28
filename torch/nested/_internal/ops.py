@@ -1056,6 +1056,146 @@ def values_default(func, *args, **kwargs):
     # See https://github.com/pytorch/pytorch/issues/112024#issuecomment-1779554292
     return inp._values.detach()
 
+from torch.utils._triton import has_triton
+
+if has_triton():
+    import triton
+    import triton.language as tl
+
+    # values: (P, D) contiguous (TODO: allow non-contiguous)
+    # offsets: B + 1 contiguous
+    # output: (B, M, D) contiguous
+    # where:
+    #   P is sum_B(*)
+    #   M is max sequence length
+    @triton.jit
+    def _jagged_to_padded_kernel(
+        # TODO: handle strides too
+        values_ptr,
+        values_packed_batch_stride,
+        values_dim_stride,
+        offsets_ptr,
+        offsets_stride,
+        output_ptr,
+        output_batch_stride,
+        output_seq_stride,
+        output_dim_stride,
+        padding_value,
+        B: tl.constexpr,
+        M: tl.constexpr,
+        D: tl.constexpr,
+        BLOCKSIZE_BATCH: tl.constexpr,
+    ):
+        batch_pid = tl.program_id(axis=0)
+
+        # Get (begin, end) offsets within packed batch dimension.
+        batch_block_arange = batch_pid * BLOCKSIZE_BATCH + tl.arange(0, BLOCKSIZE_BATCH)
+        block_offsets_ptrs = offsets_ptr + batch_block_arange
+        block_begin_offsets = tl.load(block_offsets_ptrs, mask=batch_block_arange < B)
+        block_end_offsets = (
+            tl.load(block_offsets_ptrs + 1, mask=batch_block_arange < B)
+        )
+
+        # Compute mask for sequence length by batch item.
+        seq_block_arange = tl.arange(0, M)
+        dim_block_arange = tl.arange(0, D)
+        lengths = block_end_offsets - block_begin_offsets
+        values_mask = (
+            seq_block_arange[None, :, None] < lengths[:, None, None]
+        )
+
+        # Load values from input values tensor.
+        values_ptrs = (
+            values_ptr +
+            (block_begin_offsets[:, None, None] * values_packed_batch_stride) +
+            (seq_block_arange[None, :, None] * values_packed_batch_stride) +
+            (dim_block_arange[None, None, :] * values_dim_stride)
+        )
+        block_values = tl.load(values_ptrs, mask=values_mask)
+
+        # Store values to output tensor.
+        output_ptrs = (
+            output_ptr +
+            (batch_block_arange[:, None, None] * output_batch_stride) +
+            (seq_block_arange[None, :, None] * output_seq_stride) +
+            (dim_block_arange[None, None, :] * output_dim_stride)
+        )
+        output_values = tl.where(values_mask, block_values, padding_value)
+        tl.store(output_ptrs, output_values)
+
+
+    def _run_jagged_to_padded_kernel(
+        values, offsets, output, max_seq_len, padding_value = 0.0
+    ):
+        B, M, D = offsets.size(0) - 1, max_seq_len, values.size(-1)
+        full_grid = (B,)
+
+        grid_blocks = None
+        tensor_dims_map = {
+            values: (None,),
+            offsets: (None,),
+            output: (0,),
+        }
+
+        from torch.sparse._triton_ops import launch_kernel, ptr_stride_extractor
+
+        def kernel(grid, *sliced_tensors):
+            _jagged_to_padded_kernel[grid](
+                values,
+                values.stride(0),
+                values.stride(1),
+                offsets,
+                offsets.stride(0),
+                output,
+                output.stride(0),
+                output.stride(1),
+                output.stride(2),
+                padding_value,
+                B, M, D,
+                BLOCKSIZE_BATCH=4,
+            )
+
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+    def jagged_to_padded(values, offsets, max_seq_len, padding_value = 0.0):
+        # allocate output
+        T, B, M, D = values.size(0), offsets.size(0) - 1, max_seq_len, values.size(-1)
+        full_grid = (B, M, D)
+        output = values.new_empty(full_grid)
+        _run_jagged_to_padded_kernel(values, offsets, output, max_seq_len, padding_value)
+        return output
+
+
+@register_jagged_func(
+    torch.ops.aten.to_padded_tensor.default,
+    "self: jt, padding: any, output_size: any?"
+)
+def to_padded_tensor_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    # TODO: Handle the rest of output_size
+    output_size = new_kwargs["output_size"]
+    if output_size is not None:
+        max_seq_len = output_size[inp._ragged_dim]
+    else:
+        max_seq_len = inp._max_seqlen
+
+    return jagged_to_padded(inp.values(), inp._offsets, max_seq_len, new_kwargs["padding"])
+
+
+# @register_jagged_func(
+#     torch.ops.aten._nested_jagged_from_padded.default,
+#     "padded: t, offsets: t, dummy: jt_all, ragged_idx: any?"
+# )
+# def _nested_jagged_from_padded_default(func, *args, **kwargs):
+#     # TODO call FBGEMM kernel
+#     breakpoint()
+#     return None
+
 
 @register_jagged_func(
     torch.ops.aten._nested_view_from_jagged.default,
