@@ -6364,12 +6364,23 @@ class CommonTemplate:
             )
 
     def test_dense_mask_index(self):
+        r"""
+        There will be a little difference for reduce order between aten and inductor
+        https://github.com/pytorch/pytorch/pull/122289
+        Absolute difference: 0.00067138671875 (up to 1e-05 allowed)
+        Relative difference: 3.1747371732500974e-06 (up to 1.3e-06 allowed)
+        """
+        kwargs = {}
+        if self.device == "cpu":
+            kwargs["atol"] = 1e-4
+            kwargs["rtol"] = 1e-4
+
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
             return z.sum()
 
-        self.common(fn, [torch.randn(102400), torch.randn(3)])
+        self.common(fn, [torch.randn(102400), torch.randn(3)], **kwargs)
 
     def test_empty1(self):
         def fn():
