@@ -43,6 +43,7 @@ def count_ops(
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op is not None:
+        assert not isinstance(op, list)
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -54,9 +55,8 @@ def count_ops(
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert (
-                actual_count == freq
-            ), f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            assert actual_count == freq, err_msg
     else:
         assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
@@ -239,6 +239,31 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
+
+    @requires_cuda
+    def test_tags_sequential_layers(self):
+        def gn(x):
+            x = x.cos()
+            for _ in range(3):
+                x = torch.mm(x, x)
+            x = x.cos()
+            return x
+
+        def fn(x):
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            return x
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=6, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 18],
+            ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x)
 
     @requires_cuda
     def test_tags_multiple_checkpoints(self):
