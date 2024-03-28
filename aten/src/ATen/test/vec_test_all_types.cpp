@@ -70,6 +70,8 @@ namespace {
     class InfiniteTests : public ::testing::Test {};
     template <typename T>
     class VecConvertTests : public ::testing::Test {};
+    template <typename T>
+    class VecMaskTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -119,6 +121,7 @@ namespace {
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(VecConvertTests, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(VecMaskTests, RealFloatIntTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1671,6 +1674,68 @@ namespace {
       TEST_CONVERT_TO(float);
       TEST_CONVERT_TO(double);
     #undef TEST_CONVERT_TO
+    }
+    TYPED_TEST(VecMaskTests, MaskedLoad) {
+      using vec = TypeParam;
+      using VT = ValueType<TypeParam>;
+      constexpr auto N = vec::size();
+      CACHE_ALIGN VT x[N];
+      CACHE_ALIGN VT y[N];
+      CACHE_ALIGN VT ref[N];
+      auto seed = TestSeed();
+      ValueGen<VT> generator(VT(-100), VT(100), seed);
+      for (const auto i : c10::irange(N)) {
+        x[i] = generator.get();
+      }
+      auto vec_mask = generate_vec_mask<VT>(seed);
+      auto x_vec = vec_mask.template loadu<VT, 1>(x);
+      x_vec.store(y);
+      for (const auto i : c10::irange(N)) {
+        if (vec_mask.is_masked(i)) {
+          ref[i] = x[i];
+        } else {
+          ref[i] = 0;
+        }
+      }
+      for (const auto i : c10::irange(N)) {
+        ASSERT_EQ(y[i], ref[i])
+            << "Failure Details:\nTest Seed to reproduce: " << seed;
+      }
+    }
+    TYPED_TEST(VecMaskTests, MaskedCheck) {
+      using VT = ValueType<TypeParam>;
+      auto vec_mask = create_vec_mask<VT>(0);
+      ASSERT_TRUE(vec_mask.all_zero()) << "all_zero check failed";
+      vec_mask = create_vec_mask<VT>(-1);
+      ASSERT_TRUE(vec_mask.all_masked()) << "all_masked check failed";
+      vec_mask = create_vec_mask<VT>(2);
+      ASSERT_TRUE(vec_mask.is_masked(1)) << "is_masked(1) check failed";
+      ASSERT_TRUE(!vec_mask.is_masked(0)) << "!is_masked(0) check failed";
+    }
+    TYPED_TEST(VecMaskTests, MaskedToFrom) {
+      using vec = TypeParam;
+      using VT = ValueType<TypeParam>;
+      constexpr auto N = vec::size();
+      auto vec_mask = at::vec::VecMask<VT, 1>::from(1);
+      ASSERT_TRUE(vec_mask.all_masked()) << "expect all_masked with from(1)";
+      vec_mask = at::vec::VecMask<VT, 1>::from(0);
+      ASSERT_TRUE(vec_mask.all_zero()) << "expect all_zero with from(0)";
+
+      CACHE_ALIGN VT x[N];
+      CACHE_ALIGN VT y[N];
+      auto seed = TestSeed();
+      ValueGen<VT> generator(VT(0), VT(2), seed);
+      for (const auto i : c10::irange(N)) {
+        x[i] = generator.get();
+      }
+      auto x_vec = vec::loadu(x);
+      vec_mask = at::vec::VecMask<VT, 1>::template from<VT, 1>(x_vec);
+      auto y_vec = vec_mask.template to<VT, 1>();
+      y_vec.store(y);
+      for (const auto i : c10::irange(N)) {
+        ASSERT_EQ(y[i] != 0, x[i] != 0)
+            << "Failure Details:\nTest Seed to reproduce: " << seed;
+      }
     }
 
 #else

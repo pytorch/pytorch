@@ -116,7 +116,7 @@ class VecMask {
   template <typename U>
   static VecMask<T, N> from(U b) {
     using int_t = int_same_size_t<T>;
-    T mask = b ? c10::bit_cast<T>(~(int_t)0) : (T)0;
+    T mask = b ? c10::bit_cast<T>((int_t)(~(int_t)0)) : (T)0;
     return VectorizedN<T, N>(mask);
   }
 
