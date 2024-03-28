@@ -458,6 +458,14 @@ def _insert_reshard_gm(
     reshard_gm_nodes = list(reshard_gm.graph.nodes)
     input_node = reshard_gm_nodes[0]
     with gm.graph.inserting_before(node):
+        # copy nn_module_stack metadata for output, all-reduce nodes
+        for reshard_node in reshard_gm.graph.nodes:
+            if reshard_node.op not in ["placeholder", "output"]:
+                reshard_node.meta["nn_module_stack"] = (
+                    copy.copy(input_arg.meta["nn_module_stack"])
+                    if not input_arg.op == "placeholder"
+                    else copy.copy(node.meta["nn_module_stack"])
+                )
         output_node = gm.graph.graph_copy(
             reshard_gm.graph,
             val_map={
