@@ -107,6 +107,9 @@ class VecMask {
     __at_align__ U b_buf[size()];
     if constexpr (size() >= VectorizedN<U, L>::size()) {
       b_vec.store(b_buf);
+      for (int i = VectorizedN<U, L>::size(); i < size(); i++) {
+        b_buf[i] = static_cast<U>(0);
+      }
     } else {
       b_vec.store(b_buf, size());
     }
@@ -116,7 +119,7 @@ class VecMask {
   template <typename U>
   static VecMask<T, N> from(U b) {
     using int_t = int_same_size_t<T>;
-    T mask = b ? c10::bit_cast<T>(~(int_t)0) : (T)0;
+    T mask = b ? c10::bit_cast<T>((int_t)(~(int_t)0)) : (T)0;
     return VectorizedN<T, N>(mask);
   }
 
