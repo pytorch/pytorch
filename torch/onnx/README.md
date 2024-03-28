@@ -2,7 +2,7 @@
 
 Torch->ONNX converter / exporter.
 
-- User-facing docs: https://pytorch.org/docs/master/onnx.html
+- User-facing docs: https://pytorch.org/docs/main/onnx.html
 - Developer docs: https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter
 
 > Read the following if you are contributing to `torch.onnx`
