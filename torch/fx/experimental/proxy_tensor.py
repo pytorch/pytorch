@@ -15,7 +15,7 @@ from torch.fx.graph_module import _assign_attr
 from weakref import WeakKeyDictionary
 from collections import defaultdict
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
-from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -1121,13 +1121,10 @@ def make_fx(f,
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        pre_dispatch_mode: Any = nullcontext()
         # pre-autograd tracing uses per-dispatch-key modes,
         # which requires the python dispatcher
         if tracing_mode == "symbolic" or pre_dispatch:
             python_dispatcher_mode = enable_python_dispatcher()
-        if pre_dispatch:
-            pre_dispatch_mode = enable_pre_dispatch()
 
         proxy_function_mode: Any = nullcontext()
         if pre_dispatch:
@@ -1180,7 +1177,7 @@ def make_fx(f,
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, proxy_function_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():
             t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
