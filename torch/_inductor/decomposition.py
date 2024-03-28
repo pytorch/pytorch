@@ -230,9 +230,8 @@ def mm(self, input2):
     )
 
     def mul_sum_decomp(self, input2):
-        out = (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
         assert self.dtype == input2.dtype
-        assert out.dtype == self.dtype
+        out = (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1).to(self.dtype)
         return out
 
     def coordesc_or(cond):
