@@ -1,4 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
+#include <thrust/swap.h>
+
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
