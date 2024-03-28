@@ -337,6 +337,63 @@ def _make_module_call_graph(
     return ret
 
 
+@contextmanager
+def detect_attribute_assignment(mod: torch.nn.Module):
+    from torch.distributed.nn.api.remote_module import _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
+    baseline = _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
+    # snapshot = {}
+    # for k, v in mod.__dict__.items():
+    #     # TODO(avik): use pytree.tree_map
+    #     if k in baseline:
+    #         continue
+    #     if isinstance(v, list):
+    #         snapshot[k] = [*v]
+    #     elif isinstance(v, dict):
+    #         snapshot[k] = {**v}
+    #     else:
+    #         snapshot[k] = v
+    snapshot = pytree.tree_map(lambda x: x, {k: v for k, v in mod.__dict__.items() if k not in baseline})
+
+    try:
+        yield
+    finally:
+        assigned_attributes = []
+        def _f(kp, t, _t):
+            if isinstance(t, torch.Tensor) and not(_t is t):
+                attr, *rest = kp
+                assigned_attributes.append(f"self.{attr.key}{torch.utils._pytree.keystr(rest)}")
+        pytree.tree_map_with_path(_f, snapshot, {k: v for k, v in mod.__dict__.items() if k not in baseline})
+        # for k, v in snapshot.items():
+        #     if isinstance(v, torch.Tensor):
+        #         t = v
+        #         _t = mod.__dict__[k]
+        #         if not(_t is t):
+        #             assigned_attributes.append(f"self.{k}")
+        #             mod.__dict__[k] = t
+        #     if isinstance(v, list) and all(isinstance(t, torch.Tensor) for t in v):
+        #         for i, t in enumerate(v):
+        #             _t = mod.__dict__[k][i]
+        #             if not(_t is t):
+        #                 assigned_attributes.append(f"self.{k}[{i}]")
+        #                 mod.__dict__[k][i] = t
+        #     if isinstance(v, dict) and all(isinstance(t, torch.Tensor) for t in v.values()):
+        #         for n, t in v.items():
+        #             _t = mod.__dict__[k][n]
+        #             if not(_t is t):
+        #                 assigned_attributes.append(f"self.{k}[\"{n}\"]")
+        #                 mod.__dict__[k][n] = t
+        if assigned_attributes:
+            if len(assigned_attributes) > 1:
+                msg = f"attributes {', '.join(assigned_attributes)} were"
+            else:
+                msg = f"attribute {assigned_attributes[0]} was"
+            raise ValueError(
+                f"The {msg} assigned during export. "
+                "Such attributes must be registered as buffers using the `register_buffer` API "
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+            )
+
+
 def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
@@ -410,6 +467,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
     def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
         for k, v in m.__dict__.items():
+            # TODO(avik): also search for constants inside lists, dicts, etc.?
             if isinstance(v, (torch.Tensor, torch.ScriptObject)):
                 if v in buffers_parameters:
                     # filter out buffers and parameters, leaving only constants
@@ -811,7 +869,8 @@ def _export(
                                     *args, **kwargs
                                 )
                         else:
-                            tree_out = self._export_root(*args, **kwargs)
+                            with detect_attribute_assignment(self._export_root):
+                                tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
