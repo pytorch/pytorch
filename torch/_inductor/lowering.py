@@ -631,7 +631,7 @@ def _bmm_fallback(self: TensorBox, batch2: TensorBox):
     if self.get_device().type == "cpu" and batch2.get_device().type == "cpu":
         self = do_bmm_input_contiguous(self)
         batch2 = do_bmm_input_contiguous(batch2)
-    return fallback_handler(aten.bmm)(self, batch2)
+    return fallback_handler(aten.bmm.default)(self, batch2)
 
 
 def register_pointwise(
