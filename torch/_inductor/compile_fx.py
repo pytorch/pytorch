@@ -403,8 +403,7 @@ def compile_fx_inner(
     is_inference: bool = False,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     user_visible_outputs: FrozenSet[str] = frozenset(),
-    channel_last_layout_opt: Optional[bool] = None,
-    contiguous_layout_opt: Optional[bool] = None,
+    layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
     """
@@ -438,8 +437,7 @@ def compile_fx_inner(
             is_inference=is_inference,
             boxed_forward_device_index=boxed_forward_device_index,
             user_visible_outputs=user_visible_outputs,
-            channel_last_layout_opt=channel_last_layout_opt,
-            contiguous_layout_opt=contiguous_layout_opt,
+            layout_opt=layout_opt,
         )
 
     if cudagraphs is None:
@@ -457,8 +455,7 @@ def compile_fx_inner(
         "aot_mode": aot_mode,
         "is_inference": is_inference,
         "user_visible_outputs": user_visible_outputs,
-        "channel_last_layout_opt": channel_last_layout_opt,
-        "contiguous_layout_opt": contiguous_layout_opt,
+        "layout_opt": layout_opt,
         "extern_node_serializer": extern_node_serializer,
     }
 
@@ -617,8 +614,7 @@ def fx_codegen_and_compile(
     aot_mode: bool = False,
     is_inference: bool = False,
     user_visible_outputs: FrozenSet[str] = frozenset(),
-    channel_last_layout_opt: Optional[bool] = None,
-    contiguous_layout_opt: Optional[bool] = None,
+    layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
@@ -1091,16 +1087,11 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     _recursive_joint_graph_passes(aot_autograd_model)
 
-    channel_last_layout_opt = GraphLowering.decide_channel_last_layout_opt(
-        aot_autograd_model, is_inference=True
-    )
-    if channel_last_layout_opt:
+    layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
+    if layout_opt:
         # make sure meta['val'] is properly setup
         fake_tensor_prop(aot_autograd_model, aot_example_inputs, True)
         convert_conv_weights_to_channels_last(aot_autograd_model)
-    contiguous_layout_opt = GraphLowering.decide_contiguous_layout_opt(
-        aot_autograd_model, is_inference=True
-    )
 
     opt_model, preserved_arg_indices = freeze(
         dynamo_model,
@@ -1138,8 +1129,7 @@ def fw_compiler_freezing(
             graph_id=graph_id,
             is_inference=True,
             boxed_forward_device_index=forward_device,
-            channel_last_layout_opt=channel_last_layout_opt,
-            contiguous_layout_opt=contiguous_layout_opt,
+            layout_opt=layout_opt,
             user_visible_outputs=user_visible_outputs,
         )
 

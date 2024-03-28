@@ -340,7 +340,7 @@ def convolution(
     output_padding = pad_listlike(output_padding, ndim)
 
     def channels_last_conv():
-        if V.graph.channel_last_layout_opt and ndim == 2:
+        if V.graph.layout_opt and ndim == 2:
             return True
 
         layout = conv_layout(x, weight, None, **kwargs)
@@ -377,7 +377,7 @@ def convolution(
     # ndim can be 1 for convolution in models such as demucs
     # TODO: check if it's beneficial to convert Conv1d to Conv2d and then
     # apply channels last.
-    if V.graph.channel_last_layout_opt and ndim == 2:
+    if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
         x = ir.ExternKernel.require_channels_last(x)
         # TODO maybe we can convert weights to channels last just once before
@@ -487,7 +487,7 @@ def _convolution(
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
     assert fx_node.target == torch.ops.aten.convolution.default
-    if V.graph.channel_last_layout_opt:
+    if V.graph.layout_opt:
         return args, kwargs
     else:
         return constrain_to_fx_strides(fx_node, *args, **kwargs)

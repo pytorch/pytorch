@@ -225,8 +225,7 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_wrapper=False,
         aot_mode=False,
         user_visible_outputs=frozenset(),
-        channel_last_layout_opt=None,
-        contiguous_layout_opt=None,
+        layout_opt=None,
         extern_node_serializer=None,
         is_inference=False,
         is_const_graph=False,
@@ -238,15 +237,10 @@ class GraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
 
         self.example_inputs = example_inputs
-        self.channel_last_layout_opt = (
-            channel_last_layout_opt
-            if channel_last_layout_opt is not None
-            else self.decide_channel_last_layout_opt(gm, is_inference=is_inference)
-        )
-        self.contiguous_layout_opt = (
-            contiguous_layout_opt
-            if contiguous_layout_opt is not None
-            else self.decide_contiguous_layout_opt(gm, is_inference=is_inference)
+        self.layout_opt = (
+            layout_opt
+            if layout_opt is not None
+            else self.decide_layout_opt(gm, is_inference=is_inference)
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
@@ -315,12 +309,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
-            self.find_nodes_prefer_channels_last()
-            if self.channel_last_layout_opt
-            else set()
-        )
-        self.nodes_prefer_contiguous = (
-            self.find_nodes_prefer_contiguous() if self.contiguous_layout_opt else set()
+            self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
@@ -348,7 +337,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
     @staticmethod
-    def decide_channel_last_layout_opt(gm, *, is_inference) -> bool:
+    def decide_layout_opt(gm, *, is_inference) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
@@ -509,28 +498,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         return True
 
-    @staticmethod
-    def decide_contiguous_layout_opt(gm, *, is_inference) -> bool:
-        # The rule to decide whether to do contiguous_layout_opt：
-        # 1. At least one bmm in graph;
-        # 2. The input of bmm has a stride of 1 on batch dim.
-        bmm_nodes = [
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.bmm.default
-        ]
-        nbmm = len(bmm_nodes)
-
-        if nbmm == 0:
-            return False
-
-        for bmm in bmm_nodes:
-            if (
-                bmm.args[0].meta["val"].stride()[0] == 1
-                or bmm.args[1].meta["val"].stride()[0] == 1
-            ):
-                return True
-
-        return False
-
     def qualify_name(self, name: str) -> str:
         """Prepend the given name with the graph name if any."""
         if self.name is not None:
@@ -610,23 +577,6 @@ class GraphLowering(torch.fx.Interpreter):
             if n in output_set:
                 for child in n.users:
                     output_set.add(child)
-
-        return output_set
-
-    def find_nodes_prefer_contiguous(self):
-        # The rule to decide if an node prefer contiguous: input of a bmm
-        # this is to avoid additional copies in bmm
-        bmm_set = set()
-        output_set = set()
-        for n in reversed(self.module.graph.nodes):
-            if n.target == torch.ops.aten.bmm.default:
-                bmm_set.add(n)
-                continue
-
-            for user in n.users:
-                if user in bmm_set:
-                    output_set.add(n)
-                    break
 
         return output_set
 
@@ -1165,33 +1115,6 @@ class GraphLowering(torch.fx.Interpreter):
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
-            if (
-                n in self.nodes_prefer_contiguous
-                and isinstance(result, TensorBox)
-                and isinstance(result.data, ir.View)
-                and isinstance(result.data.data, ir.PermuteView)
-                and result.data.data.dims == [0, 3, 1, 2]
-                and isinstance(result.data.data.data, ir.StorageBox)
-            ):
-                result.realize()
-                storage_data = result.data.data.data.data
-                sizes = storage_data.get_size()
-                origin_strides = storage_data.get_stride()  # type: ignore[attr-defined]
-                # change to ideal input layout of bmm: contiguous after permution
-                # to avoid additional copies in bmm.
-                opt_strides = [
-                    sizes[1] * sizes[2] * sizes[3],
-                    sizes[2],
-                    1,
-                    sizes[1] * sizes[2],
-                ]
-                if origin_strides != opt_strides:
-                    storage_data.layout = FixedLayout(  # type: ignore[attr-defined]
-                        result.get_device(),
-                        result.get_dtype(),
-                        sizes,
-                        opt_strides,
-                    )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -1215,7 +1138,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
-                        if not self.channel_last_layout_opt:
+                        if not self.layout_opt:
                             need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C._has_mkldnn:
                             need_fixed_layout += [
