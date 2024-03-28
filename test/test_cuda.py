@@ -2931,7 +2931,7 @@ exit(2)
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
                                                                  torch.optim.ASGD, torch.optim.Adamax,
                                                                  torch.optim.NAdam, torch.optim.RAdam,
-                                                                 torch.optim.Adadelta, torch.optim.RMSprop
+                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
                                                                  torch.optim.Rprop), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
