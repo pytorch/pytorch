@@ -2291,9 +2291,6 @@ make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-# Looking like impossible, see: https://github.com/pytorch/pytorch/pull/121354
-make_fallback(aten.resize_)
-make_fallback(aten.resize_as_)
 
 # 2) Medium
 make_fallback(aten.max_unpool2d)
@@ -2363,6 +2360,9 @@ make_fallback(aten.mode)
 make_fallback(aten.median)
 make_fallback(aten.nanmedian)
 make_fallback(aten.randperm)
+# see: https://github.com/pytorch/pytorch/pull/121354
+make_fallback(aten.resize_)
+make_fallback(aten.resize_as_)
 
 # Linalg
 make_fallback(aten._linalg_det)
@@ -5855,15 +5855,18 @@ def create_nn_parameter(self, placeholder):
 
 @register_lowering(torch.ops.aten.resize)
 def resize(x, size, *, memory_format=None):
+    assert isinstance(x, TensorBox)
+    assert isinstance(size, (list, tuple))
+
     if memory_format is None:
         memory_format = torch.contiguous_format
     if memory_format == torch.preserve_format:
         raise RuntimeError(f"unsupported memory format: {memory_format}")
 
-    assert isinstance(x, TensorBox)
-    assert isinstance(size, (list, tuple))
-
-    size = V.graph.sizevars.size_hints(size)
+    if memory_format == torch.channels_last:
+        assert len(size) == 4
+    if memory_format == torch.channels_last_3d:
+        assert len(size) == 5
 
     old_numel = x.get_numel()
     dtype = x.get_dtype()
@@ -5902,12 +5905,7 @@ def resize(x, size, *, memory_format=None):
         flat_index_expr = ops.index_expr(flat_index, torch.int64)
         limit = ops.index_expr(old_numel, torch.int64)
         mask = ops.lt(flat_index_expr, limit)
-        x_val = flat_loader(
-            [
-                flat_index,
-            ]
-        )
-        return ops.where(mask, x_val, uninitalized_val)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
 
     pointwise = Pointwise.create(
         device=device,
@@ -5916,9 +5914,12 @@ def resize(x, size, *, memory_format=None):
         ranges=list(size),
     )
 
-    return ir.ExternKernel.require_stride_order(
-        pointwise, ir.get_stride_order(new_stride)
-    )
+    if memory_format == torch.channels_last:
+        return ir.ExternKernel.require_channels_last(pointwise)
+    elif memory_format == torch.channels_last_3d:
+        return ir.ExternKernel.require_channels_last_3d(pointwise)
+    else:
+        return ir.ExternKernel.require_contiguous(pointwise)
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
