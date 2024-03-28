@@ -357,4 +357,42 @@ static inline bool binary_valid(
   return false;
 }
 
+inline bool is_channels_last(at::MemoryFormat fmt){
+  return (at::MemoryFormat::ChannelsLast == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
+}
+
+inline bool is_smf_channels_last(const Tensor& t){
+  return is_channels_last(t.suggest_memory_format());
+}
+
+static inline bool use_channels_last_for_conv(
+    const at::Tensor& src,
+    const at::Tensor& weight,
+    bool is_transpose){
+
+  if (!src.defined() || src.is_sparse()) {
+    // suggest channels_first
+    return false;
+  }
+
+  auto suggest_channels_last_format =
+      (is_smf_channels_last(src) || is_smf_channels_last(weight));
+  if (suggest_channels_last_format) {
+    // suggest channels_last
+    return true;
+  }
+
+  return false;
+}
+
+static inline std::vector<int64_t> compatible_groups_deconv_strides(
+    const at::Tensor& wgh,
+    dnnl::memory::dims group_size) {
+  std::vector<int64_t> strides = wgh.strides().vec();
+  strides[0] = wgh.strides()[1];
+  strides[1] = wgh.strides()[0];
+  strides.insert(strides.begin(), group_size[2] * wgh.strides()[0]);
+  return strides;
+}
+
 } // namespace at::native::onednn
