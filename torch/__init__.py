@@ -801,15 +801,36 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 class DtypeContext:
+    r"""A context manager using `set_default_dtype` to set the default floating point dtype
+
+    Example::
+
+        >>> torch.tensor([1.2, 3]).dtype        # initial default for floating point is torch.float32
+        torch.float32
+        >>> with torch.DtypeContext(torch.float64):
+        ...     torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        ... 
+        torch.float64
+        >>> torch.tensor([1.2, 3]).dtype        # default for floating point is back to torch.float32
+        torch.float32
+
+    """
     def __init__(self, dtype):
+        r"""Inits DtypeContext class
+        Args:
+            dtype (:class:`torch.dtype`): the floating point dtype to make the default.
+                                          Either torch.float32 or torch.float64.
+        """
         self.dytpe = dtype
 
     def __enter__(self):
+        r"""Uses `set_default_dtype` to set the floating point dtype"""
         self.old_dtype = torch.get_default_dtype()
         torch.set_default_dtype(self.dytpe)
         return self.dytpe
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        r"""Restores default for the floating point dtype"""
         torch.set_default_dtype(self.old_dtype)
 
 def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.bool = False) -> None:
