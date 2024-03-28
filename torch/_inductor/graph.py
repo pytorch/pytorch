@@ -311,6 +311,7 @@ class GraphLowering(torch.fx.Interpreter):
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: Optional[str] = None
+        self.aligned_inputs: Set[str] = set()
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
@@ -763,6 +764,23 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
+
+        # Note: [Input Alignment handling in Inductor]
+        # Alignment matters for generating efficient code. Some operations,
+        # e.g. vectorized loads, can only be performed on aligned inputs.
+        #
+        # But if we codegen assuming aligned inputs and then get unaligned
+        # inputs at runtime, then we are forced to clone - which is bad for
+        # both perf and memory usage.
+        #
+        # One option would be to guard on storage_offset%ALIGNMENT, and then
+        # codegen based on this. But storage_offset guards turned out to be
+        # expensive and cause recompiles; instead we're guarding on whether
+        # the input tensor is a view or not. If a tensor isn't a view, we can
+        # be pretty sure that it was allocated with good alignment; and if a
+        # tensor is a view, we'll codegen code that doesn't assume alignment.
+        if not example._is_view() or config.assume_aligned_inputs:
+            self.aligned_inputs.add(target)
         return tensor
 
     def call_function(self, target, args, kwargs):
