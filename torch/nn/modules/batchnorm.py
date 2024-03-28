@@ -306,10 +306,10 @@ class BatchNorm1d(_BatchNorm):
     """
 
     def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
+        torch._check_value(
+            input.dim() == 2 or input.dim() == 3,
+            lambda: f"expected 2D or 3D input (got {input.dim()}D input)"
+        )
 
 
 class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
@@ -342,10 +342,10 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     cls_to_become = BatchNorm1d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
+        torch._check_value(
+            input.dim() == 2 or input.dim() == 3,
+            lambda: f"expected 2D or 3D input (got {input.dim()}D input)"
+        )
 
 
 class BatchNorm2d(_BatchNorm):
@@ -421,8 +421,10 @@ class BatchNorm2d(_BatchNorm):
     """
 
     def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
+        torch._check_value(
+            input.dim() == 4,
+            lambda: f"expected 4D input (got {input.dim()}D input)",
+        )
 
 
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
@@ -455,9 +457,10 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     cls_to_become = BatchNorm2d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
-        if input.dim() != 4:
-            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
-
+        torch._check_value(
+            input.dim() == 4,
+            lambda: f"expected 4D input (got {input.dim()}D input)",
+        )
 
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input.
@@ -532,8 +535,10 @@ class BatchNorm3d(_BatchNorm):
     """
 
     def _check_input_dim(self, input):
-        if input.dim() != 5:
-            raise ValueError(f"expected 5D input (got {input.dim()}D input)")
+        torch._check_value(
+            input.dim() == 5,
+            lambda: f"expected 5D input (got {input.dim()}D input)",
+        )
 
 
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
@@ -566,8 +571,10 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
     cls_to_become = BatchNorm3d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
-        if input.dim() != 5:
-            raise ValueError(f"expected 5D input (got {input.dim()}D input)")
+        torch._check_value(
+            input.dim() == 5,
+            lambda: f"expected 5D input (got {input.dim()}D input)",
+        )
 
 
 class SyncBatchNorm(_BatchNorm):
@@ -691,10 +698,10 @@ class SyncBatchNorm(_BatchNorm):
         self.process_group = process_group
 
     def _check_input_dim(self, input):
-        if input.dim() < 2:
-            raise ValueError(
-                f"expected at least 2D input (got {input.dim()}D input)"
-            )
+        torch._check_value(
+            input.ndim >= 2,
+            lambda: f"expected at least 2D input (got {input.dim()}D input)",
+        )
 
     def _check_non_zero_input_channels(self, input):
         if input.size(1) == 0:
