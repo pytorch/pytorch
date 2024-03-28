@@ -1712,7 +1712,7 @@ namespace {
       ASSERT_TRUE(vec_mask.is_masked(1)) << "is_masked(1) check failed";
       ASSERT_TRUE(!vec_mask.is_masked(0)) << "!is_masked(0) check failed";
     }
-    TYPED_TEST(VecMaskTests, MaskedToFrom) {
+    TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
       constexpr auto N = vec::size();
@@ -1737,7 +1737,41 @@ namespace {
             << "Failure Details:\nTest Seed to reproduce: " << seed;
       }
     }
-
+    TYPED_TEST(VecMaskTests, Cast) {
+      using vec = TypeParam;
+      using src_t = ValueType<TypeParam>;
+      constexpr auto N = vec::size();
+    #define TEST_MASK_CAST(dst_t)                                      \
+      do {                                                             \
+        CACHE_ALIGN src_t x[N];                                        \
+        CACHE_ALIGN dst_t y[N];                                        \
+        auto seed = TestSeed();                                        \
+        auto vec_mask = generate_vec_mask<src_t>(seed);                \
+        constexpr int num_dst_elements =                               \
+            std::min(N, at::vec::Vectorized<dst_t>::size());           \
+        constexpr int dst_n = N / num_dst_elements;                    \
+        auto vec_mask_new = vec_mask.template cast<dst_t, dst_n>();    \
+        vec_mask.template to<src_t, 1>().store(x);                     \
+        vec_mask_new.template to<dst_t, dst_n>().store(y, N);          \
+        for (const auto i : c10::irange(N)) {                          \
+          ASSERT_EQ(y[i], x[i])                                        \
+              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+        }                                                              \
+      } while (0)
+      TEST_MASK_CAST(int8_t);
+      TEST_MASK_CAST(uint8_t);
+      TEST_MASK_CAST(int16_t);
+      TEST_MASK_CAST(uint16_t);
+      TEST_MASK_CAST(int32_t);
+      TEST_MASK_CAST(uint32_t);
+      TEST_MASK_CAST(int64_t);
+      TEST_MASK_CAST(uint64_t);
+      TEST_MASK_CAST(c10::BFloat16);
+      TEST_MASK_CAST(c10::Half);
+      TEST_MASK_CAST(float);
+      TEST_MASK_CAST(double);
+    #undef TEST_MASK_CAST
+    }
 #else
 #error GTEST does not have TYPED_TEST
 #endif
