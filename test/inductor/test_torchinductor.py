@@ -1339,11 +1339,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     def test_expanded_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -6368,19 +6363,24 @@ class CommonTemplate:
                 ],
             )
 
-    # issue #1150
     def test_dense_mask_index(self):
+        r"""
+        There will be a little difference for reduce order between aten and inductor
+        https://github.com/pytorch/pytorch/pull/122289
+        Absolute difference: 0.00067138671875 (up to 1e-05 allowed)
+        Relative difference: 3.1747371732500974e-06 (up to 1.3e-06 allowed)
+        """
+        kwargs = {}
         if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
+            kwargs["atol"] = 1e-4
+            kwargs["rtol"] = 1.3e-5
 
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
             return z.sum()
 
-        self.common(fn, [torch.randn(102400), torch.randn(3)])
+        self.common(fn, [torch.randn(102400), torch.randn(3)], **kwargs)
 
     def test_empty1(self):
         def fn():
