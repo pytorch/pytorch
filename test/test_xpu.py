@@ -4,6 +4,7 @@ import sys
 import unittest
 
 import torch
+import torch.nn as nn
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
@@ -230,6 +231,234 @@ if __name__ == "__main__":
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
+
+class TestBasicConv(TestCase):
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_conv2d(self, device, dtype):
+        inchannel = 16
+        outchannel = 64
+        x_ref = torch.randn(
+            [1, inchannel, 256, 256], dtype=dtype, device="cpu", requires_grad=True
+        )
+        conv_ref = nn.Conv2d(
+            inchannel, outchannel, kernel_size=3, stride=1, padding=1
+        ).to(dtype)
+
+        x = x_ref.detach().clone().contiguous().to(device).requires_grad_()
+        conv = nn.Conv2d(inchannel, outchannel, kernel_size=3, stride=1, padding=1).to(
+            dtype
+        )
+        conv.load_state_dict(conv_ref.state_dict())
+        conv.to(device)
+
+        y_ref = conv_ref(x_ref)
+        y = conv(x)
+
+        grad_ref = torch.full(
+            [1, outchannel, 256, 256], 1e-3, dtype=dtype, device="cpu"
+        )
+        grad = grad_ref.detach().clone().contiguous().to(device)
+
+        y_ref.backward(grad_ref)
+        y.backward(grad)
+
+        self.assertEqual(y_ref, y.cpu())
+        self.assertEqual(
+            conv.weight.grad, conv_ref.weight.grad, atol=5 * 1e-5, rtol=5 * 1e-5
+        )
+        self.assertEqual(
+            conv.bias.grad, conv_ref.bias.grad, atol=5 * 1e-5, rtol=5 * 1e-5
+        )
+        self.assertEqual(x.grad, x_ref.grad, atol=5 * 1e-5, rtol=5 * 1e-5)
+
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_conv3d(self, device, dtype):
+        x_ref = torch.randn(
+            [1, 3, 16, 32, 32], dtype=dtype, device="cpu", requires_grad=True
+        )
+        conv_ref = nn.Conv3d(3, 3, kernel_size=3, stride=1, padding=1).to(dtype)
+
+        x = x_ref.detach().clone().contiguous().to(device).requires_grad_()
+        conv = nn.Conv3d(3, 3, kernel_size=3, stride=1, padding=1).to(dtype)
+        conv.load_state_dict(conv_ref.state_dict())
+        conv.to(device)
+
+        y_ref = conv_ref(x_ref)
+        y = conv(x)
+
+        grad_ref = torch.full([1, 3, 16, 32, 32], 1e-3, dtype=dtype, device="cpu")
+        grad = grad_ref.detach().clone().contiguous().to(device)
+
+        y_ref.backward(grad_ref)
+        y.backward(grad)
+
+        self.assertEqual(y_ref, y.cpu())
+        self.assertEqual(
+            conv.weight.grad, conv_ref.weight.grad, atol=5 * 1e-5, rtol=5 * 1e-5
+        )
+        self.assertEqual(
+            conv.bias.grad, conv_ref.bias.grad, atol=5 * 1e-5, rtol=5 * 1e-5
+        )
+        self.assertEqual(x.grad, x_ref.grad, atol=5 * 1e-5, rtol=5 * 1e-5)
+
+    def _test_conv_xpu_nhwc_nchw(self, layer, n, c, h, w, k, filter_size, device):
+        ref_x = torch.randn([n, c, h, w], dtype=torch.float32, device="cpu")
+        ref_conv = layer(c, k, kernel_size=filter_size)
+        ref_y = ref_conv(ref_x)
+
+        x = ref_x.to(memory_format=torch.channels_last).to(device)
+        conv = ref_conv.to(memory_format=torch.channels_last).to(device)
+        y = conv(x)
+
+        # self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(y.cpu(), ref_y.to(memory_format=torch.channels_last))
+
+    @dtypes(torch.float32, torch.half)
+    def test_conv2d_channels_last(self, device, dtype):
+        configs = [[1, 256, 5, 5, 64, 3]]
+
+        for n, c, h, w, k, filter_size in configs:
+            self._test_conv_xpu_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
+            self._test_conv_xpu_nhwc_nchw(
+                nn.ConvTranspose2d, n, c, h, w, k, filter_size, device
+            )
+
+    def _test_conv3d_xpu_ndhwc_ncdhw(
+        self, layer, n, c, d, h, w, k, filter_size, device
+    ):
+        ref_x = torch.randn([n, c, d, h, w], dtype=torch.float32, device="cpu")
+        ref_conv = layer(c, k, kernel_size=filter_size)
+        ref_y = ref_conv(ref_x)
+
+        x = ref_x.to(memory_format=torch.channels_last_3d).to(device)
+        conv = ref_conv.to(memory_format=torch.channels_last_3d).to(device)
+        y = conv(x)
+
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(y.cpu().to(memory_format=torch.channels_last_3d), ref_y)
+
+    @dtypes(torch.float32, torch.half)
+    def test_conv3d_channels_last(self, device, dtype):
+        configs = [[1, 256, 5, 5, 5, 64, 3]]
+
+        for n, c, d, h, w, k, filter_size in configs:
+            self._test_conv3d_xpu_ndhwc_ncdhw(
+                nn.Conv3d, n, c, d, h, w, k, filter_size, device
+            )
+            # self._test_conv3d_xpu_ndhwc_ncdhw(nn.ConvTranspose3d, n, c, d, h, w, k, filter_size, device)
+
+    @dtypes(torch.float32)
+    def test_conv2d_channels_last_backward(self, device, dtype):
+        in_channel = 3
+        out_channel = 32
+        x_ref = (
+            torch.randn([1, in_channel, 256, 256], dtype=dtype, device="cpu")
+            .to(memory_format=torch.channels_last)
+            .requires_grad_()
+        )
+        grad_ref = (
+            torch.full([1, out_channel, 256, 256], 1e-3, dtype=dtype, device="cpu")
+            .to(memory_format=torch.channels_last)
+            .requires_grad_()
+        )
+        conv_ref = (
+            nn.Conv2d(in_channel, out_channel, kernel_size=3, stride=1, padding=1)
+            .to(memory_format=torch.channels_last)
+            .to(dtype)
+        )
+
+        conv = (
+            nn.Conv2d(in_channel, out_channel, kernel_size=3, stride=1, padding=1)
+            .to(memory_format=torch.channels_last)
+            .to(dtype)
+        )
+        conv.load_state_dict(conv_ref.state_dict())
+        conv.to(device)
+
+        y_ref = conv_ref(x_ref)
+        y_ref.backward(grad_ref)
+        ref_gw = conv_ref.weight.grad.detach().clone()
+
+        x = x_ref.detach().clone().to(device).requires_grad_()
+        grad = (
+            torch.full([1, out_channel, 256, 256], 1e-3, dtype=dtype, device="cpu")
+            .to(memory_format=torch.channels_last)
+            .to(device)
+            .requires_grad_()
+        )
+        y = conv(x)
+        y.backward(grad)
+        gw = conv.weight.grad.detach()
+
+        self.assertEqual(y_ref, y.cpu())
+        self.assertEqual(conv.bias.grad, conv_ref.bias.grad, atol=3e-4, rtol=3e-2)
+        self.assertEqual(gw, ref_gw.to(memory_format=torch.channels_last))
+        self.assertEqual(
+            conv.weight.grad,
+            ref_gw.to(memory_format=torch.channels_last),
+            atol=3e-4,
+            rtol=3e-2,
+        )
+
+    @dtypes(torch.float32)
+    def test_conv3d_channels_last_backward(self, device, dtype):
+        inchannel = 3
+        outchannel = 64
+        x_ref = (
+            torch.randn([1, inchannel, 16, 32, 32], dtype=dtype, device="cpu")
+            .to(memory_format=torch.channels_last_3d)
+            .requires_grad_()
+        )
+        grad_ref = (
+            torch.full([1, outchannel, 16, 32, 32], 1e-3, dtype=dtype, device="cpu")
+            .to(memory_format=torch.channels_last_3d)
+            .requires_grad_()
+        )
+        conv_ref = (
+            nn.Conv3d(
+                inchannel, outchannel, kernel_size=3, stride=1, padding=1, dilation=1
+            )
+            .to(memory_format=torch.channels_last_3d)
+            .to(dtype)
+        )
+
+        conv = (
+            nn.Conv3d(
+                inchannel, outchannel, kernel_size=3, stride=1, padding=1, dilation=1
+            )
+            .to(memory_format=torch.channels_last_3d)
+            .to(dtype)
+        )
+        conv.load_state_dict(conv_ref.state_dict())
+        conv.to(device)
+
+        y_ref = conv_ref(x_ref)
+        y_ref.backward(grad_ref)
+        ref_gw = conv_ref.weight.grad.detach()
+
+        conv_ref.zero_grad()
+
+        x = x_ref.detach().clone().to(device).requires_grad_()
+        grad = (
+            torch.full([1, 64, 16, 32, 32], 1e-3, dtype=dtype, device="cpu")
+            .to(memory_format=torch.channels_last_3d)
+            .to(device)
+            .requires_grad_()
+        )
+        y = conv(x)
+        y.backward(grad)
+        gw = conv.weight.grad.detach()
+
+        self.assertEqual(y_ref, y.cpu())
+        self.assertEqual(gw.cpu(), ref_gw.to(memory_format=torch.channels_last_3d))
+
+    @dtypes(torch.float32)
+    def test_to_channels_last(self, device, dtype):
+        x_ref = torch.randn([1, 3, 9, 9], device="cpu").to(device)
+        x_ref = x_ref.to(memory_format=torch.channels_last)
+
+
+instantiate_device_type_tests(TestBasicConv, globals(), only_for="xpu")
 
 if __name__ == "__main__":
     run_tests()
