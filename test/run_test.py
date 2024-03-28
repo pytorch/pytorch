@@ -544,7 +544,7 @@ def run_test(
             # C++ test at the time of this writing have been excluded, but we
             # can accept code 4 too just in case a new non-test binary file
             # comes up in the future.
-            ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+            ret_code = 0 if ret_code == 5 else ret_code
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -1563,6 +1563,7 @@ def run_tests(
     ):
         # Take the conftest file from the test directory
         shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
+        shutil.copy(os.path.join(test_directory, "pytest_shard_custom.py"), os.path.join(CPP_TESTS_DIR, "pytest_shard_custom.py"))
 
     def handle_error_messages(failure: Optional[TestFailure]):
         if failure is None:
