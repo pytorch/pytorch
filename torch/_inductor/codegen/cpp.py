@@ -15,7 +15,6 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -32,6 +31,7 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
+    free_symbol_startswith,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
@@ -554,10 +554,6 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
-class CppVecUnsupportedError(Exception):
-    pass
-
-
 class CppCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
@@ -1016,7 +1012,8 @@ class CppVecOverrides(CppOverrides):
                 scalars = [
                     arg
                     for arg in args
-                    if isinstance(arg, CppCSEVariable) and not arg.is_vec
+                    if isinstance(arg, (int, sympy.Expr))
+                    or (isinstance(arg, CppCSEVariable) and not arg.is_vec)
                 ]
                 vectors = [
                     arg
@@ -1029,6 +1026,17 @@ class CppVecOverrides(CppOverrides):
                     new_args = []
                     vec_dtype = vectors[0].dtype
                     for arg in args:
+                        if isinstance(arg, (int, sympy.Expr)):
+                            arg_dtype = torch.int64
+                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+                            assert opt_ctx
+                            if opt_ctx.dtype is not None:
+                                arg_dtype = opt_ctx.dtype
+                            if isinstance(arg, sympy.Expr) and not arg.is_number:
+                                arg = ops.index_expr(arg, arg_dtype)
+                            else:
+                                arg = ops.constant(arg, arg_dtype)
+                            arg = arg.value if isinstance(arg, OpsValue) else arg
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
@@ -1418,6 +1426,10 @@ class CppVecOverrides(CppOverrides):
             return f"cvt_int32_to_int64({x})"
         if opt_ctx_x.dtype == torch.int64 and dtype == torch.int32:
             return f"cvt_int64_to_int32({x})"
+        if opt_ctx_x.dtype in (torch.int8, torch.uint8) and dtype == torch.int32:
+            return f"cvt_int8_to_int32({x})"
+        if opt_ctx_x.dtype in (torch.int8, torch.uint8) and dtype == torch.int64:
+            return f"cvt_int8_to_int64({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
@@ -1493,33 +1505,23 @@ class CppVecOverrides(CppOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx and opt_ctx.dtype is not None
         dtype = opt_ctx.dtype
-        assert dtype == torch.int32
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-        stride = stride_at_vec_range(index, tiling_var, V.kernel.tiling_factor)
-        if stride.is_number and not V.kernel.index_indirect_depends_on(
-            index, tiling_var
-        ):
-            if stride == 0:
-                return CppOverrides.index_expr(expr, dtype)
+        stride = V.kernel._try_get_const_stride(index, tiling_var)
+        if stride == 0:
+            return CppOverrides.index_expr(expr, dtype)
+        elif stride is not None:
             value = ops.to_dtype(cexpr(index), dtype)
             if isinstance(value, OpsValue):
                 value = value.value
             csevar = V.kernel.arange(value, stride)
         else:
-            csevar = V.kernel.load_non_contiguous(None, index, dtype, V.kernel.compute)
+            csevar = V.kernel._load_or_store_non_contiguous(  # type: ignore[assignment]
+                None, index, dtype, V.kernel.compute
+            )
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
-
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
-        assert isinstance(index_var, CppCSEVariable)
-        if index_var.is_vec:
-            raise CppVecUnsupportedError(
-                "indirect_indexing does not support vector index_var"
-            )
-        return sympy_index_symbol(str(index_var))
 
 
 CppVecOverrides._initialize_pointwise_overrides("cppvec")
@@ -2028,6 +2030,20 @@ class CppVecKernel(CppKernel):
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
 
+    def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
+        if self.index_indirect_depends_on(index, itervar):
+            return None
+        for indirect_var in (
+            self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+            for s in index.free_symbols
+            if s.name.startswith("tmp")  # type: ignore[attr-defined]
+        ):
+            assert isinstance(indirect_var, CppCSEVariable)
+            if indirect_var.is_vec:
+                return None
+        stride = stride_at_vec_range(index, itervar, self.tiling_factor)
+        return stride if stride.is_number else None
+
     def _get_num_vectors(self, dtype: torch.dtype) -> int:
         num_vectors = math.ceil(
             self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
@@ -2043,6 +2059,8 @@ class CppVecKernel(CppKernel):
             return f"at::vec::VectorizedN<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
 
     def _get_mask_type(self, dtype: torch.dtype = torch.float) -> str:
+        if dtype == torch.bool:
+            return ""
         num_vectors = self._get_num_vectors(dtype)
         return f"at::vec::VecMask<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
 
@@ -2077,46 +2095,34 @@ class CppVecKernel(CppKernel):
         load_mask_str = None
         if load_mask:
             if not load_mask.is_vec:
-                # TODO: combine with opt_ctx.is_load_as_mask path below
-                # TODO: use ?: should be faster than masked load for scalar masks
+                # TODO: avoid hard-code torch.float
                 load_mask_str = f"{self._get_mask_type(torch.float)}::from({load_mask})"
             else:
                 load_mask_str = f"{self._get_mask_cast(load_mask, torch.float)}"
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
-        if dtype in (torch.uint8, torch.int8) and opt_ctx.is_load_int8_as_float:
-            assert self._get_num_vectors(torch.uint8) == 1
-            line = (
-                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
-                if load_mask_str
-                else f"at::vec::Vectorized<{cpp_type}>::loadu_one_fourth({loadbuf})"
-            )
-        elif opt_ctx.is_load_as_mask:
+        if dtype == torch.bool:
+            # TODO: should we consider load mask here?
             line = f"{self._get_mask_type()}::from({loadbuf})"
-        elif dtype in DTYPE_LOWP_FP:
+        else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
                 else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
             )
-        else:
-            line = (
-                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
-                if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf})"
-            )
         return line
 
-    def load_non_contiguous(
+    def _load_or_store_non_contiguous(
         self,
         var: Optional[str],
         index: sympy.Expr,
         dtype: torch.dtype,
         buffer: Optional[IndentedBuffer] = None,
-    ) -> CppCSEVariable:
+        store_value: Optional[Union[str, CppCSEVariable]] = None,
+    ) -> Optional[CppCSEVariable]:
         """
-        Load a vector in a non-contiguous way. The vector is initialized from an array that is
+        Load or store a vector in a non-contiguous way. The vector is initialized from an array that is
         filled in an inner loop over the tiling factor.
-        :param var: buffer to load from, i.e. `var[transformed(index)]`. If None, we load the index
+        :param var: buffer to load from or store to, i.e. `var[transformed(index)]`. If None, we load the index
                     as index expression, i.e. `transformed(index)`.
         :param index: index into the `var` or the index expression by its own if `var` is None.
                       The `index` could contain indirect indexing or the tiling itervar. When used in
@@ -2125,8 +2131,11 @@ class CppVecKernel(CppKernel):
                       2. the indirect indexing vector variables are transformed into arrays over the tiling dim.
         :param dtype: data type of `var` or `index` if `var` is None.
         :param buffer: the code buffer to write the generated code to. If None, we write to `self.loads`.
-        :return: a CppCSEVariable that represents the loaded vector.
+        :param store_value: the value to store. If None, we load the vector.
+        :return: a CppCSEVariable that represents the loaded vector or None if it is a store.
         """
+        assert not store_value or var is not None, "store var must be provided"
+
         if buffer is None:
             buffer = self.loads
 
@@ -2159,16 +2168,16 @@ class CppVecKernel(CppKernel):
 
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx is not None
-        is_mask = opt_ctx.is_load_as_mask
         code = BracesBuffer()
         code.writeline("[&]")
         with self.swap_buffers(code), code.indent():
-            result_type = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             result_size = get_result_size(dtype)
             result_declare = (
-                f"__at_align__ std::array<{result_type}, {result_size}> tmpbuf;"
+                f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"
             )
             code.writeline(result_declare)
+            if store_value:
+                code.writeline(f"{store_value}.store(tmpbuf.data());")
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2182,17 +2191,17 @@ class CppVecKernel(CppKernel):
                 if indirect_var.is_vec:
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
+            index = self.scale_index_with_offset(
+                index, itervar_idx=self.tiling_idx, offset=itervar_inner
+            )
             load_mask = None
             if self._load_mask is not None:
+                assert not store_value, "unexpected store with load mask"
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-            index = self.scale_index_with_offset(
-                index, itervar_idx=self.tiling_idx, offset=itervar_inner
-            )
             if codecache.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
@@ -2201,24 +2210,34 @@ class CppVecKernel(CppKernel):
                 f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
-                rhs = (
-                    f"{var}[{cexpr_index(index)}]"
-                    if var is not None
-                    else f"{cexpr_index(index)}"
-                )
-                if is_mask:
-                    rhs = f"{self._get_mask_type()}::from({rhs})"
+                index_c = cexpr_index(index)
+                for indirect_var in replacements:
+                    index_c = re.sub(
+                        r"\b" + f"{indirect_var}" + r"\b",
+                        replacements[indirect_var],
+                        index_c,
+                    )
+                rhs = f"{var}[{index_c}]" if var is not None else f"{index_c}"
                 if load_mask:
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
-                code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
-            load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
-            code.writeline(f"return {load_line};")
+                if store_value:
+                    code.writeline(f"{rhs} = tmpbuf[{itervar_inner}];")
+                else:
+                    code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
+            if not store_value:
+                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
+                code.writeline(f"return {load_line};")
         code.writeline("()")
-        csevar = self.cse.generate(buffer, code)
-        assert isinstance(csevar, CppCSEVariable)
-        csevar.is_vec = True
-        return csevar
+        if store_value:
+            code.writeline(";")
+            buffer.splice(code)
+            return None
+        else:
+            csevar = self.cse.generate(buffer, code)
+            assert isinstance(csevar, CppCSEVariable)
+            csevar.is_vec = True
+            return csevar
 
     def load(self, name: str, index: sympy.Expr):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
@@ -2226,27 +2245,22 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
+        stride = self._try_get_const_stride(index, tiling_var)
         if stride == 0:
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
-        non_contiguous = stride != 1 or self.index_indirect_depends_on(
-            index, tiling_var
-        )
-        if non_contiguous:
-            csevar = self.load_non_contiguous(var, index, dtype)
-        else:
+        elif stride == 1:
+            # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
+        else:
+            csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (name, index), {})
         csevar.is_vec = True
-        if opt_ctx.is_load_as_mask:
-            csevar.dtype = torch.bool
-            opt_ctx.dtype = torch.bool
         return csevar
 
-    def _get_vec_store_line(
+    def _get_store_line(
         self,
         value: Union[str, CppCSEVariable],
         var: str,
@@ -2254,7 +2268,8 @@ class CppVecKernel(CppKernel):
         dtype: torch.dtype,
     ):
         """
-        Get a store line str that stores `value` into `var` at `index` of `dtype`.
+        Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
+        both contiguous and non-contiguous store cases.
         :param value: Vectorized type templaterized on `dtype`.
         :param var: buffer to store into.
         :index: index into the `var`.
@@ -2265,29 +2280,19 @@ class CppVecKernel(CppKernel):
             isinstance(value, CppCSEVariable) and value.is_vec
         ), value
         tiling_var = self.itervars[self.tiling_idx]
-        assert index.has(tiling_var), f"index: {index}, tiling_var: {tiling_var}"
         var_expr = f"{var} + {cexpr_index(index)}"
-        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
-        non_contiguous = stride != 1 or self.index_indirect_depends_on(
-            index, tiling_var
-        )
-        if non_contiguous:
-            var_expr = "tmpbuf"
-        if dtype == torch.float:
-            line = f"{value}.store({var_expr});"
+        stride = self._try_get_const_stride(index, tiling_var)
+        code = IndentedBuffer()
+        if stride == 1:
+            if dtype == torch.float:
+                code.writeline(f"{value}.store({var_expr});")
+            else:
+                code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
         else:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        if non_contiguous:
-            inner = sympy_index_symbol(f"{tiling_var}_inner")
-            new_index = self.scale_index_with_offset(
-                index, itervar_idx=self.tiling_idx, offset=inner
+            self._load_or_store_non_contiguous(
+                var, index, dtype, buffer=code, store_value=value
             )
-            line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{self.tiling_factor}]; {line} "
-                f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
-                f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
-            )
-        return line
+        return code
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
@@ -2300,12 +2305,8 @@ class CppVecKernel(CppKernel):
         var = self.args.output(name)
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
-        self.stores.writeline(
-            DeferredLine(
-                name,
-                self._get_vec_store_line(value, var, index, V.graph.get_dtype(name)),
-            )
-        )
+        code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
+        self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
@@ -2396,38 +2397,27 @@ class CppVecKernel(CppKernel):
         out_dtype = V.graph.get_dtype(name)
         # Only float reductions are vectorized currently
         dtype = torch.float
+        code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            self.reduction_suffix.writeline(
-                DeferredLine(
-                    name,
-                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
-                )
+            code.writeline(
+                f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});"
             )
         else:
             # Vertical reduction
-            store_lines = []
             if out_dtype != dtype:
                 if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
                     _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                    store_lines = [
-                        DeferredLine(
-                            name,
-                            f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});",
-                        )
-                    ]
+                    code.writeline(
+                        f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                    )
                     value = _lowp_fp_tmpvar_vec
                 else:
                     raise AssertionError(
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
-            store_lines += [
-                DeferredLine(
-                    name,
-                    self._get_vec_store_line(value, var, index, out_dtype),
-                )
-            ]
-            self.reduction_suffix.writelines(store_lines)
+            code.splice(self._get_store_line(value, var, index, out_dtype))
+        self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def broadcast(self, scalar_var: CppCSEVariable) -> CppCSEVariable:
         assert not scalar_var.is_vec
@@ -2447,20 +2437,15 @@ class CppVecKernel(CppKernel):
         vec_var.is_vec = True
         return vec_var
 
-    def arange(
-        self, index: Union[sympy.Expr, CppCSEVariable], stride: sympy.Symbol
-    ) -> CppCSEVariable:
-        if isinstance(index, sympy.Expr):
-            index = cexpr(index)
-        else:
-            assert isinstance(index, CppCSEVariable)
-            assert not index.is_vec
+    def arange(self, index: CppCSEVariable, stride: sympy.Symbol) -> CppCSEVariable:
+        assert not index.is_vec
+        assert index.dtype is not None
         csevar = self.cse.generate(
             self.compute,
-            f"{self._get_vec_type(torch.int32)}::arange({index}, {stride})",
+            f"{self._get_vec_type(index.dtype)}::arange({index}, {stride})",
         )
         assert isinstance(csevar, CppCSEVariable)
-        csevar.dtype = torch.int32
+        csevar.dtype = index.dtype
         csevar.is_vec = True
         return csevar
 
@@ -2506,6 +2491,31 @@ class CppVecKernel(CppKernel):
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError()
+
+    def indirect_assert(self, var, lower, upper, mask=None):
+        assert not mask, "do not support mask in indirect_indexing assertion"
+        assert isinstance(var, CppCSEVariable)
+        assert var.dtype is not None
+        if not var.is_vec:
+            return super().indirect_assert(var, lower, upper, mask)
+        lower_scalar = lower
+        upper_scalar = upper
+        if lower:
+            lower = f"{self._get_vec_type(var.dtype)}({lower})"
+        if upper:
+            upper = f"{self._get_vec_type(var.dtype)}({upper})"
+        if lower and upper:
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower_scalar} <= {var} < {upper_scalar}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = f"{lower_scalar} <= {var}"
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = f"{var} < {upper_scalar}"
+        cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -2709,119 +2719,28 @@ class CppVecKernelChecker(CppVecKernel):
             torch.int32,
             torch.int64,
         ]
-        # Cache the dtypes of the store operation. If the store is mixing dtypes, the
-        # vectorization would not support it as it is hard to determine the vec dtype
-        self.store_dtypes: List[torch.dtype] = []
-        # The dtype is used for vectorization
-        self.vec_dtype: torch.dtype = torch.float32
 
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
 
-    def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
-        load_type = V.graph.get_dtype(name)
-        if load_type == torch.bool:
-            return all(user.target in ("where", "masked") for user in users.keys())
-        elif load_type in (torch.uint8, torch.int8):
-            """
-            If the load value is torch.uint8/int8, then we only support the loaded
-            value is as the mask.
-            """
-            if not all(
-                user.target == "to_dtype" and user.args[-1] == torch.bool
-                for user in users.keys()
-            ):
-                return False
-
-            for to_dtype_node in users.keys():
-                assert to_dtype_node.target == "to_dtype"
-                if not all(
-                    user.target in ("where", "masked")
-                    for user in to_dtype_node.users.keys()
-                ):
-                    return False
-            return True
-        else:
-            return False
-
-    def is_load_int8_as_float(self, name: str, users: Dict[torch.fx.Node, None]):
-        """
-        Check:
-        1. load_type is torch.uint8 or torch.int8
-        2. has 1 user node of target to_dtype
-        3. dtype of to_dtype is torch.float
-        """
-        load_type = V.graph.get_dtype(name)
-        if load_type not in (torch.uint8, torch.int8):
-            return False
-        if len(users) == 1:
-            user = next(iter(users))
-            if (user.target == "to_dtype") and (user.args[-1] == torch.float):
-                return True
-            return False
-        return False
-
-    def can_store_fp32_as_int8(self, store_var: str, value_node: torch.fx.Node):
-        """
-        Check:
-        1. store_type is torch.uint8/torch.int8
-        2. value_node is of target to_dtype
-        3. dtype of to_dtype node is torch.uint8/torch.int8
-        """
-        store_type = V.graph.get_dtype(store_var)
-        if store_type not in (torch.uint8, torch.int8):
-            return False
-        if value_node.target == "to_dtype" and value_node.args[-1] in (
-            torch.uint8,
-            torch.int8,
-        ):
-            return True
-
-        return False
-
-    def is_load_integer_scalar_tensor(self, name: str, index: sympy.Expr):
-        load_dtype = V.graph.get_dtype(name)
-        buffer = V.graph.get_buffer(name)
-        return (
-            load_dtype in [torch.int32, torch.int64]
-            and isinstance(buffer, TensorBox)
-            and isinstance(buffer.data, StorageBox)
-            and (len(buffer.data.layout.size) == 0)
-            and (index == 0)
-        )
-
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
             load_dtype = V.graph.get_dtype(name)
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
             assert opt_ctx
-            opt_ctx.dtype = load_dtype
-            opt_ctx.is_load_as_mask = self.is_mask(name, node_ctx.get_fx_node().users)
-            opt_ctx.is_load_int8_as_float = self.is_load_int8_as_float(
-                name, node_ctx.get_fx_node().users
-            )
 
+            opt_ctx.dtype = load_dtype
             var = self.cse.newvar()
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype in (torch.bool, torch.uint8, torch.int8) and not (
-                opt_ctx.is_load_as_mask or opt_ctx.is_load_int8_as_float
-            ):
-                if not opt_ctx.is_load_as_mask:
-                    self.disable_vec(f"{load_dtype} not loaded as mask")
-                elif not opt_ctx.is_load_int8_as_float:
-                    self.disable_vec(f"{load_dtype} not loaded as float")
-                return var
-
-            if (
-                (load_dtype not in self.load_supported_dtypes)
-                and not self.is_load_integer_scalar_tensor(name, index)
-                and index.has(self.itervars[self.tiling_idx])
+            if load_dtype not in self.load_supported_dtypes and (
+                index.has(self.itervars[self.tiling_idx])
+                or free_symbol_startswith(index, "tmp")
             ):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
@@ -2840,17 +2759,9 @@ class CppVecKernelChecker(CppVecKernel):
             assert opt_ctx
             opt_ctx.dtype = store_dtype
 
-            store_dtype = torch.float if store_dtype == torch.float32 else store_dtype
-            self.store_dtypes.append(store_dtype)
             if store_dtype not in self.store_supported_dtypes:
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
-
-            if store_dtype in (torch.uint8, torch.int8):
-                value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                if not self.can_store_fp32_as_int8(name, value_node):
-                    self.disable_vec("not support store float32 as uint8/int8")
-                    return self.simd_vec
 
             assert "buf" in name
             index = self.rename_indexing(index)
@@ -2859,18 +2770,14 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
-            if index.is_number:
-                self.disable_vec(f"constant store index: {index}")
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        if (
+        if not (
             (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
-            pass
-        else:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
@@ -2927,18 +2834,8 @@ class CppVecKernelChecker(CppVecKernel):
 
         class VecCheckerProxy:
             @staticmethod
-            def _bin_cmp_op(x, y):
-                current_node: torch.fx.Node = V.interpreter.current_node
-                if not self.is_supported_cmp(current_node):
-                    self.disable_vec(f"binary comparison op: {current_node}")
-                return self.simd_vec
-
-            @staticmethod
             def __getattr__(name):  # type: ignore[misc]
                 def inner(*args, **kwargs):
-                    if name in BIN_CMP_OPS:
-                        return VecCheckerProxy._bin_cmp_op(args, kwargs)
-
                     if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
 
@@ -2976,6 +2873,10 @@ class CppVecKernelChecker(CppVecKernel):
                         dtype == torch.int64
                         and val <= i32_iinfo.max
                         and val >= i32_iinfo.min
+                        and all(
+                            user.target in BIN_CMP_OPS
+                            for user in node_ctx.current_node.users
+                        )
                     ):
                         opt_ctx.dtype = torch.int32
 
@@ -2989,34 +2890,23 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.dtype = torch.float32
 
                     supported_dtypes = [
-                        torch.float32,
-                        torch.int32,
-                        torch.int64,
+                        torch.float,
                         torch.bfloat16,
                         torch.float16,
                         torch.bool,
+                        torch.uint8,
+                        torch.int8,
+                        torch.int32,
+                        torch.int64,
                     ]
 
-                    if opt_ctx.dtype not in supported_dtypes or (
-                        opt_ctx.dtype == torch.int32
-                        and not all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
+                    if opt_ctx.dtype not in supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
 
             @staticmethod
             def index_expr(expr, dtype):
                 assert len(self.ranges) == len(self.itervars)
-                if not len(self.ranges) or not all(
-                    not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
-                    for range in self.ranges
-                ):
-                    # if the range value is sympy.Expr, we might could not deduce the accurate loop interval.
-                    self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
-                    return self.cse.newvar()
 
                 def can_use_int32():
                     free_symbols = list(expr.free_symbols)
@@ -3029,7 +2919,11 @@ class CppVecKernelChecker(CppVecKernel):
                     if any(v == 0 for v in sizes.values()):
                         return True
 
-                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
+                    vars_ranges = {
+                        k: ValueRanges(0, v - 1)
+                        for k, v in sizes.items()
+                        if not isinstance(v, sympy.Expr) or v.is_number
+                    }
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = torch.iinfo(torch.int32)
                         return (
@@ -3063,7 +2957,6 @@ class CppVecKernelChecker(CppVecKernel):
                     ):
                         opt_ctx.dtype = torch.int32
                     else:
-                        opt_ctx.dtype = dtype
                         self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
 
                     tmp_var = self.cse.newvar()
@@ -3080,78 +2973,18 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    opt_ctx.dtype = dtype
-
-                    cur_node = node_ctx.get_fx_node()
-                    input_value: torch.fx.Node = cur_node.all_input_nodes[1]
-                    if dtype == torch.float:
-                        if input_value.target in [
-                            "load",
-                        ]:
-                            # Support masked_load for BF16/FP16. Because the legalization will
-                            # insert to_dtype to convert the BF16/FP16 input to FP32.
-                            dtype = (
-                                V.graph.get_dtype(input_value.args[1])  # type: ignore[arg-type]
-                                if input_value.target == "load"
-                                else input_value.args[-1]
-                            )
-                            if dtype in [
-                                torch.float16,
-                                torch.bfloat16,
-                                torch.float,
-                                torch.float64,
-                                torch.uint8,
-                                torch.int8,
-                                torch.int32,
-                                torch.int64,
-                            ]:
-                                # Convert from dtype to torch.float
-                                pass
-                            else:
-                                self.disable_vec(f"to_dtype: dtype {dtype}")
-                    elif dtype in DTYPE_LOWP_FP:
-                        if not all(usr.target == "store" for usr in cur_node.users):
-                            self.disable_vec(
-                                "to_dtype: bfloat16/float16 expecting users are all stores"
-                            )
-                            return x
-
-                        store_names = [usr.args[1] for usr in cur_node.users]
-                        if not all(
-                            V.graph.get_dtype(name) in [dtype] for name in store_names
-                        ):
-                            self.disable_vec(
-                                "to_dtype: expecting all stores into bfloat16 or float16"
-                            )
-                            return x
-                    elif dtype == torch.bool:
-                        pass
-                    elif dtype in (torch.uint8, torch.int8):
-                        # Only allow below 2 cases:
-                        # Case 1: to_int8 and store which corresponding to the single quant node
-                        # at last of fusion pattern.
-                        is_to_int8_and_store = all(
-                            usr.target in ["store"] for usr in cur_node.users
-                        )
-                        # Case 2: to_int8 and to_float which corresponding to pair of quant/dequant node
-                        # at middle of fusion pattern.
-                        is_to_int8_and_to_float = all(
-                            (
-                                usr.target in ["to_dtype"]
-                                and usr.args[2] == torch.float32
-                            )
-                            for usr in cur_node.users
-                        )
-                        if not (is_to_int8_and_store or is_to_int8_and_to_float):
-                            self.disable_vec(f"to_dtype: dtype {dtype}")
-                    elif dtype in [torch.int64, torch.int32]:
-                        pass
-                    else:
-                        self.disable_vec(f"to_dtype: dtype {dtype}")
-                    return x
+                if dtype not in [
+                    torch.float,
+                    torch.bfloat16,
+                    torch.float16,
+                    torch.bool,
+                    torch.uint8,
+                    torch.int8,
+                    torch.int32,
+                    torch.int64,
+                ]:
+                    self.disable_vec(f"to_dtype: {dtype}")
+                return x
 
         self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
@@ -3537,52 +3370,48 @@ class CppKernelProxy(CppKernel):
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
-            try:
-                if len(tiling_indices) == 1:
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    metrics.generated_cpp_vec_kernel_count += 1
-                    main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                        tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    main_loop.set_kernel(vec_kernel)
-                    tail_loop.set_kernel(scalar_kernel)
-                    main_loop.simd_vec = True
-                    tail_loop.simd_omp = True
-                    # We chop the loop into two cubes by the nelements - main loop and tail loop.
-                    # Regarding the main loop, it is straightforward that it could be vectorized with
-                    # nelements. But for the tail loop, it still could be vectorized. For example,
-                    # if the nelements is 8(256bits), then the tail loop still could be vectorized
-                    # as 4(128bits).
-                    tail_loop.simd_nelements = tiling_factors[0] // 2
-                elif len(tiling_indices) == 2:
-                    assert (
-                        tiling_indices[1] == len(self.itervars) - 1
-                        and tiling_factors[0] == tiling_factors[1]
-                    )
-                    tile2d_kernel = codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
-                    )
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    metrics.generated_cpp_vec_kernel_count += 2
-                    outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
-                        tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    outer_tail_loop.set_kernel(scalar_kernel)
-                    (
-                        inner_main_loop,
-                        inner_tail_loop,
-                    ) = outer_main_loop.split_with_tiling(
-                        tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    inner_main_loop.set_kernel(tile2d_kernel)
-                    inner_tail_loop.set_kernel(vec_kernel)
-            except CppVecUnsupportedError as e:
-                if schedule_log.isEnabledFor(logging.DEBUG):
-                    schedule_log.debug("Disabled vectorization: %s", e)
+            if len(tiling_indices) == 1:
+                vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                )
+                metrics.generated_cpp_vec_kernel_count += 1
+                main_loop, tail_loop = self.loop_nest.split_with_tiling(
+                    tiling_indices[0], factor=tiling_factors[0]
+                )
+                main_loop.set_kernel(vec_kernel)
+                tail_loop.set_kernel(scalar_kernel)
+                main_loop.simd_vec = True
+                tail_loop.simd_omp = True
+                # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                # Regarding the main loop, it is straightforward that it could be vectorized with
+                # nelements. But for the tail loop, it still could be vectorized. For example,
+                # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                # as 4(128bits).
+                tail_loop.simd_nelements = tiling_factors[0] // 2
+            elif len(tiling_indices) == 2:
+                assert (
+                    tiling_indices[1] == len(self.itervars) - 1
+                    and tiling_factors[0] == tiling_factors[1]
+                )
+                tile2d_kernel = codegen_kernel(
+                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                )
+                vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                )
+                metrics.generated_cpp_vec_kernel_count += 2
+                outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
+                    tiling_indices[0], factor=tiling_factors[0]
+                )
+                outer_tail_loop.set_kernel(scalar_kernel)
+                (
+                    inner_main_loop,
+                    inner_tail_loop,
+                ) = outer_main_loop.split_with_tiling(
+                    tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
+                )
+                inner_main_loop.set_kernel(tile2d_kernel)
+                inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
