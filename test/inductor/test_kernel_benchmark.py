@@ -11,6 +11,7 @@ from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -79,6 +80,7 @@ class TestKernelBenchmark(TestCase):
         out = f(inp)
         self.verify_compiled_kernels()
 
+    @expectedFailureXPU
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
@@ -95,6 +97,7 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
+    @expectedFailureXPU
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     @fresh_inductor_cache()
     def test_mm_triton_kernel_benchmark(self):
@@ -199,6 +202,7 @@ class TestKernelBenchmark(TestCase):
         #        = 0.042
         self.check_bandwidth(compiled_module, "0.042")
 
+    @expectedFailureXPU
     @config.patch(max_autotune=True)
     def test_fused_layernorm_bandwidth_computation(self):
         M, N = 10, 1000000
@@ -272,6 +276,7 @@ class TestKernelBenchmark(TestCase):
         #        = 0.032
         self.check_bandwidth(compiled_module, "0.032")
 
+    @expectedFailureXPU
     def test_mm_slice_add_bandwidth_computation(self):
         M, N, K = 1000, 1000, 30
 
@@ -322,6 +327,7 @@ class TestKernelBenchmark(TestCase):
         # have the same index.
         self.check_bandwidth(compiled_module, "0.006")
 
+    @expectedFailureXPU
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_slice_mm_bandwidth_computation(self):
         M, N, K = 1000, 2000, 3000

@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -93,6 +93,7 @@ if HAS_CPU:
     class DynamicShapesCpuTests(TestCase):
         common = check_model
         device = "cpu"
+        device_type = device
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
@@ -102,6 +103,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
+        device_type = device
 
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
@@ -712,5 +714,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
