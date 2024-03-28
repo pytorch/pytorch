@@ -413,7 +413,7 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default="1",
-        help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
+        help=f"Number of workers per node; supported values: [auto, cpu, gpu, {torch._C._get_privateuse1_backend_name()}, int].",
     )
 
     #
