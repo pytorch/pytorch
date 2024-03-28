@@ -2957,6 +2957,10 @@ class CppVecKernelChecker(CppVecKernel):
                     ):
                         opt_ctx.dtype = torch.int32
                     else:
+                        # index = V.kernel.rename_indexing(expr)
+                        # tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
+                        # stride = V.kernel._try_get_const_stride(index, tiling_var)
+                        # if stride is None or stride != 0:
                         self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
 
                     tmp_var = self.cse.newvar()

@@ -3012,7 +3012,10 @@ def meta_index_Tensor(self, indices):
                 before_shape.append(self.shape[dim])
         else:
             replacement_shape = list(index.shape)
-    return self.new_empty(before_shape + replacement_shape + after_shape)
+    memory_format = utils.suggest_memory_format(self)
+    return self.new_empty(before_shape + replacement_shape + after_shape).contiguous(
+        memory_format=memory_format
+    )
 
 
 @register_meta([aten.convolution_backward.default])

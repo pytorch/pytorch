@@ -1196,10 +1196,10 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
         a_first = sum(
-            sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+            (sl_b == 0 and sl_a == 1) or (sl_a != 0 and sl_a < sl_b) for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
         b_first = sum(
-            sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+            (sl_a == 0 and sl_b == 1) or (sl_b != 0 and sl_b < sl_a) for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
         if a_first > b_first:
             return -1
