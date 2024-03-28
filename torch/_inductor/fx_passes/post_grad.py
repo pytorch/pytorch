@@ -51,6 +51,7 @@ from torch._functorch._aot_autograd import fsdp_fx_passes
 
 
 log = logging.getLogger(__name__)
+torch_log = logging.getLogger("torch")
 aten = torch.ops.aten
 prims = torch.ops.prims
 
@@ -136,9 +137,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fsdp_fx_passes.remove_clone_if_input_is_alias_of_graph_input(gm)
     fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
     fsdp_fx_passes.remove_no_use_empty(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
-    fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
+    # fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
 
     decompose_auto_functionalized(gm.graph)
+
+    torch_log.warning(lazy_format_graph_code("after FSDP FX passes: ", gm))
     gm.recompile()
     gm.graph.lint()
 

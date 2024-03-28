@@ -928,7 +928,7 @@ def min_cut_rematerialization_partition(
                 flat_args.append(arg)
         return flat_args
 
-    def is_alias_of_primal_input(full_bw_graph, primal_inputs, node):
+    def is_alias_of_primal_input(primal_inputs, node):
         if hasattr(node, "target") and node.target in [
             # List of view ops. TODO add more
             torch.ops.aten.t.default,
@@ -941,7 +941,7 @@ def min_cut_rematerialization_partition(
                 if arg in primal_inputs:
                     return True, view_chain
                 else:
-                    upstream_is_alias, upstream_view_chain = is_alias_of_primal_input(full_bw_graph, primal_inputs, arg)
+                    upstream_is_alias, upstream_view_chain = is_alias_of_primal_input(primal_inputs, arg)
                     if upstream_is_alias:
                         view_chain.extend(upstream_view_chain)
                         return True, view_chain
@@ -953,7 +953,7 @@ def min_cut_rematerialization_partition(
         # so that only primals (along with non-view op output intermediates) are saved as FWD graph output.
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         for saved_value in saved_values:
-            is_alias, view_chain = is_alias_of_primal_input(full_bw_graph, primal_inputs, saved_value)
+            is_alias, view_chain = is_alias_of_primal_input(primal_inputs, saved_value)
             if is_alias:
                 required_bw_nodes.update(set(view_chain))
 

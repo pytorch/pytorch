@@ -1,7 +1,10 @@
 import torch
 import operator
 import copy
+import logging
 from collections import defaultdict
+
+torch_log = logging.getLogger("torch")
 
 
 _view_ops = [
@@ -439,6 +442,7 @@ def replace_foreach_all_gather_pattern(mod):
             and (node_list[i+1].target is torch.ops.aten.slice.Tensor and node_list[i+1].args[0] == n)
             and (node_list[i+2].target is torch.ops.aten.split_with_sizes.default and node_list[i+2].args[0] == node_list[i+1])
         ):
+            empty_node = n
             slice_after_empty_node = node_list[i+1]
             split_with_sizes_node_idx = i+2
             split_with_sizes_node = node_list[split_with_sizes_node_idx]
@@ -453,22 +457,24 @@ def replace_foreach_all_gather_pattern(mod):
             for j in range(getitem_start_index + num_blocks, len(node_list)):
                 nj = node_list[j]
                 if nj.target is torch.ops.aten._foreach_copy_.default and all(arg == getitem_node for arg, getitem_node in zip(nj.args[0], getitem_nodes)):
-                    block_start_index = j+1
-                    if not all(
-                        oc[0].target is torch.ops.aten.slice.Tensor \
-                        and oc[1].target is torch.ops.aten.slice_scatter.default \
-                        and oc[2].target is torch.ops.aten.slice_scatter.default \
-                        for oc in _get_chunks(node_list[block_start_index:block_start_index+num_blocks*3], 3)
-                    ):
-                        continue
-                    last_slice_start_index = block_start_index + num_blocks * 3
-                    last_slice_node = node_list[last_slice_start_index]
-                    if not last_slice_node.target is torch.ops.aten.slice.Tensor or last_slice_node.args[1:] != slice_after_empty_node.args[1:]:
-                        continue
-                    last_slice_node.replace_all_uses_with(slice_after_empty_node)
-                    mod.graph.erase_node(last_slice_node)
-                    for node in reversed(node_list[block_start_index:block_start_index+num_blocks*3]):
-                        mod.graph.erase_node(node)
+                    for k in range(j+1, len(node_list)):
+                        nk = node_list[k]
+                        if nk.target is torch.ops.aten.slice.Tensor and nk.args[0] == empty_node:
+                            block_start_index = k
+                            if all(
+                                oc[0].target is torch.ops.aten.slice.Tensor \
+                                and oc[1].target is torch.ops.aten.slice_scatter.default \
+                                and oc[2].target is torch.ops.aten.slice_scatter.default \
+                                for oc in _get_chunks(node_list[block_start_index:block_start_index+num_blocks*3], 3)
+                            ):
+                                last_slice_start_index = block_start_index + num_blocks * 3
+                                last_slice_node = node_list[last_slice_start_index]
+                                if not last_slice_node.target is torch.ops.aten.slice.Tensor or last_slice_node.args[1:] != slice_after_empty_node.args[1:]:
+                                    continue
+                                last_slice_node.replace_all_uses_with(slice_after_empty_node)
+                                mod.graph.erase_node(last_slice_node)
+                                for node in reversed(node_list[block_start_index:block_start_index+num_blocks*3]):
+                                    mod.graph.erase_node(node)
     mod.graph.lint()
     mod.recompile()
 
@@ -729,6 +735,60 @@ def replace_foreach_reduce_scatter_copy_in_pattern(mod):
     mod.recompile()
 
 
+# TODO(yf225): dedup with partitioner.py view chain move code
+def _is_descendent_of_primal_input(node, primal_inputs):
+    if node in primal_inputs:
+        return True, [node], node
+    elif hasattr(node, "target"):
+        op_chain = [node]
+        flattened_arg_list = _flatten_arg_list(node.args)
+        for arg in flattened_arg_list:
+            upstream_is_alias, upstream_op_chain, primal_input = _is_descendent_of_primal_input(arg, primal_inputs)
+            if upstream_is_alias:
+                op_chain.extend(upstream_op_chain)
+                return True, op_chain, primal_input
+    else:
+        return False, [], None
+
+
+def _get_op_chains_from_primals(end_nodes, primal_inputs, all_node_list):
+    # Check end_node is descendent of primals_X, and move up the entire chain starting from primals_X.
+    op_chains_from_primals = []
+    for end_node in end_nodes:
+        is_descendent_of_primal_input, op_chain, primal_input = _is_descendent_of_primal_input(end_node, primal_inputs)
+        assert op_chain[-1] == primal_input
+        # primals_X must not be used in any view ops in this graph (otherwise it might have alias mutation
+        # which is hard to track and would cause it to potentially not be legal to move the chain up).
+        if is_descendent_of_primal_input and not _input_is_used_in_view_ops(all_node_list, primal_input):
+            op_chains_from_primals.append(op_chain)
+    return op_chains_from_primals
+
+
+def _find_next_block_of_inplace_copy_nodes(node_list, start_index, expected_block_length, getitem_nodes):
+    inplace_copy_nodes_start_index = None
+    inplace_copy_nodes = []
+    for k in range(start_index, len(node_list)):
+        nk = node_list[k]
+        if nk.target is torch.ops.aten.copy_.default and nk.args[0] in getitem_nodes:
+            if inplace_copy_nodes_start_index is None:
+                inplace_copy_nodes_start_index = k
+            inplace_copy_nodes.append(nk)
+            if len(inplace_copy_nodes) == expected_block_length:
+                break
+        else:
+            inplace_copy_nodes_start_index = None
+            inplace_copy_nodes = []
+            continue
+    return inplace_copy_nodes_start_index, inplace_copy_nodes
+
+
+def _create_new_node_and_replace(mod, node):
+    new_node = mod.graph.call_function(node.target, node.args, node.kwargs)
+    node.replace_all_uses_with(new_node)
+    mod.graph.erase_node(node)
+    return new_node
+
+
 def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
     """
     ======== [Case 1] no `aten.empty` reuse ========
@@ -853,17 +913,25 @@ def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
 
     ... (uses `wait_tensor_1` in compute)
     """
+    primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
     node_list = list(mod.graph.nodes)
     prev_all_gather_wait_node = None
-    for i in range(len(node_list)):
-        n = node_list[i]
+    # First step: identify all nodes that need to be moved.
+    all_gather_blocks = []
+    known_getitem_nodes = set()
+    j = 0
+    prev_all_gather_wait_node_idx = -1
+    while j < len(node_list):
+        nj = node_list[j]
         if (
-            n.target is torch.ops.aten.empty.memory_format
-            and (node_list[i+1].target is torch.ops.aten.slice.Tensor and node_list[i+1].args[0] == n)
-            and (node_list[i+2].target is torch.ops.aten.split_with_sizes.default and node_list[i+2].args[0] == node_list[i+1])
+            nj.target is torch.ops.aten.empty.memory_format
+            and (node_list[j+1].target is torch.ops.aten.slice.Tensor and node_list[j+1].args[0] == nj)
+            and (node_list[j+2].target is torch.ops.aten.split_with_sizes.default and node_list[j+2].args[0] == node_list[j+1])
         ):
-            slice_after_empty_node = node_list[i+1]
-            split_with_sizes_node_idx = i+2
+            # Handle Case 1
+            empty_node = nj
+            slice_after_empty_node = node_list[j+1]
+            split_with_sizes_node_idx = j+2
             split_with_sizes_node = node_list[split_with_sizes_node_idx]
             num_blocks = len(split_with_sizes_node.args[1])
             getitem_start_index = split_with_sizes_node_idx + 1
@@ -871,83 +939,125 @@ def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
                 node.target is operator.getitem and node.args[0] == split_with_sizes_node
                 for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
             ):
+                j += 1
                 continue
-            first_getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
-            inplace_copy_nodes_start_index = getitem_start_index+num_blocks
-            inplace_copy_nodes = node_list[inplace_copy_nodes_start_index:inplace_copy_nodes_start_index+num_blocks]
-            assert all(n.target is torch.ops.aten.copy_.default for n in inplace_copy_nodes)
-            all_gather_node = node_list[inplace_copy_nodes_start_index+num_blocks]
-            assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
-            first_all_gather_wait_node_idx = inplace_copy_nodes_start_index+num_blocks+1
-            prev_all_gather_wait_node = node_list[first_all_gather_wait_node_idx]
-            assert prev_all_gather_wait_node.target is torch.ops._c10d_functional.wait_tensor.default
+            getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
 
-            for j in range(first_all_gather_wait_node_idx+1, len(node_list)):
-                nj = node_list[j]
+            inplace_copy_nodes_start_index, inplace_copy_nodes = _find_next_block_of_inplace_copy_nodes(
+                node_list, getitem_start_index+num_blocks, num_blocks, getitem_nodes
+            )
+            if not (inplace_copy_nodes_start_index is not None and len(inplace_copy_nodes) == num_blocks):
+                j += 1
+                continue
+
+            end_nodes = []
+            for copy_node in inplace_copy_nodes:
+                copy_from = copy_node.args[1]
+                end_nodes.append(copy_from)
+            op_chains_from_primals = _get_op_chains_from_primals(end_nodes, primal_inputs_tensor_only, node_list)
+            if len(op_chains_from_primals) != num_blocks:
+                j += 1
+                continue
+
+            for k in range(inplace_copy_nodes_start_index+num_blocks, len(node_list)):
+                if node_list[k].target is torch.ops._c10d_functional.all_gather_into_tensor.default and node_list[k].args[0] == slice_after_empty_node:
+                    all_gather_node_start_index = k
+                    break
+            all_gather_node = node_list[all_gather_node_start_index]
+            assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default, f"got: {all_gather_node}. Full graph: {mod.graph}"
+            all_gather_wait_node = node_list[all_gather_node_start_index+1]
+            assert all_gather_wait_node.target is torch.ops._c10d_functional.wait_tensor.default
+            all_gather_blocks.append({
+                "empty_node": empty_node,
+                "slice_after_empty_node": slice_after_empty_node,
+                "split_with_sizes_node": split_with_sizes_node,
+                "getitem_nodes": getitem_nodes,
+                "op_chains_from_primals": op_chains_from_primals,
+                "inplace_copy_nodes": inplace_copy_nodes,
+                "all_gather_node": all_gather_node,
+                "all_gather_wait_node": all_gather_wait_node,
+            })
+            known_getitem_nodes.update(getitem_nodes)
+            prev_all_gather_wait_node_idx = all_gather_node_start_index + 1
+            j = prev_all_gather_wait_node_idx + 1
+        elif nj.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+            # Handle Case 2
+            all_gather_node = nj
+            all_gather_wait_node = node_list[j+1]
+            inplace_copy_nodes = []
+            k = j - 1
+            while k > prev_all_gather_wait_node_idx:
                 if (
-                    nj.target is torch.ops.aten.empty.memory_format
-                    and (node_list[j+1].target is torch.ops.aten.slice.Tensor and node_list[j+1].args[0] == nj)
-                    and (node_list[j+2].target is torch.ops.aten.split_with_sizes.default and node_list[j+2].args[0] == node_list[j+1])
+                    node_list[k].target is torch.ops.aten.copy_.default
+                    and node_list[k].args[0] in known_getitem_nodes
                 ):
-                    # Handle Case 1
-                    slice_after_empty_node = node_list[j+1]
-                    split_with_sizes_node_idx = j+2
-                    split_with_sizes_node = node_list[split_with_sizes_node_idx]
-                    num_blocks = len(split_with_sizes_node.args[1])
-                    getitem_start_index = split_with_sizes_node_idx + 1
-                    if not all(
-                        node.target is operator.getitem and node.args[0] == split_with_sizes_node
-                        for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
-                    ):
-                        continue
-                    getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
-                    inplace_copy_nodes_start_index = getitem_start_index+num_blocks
-                    inplace_copy_nodes = node_list[inplace_copy_nodes_start_index:inplace_copy_nodes_start_index+num_blocks]
-                    assert all(n.target is torch.ops.aten.copy_.default for n in inplace_copy_nodes)
-                    all_gather_node = node_list[inplace_copy_nodes_start_index+num_blocks]
-                    assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
-                    with mod.graph.inserting_after(prev_all_gather_wait_node):
-                        # NOTE: the last inserted op within `mod.graph.inserting_after` ctx appears *first* in graph.
-                        new_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor.default, nj.args, {})
-                        nj.replace_all_uses_with(new_all_gather_node)
-                        mod.graph.erase_node(nj)
-                        for copy_node in inplace_copy_nodes_reversed:
-                            mod.graph.call_function(torch.ops.aten.copy_.default, copy_node.args, {})
-                            mod.graph.erase_node(copy_node)
-                        for getitem_node in reversed(getitem_nodes):
-                            new_getitem_node = mod.graph.call_function(operator.getitem, getitem_node.args, {})
-                            getitem_node.replace_all_uses_with(new_getitem_node)
-                            mod.graph.erase_node(getitem_node)
-                        new_split_with_sizes_node = mod.graph.call_function(torch.ops.aten.split_with_sizes.default, split_with_sizes_node.args, {})
-                        split_with_sizes_node.replace_all_uses_with(new_split_with_sizes_node)
-                        mod.graph.erase_node(split_with_sizes_node)
-                        new_slice_after_empty_node = mod.graph.call_function(torch.ops.aten.slice.Tensor, slice_after_empty_node.args, {})
-                        slice_after_empty_node.replace_all_uses_with(new_slice_after_empty_node)
-                        mod.graph.erase_node(slice_after_empty_node)
-                        new_empty_node = mod.graph.call_function(torch.ops.aten.empty.memory_format, nj.args, {})
-                        nj.replace_all_uses_with(new_empty_node)
-                        mod.graph.erase_node(nj)
-                elif nj.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
-                    # Handle Case 2
-                    inplace_copy_nodes_reversed = []
-                    k = j - 1
-                    while k > first_all_gather_wait_node_idx:
-                        if node_list[k].target is torch.ops.aten.copy_.default and node_list[k].args[0] in first_getitem_nodes:
-                            # TODO(yf225): we also need to check `node_list[k].args[1]` is descendent of primals_X, and move up the entire chain starting from primals_X.
-                            # primals_X must not be used in any view ops in this graph (otherwise its alias mutation is hard to track and it might not be legal to move the chain up).
-                            inplace_copy_nodes_reversed.append(node_list[k])
-                        else:
-                            break
-                        k -= 1
-                    if len(inplace_copy_nodes_reversed) > 0:
-                        with mod.graph.inserting_after(prev_all_gather_wait_node):
-                            # NOTE: the last inserted op within `mod.graph.inserting_after` ctx appears *first* in graph.
-                            new_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor.default, nj.args, {})
-                            nj.replace_all_uses_with(new_all_gather_node)
-                            mod.graph.erase_node(nj)
-                            for copy_node in inplace_copy_nodes_reversed:
-                                mod.graph.call_function(torch.ops.aten.copy_.default, copy_node.args, {})
-                                mod.graph.erase_node(copy_node)
-                        prev_all_gather_wait_node = node_list[j+1]
+                    inplace_copy_nodes.append(node_list[k])
+                else:
+                    break
+                k -= 1
+            if len(inplace_copy_nodes) > 0:
+                end_nodes = []
+                for copy_node in inplace_copy_nodes:
+                    copy_from = copy_node.args[1]
+                    end_nodes.append(copy_from)
+                op_chains_from_primals = _get_op_chains_from_primals(end_nodes, primal_inputs_tensor_only, node_list)
+                if len(op_chains_from_primals) != num_blocks:
+                    j += 1
+                    continue
+                all_gather_blocks.append({
+                    "empty_node": None,
+                    "slice_after_empty_node": None,
+                    "split_with_sizes_node": None,
+                    "getitem_nodes": None,
+                    "op_chains_from_primals": op_chains_from_primals,
+                    "inplace_copy_nodes": inplace_copy_nodes,
+                    "all_gather_node": all_gather_node,
+                    "all_gather_wait_node": all_gather_wait_node,
+                })
+                prev_all_gather_wait_node_idx = j + 1
+                j += 2
+                continue
+            else:
+                j += 1
+                continue
+        else:
+            j += 1
+            continue
+
+    for block in all_gather_blocks:
+        torch_log.warning(f"block: {block}")
+    # Second step: move the nodes (starting with the last block in graph)
+    for i in range(len(all_gather_blocks)-1, 0, -1):  # range ends at 0 (exclusive), because we don't move the first block in graph
+        prev_all_gather_wait_node = all_gather_blocks[i-1]["all_gather_wait_node"]
+        torch_log.warning(f"prev_all_gather_wait_node: {prev_all_gather_wait_node}")
+        block = all_gather_blocks[i]
+        torch_log.warning(f"block to move: {block}")
+        empty_node = block["empty_node"]
+        slice_after_empty_node = block["slice_after_empty_node"]
+        split_with_sizes_node = block["split_with_sizes_node"]
+        getitem_nodes = block["getitem_nodes"]
+        op_chains_from_primals = block["op_chains_from_primals"]
+        inplace_copy_nodes = block["inplace_copy_nodes"]
+        all_gather_node = block["all_gather_node"]
+        all_gather_wait_node = block["all_gather_wait_node"]
+
+        with mod.graph.inserting_after(prev_all_gather_wait_node):
+            # NOTE: the last inserted op within `mod.graph.inserting_after` ctx appears *first* in graph.
+            new_all_gather_node = _create_new_node_and_replace(mod, all_gather_node)
+            for copy_node in inplace_copy_nodes:
+                new_copy_node = _create_new_node_and_replace(mod, copy_node)
+            for op_chain in op_chains_from_primals:
+                for op in op_chain[:-1]:  # the last op is just the primal input node, we don't need to move it as it's already at the top of graph.
+                    new_op = _create_new_node_and_replace(mod, op)
+            if getitem_nodes is not None:
+                for getitem_node in reversed(getitem_nodes):
+                    new_getitem_node = _create_new_node_and_replace(mod, getitem_node)
+            if split_with_sizes_node is not None:
+                new_split_with_sizes_node = _create_new_node_and_replace(mod, split_with_sizes_node)
+            if slice_after_empty_node is not None:
+                new_slice_after_empty_node = _create_new_node_and_replace(mod, slice_after_empty_node)
+            if empty_node is not None:
+                new_empty_node = _create_new_node_and_replace(mod, empty_node)
+
     mod.graph.lint()
     mod.recompile()
