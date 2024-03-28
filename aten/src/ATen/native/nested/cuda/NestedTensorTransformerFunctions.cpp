@@ -234,7 +234,9 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    c10::optional<double> scale,
+    c10::optional<int64_t> window_size_left,
+    c10::optional<int64_t> window_size_right) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
@@ -265,7 +267,9 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
           dropout_p,
           is_causal,
           return_debug_mask,
-          scale);
+          scale,
+          window_size_left,
+          window_size_right);
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(
@@ -344,7 +348,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    c10::optional<double> scale,
+    c10::optional<int64_t> window_size_left,
+    c10::optional<int64_t> window_size_right){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -383,7 +389,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     is_causal,
     philox_seed,
     philox_offset,
-    scale);
+    scale,
+    window_size_left,
+    window_size_right);
 
   grad_q = wrap_buffer(grad_q.view(-1), query.transpose(1,2)._nested_tensor_size()).transpose(1,2);
   grad_k = wrap_buffer(grad_k.view(-1), key.transpose(1,2)._nested_tensor_size()).transpose(1,2);

@@ -60,12 +60,17 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    c10::optional<double> scale) {
+    c10::optional<double> scale,
+    c10::optional<int64_t> window_size_left,
+    c10::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
+
+  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
+  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 
   c10::optional<at::Tensor> dq{c10::nullopt};
   c10::optional<at::Tensor> dk{c10::nullopt};
@@ -112,9 +117,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
-        -1, /*window_size_left*/
-        -1, /*window_size_right*/
+        non_null_window_left,
+        non_null_window_right,
         determinisitic,
+
         philox_seed,
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
@@ -134,8 +140,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
-        -1, /*window_size_left*/
-        -1, /*window_size_right*/
+        non_null_window_left,
+        non_null_window_right,
         determinisitic,
         philox_seed,
         philox_offset);
@@ -547,7 +553,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    c10::optional<double> scale,
+    c10::optional<int64_t> window_size_left,
+    c10::optional<int64_t> window_size_right){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -574,7 +582,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     is_causal,
     philox_seed,
     philox_offset,
-    scale);
+    scale,
+    window_size_left,
+    window_size_right);
 
   grad_q = grad_q.transpose(1,2);
   grad_k = grad_k.transpose(1,2);

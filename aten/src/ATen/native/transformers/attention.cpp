@@ -510,6 +510,7 @@ inline void validate_sdpa_input(
 // This function is used to produce an attn_mask
 // in a standard format that can be consumed by both
 // the math and memory efficient attn_mask implementation
+// If mask is boolean than True indicates that the element *should* take part in attention
 //  Args:
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
 c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
@@ -623,8 +624,6 @@ int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor
 //         A boolean mask where a value of True indicates that the element *should* take part in attention.
 //         A float mask of the same type as query, key, value that is added to the attention score.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-//     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
-//         otherwise, the second return value is unspecified
 //     is_causal (bool): If true, assumes causal attention masking; for this case, attn_mask should not be set.
 //         TODO: Consider removing this flag before promoting this function to the public API. It's possible
 //         to get specialized support for causal masks (and other types of masking e.g. local attention / block

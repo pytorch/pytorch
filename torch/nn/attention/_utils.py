@@ -1,6 +1,6 @@
 """Defines utilities for interacting with scaled_dot_product_attention"""
 import math
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -55,3 +55,26 @@ def _validate_sdpa_input(
             f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
+
+
+def _preprocess_flash(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    scale: Optional[float] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, float]:
+    """Preprocesses the input for _scaled_dot_product_flash_attention
+    Args:
+        query: torch.Tensor: The query tensor
+        key: torch.Tensor: The key tensor
+        value: torch.Tensor: The value tensor
+        scale: Optional[float]: The scale to use for the attention
+    """
+    needs_padding = query.size(-1) % 8 != 0
+    og_head_size = query.size(-1)
+    og_scale = _calculate_scale(og_head_size, scale)
+    if needs_padding:
+        query = torch.nn.functional.pad(query, (0, 8 - query.size(-1) % 8))
+        key = torch.nn.functional.pad(key, (0, 8 - key.size(-1) % 8))
+        value = torch.nn.functional.pad(value, (0, 8 - value.size(-1) % 8))
+    return query, key, value, og_head_size, og_scale
