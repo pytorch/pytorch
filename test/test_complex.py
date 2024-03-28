@@ -18,12 +18,17 @@ class TestComplexTensor(TestCase):
         # there's no garbage value in the resultant list
         self.assertEqual(torch.zeros((2, 2), device=device, dtype=dtype).tolist(), [[0j, 0j], [0j, 0j]])
 
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.float16)
     def test_dtype_inference(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/36834
         with set_default_dtype(dtype):
             x = torch.tensor([3., 3. + 5.j], device=device)
-        self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
+        if dtype == torch.float16:
+            self.assertEqual(x.dtype, torch.chalf)
+        elif dtype == torch.float32:
+            self.assertEqual(x.dtype, torch.cfloat)
+        else:
+            self.assertEqual(x.dtype, torch.cdouble)
 
     @dtypes(*complex_types())
     def test_conj_copy(self, device, dtype):

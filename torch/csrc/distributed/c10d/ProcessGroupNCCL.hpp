@@ -981,10 +981,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int coalescing_state_ = 0;
 
   // Stores device indexes for all collectives run inside a coalescing block
-  std::vector<at::Device> coalescedDevices_;
+  at::Device coalescedDevice_ = at::Device("cuda");
 
   // Stores communicators for all collectives run inside a coalescing block
-  std::vector<std::shared_ptr<NCCLComm>> coalescedComms_;
+  std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
@@ -1063,11 +1063,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // the sequential number of the last colletive enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
-  uint64_t lastEnqueuedSeq_;
+  // initialized to be -1 to indicate no collective has been enqueued
+  int64_t lastEnqueuedSeq_{-1};
 
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
-  uint64_t lastCompletedSeq_;
+  // initialized to be -1 to indicate no collective has been completed
+  int64_t lastCompletedSeq_{-1};
 
   std::exception_ptr watchDogException_ = nullptr;
 
