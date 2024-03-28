@@ -684,7 +684,7 @@ class QLinearUnpackedDynamicFp16 final {
   }
 
   static at::Tensor meta(
-      const at::Tensor& input,
+      at::Tensor input,
       const at::Tensor& weight,
       const at::Tensor& bias) {
     // We make a strong guarantee that models using these operators will have
@@ -706,8 +706,8 @@ class QLinearUnpackedDynamicFp16 final {
 #else // USE_FBGEMM
   static at::Tensor run(
       at::Tensor /* input */,
-      const at::Tensor weight,
-      const at::Tensor bias) {
+      const at::Tensor& weight,
+      const at::Tensor& bias) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -717,8 +717,8 @@ class QLinearUnpackedDynamicFp16 final {
 
   static at::Tensor meta(
       at::Tensor /* input */,
-      const at::Tensor weight,
-      const at::Tensor bias) {
+      const at::Tensor& weight,
+      const at::Tensor& bias) {
     TORCH_CHECK(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
