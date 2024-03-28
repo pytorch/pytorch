@@ -34,6 +34,7 @@ from torch.testing._internal.common_fsdp import (
     patch_post_backward,
     patch_reduce_scatter,
     patch_unshard,
+    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -251,6 +252,7 @@ class TestFullyShardCommunication(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_fully_shard_communication_count(self):
         """
         Tests that FSDP issues the expected number of all-gathers and

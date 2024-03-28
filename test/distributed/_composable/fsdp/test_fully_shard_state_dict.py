@@ -16,7 +16,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_fsdp import FSDPTest, MLP, test_compiled_fsdp
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -26,6 +26,7 @@ class TestFullyShardStateDict(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_1d_state_dict_save_load(self):
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5]},
