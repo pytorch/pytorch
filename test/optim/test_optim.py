@@ -746,7 +746,7 @@ class TestDifferentiableOptimizer(TestCase):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        state["step"] = 0
+        state["step"] = torch.zeros((), dtype=torch.float64)
         state["square_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state["momentum_buffer"] = torch.rand(
             10, requires_grad=True, dtype=torch.float64

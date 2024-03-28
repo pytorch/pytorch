@@ -64,6 +64,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adam_amsgrad_capturable_cuda": 6,
     "test_adadelta_tensor_lr_capturable_cuda": 6,
+    "test_rmsprop_tensor_lr_capturable_cuda": 6,
     "test_adadelta_tensor_lr_capturable_foreach_cuda": 4,
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
@@ -72,6 +73,9 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_momentum_dampening_foreach_cuda": 5,
     "test_sgd_momentum_foreach_cuda": 5,
+    "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
+    "test_sgd_momentum_weight_decay_foreach_cuda": 2,
+    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
 }
 
 # also tracks currently supported optimizers
@@ -80,7 +84,7 @@ KERNEL_COUNTS = {
     AdamW: KernelCounts(multitensor=2, singletensor=8),
     NAdam: KernelCounts(multitensor=2, singletensor=8),
     Rprop: KernelCounts(multitensor=1, singletensor=4),
-    RMSprop: KernelCounts(multitensor=1, singletensor=4),
+    RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=8),
@@ -424,7 +428,7 @@ class CompiledOptimizerTests(TestCase):
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
-    test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
+    test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
