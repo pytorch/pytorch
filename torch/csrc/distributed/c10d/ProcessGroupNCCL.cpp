@@ -26,6 +26,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
@@ -914,8 +915,17 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
+  using IntraNodeComm = intra_node_comm::IntraNodeComm;
+  if (!IntraNodeComm::isEnabled()) {
+    return nullptr;
+  }
+  auto prefixStore = c10::make_intrusive<PrefixStore>("IntraNodeComm", store_);
+  auto comm = c10::make_intrusive<IntraNodeComm>(prefixStore, rank_, size_);
+  if (comm->rendezvous()) {
+    return comm;
+  } else {
+    return nullptr;
+  }
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -1158,6 +1168,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
+              << writer.getWriterTarget();
     writer.write(ncclTrace);
     return true;
   }
@@ -2035,16 +2047,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
             reinterpret_cast<void*>(segmentInfo.address),
             segmentInfo.total_size);
       }
-
-      // Record the mapping between ncclComm and device index so that later
-      // register hook can register a newly allocated segment to communicators
-      // on the same device.
-      // NOTE: we need remove the communicator from this map when it is
-      // destroyed, otherwise may register onto an invalid communicator.
-      ncclCommDevIdxMapMutex.lock();
-      ncclCommDevIdxMap.emplace(ncclComm, device.index());
-      ncclCommDevIdxMapMutex.unlock();
     }
+    // Record the mapping between ncclComm and device index so that later
+    // register hook can register a newly allocated segment to communicators
+    // on the same device.
+    // NOTE: we need remove the communicator from this map when it is
+    // destroyed, otherwise may register onto an invalid communicator.
+    ncclCommDevIdxMapMutex.lock();
+    ncclCommDevIdxMap.emplace(ncclComm, device.index());
+    ncclCommDevIdxMapMutex.unlock();
   }
 
   it = devNCCLCommMap_.find(deviceKey);
@@ -2228,8 +2239,8 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 void ProcessGroupNCCL::startCoalescing() {
-  coalescedDevices_.clear();
-  coalescedComms_.clear();
+  coalescedDevice_.set_index(-1);
+  coalescedComm_ = nullptr;
   coalescing_state_ |= CoalActive;
   groupStart();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
@@ -2249,17 +2260,20 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
-  if (coalescedComms_.size() == 0) {
+  if (coalescedComm_ == nullptr) {
     // There is no actual work being coalesced, return here
     groupEnd();
     coalescing_state_ = 0;
     return nullptr;
   }
+  TORCH_CHECK(
+      coalescedDevice_.index() >= 0,
+      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
 
-  // `coalescedComms_` should have same set of comms across collectives
-  auto comm = coalescedComms_[0];
-  // `coalescedDevices_` should have same set of devices across collectives
-  auto device = coalescedDevices_[0];
+  // `coalescedComm_` should have same set of comms across collectives
+  auto comm = coalescedComm_;
+  // `coalescedDevice_` should have same set of devices across collectives
+  auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
@@ -2309,6 +2323,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
 
   coalescing_state_ = 0;
+  coalescedComm_ = nullptr;
   return work;
 }
 
@@ -2343,8 +2358,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalColl;
-    coalescedDevices_.push_back(device);
-    coalescedComms_.push_back(ncclComm);
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2706,8 +2730,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalP2P;
-    coalescedDevices_.push_back(device);
-    coalescedComms_.push_back(ncclComm);
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
