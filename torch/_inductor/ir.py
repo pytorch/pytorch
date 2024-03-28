@@ -6624,9 +6624,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                std::string post_op_name,
+                c10::string_view post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
-                std::string post_op_algorithm)"""
+                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -6759,11 +6759,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     ):
         """
         if bias is not None
-            - inputs = [x, w, b, weight_scale, weight_zp, accum]
+            - inputs = [x, w, b, weight_scale, weight_zp, x2]
             - const_args is: [x_scale, x_zp, o_inv_scale, o_zp,
               fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         else
-            - inputs = [x, w, weight_scale, weight_zp, accum]
+            - inputs = [x, w, weight_scale, weight_zp, x2]
             - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
               fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
@@ -6802,14 +6802,14 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                c10::optional<at::Tensor> accum,
-                double accum_scale,
-                int64_t accum_zero_point,
-                std::string binary_post_op,
+                c10::optional<at::Tensor> other,
+                double other_scale,
+                int64_t other_zero_point,
+                c10::string_view binary_post_op,
                 double binary_alpha,
-                std::string unary_post_op,
+                c10::string_view unary_post_op,
                 torch::List<c10::optional<at::Scalar>> unary_post_op_args,
-                std::string unary_post_op_algorithm)"""
+                c10::string_view unary_post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -6820,7 +6820,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         x = args[0]
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
-        w_scale, w_zp, accum = args[-3], args[-2], args[-1]
+        w_scale, w_zp, other = args[-3], args[-2], args[-1]
         if self.x_scale_zp_are_tensors:
             assert len(args) >= 5
             x_scale, x_zp = args[-5], args[-4]
@@ -6828,8 +6828,8 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 o_inv_scale,
                 o_zp,
                 output_dtype,
-                accum_scale,
-                accum_zp,
+                other_scale,
+                other_zp,
                 binary_attr,
                 alpha,
                 unary_attr,
@@ -6844,8 +6844,8 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 o_inv_scale,
                 o_zp,
                 output_dtype,
-                accum_scale,
-                accum_zp,
+                other_scale,
+                other_zp,
                 binary_attr,
                 alpha,
                 unary_attr,
@@ -6864,9 +6864,9 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             o_inv_scale,
             o_zp,
             output_dtype,
-            accum,
-            accum_scale,
-            accum_zp,
+            other,
+            other_scale,
+            other_zp,
             binary_attr,
             alpha,
             unary_attr,
@@ -6897,9 +6897,9 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         o_inv_scale: float,
         output_zero_point: int,
         output_dtype,
-        accum: "TensorBox",
-        accum_scale,
-        accum_zp,
+        other: "TensorBox",
+        other_scale,
+        other_zp,
         binary_attr,
         alpha,
         unary_attr,
@@ -6930,14 +6930,15 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         w_scale.realize()
         w_zp.realize()
         inputs = inputs + [w_scale, w_zp]
-        accum = cls.require_stride_order(accum, req_stride_order)
-        inputs.append(accum)
+        if binary_attr == "sum":
+            other = cls.require_stride_order(other, req_stride_order)
+        inputs.append(other)
         constant_args = constant_args + [
             o_inv_scale,
             output_zero_point,
             output_dtype,
-            accum_scale,
-            accum_zp,
+            other_scale,
+            other_zp,
             binary_attr,
             alpha,
             unary_attr,
@@ -6945,16 +6946,25 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        packed = QLinearPointwiseBinaryPT2E(
-            layout=NoneLayout(accum.get_device()),
+        if binary_attr == "sum":
+            packed = QLinearPointwiseBinaryPT2E(
+                layout=NoneLayout(other.get_device()),
+                inputs=inputs,
+                constant_args=constant_args,
+                has_bias=(bias is not None),
+                x_scale_zp_are_tensors=x_scale_zp_are_tensors,
+            )
+            mark_node_as_mutating(packed, other)
+            # Return other since it has been inplace changed.
+            return packed.inputs[-1]
+
+        return QLinearPointwiseBinaryPT2E(
+            layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
             has_bias=(bias is not None),
             x_scale_zp_are_tensors=x_scale_zp_are_tensors,
         )
-        mark_node_as_mutating(packed, accum)
-        # Return accum since it has been inplace changed.
-        return packed.inputs[-1]
 
 
 @dataclasses.dataclass
