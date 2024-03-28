@@ -88,7 +88,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.cuda-version != 'cpu' }}
+        if: ${{ inputs.cuda-version != 'cpu' && hashFiles('/.inarc') == '' }}
 
       - name: Output disk space left
         run: |
