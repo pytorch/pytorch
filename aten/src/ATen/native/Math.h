@@ -4,6 +4,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <cfloat>
