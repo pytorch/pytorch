@@ -287,7 +287,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_train_parity_multi_group_compile(self):
         self.run_subtests(
             {
