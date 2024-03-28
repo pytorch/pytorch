@@ -88,6 +88,10 @@ def parallelize_module(  # type: ignore[return]
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
+            if not isinstance(parallelize_style, ParallelStyle):
+                raise RuntimeError(
+                    f"Expect ParallelStyle, but got {type(parallelize_style)}!"
+                )
             sub_module = module.get_submodule(module_path)
             parent_module = module
             if "." in module_path:
