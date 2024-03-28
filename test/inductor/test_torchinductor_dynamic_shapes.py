@@ -93,7 +93,6 @@ if HAS_CPU:
     class DynamicShapesCpuTests(TestCase):
         common = check_model
         device = "cpu"
-        device_type = device
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
@@ -103,7 +102,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
-        device_type = device
 
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures

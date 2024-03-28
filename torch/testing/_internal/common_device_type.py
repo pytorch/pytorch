@@ -1141,7 +1141,12 @@ class expectedFailure:
 
         @wraps(fn)
         def efail_fn(slf, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
+            if not hasattr(slf, "device_type") and hasattr(slf, "device") and isinstance(getattr(slf, "device"), str):
+                target_device_type = slf.device
+            else:
+                target_device_type = slf.device_type
+
+            if self.device_type is None or self.device_type == target_device_type:
                 try:
                     fn(slf, *args, **kwargs)
                 except Exception:

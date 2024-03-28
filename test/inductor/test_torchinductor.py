@@ -9536,7 +9536,6 @@ if HAS_CPU and RUN_CPU:
     class CpuTests(TestCase):
         common = check_model
         device = "cpu"
-        device_type = device
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
@@ -9550,7 +9549,6 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
     class GPUTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
-        device_type = device
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 

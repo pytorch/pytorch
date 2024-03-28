@@ -379,7 +379,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
     class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
         device = GPU_TYPE
-        device_type = device
 
         def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(

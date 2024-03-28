@@ -1483,7 +1483,6 @@ def collect_defined_kernels(kernel_list):
 
 
 def is_gpu(device: str):
-    assert isinstance(device, str)
     return device in ["cuda", "xpu"]
 
 
