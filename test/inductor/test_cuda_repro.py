@@ -1120,6 +1120,19 @@ class CudaReproTests(TestCase):
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
 
+    def test_compile_debug(self):
+        @torch.compile(dynamic=True)
+        def model(x):
+            y = x.sin()
+            z = y.cos()
+            return y, z
+
+        try:
+            model_input = torch.randn([8192, 1024], device="cuda")
+            _, _ = model(model_input)
+        except Exception as e:
+            unittest.TestCase.fail(f"failed with exception: {e}")
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
