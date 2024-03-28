@@ -48,6 +48,7 @@ class TestHOPGeneric(TestCase):
         self.assertTrue(len(missing_ops) == 0, f"Missing op info for {missing_ops}")
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestHOP(TestCase):
     def _compare(self, eager_model, export, args, kwargs):
