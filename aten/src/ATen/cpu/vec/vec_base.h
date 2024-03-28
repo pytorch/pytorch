@@ -228,6 +228,11 @@ public:
     std::memcpy(vector.values, ptr, count * sizeof(T));
     return vector;
   }
+  static Vectorized<T> loadu_one_fourth(const void* ptr) {
+    static_assert(std::is_same_v<T, signed char> || std::is_same_v<T, unsigned char>, "For byte types only");
+    return Vectorized::loadu(ptr, 8);
+  }
+
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
@@ -835,8 +840,8 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
-  Vectorized<T> ones;  // All bits are 1
-  memset((T*) ones, 0xFF, VECTOR_WIDTH);
+  using int_t = int_same_size_t<T>;
+  Vectorized<T> ones(c10::bit_cast<T>((int_t)(~(int_t)0)));  // All bits are 1
   return a ^ ones;
 }
 
@@ -1106,3 +1111,7 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
 }
 
 }} // namespace at::vec::CPU_CAPABILITY
+
+// additional headers for more operations that depend on vec_base
+#include <ATen/cpu/vec/vec_n.h>
+#include <ATen/cpu/vec/vec_mask.h>
