@@ -332,7 +332,7 @@ numpy_default_int = "int64"
 use_numpy_random_stream = False
 
 # Use C++ guard manager
-enable_cpp_guard_manager = False
+enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
 
 
 def is_fbcode():
