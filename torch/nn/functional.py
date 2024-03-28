@@ -2479,8 +2479,8 @@ def _verify_batch_size(size: List[int]) -> None:
 
 def batch_norm(
     input: Tensor,
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
+    running_mean: Optional[Tensor] = None,
+    running_var: Optional[Tensor] = None,
     weight: Optional[Tensor] = None,
     bias: Optional[Tensor] = None,
     training: bool = False,
