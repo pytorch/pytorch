@@ -10,7 +10,7 @@ class A:
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 4),),
+    example_inputs=(torch.randn(3, 4),),
     tags={"python.builtin"},
     support_level=SupportLevel.SUPPORTED,
 )
