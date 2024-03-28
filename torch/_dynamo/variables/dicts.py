@@ -14,6 +14,7 @@ from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from ..eval_frame import skip_code
 
@@ -59,6 +60,11 @@ def is_hashable(x):
 
 
 class ConstDictVariable(VariableTracker):
+    _nonvar_fields = {
+        "user_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     class _HashableTracker:
         """
         Auxiliary opaque internal class that wraps a VariableTracker and makes it hashable
@@ -423,7 +429,7 @@ class DictView(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(
             [
-                create_instruction("LOAD_METHOD", argval=self.kv),
+                create_load_method(self.kv),
                 *create_call_method(0),
             ]
         )

@@ -241,6 +241,15 @@ enforce_cond_guards_match = True
 # no optimization.
 optimize_ddp: Union[bool, str] = True
 
+# By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
+# In some cases those asserts could be performance costly
+# E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
+# Setting this to True keeps them hinting to symbolic shapes engine,
+# but not be emitted in the graph.
+do_not_emit_runtime_asserts: bool = (
+    os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1"
+)
+
 _ddp_optimization_mode = [
     "ddp_optimizer",
     "python_reducer",  # experimental mode
@@ -323,7 +332,12 @@ numpy_default_int = "int64"
 use_numpy_random_stream = False
 
 # Use C++ guard manager
-enable_cpp_guard_manager = False
+enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
+
+# Inline inbuilt nn modules
+inline_inbuilt_nn_modules = (
+    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
+)
 
 
 def is_fbcode():
