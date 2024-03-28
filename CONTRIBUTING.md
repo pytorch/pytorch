@@ -251,12 +251,6 @@ into the repo directory.
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
     using both PyTorch and Caffe2.
-* [caffe2](caffe2) - The Caffe2 library.
-  * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
-    blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
-  * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
 ## Unit testing

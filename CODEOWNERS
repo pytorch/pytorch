@@ -122,10 +122,6 @@ aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
 aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
 aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
 c10/hip @jeffdaily @jithunnair-amd
-caffe2/core/hip @jeffdaily @jithunnair-amd
-caffe2/operators/hip @jeffdaily @jithunnair-amd
-caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
-caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
@@ -133,7 +129,6 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki
-/caffe2/serialize/ @mikaylagawarecki
 /torch/serialization.py @mikaylagawarecki
 /torch/storage.py @mikaylagawarecki
 /torch/csrc/Storage* @mikaylagawarecki

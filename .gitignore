@@ -33,7 +33,6 @@ aten/build/
 aten/src/ATen/Config.h
 aten/src/ATen/cuda/CUDAConfig.h
 benchmarks/.data
-caffe2/cpp_test/
 dist/
 docs/build/
 docs/cpp/src
@@ -266,9 +265,6 @@ docs/dev
 LOCK
 CURRENT
 MANIFEST-*
-
-# generated version file
-caffe2/version.py
 
 # setup.py intermediates
 .eggs

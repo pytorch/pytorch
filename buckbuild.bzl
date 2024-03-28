@@ -2023,9 +2023,6 @@ def define_buck_targets(
         exported_headers = subdir_glob(
             [
                 ("", "torch/csrc/jit/ir/*.h"),
-                ("", "caffe2/serialize/*.h"),
-                ("", "caffe2/utils/*.h"),
-                ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
                 ("", "torch/csrc/api/include/torch/*.h"),
                 ("", "torch/csrc/autograd/*.h"),
@@ -2208,7 +2205,6 @@ def define_buck_targets(
         ],
         header_namespace = "",
         exported_headers = [
-            "caffe2/serialize/versions.h",
             "torch/csrc/jit/backends/backend_exception.h",
             "torch/csrc/jit/mobile/register_ops_common_utils.h",
             "torch/csrc/jit/runtime/instruction.h",

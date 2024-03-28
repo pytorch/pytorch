@@ -6,53 +6,6 @@ load(
 )
 
 def define_targets(rules):
-    rules.cc_library(
-        name = "caffe2_core_macros",
-        hdrs = [":caffe2_core_macros_h"],
-    )
-
-    rules.cmake_configure_file(
-        name = "caffe2_core_macros_h",
-        src = "caffe2/core/macros.h.in",
-        out = "caffe2/core/macros.h",
-        definitions = [
-            "CAFFE2_BUILD_SHARED_LIBS",
-            "CAFFE2_PERF_WITH_AVX",
-            "CAFFE2_PERF_WITH_AVX2",
-            "CAFFE2_PERF_WITH_AVX512",
-            "CAFFE2_USE_EXCEPTION_PTR",
-            "CAFFE2_USE_CUDNN",
-            "USE_MKLDNN",
-            "CAFFE2_USE_ITT",
-            "USE_ROCM_KERNEL_ASSERT",
-            "EIGEN_MPL2_ONLY",
-        ],
-    )
-
-    rules.cc_library(
-        name = "caffe2_serialize",
-        srcs = [
-            "caffe2/serialize/file_adapter.cc",
-            "caffe2/serialize/inline_container.cc",
-            "caffe2/serialize/istream_adapter.cc",
-            "caffe2/serialize/read_adapter_interface.cc",
-        ],
-        copts = ["-fexceptions"],
-        tags = [
-            "-fbcode",
-            "supermodule:android/default/pytorch",
-            "supermodule:ios/default/public.pytorch",
-            "xplat",
-        ],
-        visibility = ["//visibility:public"],
-        deps = [
-            ":caffe2_headers",
-            "//c10",
-            "//third_party/miniz-2.1.0:miniz",
-            "@com_github_glog//:glog",
-        ],
-    )
-
     #
     # ATen generated code
     # You need to keep this is sync with the files written out
