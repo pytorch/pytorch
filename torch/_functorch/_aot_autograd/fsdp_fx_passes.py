@@ -727,3 +727,227 @@ def replace_foreach_reduce_scatter_copy_in_pattern(mod):
             mod.graph.erase_node(node)
     mod.graph.lint()
     mod.recompile()
+
+
+def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
+    """
+    ======== [Case 1] no `aten.empty` reuse ========
+
+    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
+    getitem: "f32[2048]" = split_with_sizes[0]
+    getitem_1: "f32[64]" = split_with_sizes[1]
+    getitem_2: "f32[2048]" = split_with_sizes[2]
+    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
+    copy__default = torch.ops.aten.copy_.default(getitem, desc_of_primals_2);
+    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, desc_of_primals_3);
+    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, desc_of_primals_4);
+    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, desc_of_primals_5);
+    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+
+    ... (uses `wait_tensor` in compute)
+
+    empty_A: "f32[...]" = torch.ops.aten.empty.memory_format([...], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    slice_X: "f32[...]" = torch.ops.aten.slice.Tensor(empty_A, 0, 0, ...);  empty = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_X, [2048, 64, 2048, 16])
+    getitem_Y: "f32[2048]" = split_with_sizes[0]
+    getitem_Z: "f32[64]" = split_with_sizes[1]
+    getitem_K: "f32[2048]" = split_with_sizes[2]
+    getitem_L: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
+    copy__default_4 = torch.ops.aten.copy_.default(getitem_Y, desc_of_primals_11);
+    copy__default_5 = torch.ops.aten.copy_.default(getitem_Z, desc_of_primals_12);
+    copy__default_6 = torch.ops.aten.copy_.default(getitem_K, desc_of_primals_13);
+    copy__default_7 = torch.ops.aten.copy_.default(getitem_L, desc_of_primals_14);
+    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_X, 2, '0')
+    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+
+    ... (uses `wait_tensor_1` in compute)
+
+    ->
+
+    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
+    getitem: "f32[2048]" = split_with_sizes[0]
+    getitem_1: "f32[64]" = split_with_sizes[1]
+    getitem_2: "f32[2048]" = split_with_sizes[2]
+    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
+    copy__default = torch.ops.aten.copy_.default(getitem, desc_of_primals_2);
+    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, desc_of_primals_3);
+    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, desc_of_primals_4);
+    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, desc_of_primals_5);
+    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    empty_A: "f32[...]" = torch.ops.aten.empty.memory_format([...], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    slice_X: "f32[...]" = torch.ops.aten.slice.Tensor(empty_A, 0, 0, ...);  empty = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_X, [2048, 64, 2048, 16])
+    getitem_Y: "f32[2048]" = split_with_sizes[0]
+    getitem_Z: "f32[64]" = split_with_sizes[1]
+    getitem_K: "f32[2048]" = split_with_sizes[2]
+    getitem_L: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
+    copy__default_4 = torch.ops.aten.copy_.default(getitem_Y, desc_of_primals_11);
+    copy__default_5 = torch.ops.aten.copy_.default(getitem_Z, desc_of_primals_12);
+    copy__default_6 = torch.ops.aten.copy_.default(getitem_K, desc_of_primals_13);
+    copy__default_7 = torch.ops.aten.copy_.default(getitem_L, desc_of_primals_14);
+    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_X, 2, '0')
+
+    ... (uses `wait_tensor` in compute, which overlaps with `all_gather_into_tensor_1` comm op)
+
+    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+
+    ... (uses `wait_tensor_1` in compute)
+
+    ======== [Case 2] has `aten.empty` reuse ========
+
+    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
+    getitem: "f32[2048]" = split_with_sizes[0]
+    getitem_1: "f32[64]" = split_with_sizes[1]
+    getitem_2: "f32[2048]" = split_with_sizes[2]
+    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
+    copy__default = torch.ops.aten.copy_.default(getitem, primals_2);  primals_2 = None
+    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, primals_3);  primals_3 = None
+    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, primals_4);  primals_4 = None
+    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, primals_5);  primals_5 = None
+    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+
+    ... (uses `wait_tensor` in compute)
+
+    copy__default_4 = torch.ops.aten.copy_.default(getitem, primals_11);  primals_11 = None
+    copy__default_5 = torch.ops.aten.copy_.default(getitem_1, primals_12);  primals_12 = None
+    copy__default_6 = torch.ops.aten.copy_.default(getitem_2, primals_13);  primals_13 = None
+    copy__default_7 = torch.ops.aten.copy_.default(getitem_3, primals_14);  primals_14 = None
+    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+
+    ... (uses `wait_tensor_1` in compute)
+
+    ->
+
+    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
+    getitem: "f32[2048]" = split_with_sizes[0]
+    getitem_1: "f32[64]" = split_with_sizes[1]
+    getitem_2: "f32[2048]" = split_with_sizes[2]
+    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
+    copy__default = torch.ops.aten.copy_.default(getitem, primals_2);  primals_2 = None
+    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, primals_3);  primals_3 = None
+    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, primals_4);  primals_4 = None
+    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, primals_5);  primals_5 = None
+    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+
+    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    copy__default_4 = torch.ops.aten.copy_.default(getitem, primals_11);  primals_11 = None
+    copy__default_5 = torch.ops.aten.copy_.default(getitem_1, primals_12);  primals_12 = None
+    copy__default_6 = torch.ops.aten.copy_.default(getitem_2, primals_13);  primals_13 = None
+    copy__default_7 = torch.ops.aten.copy_.default(getitem_3, primals_14);  primals_14 = None
+    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+    ... (uses `wait_tensor` in compute, which overlaps with `all_gather_into_tensor_1` comm op
+
+    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+
+    ... (uses `wait_tensor_1` in compute)
+    """
+    node_list = list(mod.graph.nodes)
+    prev_all_gather_wait_node = None
+    for i in range(len(node_list)):
+        n = node_list[i]
+        if (
+            n.target is torch.ops.aten.empty.memory_format
+            and (node_list[i+1].target is torch.ops.aten.slice.Tensor and node_list[i+1].args[0] == n)
+            and (node_list[i+2].target is torch.ops.aten.split_with_sizes.default and node_list[i+2].args[0] == node_list[i+1])
+        ):
+            slice_after_empty_node = node_list[i+1]
+            split_with_sizes_node_idx = i+2
+            split_with_sizes_node = node_list[split_with_sizes_node_idx]
+            num_blocks = len(split_with_sizes_node.args[1])
+            getitem_start_index = split_with_sizes_node_idx + 1
+            if not all(
+                node.target is operator.getitem and node.args[0] == split_with_sizes_node
+                for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
+            ):
+                continue
+            first_getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
+            inplace_copy_nodes_start_index = getitem_start_index+num_blocks
+            inplace_copy_nodes = node_list[inplace_copy_nodes_start_index:inplace_copy_nodes_start_index+num_blocks]
+            assert all(n.target is torch.ops.aten.copy_.default for n in inplace_copy_nodes)
+            all_gather_node = node_list[inplace_copy_nodes_start_index+num_blocks]
+            assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
+            first_all_gather_wait_node_idx = inplace_copy_nodes_start_index+num_blocks+1
+            prev_all_gather_wait_node = node_list[first_all_gather_wait_node_idx]
+            assert prev_all_gather_wait_node.target is torch.ops._c10d_functional.wait_tensor.default
+
+            for j in range(first_all_gather_wait_node_idx+1, len(node_list)):
+                nj = node_list[j]
+                if (
+                    nj.target is torch.ops.aten.empty.memory_format
+                    and (node_list[j+1].target is torch.ops.aten.slice.Tensor and node_list[j+1].args[0] == nj)
+                    and (node_list[j+2].target is torch.ops.aten.split_with_sizes.default and node_list[j+2].args[0] == node_list[j+1])
+                ):
+                    # Handle Case 1
+                    slice_after_empty_node = node_list[j+1]
+                    split_with_sizes_node_idx = j+2
+                    split_with_sizes_node = node_list[split_with_sizes_node_idx]
+                    num_blocks = len(split_with_sizes_node.args[1])
+                    getitem_start_index = split_with_sizes_node_idx + 1
+                    if not all(
+                        node.target is operator.getitem and node.args[0] == split_with_sizes_node
+                        for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
+                    ):
+                        continue
+                    getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
+                    inplace_copy_nodes_start_index = getitem_start_index+num_blocks
+                    inplace_copy_nodes = node_list[inplace_copy_nodes_start_index:inplace_copy_nodes_start_index+num_blocks]
+                    assert all(n.target is torch.ops.aten.copy_.default for n in inplace_copy_nodes)
+                    all_gather_node = node_list[inplace_copy_nodes_start_index+num_blocks]
+                    assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
+                    with mod.graph.inserting_after(prev_all_gather_wait_node):
+                        # NOTE: the last inserted op within `mod.graph.inserting_after` ctx appears *first* in graph.
+                        new_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor.default, nj.args, {})
+                        nj.replace_all_uses_with(new_all_gather_node)
+                        mod.graph.erase_node(nj)
+                        for copy_node in inplace_copy_nodes_reversed:
+                            mod.graph.call_function(torch.ops.aten.copy_.default, copy_node.args, {})
+                            mod.graph.erase_node(copy_node)
+                        for getitem_node in reversed(getitem_nodes):
+                            new_getitem_node = mod.graph.call_function(operator.getitem, getitem_node.args, {})
+                            getitem_node.replace_all_uses_with(new_getitem_node)
+                            mod.graph.erase_node(getitem_node)
+                        new_split_with_sizes_node = mod.graph.call_function(torch.ops.aten.split_with_sizes.default, split_with_sizes_node.args, {})
+                        split_with_sizes_node.replace_all_uses_with(new_split_with_sizes_node)
+                        mod.graph.erase_node(split_with_sizes_node)
+                        new_slice_after_empty_node = mod.graph.call_function(torch.ops.aten.slice.Tensor, slice_after_empty_node.args, {})
+                        slice_after_empty_node.replace_all_uses_with(new_slice_after_empty_node)
+                        mod.graph.erase_node(slice_after_empty_node)
+                        new_empty_node = mod.graph.call_function(torch.ops.aten.empty.memory_format, nj.args, {})
+                        nj.replace_all_uses_with(new_empty_node)
+                        mod.graph.erase_node(nj)
+                elif nj.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                    # Handle Case 2
+                    inplace_copy_nodes_reversed = []
+                    k = j - 1
+                    while k > first_all_gather_wait_node_idx:
+                        if node_list[k].target is torch.ops.aten.copy_.default and node_list[k].args[0] in first_getitem_nodes:
+                            # TODO(yf225): we also need to check `node_list[k].args[1]` is descendent of primals_X, and move up the entire chain starting from primals_X.
+                            # primals_X must not be used in any view ops in this graph (otherwise its alias mutation is hard to track and it might not be legal to move the chain up).
+                            inplace_copy_nodes_reversed.append(node_list[k])
+                        else:
+                            break
+                        k -= 1
+                    if len(inplace_copy_nodes_reversed) > 0:
+                        with mod.graph.inserting_after(prev_all_gather_wait_node):
+                            # NOTE: the last inserted op within `mod.graph.inserting_after` ctx appears *first* in graph.
+                            new_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor.default, nj.args, {})
+                            nj.replace_all_uses_with(new_all_gather_node)
+                            mod.graph.erase_node(nj)
+                            for copy_node in inplace_copy_nodes_reversed:
+                                mod.graph.call_function(torch.ops.aten.copy_.default, copy_node.args, {})
+                                mod.graph.erase_node(copy_node)
+                        prev_all_gather_wait_node = node_list[j+1]
+    mod.graph.lint()
+    mod.recompile()
