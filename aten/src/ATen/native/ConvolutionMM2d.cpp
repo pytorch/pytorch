@@ -543,6 +543,11 @@ Tensor& slow_conv2d_forward_out_cpu(
     IntArrayRef padding,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
+
+  TORCH_CHECK(kernel_size.size() == 2, "2D kernel_size expected");
+  TORCH_CHECK(stride.size() == 2, "2D stride expected");
+  TORCH_CHECK(padding.size() == 2, "2D padding expected");
+
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
