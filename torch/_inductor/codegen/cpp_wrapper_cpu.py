@@ -51,6 +51,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
+        self.custom_op_wrapper_loaded = False
 
         from .cpp import cexpr, CppPrinter
 
@@ -195,7 +196,24 @@ class CppWrapperCpu(WrapperCodeGen):
                 """
                 #include <pybind11/pybind11.h>
 
+                namespace py = pybind11;
                 using namespace torch::aot_inductor;
+
+                class RAIIPyObject {
+                public:
+                    RAIIPyObject(PyObject* obj) : obj_(obj) {}
+                    ~RAIIPyObject() {
+                        Py_XDECREF(obj_);
+                    }
+                    operator PyObject*() {
+                        return obj_;
+                    }
+                    PyObject* get() {
+                        return obj_;
+                    }
+                private:
+                    PyObject* obj_;
+                };
                 """
             )
 
@@ -494,7 +512,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
-                        self.prefix.splice("pybind11::gil_scoped_release release;")
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -1010,6 +1027,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 result.writeline("} // namespace torch")
             return
 
+        # cpp entry function for JIT with cpp wrapper
         result.writeline("'''\n)")
         result.splice(
             f"""
@@ -1035,7 +1053,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # Convert vector of at::Tensor to vector of AtenTensorHandle.
         # If we pass at::Tensor, the compilation will be too slow.
         wrapper_body += """
-                    input_handles = torch._C._aoti.unsafe_alloc_void_ptr_from_tensors(input_tensors)
+                    input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
         """
 
         # unwrap output tensor back to python scalar
@@ -1052,7 +1070,7 @@ class CppWrapperCpu(WrapperCodeGen):
             outputs_str = f"[{', '.join(outputs)}]"
         wrapper_body += f"""
                     output_handles = f(input_handles)
-                    output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptr(output_handles)
+                    output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs(output_handles)
                     return {outputs_str}
         """
 
@@ -1813,71 +1831,20 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
-        name,
-        kernel,
-        codegen_args,
-        cpp_op_schema,
-        cpp_kernel_key,
-        cpp_kernel_overload_name="",
-        op_overload=None,
+        buf_name: str,
+        python_kernel_name: str,
+        cpp_kernel_name: str,
+        codegen_args: List[str],
+        cpp_op_schema: str,
+        cpp_kernel_key: str,
+        cpp_kernel_overload_name: str = "",
+        op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
     ):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
-        if config.is_fbcode():
-            assert op_overload is not None
-            assert raw_args is not None
-            assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
-                name,
-                cpp_kernel_key,
-                op_overload,
-                raw_args,
-                outputs,
-            )
-        else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
-                name,
-                kernel,
-                codegen_args,
-                cpp_op_schema,
-                cpp_kernel_key,
-                cpp_kernel_overload_name,
-            )
-
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
-        self,
-        name,
-        kernel,
-        codegen_args,
-        cpp_op_schema,
-        cpp_kernel_key,
-        cpp_kernel_overload_name="",
-    ):
-        if cpp_kernel_key not in self.extern_call_ops:
-            self.writeline(
-                f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
-            )
-            self.writeline(
-                f'\t.findSchemaOrThrow("{kernel}", "{cpp_kernel_overload_name}")'
-            )
-            self.writeline(f"\t.typed<{cpp_op_schema}>();")
-            self.extern_call_ops.add(cpp_kernel_key)
-
-        self.writeline(
-            f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
-        )
-
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
-        self,
-        name,
-        cpp_kernel_key,
-        op_overload,
-        raw_args,  # contains both args and flatten kwargs
-        outputs,
-    ):
         def extract_output_name(out):
             assert out is not None, "None, i.e. optional output is not supported"
             if isinstance(out, ir.MultiOutput):
@@ -1888,10 +1855,169 @@ class CppWrapperCpu(WrapperCodeGen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        output_args = extract_output_name(outputs)
-        if isinstance(output_args, str):
-            output_args = [output_args]
+        output_args = None
+        if config.abi_compatible:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
 
+        if config.is_fbcode():
+            assert op_overload is not None
+            assert raw_args is not None
+            assert outputs is not None
+
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+                cpp_kernel_key,
+                op_overload,
+                raw_args,
+                output_args,
+            )
+        else:
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+                buf_name,
+                python_kernel_name,
+                cpp_kernel_name,
+                codegen_args,
+                cpp_op_schema,
+                cpp_kernel_key,
+                cpp_kernel_overload_name,
+                op_overload,
+                raw_args,
+                output_args,
+            )
+
+    def load_custom_op_wrapper(self):
+        # TODO: need to support control flow
+        if self.custom_op_wrapper_loaded:
+            return
+
+        lines = """
+RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache"));
+if (codecache_module.get() == NULL) {
+    throw std::runtime_error("Failed to load torch._inductor.codecache");
+}
+RAIIPyObject custom_op_wrapper(PyObject_GetAttrString(codecache_module, "custom_op_wrapper"));
+if (custom_op_wrapper.get() == NULL) {
+    throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
+}"""
+        self.writelines(lines.split("\n"))
+        self.custom_op_wrapper_loaded = True
+
+    def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
+        def generate_py_arg_inner(raw_arg, arg_type):
+            if isinstance(arg_type, torch.TensorType):
+                # Store AtenTensorHandle as void*
+                return f"PyCapsule_New(reinterpret_cast<void*>({raw_arg.codegen_reference()}.get()), NULL, NULL)"
+            elif isinstance(arg_type, torch.IntType):
+                # int
+                return f"PyInt_FromLong({raw_arg})"
+            elif isinstance(arg_type, torch.SymIntType):
+                # SymInt
+                expr = (
+                    raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
+                )
+                return f"PyInt_FromLong({self.expr_printer(expr)})"
+            elif isinstance(arg_type, torch.FloatType):
+                return f"PyFloat_FromDouble({raw_arg})"
+            elif isinstance(arg_type, torch.BoolType):
+                return f"PyBool_FromBool({raw_arg})"
+            else:
+                raise NotImplementedError(
+                    f"arg type {arg_type} is not yet supported by custom_op_wrapper"
+                )
+
+        lines = ""
+        if isinstance(arg_type, torch.ListType):
+            assert isinstance(raw_arg, (list, tuple)), str(raw_arg) + " is not a list"
+            lines += f"PyObject* {py_args_var}_{idx} = PyList_New({len(raw_arg)});\n"
+            for i, elem in enumerate(raw_arg):
+                lines += f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(elem, arg_type.getElementType())});\n"
+            lines += f"PyTuple_SetItem({py_args_var}, {idx}, {py_args_var}_{idx});\n"
+        else:
+            lines += f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(raw_arg, arg_type)});\n"
+        return lines
+
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+        self,
+        buf_name: str,
+        python_kernel_name: str,
+        cpp_kernel_name: str,
+        codegen_args: List[str],
+        cpp_op_schema: str,
+        cpp_kernel_key: str,
+        cpp_kernel_overload_name: str = "",
+        op_overload: Optional[torch._ops.OpOverload] = None,
+        raw_args=None,
+        output_args: Optional[List[str]] = None,
+    ):
+        if V.graph.aot_mode or not config.abi_compatible:
+            # Will update this to use an OSS version ProxyExecutor
+            if cpp_kernel_key not in self.extern_call_ops:
+                self.writeline(
+                    f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
+                )
+                self.writeline(
+                    f'\t.findSchemaOrThrow("{cpp_kernel_name}", "{cpp_kernel_overload_name}")'
+                )
+                self.writeline(f"\t.typed<{cpp_op_schema}>();")
+                self.extern_call_ops.add(cpp_kernel_key)
+
+            self.writeline(
+                f"auto {buf_name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
+            )
+        else:
+            # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
+            # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
+            # to invoke this custom op.
+            self.load_custom_op_wrapper()
+
+            assert output_args is not None, "output_args should not be None"
+            num_args = len(raw_args)
+            py_args_var = f"py_args_{next(self.arg_var_id)}"
+            # First arg is always the python op name
+            lines = f"""
+RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+if ({py_args_var}.get() == NULL) {{
+    throw std::runtime_error("PyTuple_New {py_args_var} failed");
+}}
+PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
+"""
+
+            assert op_overload is not None, "op_overload should not be None"
+            for idx, (raw_arg, schema_arg) in enumerate(
+                zip(raw_args, op_overload._schema.arguments)
+            ):
+                lines += self.generate_py_arg(
+                    py_args_var, idx + 1, raw_arg, schema_arg.real_type
+                )
+
+            lines += f"""
+// Call the custom op in Python
+RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
+if (py_{buf_name}.get() == NULL) {{
+    throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
+}}"""
+
+            if len(output_args) == 1:
+                # result is a single tensor
+                lines += f"""
+RAIIAtenTensorHandle {output_args[0]}(reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL)));"""
+            else:
+                # result is a tuple of tensors
+                for idx, output_arg in enumerate(output_args):
+                    lines += f"""
+RAIIAtenTensorHandle {output_arg}(
+    reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL)));"""
+
+            self.writelines(lines.split("\n"))
+
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+        self,
+        cpp_kernel_key,
+        op_overload,
+        raw_args,  # contains both args and flatten kwargs
+        output_args: Optional[List[str]] = None,
+    ):
         (
             tensor_call_args,
             int_call_args,
