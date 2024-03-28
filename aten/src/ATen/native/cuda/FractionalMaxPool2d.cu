@@ -47,8 +47,8 @@ template <typename scalar_t>
 __global__ void fractional_max_pool2d_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> output,
   PackedTensorAccessor<int64_t, 4> indices,
-  PackedTensorAccessor<scalar_t, 4> input,
-  PackedTensorAccessor<scalar_t, 3> samples,
+  PackedTensorAccessor<const scalar_t, 4> input,
+  PackedTensorAccessor<const scalar_t, 3> samples,
   int poolSizeH, int poolSizeW) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
@@ -186,10 +186,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
     input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
-      auto devInput = input_.packed_accessor64<scalar_t, 4>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 4>();
       auto devOutput = output_.packed_accessor64<scalar_t, 4>();
       auto devIndices = indices_.packed_accessor64<int64_t, 4>();
-      auto devSamples = randomSamples.packed_accessor64<scalar_t, 3>();
+      auto devSamples = randomSamples.packed_accessor64<const scalar_t, 3>();
       fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,

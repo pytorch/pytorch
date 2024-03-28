@@ -337,9 +337,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->data_ptr<scalar_t>(),
+              args.mata->const_data_ptr<scalar_t>(),
               args.lda,
-              args.matb->data_ptr<scalar_t>(),
+              args.matb->const_data_ptr<scalar_t>(),
               args.ldb,
 #if defined(USE_ROCM)
               // This condition is needed for mm case on ROCm for hipblasLt path.
