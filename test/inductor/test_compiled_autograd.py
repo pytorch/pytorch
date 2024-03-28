@@ -24,6 +24,7 @@ def compiler_fn(gm):
     def inner_compiler(gm_, example_inputs_):
         counters["compiled_autograd"]["compiles"] += 1
         return inductor.compile(gm_, example_inputs_)
+        # return torch._dynamo.backends.debugging.eager(gm_, example_inputs_)
 
     return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
 
@@ -207,6 +208,54 @@ main()
                 model.zero_grad()
 
         self.check_output_and_recompiles(fn)
+
+    def test_dynamo_boxed(self):
+        def get_placeholders(gm_):
+            placeholders = []
+            for node in gm_.graph.nodes:
+                if node.op == "placeholder":
+                    placeholders.append(node)
+            return placeholders
+
+        def eager_with_check(gm, is_bwd):
+            def inner_compiler(gm_, example_inputs_):
+                placeholders = get_placeholders(gm_)
+                if is_bwd:
+                    # should be boxed inputs
+                    # assert len(placeholders) == 1
+                    pass
+                else:
+                    assert len(placeholders) > 1
+
+                return gm_
+
+            return torch.compile(gm, backend=inner_compiler)
+
+        fwd_compiler_fn = functools.partial(eager_with_check, is_bwd=False)
+        bwd_compiler_fn = functools.partial(eager_with_check, is_bwd=True)
+
+        def fn(inputs):
+            args_0, args_1, args_2 = inputs
+            out = torch.mm(args_0, args_1)
+            out = torch.mm(out, args_2)
+            loss = out.sum()
+            with compiled_autograd.enable(bwd_compiler_fn):
+                loss.backward()
+            yield args_0.grad
+            yield args_1.grad
+            yield args_2.grad
+
+        inputs = [
+            torch.randn([1, 2], requires_grad=True),
+            torch.randn([2, 3], requires_grad=True),
+            torch.randn([3, 4], requires_grad=True)]
+
+        compiled_fn = eager_with_check(fn, is_bwd=False)
+        grads = list(compiled_fn(inputs))
+        self.assertEqual(len(grads), 3)
+        self.assertNotEqual(grads[0], None)
+        self.assertNotEqual(grads[1], None)
+        self.assertNotEqual(grads[2], None)
 
     def test_implicit_add(self):
         def fn():
