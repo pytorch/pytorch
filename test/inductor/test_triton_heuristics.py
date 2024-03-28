@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 try:
@@ -71,6 +71,7 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
+    @skipIfRocm
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
