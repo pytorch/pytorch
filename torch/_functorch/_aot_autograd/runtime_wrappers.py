@@ -77,7 +77,7 @@ def create_runtime_wrapper(
     def runtime_wrapper(*args):
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         if num_tokens > 0:
-            args = (*[torch.empty(0)] * num_tokens, *args)
+            args = ([None] * num_tokens, *args)
 
         if trace_joint:
             args_ = list(args)
