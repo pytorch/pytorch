@@ -718,7 +718,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
 
-        if self.fn == dist.all_reduce:
+        if self.fn in [dist.all_reduce, dist.reduce_scatter_tensor]:
             reduce_op_var = kwargs.get("op")
             reduce_op = (
                 reduce_op_var.value
