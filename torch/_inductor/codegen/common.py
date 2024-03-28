@@ -422,18 +422,18 @@ class PythonPrinter(ExprPrinter):
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
 
+    def _print_OpaqueUnaryFn_sqrt(self, expr):
+        return self._helper_sqrt(expr.args[0])
+
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
-        # NB: Remember this is sizevar computation!  You don't typically
-        # expect to have to do floating point computation including exponents
-        # in sizevar compute.  Instead of adding support for floating
-        # point pow, you should make upstream retranslate the Sympy expression
-        # into Tensor expressions earlier and do that instead.
-        if exp == 0.5:
-            return self._helper_sqrt(base)
-        elif exp == -0.5:
-            return "1/" + self._helper_sqrt(base)
+        if exp == 0.5 or exp == -0.5:
+            raise AssertionError(
+                "Direct use of sympy.sqrt is not allowed as its numerics differ "
+                "from floating point sqrt; use OpaqueUnaryFn_sqrt "
+                "instead which ensures accurate floating point behavior."
+            )
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
@@ -464,39 +464,39 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
-    def _print_cos(self, expr):
+    def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
         return f"math.cos({self._print(expr.args[0])})"
 
-    def _print_cosh(self, expr):
+    def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
         return f"math.cosh({self._print(expr.args[0])})"
 
-    def _print_acos(self, expr):
+    def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
         return f"math.acos({self._print(expr.args[0])})"
 
-    def _print_sin(self, expr):
+    def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
         return f"math.sin({self._print(expr.args[0])})"
 
-    def _print_sinh(self, expr):
+    def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
         return f"math.sinh({self._print(expr.args[0])})"
 
-    def _print_asin(self, expr):
+    def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
         return f"math.asin({self._print(expr.args[0])})"
 
-    def _print_tan(self, expr):
+    def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
         return f"math.tan({self._print(expr.args[0])})"
 
-    def _print_tanh(self, expr):
+    def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
         return f"math.tanh({self._print(expr.args[0])})"
 
-    def _print_atan(self, expr):
+    def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
