@@ -2256,7 +2256,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         torch.manual_seed(1234)
         mod = M().eval()
-        x_shape = (1, 1, 256)
+        x_shape = (2, 1, 256)
         w_shape = (12, 256)
         s_shape = 12
         x = torch.randn(x_shape, dtype=torch.bfloat16)
