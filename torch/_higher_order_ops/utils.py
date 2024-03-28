@@ -6,7 +6,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import _ModuleStackTracer, make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -79,12 +79,18 @@ def _maybe_run_with_interpreter(fn):
 # We'll use the current decomposition table to make sure operators in subgraphs are
 # decomposed properly.
 # We also need to maybe run with interpreter for propagating stack_trace
-def reenter_make_fx(fn, pre_dispatch=False):
+def reenter_make_fx(proxy_mode, fn):
+    record_module_stack = False
+    if isinstance(proxy_mode.tracer, _ModuleStackTracer):
+        fn._orig_mod = proxy_mode.tracer.scope_root
+        record_module_stack = True
+
     decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
     return make_fx(
         _maybe_run_with_interpreter(fn),
         decomposition_table=decomp_table,
-        pre_dispatch=pre_dispatch,
+        pre_dispatch=getattr(proxy_mode, "pre_dispatch", False),
+        record_module_stack=record_module_stack,
     )
 
 
