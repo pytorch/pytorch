@@ -12,7 +12,7 @@ inputs:
   s3_bucket:
     description: S3 bucket to upload/download PyTest cache
     required: false
-    default: ""
+    default: "gha-artifacts"
 
 runs:
   using: composite
