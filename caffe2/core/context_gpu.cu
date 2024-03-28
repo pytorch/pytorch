@@ -173,13 +173,13 @@ std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 // Ideally, a memory pool should already have the device id information, as
 // long as we are using UVA (as of CUDA 5 and later) so the addresses are
 // unique.
-static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
+static std::unordered_map<void*, c10::DeviceIndex> g_cuda_device_affiliation;
 
 // Data structures for optional memory tracking. Access to these structures
 // is guarded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
-static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
-static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_total_by_gpu_map(c10::Device::MAX_NUM_DEVICES, 0);
+static std::vector<long> g_max_by_gpu_map(c10::Device::MAX_NUM_DEVICES, 0);
 
 static long g_total_mem = 0;
 static long g_last_rep = 0;
@@ -208,10 +208,10 @@ static void Caffe2InitializeCuda() {
   // of GPUs.
   CAFFE_ENFORCE_LE(
       NumCudaDevices(),
-      C10_COMPILE_TIME_MAX_GPUS,
+      c10::Device::MAX_NUM_DEVICES,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
-      C10_COMPILE_TIME_MAX_GPUS,
+      c10::Device::MAX_NUM_DEVICES,
       "). Increase that and recompile.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {

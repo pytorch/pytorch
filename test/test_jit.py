@@ -3447,6 +3447,21 @@ def foo(x):
             else:
                 cu.define(full)
 
+    def test_int16_device_index(self):
+        # This used to fail after the switch from int8 to int16 DeviceIndex as the ArgumentInfo struct hardcoded
+        # the bit width. Thus, the default device (-1) wrapped around to 255.
+        # See https://github.com/pytorch/pytorch/issues/115331
+        tensor = torch.tensor([1.])
+        code_template = """
+        def fn(x):
+            return x.device
+        """
+        cu = torch.jit.CompilationUnit()
+        cu.define(code_template)
+        res = cu.fn(tensor)
+        self.assertEqual(tensor.device, res)
+
+
     def test_namedtuple_python(self):
         global MyTuple, MyMod  # see [local resolution in python]
         MyTuple = namedtuple('MyTuple', ['a'])

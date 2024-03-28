@@ -3181,7 +3181,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 #if UINTPTR_MAX == 0xFFFFFFFF
   // This is a 32-bit system
   static constexpr bool check_sizes() {
-    constexpr size_t tsize = 20 * sizeof(int64_t);
+    constexpr size_t tsize = 21 * sizeof(int64_t);
 
     // clang-format off
     are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();
@@ -3193,7 +3193,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
     are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
-    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(device_opt_),         6,  FieldNameEnum::device_opt_>();
     are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
     is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
@@ -3218,7 +3218,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
     are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
-    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(device_opt_),         6,  FieldNameEnum::device_opt_>();
     are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
     is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on

@@ -155,7 +155,7 @@ class MIOPENWrapper
 
     using PerGPUMIOPENStates = std::array<
         std::array<SyncedMIOPENState, CAFFE2_COMPILE_TIME_MAX_MIOPEN_STATES>,
-        C10_COMPILE_TIME_MAX_GPUS>;
+        c10::Device::MAX_NUM_DEVICES>;
     static PerGPUMIOPENStates& miopen_states();
 
     C10_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);
