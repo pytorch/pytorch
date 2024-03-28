@@ -86,6 +86,10 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,35
+
+
+
 detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
 
 
@@ -186,10 +190,6 @@ hf_Whisper,pass,0
 
 
 
-hf_clip,eager_fail_to_run,0
-
-
-
 hf_distil_whisper,pass,0
 
 
@@ -203,6 +203,10 @@ llama,pass,0
 
 
 llama_v2_7b_16h,model_fail_to_load,0
+
+
+
+llava,model_fail_to_load,0
 
 
 
@@ -230,7 +234,11 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
+moco,pass,5
+
+
+
+moondream,model_fail_to_load,0
 
 
 

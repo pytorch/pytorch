@@ -101,7 +101,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
 }
 
 // assume contiguous, we can construct stride from size
-inline at::Tensor construct_nested_strides(const at::Tensor& sizes) {
+at::Tensor construct_nested_strides(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return sizes;
@@ -139,7 +139,7 @@ inline at::Tensor construct_nested_strides(const at::Tensor& sizes) {
    *
    * @return A tensor of offsets
   */
-inline at::Tensor construct_offsets(const at::Tensor& sizes) {
+at::Tensor construct_offsets(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return at::empty({0}, sizes.options().dtype(kLong));
@@ -155,7 +155,7 @@ inline at::Tensor construct_offsets(const at::Tensor& sizes) {
   const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   for (const auto i : c10::irange(ntensors - 1)) {
-    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<int64_t>());
+    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies());
     offsets_ptr[i + 1] = offsets_ptr[i] + row_product;
     sizes_ptr += orig_dim;
   }

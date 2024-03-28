@@ -68,6 +68,7 @@ from typing import Callable, Dict, Optional, Tuple, Union, Set
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
     DefaultLogsSpecs,
+    LogsDest,
     LogsSpecs,
     MultiprocessContext,
     PContext,
@@ -88,6 +89,7 @@ __all__ = [
     "RunProcsResult",
     "SignalException",
     "Std",
+    "LogsDest",
     "LogsSpecs",
     "DefaultLogsSpecs",
     "SubprocessContext",

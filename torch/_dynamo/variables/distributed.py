@@ -9,6 +9,8 @@ from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
+from ..guards import GuardBuilder, install_guard
+from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -69,6 +71,29 @@ def is_constant_pg_functions(value):
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
+
+
+class WorldMetaClassVariable(DistributedVariable):
+    """
+    Tracks torch.distributed.GroupMember and torch.distributed.group, which are
+    instances of the metaclass _WorldMeta.
+    """
+
+    @classmethod
+    def is_group_member_type(cls, value):
+        if not cls.is_available():
+            return False
+
+        from torch.distributed.distributed_c10d import _WorldMeta
+
+        return type(value) is _WorldMeta
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "WORLD":
+            source = AttrSource(base=self.source, member="WORLD")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return ProcessGroupVariable(self.value.WORLD)
+        return super().var_getattr(tx, name)
 
 
 class PlacementClassVariable(DistributedVariable):
@@ -181,6 +206,8 @@ class DeviceMeshVariable(DistributedVariable):
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
+        if name == "device_type":
+            return ConstantVariable.create(self.value.device_type)
         return super().var_getattr(tx, name)
 
     def call_method(
@@ -305,7 +332,7 @@ class BackwardHookVariable(VariableTracker):
                 ),
             )
 
-        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module)
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module, "mod")
         user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
         user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
         proxy = tx.output.create_proxy(

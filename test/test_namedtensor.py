@@ -1079,6 +1079,21 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
             tensor.flatten((), 'abcd')
 
+    def test_flatten_index_error(self):
+        tensor = torch.randn(1, 2)
+        with self.assertRaisesRegex(IndexError,
+                                    r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)"):
+            tensor.flatten(0, 2)
+        with self.assertRaisesRegex(IndexError,
+                                    r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)"):
+            tensor.flatten(0, 2, 'N')
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"flatten\(\) has invalid args: start_dim cannot come after end_dim"):
+            tensor.flatten(1, 0)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"flatten\(\) has invalid args: start_dim cannot come after end_dim"):
+            tensor.flatten(1, 0, 'N')
+
     def test_unflatten(self):
         # test args: tensor, int, namedshape
         self.assertTrue(torch.equal(
