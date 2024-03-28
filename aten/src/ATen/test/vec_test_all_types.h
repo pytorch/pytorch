@@ -1444,6 +1444,24 @@ double getDefaultTolerance() {
 }
 
 template<typename T>
+at::vec::VecMask<T, 1> create_vec_mask(uint64_t bitmask) {
+  constexpr auto N = at::vec::Vectorized<T>::size();
+  std::array<int, N> mask;
+  for (int i = 0; i < N; i++) {
+    mask[i] = (bitmask >> i) & 1;
+  }
+  return at::vec::VecMask<T, 1>::from(mask.data());
+}
+
+template<typename T>
+at::vec::VecMask<T, 1> generate_vec_mask(int seed) {
+  constexpr auto N = at::vec::Vectorized<T>::size();
+  ValueGen<uint64_t> generator(0, (1ULL << N) - 1, seed);
+  auto bitmask = generator.get();
+  return create_vec_mask<T>(bitmask);
+}
+
+template<typename T>
 TestingCase<T> createDefaultUnaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
