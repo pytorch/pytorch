@@ -479,6 +479,9 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"std::atan({self._print(expr.args[0])})"
 
+    def _print_OpaqueUnaryFn_sqrt(self, expr):
+        return f"std::sqrt({self._print(expr.args[0])})"
+
     def _print_Round(self, expr):
         assert len(expr.args) == 1
         return f"std::lrint({self._print(expr.args[0])})"
