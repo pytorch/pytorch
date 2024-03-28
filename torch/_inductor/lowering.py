@@ -610,24 +610,22 @@ def _bmm_fallback(self: TensorBox, batch2: TensorBox):
     # Make the inputs of bmm contiguous
     # because bmm cpu implementation does contiguous() if not
     # this is to avoid additional copies in bmm
-    if (
-        self.get_device().type == "cpu"
-        and isinstance(self, TensorBox)
-        and isinstance(self.data, ir.View)
-        and isinstance(self.data.data, ir.PermuteView)
-        and self.data.data.dims == [0, 3, 1, 2]
-        and isinstance(self.data.data.data, ir.StorageBox)
-    ):
-        self = Pointwise.create(
-            device=self.get_device(),
-            dtype=self.get_dtype(),
-            inner_fn=self.make_loader(),
-            ranges=self.get_size(),
-            origin_node=self.get_origin_node(),
-            traceback=self.get_traceback(),
+    def do_bmm_input_contiguous(t: TensorBox):
+        t = Pointwise.create(
+            device=t.get_device(),
+            dtype=t.get_dtype(),
+            inner_fn=t.make_loader(),
+            ranges=t.get_size(),
+            origin_node=t.get_origin_node(),
+            traceback=t.get_traceback(),
         )
-        self.realize()
-        self.freeze_layout()
+        t.realize()
+        t.freeze_layout()
+        return t
+
+    if self.get_device().type == "cpu" and batch2.get_device().type == "cpu":
+        self = do_bmm_input_contiguous(self)
+        batch2 = do_bmm_input_contiguous(batch2)
     return fallback_handler(aten.bmm.default)(self, batch2)
 
 
