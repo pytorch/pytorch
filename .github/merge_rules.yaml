@@ -240,6 +240,9 @@
   patterns:
   - aten/src/ATen/xpu/**
   - c10/xpu/**
+  - torch/csrc/xpu/**
+  - torch/xpu/**
+  - test/xpu/**
   - third_party/xpu.txt
   approved_by:
   - EikanWang
