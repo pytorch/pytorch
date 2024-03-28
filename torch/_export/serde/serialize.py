@@ -190,6 +190,7 @@ class SerializedArtifact:
     exported_program: bytes
     state_dict: bytes
     constants: bytes
+    example_inputs: bytes
 
 
 @dataclass
@@ -197,6 +198,7 @@ class _SerializedProgram:
     exported_program: ExportedProgram
     state_dict: bytes
     constants: bytes
+    example_inputs: bytes
 
 
 def deserialize_device(d: Device) -> torch.device:
@@ -297,15 +299,15 @@ def serialize_torch_artifact(artifact: Dict[str, Any]) -> bytes:
         del copyreg.dispatch_table[FakeTensor]
 
 
-def deserialize_torch_artifact(serialized: Union[Dict[str, Any], bytes]):
-    if isinstance(serialized, dict):
+def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...], bytes]):
+    if isinstance(serialized, (dict, tuple)):
         return serialized
     if len(serialized) == 0:
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
     artifact = torch.load(buffer)
-    assert isinstance(artifact, dict)
+    assert isinstance(artifact, (tuple, dict))
     return artifact
 
 
@@ -1275,6 +1277,7 @@ class ExportedProgramSerializer:
             serialized_ep,
             serialize_torch_artifact(exported_program.state_dict),
             serialize_torch_artifact(constants),
+            serialize_torch_artifact(exported_program.example_inputs),
         )
 
 
@@ -1287,6 +1290,7 @@ class GraphModuleDeserializer:
         names_to_symbols: Dict[str, sympy.Symbol]
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
         constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]]
+        example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
     def __init__(self):
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
@@ -1670,6 +1674,7 @@ class GraphModuleDeserializer:
         serialized_graph_module: GraphModule,
         serialized_state_dict: Union[Dict[str, torch.Tensor], bytes],
         constants: Union[Dict[str, Any], bytes],
+        example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
@@ -1696,6 +1701,10 @@ class GraphModuleDeserializer:
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
 
+            if example_inputs is not None and len(example_inputs) > 0:
+                self.example_inputs = deserialize_torch_artifact(example_inputs)
+            else:
+                self.example_inputs = None
             self.deserialize_graph(serialized_graph_module.graph)
 
             module_call_graph = self.deserialize_module_call_graph(
@@ -1710,6 +1719,7 @@ class GraphModuleDeserializer:
                 names_to_symbols=self.symbol_name_to_symbol,
                 state_dict=deserialize_torch_artifact(serialized_state_dict),
                 constants=self.constants,
+                example_inputs=self.example_inputs,
             )
         finally:
             _CURRENT_DESERIALIZER = None
@@ -2042,6 +2052,7 @@ class ExportedProgramDeserializer:
         exported_program: ExportedProgram,
         state_dict: Union[Dict[str, torch.Tensor], bytes],
         constants: Union[Dict[str, torch.Tensor], bytes],
+        example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
     ) -> ep.ExportedProgram:
         assert isinstance(exported_program, ExportedProgram)
         version = exported_program.schema_version
@@ -2059,11 +2070,15 @@ class ExportedProgramDeserializer:
             )
             for k, v in exported_program.range_constraints.items()
         }
-        res = GraphModuleDeserializer().deserialize(
-            exported_program.graph_module,
-            state_dict,
-            constants,
-            symbol_name_to_range,
+        res = (
+            GraphModuleDeserializer()
+            .deserialize(
+                exported_program.graph_module,
+                state_dict,
+                constants,
+                example_inputs,
+                symbol_name_to_range,
+            )
         )
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range,
@@ -2083,7 +2098,7 @@ class ExportedProgramDeserializer:
             state_dict=res.state_dict,  # type: ignore[arg-type]
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
-            example_inputs=None,
+            example_inputs=res.example_inputs,
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
         )
@@ -2179,7 +2194,10 @@ def serialize(
     )
     json_bytes = json_program.encode("utf-8")
     artifact = SerializedArtifact(
-        json_bytes, serialized_program.state_dict, serialized_program.constants
+        json_bytes,
+        serialized_program.state_dict,
+        serialized_program.constants,
+        serialized_program.example_inputs
     )
     return artifact
 
@@ -2226,11 +2244,15 @@ def deserialize(
     assert isinstance(artifact.exported_program, bytes)
     exported_program_str = artifact.exported_program.decode("utf-8")
     exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(
-        ExportedProgram, exported_program_dict
-    )
-    return ExportedProgramDeserializer(expected_opset_version).deserialize(
-        serialized_exported_program, artifact.state_dict, artifact.constants
+    serialized_exported_program = _dict_to_dataclass(ExportedProgram, exported_program_dict)
+    return (
+        ExportedProgramDeserializer(expected_opset_version)
+        .deserialize(
+            serialized_exported_program,
+            artifact.state_dict,
+            artifact.constants,
+            artifact.example_inputs,
+        )
     )
 
 
@@ -2601,6 +2623,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     raise AssertionError(f"Unknown sym_int type: {s}")
             elif arg.type in (
                 "as_none",
+                "as_bool",
                 "as_int",
                 "as_float",
                 "as_string",
