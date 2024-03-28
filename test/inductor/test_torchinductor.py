@@ -6373,7 +6373,7 @@ class CommonTemplate:
         kwargs = {}
         if self.device == "cpu":
             kwargs["atol"] = 1e-4
-            kwargs["rtol"] = 1e-4
+            kwargs["rtol"] = 1.3e-5
 
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
