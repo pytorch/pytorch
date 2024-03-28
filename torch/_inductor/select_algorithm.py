@@ -16,6 +16,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+import torch.profiler.profiler as profiler
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -424,9 +425,23 @@ class TritonTemplateKernel(TritonKernel):
                 texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-            wrapper.writeline(
-                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
-            )
+
+            if profiler._capture_generated_kernel:
+                wrapper.writeline("if autograd_profiler._is_profiler_enabled:")
+                wrapper.writeline(
+                    f'    handle = _record_function_with_args_enter("{name}", getattr({name}, "__file__", '
+                    "),"
+                    f"{', '.join(call_args)}, grid=\"{grid_call}\", stream={stream_name})"
+                )
+                wrapper.writeline(
+                    f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
+                )
+                wrapper.writeline("if autograd_profiler._is_profiler_enabled:")
+                wrapper.writeline("    _record_function_with_args_exit(handle)")
+            else:
+                wrapper.writeline(
+                    f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
+                )
 
 
 @functools.lru_cache(None)
@@ -521,7 +536,7 @@ class TritonTemplate(KernelTemplate):
                 )
                 + "-"
             )
-            mod = PyCodeCache.load(code, extra)
+            mod, _ = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = list(unique(x.get_name() for x in input_nodes))

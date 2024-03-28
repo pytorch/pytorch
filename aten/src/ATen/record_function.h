@@ -447,6 +447,14 @@ struct TORCH_API RecordFunction {
 #endif
   }
 
+  std::string getKernelFile() const {
+    return kernel_file_;
+  }
+
+  void setKernelFile(const std::string& kernel_file) {
+    kernel_file_ = kernel_file;
+  }
+
  private:
   void runStartCallbacks();
 
@@ -494,6 +502,10 @@ struct TORCH_API RecordFunction {
 
   // Whether this RecordFunction is used for NCCL metadata collection
   bool is_nccl_meta_{false};
+
+  //  If the recorded function is a generated kernel, this stores the file name
+  //  of the generated kernel.
+  std::string kernel_file_{""};
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);

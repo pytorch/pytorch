@@ -285,7 +285,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // callbacks.
   m.def(
       "_record_function_with_args_enter",
-      [](const std::string& name, const py::args& args) {
+      [](const std::string& name,
+         const std::string& kernel_file,
+         const py::args& args,
+         const py::kwargs& kwargs) {
         using torch::autograd::profiler::PythonRecordFunction;
         auto python_rec = c10::make_intrusive<PythonRecordFunction>(
             at::RecordScope::USER_SCOPE);
@@ -296,12 +299,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             for (const auto& arg : args) {
               iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
             }
+            for (auto item : kwargs) {
+              iv_inputs.push_back(
+                  torch::jit::toTypeInferredIValue(item.second));
+            }
+
             rec->before(
                 name,
                 c10::ArrayRef<const c10::IValue>(
                     iv_inputs.data(), iv_inputs.size()));
           } else {
             rec->before(name);
+          }
+
+          if (!kernel_file.empty()) {
+            const std::string file_name =
+                kernel_file.substr(kernel_file.find_last_of('/') + 1);
+            rec->setKernelFile(file_name);
           }
         }
         return torch::jit::toPyObject(std::move(python_rec));
@@ -474,8 +488,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   Py_RETURN_TRUE;
 }
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -1225,5 +1238,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

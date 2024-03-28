@@ -3894,7 +3894,7 @@ class TritonScheduling(BaseScheduling):
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
-        mod = PyCodeCache.load(src_code)
+        mod, _ = PyCodeCache.load(src_code)
 
         def cache_file_path():
             assert mod.__file__ is not None

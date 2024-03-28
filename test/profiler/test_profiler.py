@@ -4,33 +4,35 @@ import gc
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
 import unittest
-from unittest.mock import patch
 import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from unittest.mock import patch
 
 import expecttest
-import subprocess
-import sys
 import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
+from torch import _dynamo as torchdynamo
+from torch._C._profiler import _TensorMetadata
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
 )
-from torch.autograd.profiler import profile as _profile
-from torch.autograd.profiler import KinetoStepTracker
+from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     _utils,
     DeviceType,
+    EnableCaptureGeneratedKernel,
     ExecutionTraceObserver,
     kineto_available,
     profile,
@@ -39,7 +41,6 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-from torch._C._profiler import _TensorMetadata
 from torch.profiler._pattern_matcher import (
     Conv2dBiasFollowedByBatchNorm2dPattern,
     ExtraCUDACopyPattern,
@@ -53,12 +54,16 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    TEST_CUDA,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_JETSON,
     IS_WINDOWS,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TemporaryDirectoryName,
@@ -68,6 +73,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils._triton import has_triton
 
 Json = Dict[str, Any]
 
@@ -207,10 +213,10 @@ class TestRecordFunction(TestCase):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
             with record_function("## TEST 1 ##", "1, 2, 3"):
-                rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u)
+                rf_handle = _record_function_with_args_enter("## TEST 2 ##", "", 1, False, 2.5, [u, u], "hello", u)
                 _record_function_with_args_exit(rf_handle)
             with record_function("## TEST 3 ##"):
-                rf_handle = _record_function_with_args_enter("## TEST 4 ##")
+                rf_handle = _record_function_with_args_enter("## TEST 4 ##", "")
                 _record_function_with_args_exit(rf_handle)
         return prof
 
@@ -322,7 +328,7 @@ class TestExecutionTrace(TestCase):
             inf_val = float("inf")
             neg_inf_val = float("-inf")
             nan_val = float("nan")
-            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u),
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", "", 1, False, 2.5, [u, u], (u, u),
                                                          "hello", u, inf_val, neg_inf_val, nan_val)
             x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
@@ -488,42 +494,51 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, 'torch.compile does not support WINDOWS')
     @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")
+    @unittest.skipIf(_get_torch_cuda_version() < (12, 0), "only Tested on CUDA version >= 12.0")
     def test_execution_trace_with_pt2(self):
 
-        class ConvAndRelu(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = nn.Linear(4096, 4096)
-                self.relu = nn.ReLU(inplace=True)
+        @torchdynamo.optimize("inductor")
+        def fn(a, b, c):
+            x = torch.nn.functional.linear(a, b)
+            x = x + c
+            return x.cos()
 
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                x = self.linear(x)
-                x = self.relu(x)
-                return x
+        EnableCaptureGeneratedKernel(True)
+
+        a, b, c = (torch.randn(4, 4, requires_grad=True).to("cuda") for _ in range(3))
+
+        inputs = [a, b, c]
+        fn(*inputs)
 
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile('w+t', suffix='.et.json', delete=False)
         fp.close()
 
-        test_module = torch.compile(ConvAndRelu())
+        et_file = fp.name
+        et = ExecutionTraceObserver()
+        et.register_callback(et_file)
 
-        x = torch.rand(128, 4096)
-        et = ExecutionTraceObserver().register_callback(fp.name)
-        et.start()
-        test_module.forward(x)
-        et.stop()
+        with profile(activities=torch.profiler.supported_activities(), record_shapes=True):
+            et.start()
+            fn(*inputs)
+            et.stop()
 
         assert fp.name == et.get_output_file_path()
         et.unregister_callback()
         nodes = self.get_execution_trace_root(fp.name)
 
-        found_root_node = False
+        found_captured_triton_kernel_node = False
         for n in nodes:
             assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
+            if "triton_" in n["name"]:
+                for attr in n['attrs']:
+                    if attr['name'] == 'kernel_file' and attr['value'] != '':
+                        found_captured_triton_kernel_node = True
+                        assert len(n['inputs']['values']) > 0
+                        assert len(n['outputs']['values']) == 0
 
-        assert found_root_node
+        assert found_captured_triton_kernel_node
 
     def test_execution_trace_start_stop(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()

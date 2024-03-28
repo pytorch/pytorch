@@ -269,8 +269,8 @@ class MultiKernelCall:
         assert len(kernels) >= 2
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
-
-        self._run = PyCodeCache.load(src_code).run
+        mod, _ = PyCodeCache.load(src_code)
+        self._run = mod.run
         self.disable_cache = os.environ.get(
             "TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE"
         ) == "1" or is_metric_table_enabled("persistent_red_perf")
