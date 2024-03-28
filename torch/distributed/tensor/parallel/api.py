@@ -102,8 +102,9 @@ def parallelize_module(  # type: ignore[return]
             while path_splits:
                 atom = path_splits.pop(0)
                 if atom == "*":
-                    # recursively apply the plan to all submodules
+                    # Rest of the path after "*"
                     leaf_path = ".".join(path_splits)
+                    # recursively apply the plan to all submodules
                     for submodule in parent_module.children():  # corresponds to "*"
                         if leaf_path:
                             # we haven't reached the leaf, apply in dict style
