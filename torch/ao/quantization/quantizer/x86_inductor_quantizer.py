@@ -1057,7 +1057,6 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if linear_node != binary_node.args[linear_node_idx]:
                 raise ValueError(f"{linear_node} doesn't match input of binary node")
-            extra_input_node = binary_node.args[extra_input_node_idx]
             assert isinstance(linear_node, Node)
             if (
                 linear_node.op != "call_function"
