@@ -3220,7 +3220,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()) and src.get_device().type == torch.device("cuda").type:
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
