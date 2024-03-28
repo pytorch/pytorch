@@ -713,6 +713,20 @@ def optim_error_inputs_func_radam(device, dtype):
 
 
 def optim_inputs_func_rmsprop(device):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True, "capturable": True},
+            desc="capturable, maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001), "capturable": True},
+            desc="Tensor lr with capturable",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 1e-3}, desc="non-default lr"),
@@ -739,7 +753,7 @@ def optim_inputs_func_rmsprop(device):
             },
             desc="maximize",
         ),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_rmsprop(device, dtype):

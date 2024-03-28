@@ -1992,7 +1992,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.resolve_conj",
         "torch.resolve_neg",
         "torch.result_type",
-        "torch.rms_norm",
         "torch.rnn_relu_cell",
         "torch.rnn_relu",
         "torch.rnn_tanh_cell",
