@@ -1,7 +1,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/mkldnn/xpu/BlasImpl.h>
 #include <torch/library.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 
 namespace at::native::xpu {
 
