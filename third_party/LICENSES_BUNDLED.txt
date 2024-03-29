@@ -1,0 +1,349 @@
+The Pytorch repository and source distributions bundle several libraries that are
+compatibly licensed.  We list these here.
+
+Name: DCGM
+License: Apache-2.0
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/LICENSE
+
+Name: FP16
+License: MIT
+Files: third_party/FP16
+  For details, see: third_party/FP16/LICENSE
+
+Name: FXdiv
+License: MIT
+Files: third_party/FXdiv
+  For details, see: third_party/FXdiv/LICENSE
+
+Name: NNPACK
+License: BSD-2-Clause
+Files: third_party/NNPACK
+  For details, see: third_party/NNPACK/LICENSE
+
+Name: QNNPACK
+License: BSD-3-Clause
+Files: third_party/QNNPACK
+  For details, see: third_party/QNNPACK/LICENSE
+
+Name: VulkanMemoryAllocator
+License: MIT
+Files: third_party/VulkanMemoryAllocator
+  For details, see: third_party/VulkanMemoryAllocator/LICENSE.txt
+
+Name: XNNPACK
+License: BSD-3-Clause
+Files: third_party/XNNPACK
+  For details, see: third_party/XNNPACK/LICENSE
+
+Name: benchmark
+License: Apache-2.0
+Files: third_party/benchmark,
+     third_party/onnx/third_party/benchmark,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark,
+     third_party/protobuf/third_party/benchmark
+  For details, see: third_party/benchmark/LICENSE,
+     third_party/onnx/third_party/benchmark/LICENSE,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark/LICENSE,
+     third_party/protobuf/third_party/benchmark/LICENSE
+
+Name: clog
+License: BSD-2-Clause
+Files: third_party/QNNPACK/deps/clog,
+     third_party/cpuinfo/deps/clog,
+     third_party/fbgemm/third_party/cpuinfo/deps/clog
+  For details, see: third_party/QNNPACK/deps/clog/LICENSE,
+     third_party/cpuinfo/deps/clog/LICENSE,
+     third_party/fbgemm/third_party/cpuinfo/deps/clog/LICENSE
+
+Name: colorama
+License: BSD-3-Clause
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/testing/python3/libs_3rdparty/colorama
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/testing/python3/libs_3rdparty/colorama/LICENSE.txt
+
+Name: cpplint
+License: BSD-3-Clause
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint,
+     third_party/nlohmann/tools/cpplint
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint/LICENSE,
+     third_party/nlohmann/tools/cpplint/LICENSE
+
+Name: cpr
+License: MIT
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/cpr
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/cpr/LICENSE
+
+Name: cpuinfo
+License: BSD-2-Clause
+Files: third_party/cpuinfo,
+     third_party/fbgemm/third_party/cpuinfo
+  For details, see: third_party/cpuinfo/LICENSE,
+     third_party/fbgemm/third_party/cpuinfo/LICENSE
+
+Name: cudnn_frontend
+License: MIT
+Files: third_party/cudnn_frontend
+  For details, see: third_party/cudnn_frontend/LICENSE.txt
+
+Name: cutlass
+License: BSD-3-Clause
+Files: third_party/cutlass,
+     third_party/fbgemm/third_party/cutlass
+  For details, see: third_party/cutlass/LICENSE.txt,
+     third_party/fbgemm/third_party/cutlass/LICENSE.txt
+
+Name: dart
+License: Apache-2.0
+Files: third_party/flatbuffers/dart
+  For details, see: third_party/flatbuffers/dart/LICENSE
+
+Name: doctest
+License: MIT
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest,
+     third_party/nlohmann/tests/thirdparty/doctest
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest/LICENSE.txt,
+     third_party/nlohmann/tests/thirdparty/doctest/LICENSE.txt
+
+Name: dynolog
+License: MIT
+Files: third_party/kineto/libkineto/third_party/dynolog
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/LICENSE
+
+Name: eigen
+License: BSD-3-Clause
+Files: third_party/eigen
+  For details, see: third_party/eigen/COPYING.BSD
+
+Name: fbgemm
+License: BSD-3-Clause
+Files: third_party/fbgemm
+  For details, see: third_party/fbgemm/LICENSE
+
+Name: flatbuffers
+License: Apache-2.0
+Files: third_party/flatbuffers
+  For details, see: third_party/flatbuffers/LICENSE.txt
+
+Name: fmt
+License: MIT with exception
+Files: third_party/fmt,
+     third_party/kineto/libkineto/third_party/dynolog/third_party/fmt,
+     third_party/kineto/libkineto/third_party/fmt
+  For details, see: third_party/fmt/LICENSE.rst,
+     third_party/kineto/libkineto/third_party/dynolog/third_party/fmt/LICENSE.rst,
+     third_party/kineto/libkineto/third_party/fmt/LICENSE.rst
+
+Name: foxi
+License: MIT
+Files: third_party/foxi
+  For details, see: third_party/foxi/LICENSE
+
+Name: gemmlowp
+License: Apache-2.0
+Files: third_party/gemmlowp/gemmlowp
+  For details, see: third_party/gemmlowp/gemmlowp/LICENSE
+
+Name: generator
+License: Apache-2.0
+Files: third_party/fbgemm/third_party/googletest/googlemock/scripts/generator,
+     third_party/googletest/googlemock/scripts/generator,
+     third_party/kineto/libkineto/third_party/googletest/googlemock/scripts/generator,
+     third_party/protobuf/third_party/googletest/googlemock/scripts/generator,
+     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator
+  For details, see: third_party/fbgemm/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator/LICENSE
+
+Name: gloo
+License: BSD-3-Clause
+Files: third_party/gloo
+  For details, see: third_party/gloo/LICENSE
+
+Name: googlemock
+License: BSD-3-Clause
+Files: third_party/fbgemm/third_party/googletest/googlemock,
+     third_party/kineto/libkineto/third_party/googletest/googlemock,
+     third_party/protobuf/third_party/googletest/googlemock,
+     third_party/tensorpipe/third_party/googletest/googlemock
+  For details, see: third_party/fbgemm/third_party/googletest/googlemock/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googlemock/LICENSE,
+     third_party/protobuf/third_party/googletest/googlemock/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googlemock/LICENSE
+
+Name: googletest
+License: BSD-3-Clause
+Files: third_party/fbgemm/third_party/googletest,
+     third_party/fbgemm/third_party/googletest/googletest,
+     third_party/googletest,
+     third_party/kineto/libkineto/third_party/dynolog/third_party/googletest,
+     third_party/kineto/libkineto/third_party/googletest,
+     third_party/kineto/libkineto/third_party/googletest/googletest,
+     third_party/protobuf/third_party/googletest,
+     third_party/protobuf/third_party/googletest/googletest,
+     third_party/tensorpipe/third_party/googletest,
+     third_party/tensorpipe/third_party/googletest/googletest
+  For details, see: third_party/fbgemm/third_party/googletest/LICENSE,
+     third_party/fbgemm/third_party/googletest/googletest/LICENSE,
+     third_party/googletest/LICENSE,
+     third_party/kineto/libkineto/third_party/dynolog/third_party/googletest/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googletest/LICENSE,
+     third_party/protobuf/third_party/googletest/LICENSE,
+     third_party/protobuf/third_party/googletest/googletest/LICENSE,
+     third_party/tensorpipe/third_party/googletest/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googletest/LICENSE
+
+Name: gtest
+License: BSD-3-Clause
+Files: third_party/ideep/mkl-dnn/tests/gtest,
+     third_party/ideep/mkl-dnn/third_party/oneDNN/tests/gtests/gtest
+  For details, see: third_party/ideep/mkl-dnn/tests/gtest/LICENSE,
+     third_party/ideep/mkl-dnn/third_party/oneDNN/tests/gtests/gtest/LICENSE
+
+Name: hipify_torch
+License: MIT
+Files: third_party/fbgemm/third_party/hipify_torch
+  For details, see: third_party/fbgemm/third_party/hipify_torch/LICENSE.txt
+
+Name: ideep
+License: MIT
+Files: third_party/ideep
+  For details, see: third_party/ideep/LICENSE
+
+Name: ios-cmake
+License: BSD-3-Clause
+Files: third_party/ios-cmake
+  For details, see: third_party/ios-cmake/LICENSE
+
+Name: json
+License: MIT
+Files: third_party/cudnn_frontend/include/contrib/nlohmann/json
+  For details, see: third_party/cudnn_frontend/include/contrib/nlohmann/json/LICENSE.txt
+
+Name: kineto
+License: BSD-3-Clause
+Files: third_party/kineto
+  For details, see: third_party/kineto/LICENSE
+
+Name: libnop
+License: Apache-2.0
+Files: third_party/tensorpipe/third_party/libnop
+  For details, see: third_party/tensorpipe/third_party/libnop/LICENSE
+
+Name: libuv
+License: MIT
+Files: third_party/tensorpipe/third_party/libuv
+  For details, see: third_party/tensorpipe/third_party/libuv/LICENSE
+
+Name: miniz-2.1.0
+License: MIT
+Files: third_party/miniz-2.1.0
+  For details, see: third_party/miniz-2.1.0/LICENSE
+
+Name: mkl-dnn
+License: Apache-2.0
+Files: third_party/ideep/mkl-dnn
+  For details, see: third_party/ideep/mkl-dnn/LICENSE
+
+Name: nccl
+License: BSD-3-Clause
+Files: third_party/nccl/nccl
+  For details, see: third_party/nccl/nccl/LICENSE.txt
+
+Name: neon2sse
+License: BSD-Source-Code
+Files: third_party/neon2sse
+  For details, see: third_party/neon2sse/LICENSE
+
+Name: oneDNN
+License: Apache-2.0
+Files: third_party/ideep/mkl-dnn/third_party/oneDNN
+  For details, see: third_party/ideep/mkl-dnn/third_party/oneDNN/LICENSE
+
+Name: onnx
+License: Apache-2.0
+Files: third_party/onnx
+  For details, see: third_party/onnx/LICENSE
+
+Name: onnx
+License: MIT
+Files: third_party/onnx-tensorrt/third_party/onnx
+  For details, see: third_party/onnx-tensorrt/third_party/onnx/LICENSE
+
+Name: onnx-tensorrt
+License: MIT
+Files: third_party/onnx-tensorrt
+  For details, see: third_party/onnx-tensorrt/LICENSE
+
+Name: pfs
+License: Apache-2.0
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/pfs
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/pfs/LICENSE
+
+Name: protobuf
+License: BSD-3-Clause
+Files: third_party/protobuf
+  For details, see: third_party/protobuf/LICENSE
+
+Name: psimd
+License: MIT
+Files: third_party/psimd
+  For details, see: third_party/psimd/LICENSE
+
+Name: pthreadpool
+License: BSD-2-Clause
+Files: third_party/pthreadpool
+  For details, see: third_party/pthreadpool/LICENSE
+
+Name: pybind11
+License: BSD-3-Clause
+Files: third_party/onnx/third_party/pybind11,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/pybind11,
+     third_party/pybind11,
+     third_party/tensorpipe/third_party/pybind11
+  For details, see: third_party/onnx/third_party/pybind11/LICENSE,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/pybind11/LICENSE,
+     third_party/pybind11/LICENSE,
+     third_party/tensorpipe/third_party/pybind11/LICENSE
+
+Name: python-peachpy
+License: BSD-2-Clause
+Files: third_party/python-peachpy
+  For details, see: third_party/python-peachpy/LICENSE.rst
+
+Name: sleef
+License: BSL-1.0
+Files: third_party/sleef
+  For details, see: third_party/sleef/LICENSE.txt
+
+Name: swift
+License: Apache-2.0
+Files: third_party/flatbuffers/swift
+  For details, see: third_party/flatbuffers/swift/LICENSE
+
+Name: tb_plugin
+License: BSD-3-Clause
+Files: third_party/kineto/tb_plugin
+  For details, see: third_party/kineto/tb_plugin/LICENSE
+
+Name: tbb
+License: Apache-2.0
+Files: third_party/tbb
+  For details, see: third_party/tbb/LICENSE
+
+Name: tensorpipe
+License: BSD-3-Clause
+Files: third_party/tensorpipe
+  For details, see: third_party/tensorpipe/LICENSE.txt
+
+Name: test
+License: MIT with exception
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/cpr/test
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/cpr/test/LICENSE
+
+Name: zstd
+License: BSD-3-Clause
+Files: third_party/zstd
+  For details, see: third_party/zstd/LICENSE
