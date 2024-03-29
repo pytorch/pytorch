@@ -117,7 +117,7 @@ def svd_lowrank(
 
         M (Tensor, optional): the input tensor's mean of size
                               :math:`(*, 1, n)`, which will be broadcasted
-                              to the size of A in this function. 
+                              to the size of A in this function.
 
     References::
         - Nathan Halko, Per-Gunnar Martinsson, and Joel Tropp, Finding
