@@ -18,7 +18,6 @@ import platform
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import sysconfig
@@ -32,8 +31,7 @@ from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
-from threading import Thread
-from time import sleep, time
+from time import time
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
@@ -46,6 +44,12 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.compile_worker.subproc_pool import (
+    _warm_process_pool,
+    AnyPool,
+    SubprocPool,
+)
+from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -2575,9 +2579,7 @@ def _set_triton_ptxas_path() -> None:
         warnings.warn(f"{ptxas_path} exists but is not an executable")
 
 
-def _worker_compile(
-    kernel_name: str, source_code: str, cc: int, device: torch.device
-) -> None:
+def _worker_compile(kernel_name: str, source_code: str, cc: int, device: torch.device):
     device_interface = get_interface_for_device(device.type)
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
@@ -2622,41 +2624,24 @@ class TritonFuture:
         return kernel
 
 
-# If this process dies abnormally (e.g. segfault)
-# it will not shut down the workers. Instead
-# the workers will have their parent reassigned to the
-# init process. This launches a separate thread to
-# watch for the worker getting reassigned,
-# and cleans it up in this case.
-#
-# This function cannot be an inner function since otherwise mp_context="spawn" would
-# not work for ProcessPoolExecutor since inner functions cannot be pickled.
-def _async_compile_initializer(orig_ppid) -> None:
-    def run() -> None:
-        while True:
-            sleep(1)
-            if orig_ppid != os.getppid():
-                os.kill(os.getpid(), signal.SIGKILL)
-
-    global _watchdog_thread
-    _watchdog_thread = Thread(target=run, daemon=True)
-    _watchdog_thread.start()
-    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-_watchdog_thread: Optional[Thread] = None
-
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[ProcessPoolExecutor] = set()
+_pool_set: Set[AnyPool] = set()
 
 
 def shutdown_compile_workers() -> None:
     """Shut down all outstanding compile-worker pools."""
-    global _pool_set
     for pool in _pool_set:
         pool.shutdown()
+    after_fork()
+
+
+def after_fork():
+    """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
+    AsyncCompile.process_pool.cache_clear()
+
+
+os.register_at_fork(after_in_child=after_fork)
 
 
 class AsyncCompile:
@@ -2671,28 +2656,29 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def process_pool() -> ProcessPoolExecutor:
-        # ensure properties have been calculated before processes
-        # are forked
-        caching_device_properties()
+    def process_pool() -> AnyPool:
         assert config.compile_threads > 1
-        orig_ppid = os.getpid()
+        pool: AnyPool
+        if config.worker_start_method == "subprocess":
+            # Wrapper around ProcessPoolExecutor forks in a new process we control
+            pool = SubprocPool(config.compile_threads)
+        else:
+            # ensure properties have been calculated before processes
+            # are forked
+            caching_device_properties()
+            ctx = multiprocessing.get_context(config.worker_start_method)
+            pool = ProcessPoolExecutor(
+                config.compile_threads,
+                mp_context=ctx,
+                initializer=partial(_async_compile_initializer, os.getpid()),
+            )
+            # when this pool is created in a subprocess object, the normal exit handler
+            # doesn't run, and we need to register our own handler.
+            # exitpriority has to be high, because another one of the finalizers will
+            # kill the worker thread that sends the shutdown message to the workers...
+            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
-        ctx = multiprocessing.get_context(config.worker_start_method)
-        pool = ProcessPoolExecutor(
-            config.compile_threads,
-            mp_context=ctx,
-            initializer=partial(_async_compile_initializer, orig_ppid),
-        )
-
-        global _pool_set
         _pool_set.add(pool)
-
-        # when this pool is created in a subprocess object, the normal exit handler
-        # doesn't run, and we need to register our own handler.
-        # exitpriority has to be high, because another one of the finalizers will
-        # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
         return pool
 
     @classmethod
@@ -2700,29 +2686,7 @@ class AsyncCompile:
         if config.compile_threads <= 1:
             return
         _compile_start()
-        pool = cls.process_pool()
-
-        # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
-        # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
-
-        # Examples:
-        # A simple x + x + x script: 10ms seconds in the middle of the program, 2ms at startup
-        # tf_efficientnet_b0 benchmark: 50ms! in the middle of the program , 3ms at startup
-
-        # So we want to start the workers early when it is still cheap, and also to allow the workers to get
-        # ready before we have work for them.
-
-        # ProcessPoolExecutor also does not launch the workers until it finds a point when all the workers are idle.
-        # But if we waited until then fork time will be long and we will be waiting for the processes to initialize.
-
-        # We force them to start here with some YOLOing of the internal methods.
-        if hasattr(pool, "_start_queue_management_thread"):
-            pool._start_queue_management_thread()
-        else:
-            for _ in range(config.compile_threads):
-                pool._adjust_process_count()
-            if hasattr(pool, "_start_executor_manager_thread"):
-                pool._start_executor_manager_thread()
+        _warm_process_pool(cls.process_pool(), config.compile_threads)
         _compile_end()
 
     @classmethod
@@ -2809,11 +2773,11 @@ class AsyncCompile:
         _compile_end()
 
 
-if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
-    # When TorchTNT is used, calling warm_pool() here will cause the
-    # compile workers created not being able to be shut down inside
-    # shutdown_compile_workers(). This may cause significant QPS drop.
-    log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+if (
+    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
+    or os.environ.get("TORCH_WARM_POOL", "1") == "1"
+):
+    pass
 elif sys.version_info >= (3, 12):
     log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
