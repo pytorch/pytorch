@@ -2,6 +2,7 @@
 #include <ATen/Context.h>
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
+#include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/complex.h>
@@ -213,31 +214,33 @@ static inline float16_t reduce(float16x4_t x) {
 
 
 static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  for (auto i = 0 ; i < n; i += 4) {
-    float16x4_t sum0Vec = vdup_n_f16(0);
-    float16x4_t sum1Vec = vdup_n_f16(0);
-    float16x4_t sum2Vec = vdup_n_f16(0);
-    float16x4_t sum3Vec = vdup_n_f16(0);
-    const auto row0 = a + lda * (i + 0);
-    const auto row1 = a + lda * (i + 1);
-    const auto row2 = a + lda * (i + 2);
-    const auto row3 = a + lda * (i + 3);
-    for (auto j = 0; j < m; j += 4) {
-      float16x4_t a0Vec = vld1_f16(row0 + j);
-      float16x4_t a1Vec = vld1_f16(row1 + j);
-      float16x4_t a2Vec = vld1_f16(row2 + j);
-      float16x4_t a3Vec = vld1_f16(row3 + j);
-      float16x4_t xVec = vld1_f16(x + j);
-      sum0Vec = vadd_f16(sum0Vec, vmul_f16(a0Vec, xVec));
-      sum1Vec = vadd_f16(sum1Vec, vmul_f16(a1Vec, xVec));
-      sum2Vec = vadd_f16(sum2Vec, vmul_f16(a2Vec, xVec));
-      sum3Vec = vadd_f16(sum3Vec, vmul_f16(a3Vec, xVec));
+  parallel_for(0, n / 4, 1, [&](int begin, int end) {
+    for (auto i = begin * 4 ; i < end * 4; i += 4) {
+      float16x4_t sum0Vec = vdup_n_f16(0);
+      float16x4_t sum1Vec = vdup_n_f16(0);
+      float16x4_t sum2Vec = vdup_n_f16(0);
+      float16x4_t sum3Vec = vdup_n_f16(0);
+      const auto row0 = a + lda * (i + 0);
+      const auto row1 = a + lda * (i + 1);
+      const auto row2 = a + lda * (i + 2);
+      const auto row3 = a + lda * (i + 3);
+      for (auto j = 0; j < m; j += 4) {
+        float16x4_t a0Vec = vld1_f16(row0 + j);
+        float16x4_t a1Vec = vld1_f16(row1 + j);
+        float16x4_t a2Vec = vld1_f16(row2 + j);
+        float16x4_t a3Vec = vld1_f16(row3 + j);
+        float16x4_t xVec = vld1_f16(x + j);
+        sum0Vec = vadd_f16(sum0Vec, vmul_f16(a0Vec, xVec));
+        sum1Vec = vadd_f16(sum1Vec, vmul_f16(a1Vec, xVec));
+        sum2Vec = vadd_f16(sum2Vec, vmul_f16(a2Vec, xVec));
+        sum3Vec = vadd_f16(sum3Vec, vmul_f16(a3Vec, xVec));
+      }
+      y[(i + 0) * incy] = reduce(sum0Vec);
+      y[(i + 1) * incy] = reduce(sum1Vec);
+      y[(i + 2) * incy] = reduce(sum2Vec);
+      y[(i + 3) * incy] = reduce(sum3Vec);
     }
-    y[(i + 0) * incy] = reduce(sum0Vec);
-    y[(i + 1) * incy] = reduce(sum1Vec);
-    y[(i + 2) * incy] = reduce(sum2Vec);
-    y[(i + 3) * incy] = reduce(sum3Vec);
-  }
+  });
 }
 #endif
 
@@ -247,31 +250,33 @@ static inline float reduce(float32x4_t x) {
 }
 
 static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  for (auto i = 0 ; i < n; i += 4) {
-    float32x4_t sum0Vec = vdupq_n_f32(0);
-    float32x4_t sum1Vec = vdupq_n_f32(0);
-    float32x4_t sum2Vec = vdupq_n_f32(0);
-    float32x4_t sum3Vec = vdupq_n_f32(0);
-    const auto row0 = a + lda * (i + 0);
-    const auto row1 = a + lda * (i + 1);
-    const auto row2 = a + lda * (i + 2);
-    const auto row3 = a + lda * (i + 3);
-    for (auto j = 0; j < m; j += 4) {
-      float32x4_t a0Vec = vcvt_f32_f16(vld1_f16(row0 + j));
-      float32x4_t a1Vec = vcvt_f32_f16(vld1_f16(row1 + j));
-      float32x4_t a2Vec = vcvt_f32_f16(vld1_f16(row2 + j));
-      float32x4_t a3Vec = vcvt_f32_f16(vld1_f16(row3 + j));
-      float32x4_t xVec = vcvt_f32_f16(vld1_f16(x + j));
-      sum0Vec = vaddq_f32(sum0Vec, vmulq_f32(a0Vec, xVec));
-      sum1Vec = vaddq_f32(sum1Vec, vmulq_f32(a1Vec, xVec));
-      sum2Vec = vaddq_f32(sum2Vec, vmulq_f32(a2Vec, xVec));
-      sum3Vec = vaddq_f32(sum3Vec, vmulq_f32(a3Vec, xVec));
+  parallel_for(0, n / 4, 1, [&](int begin, int end) {
+    for (auto i =  begin * 4 ; i < end * 4; i += 4) {
+      float32x4_t sum0Vec = vdupq_n_f32(0);
+      float32x4_t sum1Vec = vdupq_n_f32(0);
+      float32x4_t sum2Vec = vdupq_n_f32(0);
+      float32x4_t sum3Vec = vdupq_n_f32(0);
+      const auto row0 = a + lda * (i + 0);
+      const auto row1 = a + lda * (i + 1);
+      const auto row2 = a + lda * (i + 2);
+      const auto row3 = a + lda * (i + 3);
+      for (auto j = 0; j < m; j += 4) {
+        float32x4_t a0Vec = vcvt_f32_f16(vld1_f16(row0 + j));
+        float32x4_t a1Vec = vcvt_f32_f16(vld1_f16(row1 + j));
+        float32x4_t a2Vec = vcvt_f32_f16(vld1_f16(row2 + j));
+        float32x4_t a3Vec = vcvt_f32_f16(vld1_f16(row3 + j));
+        float32x4_t xVec = vcvt_f32_f16(vld1_f16(x + j));
+        sum0Vec = vaddq_f32(sum0Vec, vmulq_f32(a0Vec, xVec));
+        sum1Vec = vaddq_f32(sum1Vec, vmulq_f32(a1Vec, xVec));
+        sum2Vec = vaddq_f32(sum2Vec, vmulq_f32(a2Vec, xVec));
+        sum3Vec = vaddq_f32(sum3Vec, vmulq_f32(a3Vec, xVec));
+      }
+      y[(i + 0) * incy] = reduce(sum0Vec);
+      y[(i + 1) * incy] = reduce(sum1Vec);
+      y[(i + 2) * incy] = reduce(sum2Vec);
+      y[(i + 3) * incy] = reduce(sum3Vec);
     }
-    y[(i + 0) * incy] = reduce(sum0Vec);
-    y[(i + 1) * incy] = reduce(sum1Vec);
-    y[(i + 2) * incy] = reduce(sum2Vec);
-    y[(i + 3) * incy] = reduce(sum3Vec);
-  }
+  });
 }
 
 void fp16_gemv_trans(
