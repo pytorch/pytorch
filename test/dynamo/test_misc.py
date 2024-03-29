@@ -10020,6 +10020,27 @@ fn
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_hasattr_nn_module_guard(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                if hasattr(self, "a"):
+                    return self.a(x)
+                else:
+                    return x
+
+        m = M()
+        x = torch.randn(3, 3)
+        ref = m(x)
+
+        opt_m = torch.compile(backend="eager")(m)
+        res = opt_m(x)
+        self.assertEqual(ref, res)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
