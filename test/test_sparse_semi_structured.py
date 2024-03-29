@@ -765,13 +765,13 @@ class TestSparseSemiStructuredTraining(TestCase):
             threads_masks=threads_masks,
         )
 
-        assert torch.allclose(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[dtype])
-        assert torch.allclose(a @ b_s, a @ (b * b_m), **atol_rtol_kw[dtype])
+        assert torch.allclose(a_s @ b, (a * a_m) @ b, rtol=1e-3, atol=1e-3)
+        assert torch.allclose(a @ b_s, a @ (b * b_m), rtol=1e-3, atol=1e-3)
         assert torch.allclose(
-            a @ a_s.t(), a @ (a * a_m).t(), **atol_rtol_kw[dtype]
+            a @ a_s.t(), a @ (a * a_m).t(), rtol=1e-3, atol=1e-3 
         )
         assert torch.allclose(
-            a_s.t() @ a, (a * a_m).t() @ a, **atol_rtol_kw[dtype]
+            a_s.t() @ a, (a * a_m).t() @ a, rtol=1e-3, atol=1e-3
         )
 
     def test_sp24_matmuls_mat_vec(self) -> None:
