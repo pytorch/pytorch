@@ -61,8 +61,8 @@ parametrize_backends = parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS
 
 atol_rtol_kw = {
     torch.float16: {
-        "rtol": 2e-3,
-        "atol": 1e-4,
+        "rtol": 1e-3,
+        "atol": 1e-3,
     },
     torch.bfloat16: {
         "rtol": 1e-1,
