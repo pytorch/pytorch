@@ -29,7 +29,6 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
-    make_strides_for,
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -5892,17 +5891,10 @@ def resize(x, size, *, memory_format=None):
 
     x_flat = view(x, (-1,))
     flat_loader = x_flat.make_loader()
-    new_stride = make_strides_for(size, memory_format)
-    out_layout = ir.FixedLayout(
-        device,
-        dtype,
-        list(size),
-        new_stride,
-    )
-    out_indexer = out_layout.make_indexer()
+    new_numel = sympy_product(size)
 
     def inner_fn(idx):
-        flat_index = out_indexer(idx)
+        flat_index = idx[0]
         flat_index_expr = ops.index_expr(flat_index, torch.int64)
         limit = ops.index_expr(old_numel, torch.int64)
         mask = ops.lt(flat_index_expr, limit)
@@ -5912,15 +5904,21 @@ def resize(x, size, *, memory_format=None):
         device=device,
         dtype=dtype,
         inner_fn=inner_fn,
-        ranges=list(size),
+        ranges=[
+            new_numel,
+        ],
     )
 
     if memory_format == torch.channels_last:
-        return ir.ExternKernel.require_channels_last(pointwise)
+        stride = ir.FlexibleLayout.stride_ordered(size, ir.NHWC_STRIDE_ORDER)
     elif memory_format == torch.channels_last_3d:
-        return ir.ExternKernel.require_channels_last_3d(pointwise)
+        stride = ir.FlexibleLayout.stride_ordered(size, ir.NHWDC_STRIDE_ORDER)
     else:
-        return ir.ExternKernel.require_contiguous(pointwise)
+        stride = ir.FlexibleLayout.contiguous_strides(size)
+
+    pointwise.realize()
+    out = as_strided(pointwise, size, stride)
+    return out
 
 
 @register_lowering(aten.resize_, type_promotion_kind=None)
