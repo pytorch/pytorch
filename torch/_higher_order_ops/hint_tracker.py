@@ -2,6 +2,7 @@ import collections
 import json
 from typing import Deque
 
+
 class ContextHintTracker:
     hint_stack: Deque[str] = collections.deque()
 

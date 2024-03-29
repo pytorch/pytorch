@@ -19,7 +19,6 @@ from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
 import torch.fx.traceback as fx_traceback
-from torch._higher_order_ops.hint_tracker import ContextHintTracker
 
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
            'Proxy', 'Attribute', 'ParameterProxy', 'Scope',
@@ -163,8 +162,9 @@ class TracerBase:
                 new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
             node.meta["seq_nr"] = new_seq_nr
 
+            from torch._higher_order_ops.hint_tracker import ContextHintTracker
             node_hints = ContextHintTracker.get_hints_merged()
-            if node_hints:
+            if node_hints and node_hints != "":
                 node.meta["context_hints"] = node_hints
 
         elif self.module_stack:

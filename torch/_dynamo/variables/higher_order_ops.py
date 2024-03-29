@@ -1077,11 +1077,10 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, self.value, tuple(p_args), p_kwargs, body_r, treespec
         )
 
+
 class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
-        checkpoint = tx.copy_graphstate()
-        graph_checkpoint = tx.output.graph
 
         (
             (body_r, treespec),
@@ -1108,7 +1107,7 @@ class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
@@ -1135,6 +1134,7 @@ class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return _call_function_and_unflatten_output(
             tx, self.value, tuple(p_args), p_kwargs, body_r, treespec
         )
+
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
