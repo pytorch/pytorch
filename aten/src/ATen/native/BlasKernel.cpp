@@ -212,7 +212,7 @@ static inline float16_t reduce(float16x4_t x) {
         return vget_lane_f16(vpadd_f16(sum, sum), 0);
 }
 static inline float16_t reduce(float16x8_t x) {
-        return reduce(vpadd_f16(vget_low_f16(x), vget_high_f16(x)));
+        return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
 }
 
 
