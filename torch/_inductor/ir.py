@@ -4059,9 +4059,18 @@ class ExternKernel(InputsKernel):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
+                # If the default size and stride of a FlexibleLayout is already the required order,
+                # return it as a FixedLayout by using its default size and stride, to be consistent
+                # with the behavior of calling require_stride_order on a FixedLayout
+
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
-                    x, freeze=True, want_contiguous=False, stride_order=order
+                    x,
+                    freeze=True,
+                    want_contiguous=False,
+                    stride_order=None
+                    if is_stride_order_storage_and_layout(x, order)
+                    else order,
                 )
                 return x
             elif isinstance(
