@@ -306,6 +306,10 @@ static bool is_batchedtensor(const Tensor& tensor) {
   return batched != nullptr;
 }
 
+static bool is_legacy_batchedtensor(const Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::Batched);
+}
+
 static bool is_gradtrackingtensor(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   return wrapped != nullptr;
@@ -478,6 +482,7 @@ void initFuncTorchBindings(PyObject* module) {
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
+  m.def("is_legacy_batchedtensor", &is_legacy_batchedtensor);
   m.def("is_gradtrackingtensor", &is_gradtrackingtensor);
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);

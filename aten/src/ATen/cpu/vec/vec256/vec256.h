@@ -15,6 +15,7 @@
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_float.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_double.h>
+#include <ATen/cpu/vec/vec256/vec256_mask.h>
 #elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
 #else
