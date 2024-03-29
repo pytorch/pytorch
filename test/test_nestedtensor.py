@@ -4151,19 +4151,22 @@ class TestNestedTensorSubclass(TestCase):
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
-            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged)
+            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged, requires_grad=True)
 
         # expect min / max seqlen to be stored here
         cache = dict(nt._metadata_cache)
 
         @torch.compile
         def f(nt):
-            return nt.sin() + 1
+            return nt.sin()
 
         output = f(nt)
+        output.backward(torch.ones_like(nt))
         self.assertEqual(output._metadata_cache, cache)
 
 
