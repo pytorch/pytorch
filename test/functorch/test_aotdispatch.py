@@ -3061,8 +3061,8 @@ def forward(self, arg0_1):
     return (getitem,)""")  # noqa: B950
 
         self.assertExpectedInline(str(gm.true_graph_0.true_graph_0.code).strip(), """\
-def forward(self, arg0_1):
-    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+def forward(self, cos_1):
+    sin = torch.ops.aten.sin.default(cos_1);  cos_1 = None
     add = torch.ops.aten.add.Tensor(sin, 7);  sin = None
     sin_1 = torch.ops.aten.sin.default(add);  add = None
     return (sin_1,)""")
