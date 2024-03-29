@@ -232,7 +232,11 @@ class ShardingPropagator:
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
-                    expected_input_specs.append(desired_spec)
+                    expected_input_specs.append(
+                        desired_spec.shallow_copy_with_tensor_meta(
+                            input_spec.tensor_meta
+                        )
+                    )
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
 
