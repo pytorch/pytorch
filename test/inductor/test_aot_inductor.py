@@ -2140,6 +2140,65 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
+    def test_non_contiguous_output_alias(self):
+        # Test return x, x.contiguous() where x is non-contiguous.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                transposed = squared.t()  # non-contiguous
+                contig = transposed.contiguous()
+                return transposed, contig
+
+        x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
+        model = Model()
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+
+        # contiguous() should create a new tensor
+        self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
+
+    def test_multiple_output_alias(self):
+        # Test when mutliple outputs alias the same tensor
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                contig = squared.contiguous()  # alias
+                reshaped = squared.reshape(squared.shape)  # alias
+                cubed = squared * x
+                return squared, contig, reshaped, cubed
+
+        x = torch.randn(3, 4, dtype=torch.float32, device=self.device)
+        model = Model()
+
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+
+        # squared, contig and reshaped alias the same tensor.
+        self.assertTrue(result[0].data_ptr() == result[1].data_ptr())
+        self.assertTrue(result[0].data_ptr() == result[2].data_ptr())
+        # cubed shouldn't be an alias.
+        self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
+
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2302,9 +2361,13 @@ CPU_TEST_FAILURES = {
     # FIXME: failed with compilation error
     "test_runtime_checks": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
-    # There is a double-free issue which will be fixed in another PR
-    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
+    # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
+    "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
     # the test segfaults
+    "test_repeat_output": fail_stack_allocation(is_skip=True),
+    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation": fail_stack_allocation(is_skip=True),
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
@@ -2338,7 +2401,6 @@ CUDA_TEST_FAILURES = {
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
-    "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
     # no ABI shim fn for torch.sort; remove this when adding one
     "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
