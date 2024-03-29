@@ -219,6 +219,7 @@ class AbstractImplCtx:
             tensor (torch.Tensor): A concrete tensor.
 
         Example::
+            >>> import torch
             >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
             >>> class FakeTensorQueue:
             >>>     def __init__(self, q):
