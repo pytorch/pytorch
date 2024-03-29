@@ -221,6 +221,13 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
     "torch._functorch.eager_transforms.hessian": UserFunctionVariable,
+    # functorch/deprecated
+    "torch._functorch.deprecated.jvp": UserFunctionVariable,
+    "torch._functorch.deprecated.hessian": UserFunctionVariable,
+    "torch._functorch.deprecated.jacfwd": UserFunctionVariable,
+    "torch._functorch.deprecated.jacrev": UserFunctionVariable,
+    "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
+    "torch._functorch.deprecated.vjp": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._constrain_as_value": UserFunctionVariable,
@@ -243,6 +250,10 @@ manual_torch_name_rule_map = {
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
+    # avoid skipping user defined modules in distributed unit tests
+    "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
+    "torch/testing/_internal/distributed/_tensor/common_dtensor.py#forward": UserFunctionVariable,
+    "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
 }
 
 
@@ -1992,7 +2003,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.resolve_conj",
         "torch.resolve_neg",
         "torch.result_type",
-        "torch.rms_norm",
         "torch.rnn_relu_cell",
         "torch.rnn_relu",
         "torch.rnn_tanh_cell",
@@ -2165,15 +2175,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.combine_state_for_ensemble",
         "torch._functorch.deprecated.functionalize",
         "torch._functorch.deprecated.get_warning",
-        "torch._functorch.deprecated.grad_and_value",
-        "torch._functorch.deprecated.hessian",
-        "torch._functorch.deprecated.jacfwd",
-        "torch._functorch.deprecated.jacrev",
-        "torch._functorch.deprecated.jvp",
         "torch._functorch.deprecated.make_functional_with_buffers",
         "torch._functorch.deprecated.make_functional",
         "torch._functorch.deprecated.setup_docs",
-        "torch._functorch.deprecated.vjp",
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
@@ -2790,7 +2794,10 @@ def get_torch_obj_rule_map():
     d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
-            obj = load_object(k)
+            if ".py#" not in k:
+                obj = load_object(k)
+            else:
+                obj = _module_dir(torch) + k[len("torch/") :]
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -3470,6 +3477,10 @@ def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
+        if rule is not None:
+            return rule
+    elif name is not None and filename is not None and not is_direct_call:
+        rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
         if rule is not None:
             return rule
 
