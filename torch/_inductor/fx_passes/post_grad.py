@@ -126,17 +126,20 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     #         is_bwd_graph = True
     #         break
     # if not is_bwd_graph:
-    fsdp_fx_passes.remove_no_use_slice(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
-    fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
-    fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(gm)
-    fsdp_fx_passes.remove_unnecessary_split_with_sizes(gm)  # only matters for CA BWD graph
-    fsdp_fx_passes.replace_foreach_all_gather_copy_out_pattern(gm)
-    fsdp_fx_passes.replace_foreach_all_gather_pattern(gm)
-    fsdp_fx_passes.replace_inplace_foreach_copy_with_inplace_copy(gm)
-    fsdp_fx_passes.remove_clone_if_input_is_alias_of_graph_input(gm)
-    fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
-    fsdp_fx_passes.remove_no_use_empty(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
-    # fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
+    if not config.use_fsdp_custom_op:
+        fsdp_fx_passes.remove_no_use_slice(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+        fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+        fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_aliases_in_graph(gm)
+        fsdp_fx_passes.remove_unnecessary_split_with_sizes(gm)  # only matters for CA BWD graph
+        fsdp_fx_passes.replace_foreach_all_gather_copy_out_pattern(gm)
+        fsdp_fx_passes.replace_foreach_all_gather_pattern(gm)
+        fsdp_fx_passes.replace_inplace_foreach_copy_with_inplace_copy(gm)
+        fsdp_fx_passes.remove_clone_if_input_is_alias_of_graph_input(gm)
+        fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+        fsdp_fx_passes.remove_no_use_empty(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
+        fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute_no_custom_op(gm)
+    else:
+        fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
 
     decompose_auto_functionalized(gm.graph)
 

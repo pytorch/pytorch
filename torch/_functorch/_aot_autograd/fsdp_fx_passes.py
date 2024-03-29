@@ -660,7 +660,7 @@ def _create_new_node_and_replace(mod, node):
     return new_node
 
 
-def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
+def raise_all_gather_to_overlap_with_prev_layer_compute_no_custom_op(mod):
     """
     ======== [Case 1] no `aten.empty` reuse ========
 

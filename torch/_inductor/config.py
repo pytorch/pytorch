@@ -8,6 +8,7 @@ import torch
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
+use_fsdp_custom_op = False
 
 # add some debug printouts
 debug = False
