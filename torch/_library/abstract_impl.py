@@ -61,13 +61,13 @@ class AbstractImplHolder:
         meta_kernel = construct_meta_kernel(self.qualname, self)
         self.lib.impl(self.qualname, meta_kernel, "Meta")
 
-        def deregister_abstract_impl():
+        def deregister_fake_class():
             if self.lib:
                 self.lib._destroy()
                 self.lib = None
             self.kernel = None
 
-        return RegistrationHandle(deregister_abstract_impl)
+        return RegistrationHandle(deregister_fake_class)
 
 
 def construct_meta_kernel(
@@ -219,7 +219,7 @@ class AbstractImplCtx:
             tensor (torch.Tensor): A concrete tensor.
 
         Example::
-            >>> @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+            >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
             >>> class FakeTensorQueue:
             >>>     def __init__(self, q):
             >>>         self.queue = q
@@ -227,7 +227,7 @@ class AbstractImplCtx:
             >>>     @classmethod
             >>>     def from_real(cls, real_tq):
             >>>         ctx = torch.library.get_ctx()
-            >>>         fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.clone_queue()]
+            >>>         fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.queue_()]
             >>>         return cls(fake_queue)
             >>>
             >>>     def push(self, x):
