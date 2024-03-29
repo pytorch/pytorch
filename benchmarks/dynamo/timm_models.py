@@ -8,11 +8,12 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main
+from common import BenchmarkRunner, download_retry_decorator, import_if_hpu, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
+import_if_hpu()
 
 def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
