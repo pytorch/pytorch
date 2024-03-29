@@ -17,7 +17,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _set_compilation_env,
     autograd_not_implemented,
-    reenter_make_fx,
+    trace_subgraph,
     UnsupportedAliasMutationException,
 )
 
@@ -25,7 +25,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
-    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -155,11 +154,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+    true_graph, _ = trace_subgraph(proxy_mode, true_fn, operands)
 
-    with disable_proxy_modes_tracing():
-        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
-        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
+    # We choose false out as example value but it shouldn't matter
+    false_graph, out = trace_subgraph(proxy_mode, false_fn, operands)
 
     true_outs = []
     false_outs = []
@@ -220,13 +218,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     # At this point, we're *guaranteed* that whether an output came from the
     # true or false branch is indistinguishable. So, as this is just for tracing
     # purposes, choose the true branch.
-
-    # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
-    # a FakeTensorMode error :
-    # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
-    # TODO Sometimes the operands are not completely FakeTensor, something seems went wrong in
-    # dynamo? Because of that it runs real computation sometimes and re-triggering downstream dispatch keys.
-    out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 

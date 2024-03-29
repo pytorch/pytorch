@@ -7,7 +7,7 @@ from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
-    reenter_make_fx,
+    trace_subgraph,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -228,10 +228,9 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     leading_dim_size = xs[0].shape[0]
 
     example_input = _unstack_pytree(xs)[0]
-    body_graph = f
-
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-    body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
+    body_graph, example_outs = trace_subgraph(
+        proxy_mode, f, (*example_input, *pos_args)
+    )
 
     next_name = None
     i = 0
@@ -244,15 +243,9 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
 
-    with disable_proxy_modes_tracing():
-        example_outs = body_graph(*example_input, *pos_args)
-
-        def expand_tensor(t):
-            if isinstance(t, torch.Tensor):
-                return t.expand(leading_dim_size, *t.shape)
-            return t
-
-        expanded_outs = pytree.tree_map(expand_tensor, example_outs)
+    expanded_outs = pytree.tree_map_only(
+        torch.Tensor, lambda t: t.expand(leading_dim_size, *t.shape), example_outs
+    )
 
     node_args = (body_graph, list(xs), list(pos_args))
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)

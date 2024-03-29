@@ -6,8 +6,9 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, track_tensor_tree
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 
 @dataclass
@@ -51,7 +52,7 @@ def autograd_not_implemented_inner(
 
                 return pytree.tree_map_only(
                     torch.Tensor, lambda x: err_fn(fake_requires_grad(x)), result
-                )
+                )  # type: ignore[arg-type]
             else:
                 raise RuntimeError(f"Autograd not implemented for {str(operator)}")
         return result
@@ -76,16 +77,104 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
-# We'll use the current decomposition table to make sure operators in subgraphs are
-# decomposed properly.
-# We also need to maybe run with interpreter for propagating stack_trace
-def reenter_make_fx(fn, pre_dispatch=False):
-    decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
-    return make_fx(
-        _maybe_run_with_interpreter(fn),
-        decomposition_table=decomp_table,
-        pre_dispatch=pre_dispatch,
-    )
+@contextmanager
+def _reset_tracer_states_temporarily(tracer):
+    """_reset_tracer_states_temporarily temporarily resets the tracer states that are critical
+    to sub-graph construction. The purpose is to use the current tracer to trace the subgraph.
+    It creates an isolated tracing environment for the subgraph. Specifically, we reset the following:
+    1. graph: it will be reset to an empty graph. Subgraph nodes will be appended to it.
+    2. root: it's used to resolve the get_attr nodes of self in the subgraph.
+    3. tensor_tracker: it associates tensors with their proxies.
+    4. symnode_tracker: it associates SymInt/SymFloat/SymBool with their proxies.
+    5. script_object_tracker: it associates script_object with their proxies.
+
+    Args:
+        tracer: the current tracer.
+    """
+    prev_graph = tracer.graph
+    prev_root = tracer.root
+    prev_symnode_tracker = tracer.symnode_tracker
+    prev_tensor_tracker = tracer.tensor_tracker
+    prev_script_object_tracker = tracer.script_object_tracker
+
+    try:
+        tracer.graph = torch.fx.Graph(
+            prev_graph.owning_module, prev_graph._tracer_cls, prev_graph._tracer_extras
+        )
+        tracer.root = torch.nn.Module()
+        tracer.tensor_tracker = WeakTensorKeyDictionary()
+        tracer.symnode_tracker = torch.fx.experimental.proxy_tensor._SymNodeDict()
+        tracer.script_object_tracker = WeakIdKeyDictionary(
+            dict=None, ref_type=_WeakHashRef
+        )
+        yield tracer
+    finally:
+        tracer.graph = prev_graph
+        tracer.root = prev_root
+        tracer.symnode_tracker = prev_symnode_tracker
+        tracer.tensor_tracker = prev_tensor_tracker
+        tracer.script_object_tracker = tracer.script_object_tracker
+
+
+def trace_subgraph(proxy_mode, func, args):
+    """
+    This function takes the current proxy_mode that's poped out of the torch dispatch stack
+    and use this proxy_mode to trace `func` with `args`.
+
+    Args:
+        proxy_mode: the current proxy_mode that has been poped out of the torch dispatch stack.
+        func: the function to be traced.
+        args: the args to the func. Specifically, call func with func(*args).
+
+    Returns:
+        the traced graph module and the actual result of func(*args)
+
+    Note: this function assume func has all the inputs passed in as args. For examples, parameters and buffers
+    accessed inside of subgraph are lifted as inputs of subgraph.
+    """
+    graph_tracer = proxy_mode.tracer
+    proxy_args = pytree.tree_map(graph_tracer.unwrap_proxy, args)
+    with _reset_tracer_states_temporarily(graph_tracer) as subgraph_tracer:
+        # create the placeholders for sub_graph.
+        for i, (arg, parg) in enumerate(zip(args, proxy_args)):
+            if not isinstance(parg, torch.fx.Proxy):
+                # Sometimes we can have inputs that are not proxies e.g. tensor closures.
+                # They're not tracked by parent graph yet so just give them a name manually.
+                # Note this won't affect the correctness of the sub_graph.
+                new_proxy_arg = subgraph_tracer.create_proxy(
+                    "placeholder", f"_input{i}", (), {}, name=f"_input{i}"
+                )
+            else:
+                new_proxy_arg = subgraph_tracer.create_proxy(
+                    "placeholder", parg.node.name, (), {}, name=parg.node.name
+                )
+            track_tensor_tree(arg, new_proxy_arg, constant=None, tracer=subgraph_tracer)
+
+        with proxy_mode:
+            real_out = _maybe_run_with_interpreter(func)(*args)
+
+        proxy_out = pytree.tree_map_only(
+            (
+                torch.Tensor,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+                torch.ScriptObject,
+            ),  # type: ignore[arg-type]
+            subgraph_tracer.unwrap_proxy,
+            real_out,
+        )
+        subgraph_tracer.create_node(
+            "output",
+            "output",
+            (subgraph_tracer.create_arg(proxy_out),),
+            {},
+            None,
+        )
+        new_gm = torch.fx._lazy_graph_module._make_graph_module(
+            subgraph_tracer.root, subgraph_tracer.graph
+        )
+    return new_gm, real_out
 
 
 @contextmanager

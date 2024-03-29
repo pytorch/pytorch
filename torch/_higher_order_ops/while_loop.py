@@ -8,7 +8,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _set_compilation_env,
     autograd_not_implemented,
-    reenter_make_fx,
+    trace_subgraph,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -159,8 +159,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, operands):
     def _trace_while_loop(proxy_mode, while_loop_op, cond_fn, body_fn, operands):
         pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
         with disable_proxy_modes_tracing():
-            cond_graph = reenter_make_fx(cond_fn, pre_dispatch)(*operands)
-            body_graph = reenter_make_fx(body_fn, pre_dispatch)(*operands)
+            cond_graph, _ = trace_subgraph(mode, cond_fn, operands)
+            body_graph, body_out = trace_subgraph(mode, body_fn, operands)
 
         next_name = None
         i = 0
@@ -187,9 +187,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, operands):
 
         # body_fn return output with the same pytree and tensor meta data as operands
         # so we could just return the output after one iteration.
-        out = body_fn(*operands)
         return track_tensor_tree(
-            out, out_proxy, constant=None, tracer=proxy_mode.tracer
+            body_out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
 
     if mode.enable_tracing:
