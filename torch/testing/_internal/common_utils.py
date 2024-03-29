@@ -2676,6 +2676,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     # Don't fail entirely if we can't get the test filename
                     log.info("could not print repro string", extra=str(e))
 
+    @torch._dynamo.disable
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
@@ -2683,10 +2684,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
+    @torch._dynamo.disable
     def assertExpectedInline(self, actual, expect, skip=0):
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
 
     # Munges exceptions that internally contain stack traces, using munge_exc
+    @torch._dynamo.disable
     def assertExpectedInlineMunged(
         self, exc_type, callable, expect, *, suppress_suffix=True
     ):
@@ -2699,11 +2702,13 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             return
         self.fail(msg="Did not raise when expected to")
 
+    @torch._dynamo.disable
     def assertLogs(self, logger=None, level=None):
         if logger is None:
             logger = logging.getLogger("torch")
         return super().assertLogs(logger, level)
 
+    @torch._dynamo.disable
     def assertNoLogs(self, logger=None, level=None):
         if logger is None:
             logger = logging.getLogger("torch")
@@ -3520,11 +3525,13 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
+    @torch._dynamo.disable
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    @torch._dynamo.disable
     def assertEqualBroadcasting(self, x, y, *args, **kwargs) -> None:
         r"""Tests if tensor x equals to y, if y to be broadcast to x.shape.
         """
@@ -3536,6 +3543,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             y = torch.ones_like(x) * torch.tensor(y)
         return self.assertEqual(x, y, *args, **kwargs)
 
+    @torch._dynamo.disable
     def assertEqual(
             self,
             x,
@@ -3628,17 +3636,20 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 (lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg
             )
 
+    @torch._dynamo.disable
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
+    @torch._dynamo.disable
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() == y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)
 
+    @torch._dynamo.disable
     def assertObjectIn(self, obj: Any, iterable: Iterable[Any]) -> None:
         for elem in iterable:
             if id(obj) == id(elem):
@@ -3647,6 +3658,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
+    @torch._dynamo.disable
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
             context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
@@ -3661,6 +3673,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
+    @torch._dynamo.disable
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
         # Verifies that an exception with the type expected_exception and message
         # matching the regular expression defined by expected_regex is thrown.
@@ -3684,6 +3697,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
     # Verifies that no unraisable exceptions are raised by callable.  Unlike regular
     # exceptions, these do not actually propagate to the caller and are
     # suppressed.  We must test for them specially.
+    @torch._dynamo.disable
     def assertNoUnraisable(self, callable, *args, **kwargs):
         raised = None
 
@@ -3707,6 +3721,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
     # TODO: Support context manager interface
     # NB: The kwargs forwarding to callable robs the 'subname' parameter.
     # If you need it, manually apply your callable in a lambda instead.
+    @torch._dynamo.disable
     def assertExpectedRaises(self, exc_type, callable, *args, **kwargs):
         subname = None
         if 'subname' in kwargs:
@@ -3720,6 +3735,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
 
+    @torch._dynamo.disable
     def assertNotWarn(self, callable, msg=''):
         r"""
         Test if :attr:`callable` does not raise a warning.
@@ -3731,6 +3747,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
+    @torch._dynamo.disable
     def assertWarnsOnceRegex(self, category, regex=''):
         """Context manager for code that *must always* warn
 
@@ -3750,6 +3767,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 any(re.match(pattern, str(w.message)) for w in ws),
                 f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
+    @torch._dynamo.disable
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -3830,10 +3848,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             else:
                 self.assertEqual(s, expected)
 
+    @torch._dynamo.disable
     def assertExpectedStripMangled(self, s, subname=None):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
 
+    @torch._dynamo.disable
     def assertGreaterAlmostEqual(self, first, second, places=None, msg=None, delta=None):
         """Assert that ``first`` is greater than or almost equal to ``second``.
 
@@ -3864,6 +3884,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+    @torch._dynamo.disable
     def assertAtenOp(self, onnx_model, operator, overload_name=""):
         all_aten_nodes = [p for p in onnx_model.graph.node
                           if p.op_type == "ATen" and p.domain == "org.pytorch.aten"]
