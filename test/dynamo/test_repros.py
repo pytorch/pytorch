@@ -4433,21 +4433,18 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
 
         out_ref = mod_ref(x)
-        with self.assertRaisesRegex(
-            RuntimeError, "requiring a storage size of 64 are out of bound"
-        ):
-            out_test = mod_test(x)
+        out_test = mod_test(x)
         self.assertExpectedInline(
             str(fw_graph[0].code.strip()),
             """\
 def forward(self, primals_1, primals_2):
-    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_2 = None
+    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
     getitem = _foreach_copy[0];  _foreach_copy = None
-    mm = torch.ops.aten.mm.default(getitem, getitem);  getitem = None
-    t_1 = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    mm = torch.ops.aten.mm.default(getitem, getitem)
+    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
     return [mm, t_1]""",
         )
-        # self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test)
 
     def test_super_in_staticmethod(self):
         class A:

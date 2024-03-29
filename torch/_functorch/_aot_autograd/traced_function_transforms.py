@@ -494,10 +494,12 @@ We only support storage resizing on graph inputs as long as the input either sta
                             torch.ops.inductor.resize_storage_bytes_(
                                 inpt_old, new_storage_size
                             )
-                            if new_storage_size == 0:
-                                # Even if we marked the input as having a data mutation (thus needing a copy_()),
-                                # We should **ignore** it if we resized our input down to 0 (there is no data to mutate)
-                                continue
+                        if new_storage_size == 0:
+                            # Even if we marked the input as having a data mutation (thus needing a copy_()),
+                            # We should **ignore** it if our input has no storage
+                            # (this can happen if, e.g. we temporarily resize our input, copy data into it,
+                            #  and resize it back down to zero)
+                            continue
                     # Optimization: if the copy_() is a no-op then don't include it in the graph.
                     # In theory inductor could optimize this away, however in fsdp, we end up with
                     # param.copy_(param), where param is a zero-storage-size tensor,

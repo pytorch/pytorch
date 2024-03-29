@@ -257,6 +257,9 @@ def is_in_base(t, maybe_tensors):
     return False
 
 class TestAOTAutograd(AOTTestCase):
+    def setUp(self):
+        print("In method", self._testMethodName)
+        super().setUp()
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
     # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
@@ -787,15 +790,16 @@ def forward(self, primals_1):
         )
         out = compiled_f(inp)
         # Final graph has two interesting properties:
-        # (1) no resizes (or copy_()) in the functional graph, since the two resizes cancel out
+        # (1) no resizes in the functional graph, since the two resizes cancel out
         #     and the final size is zero
-        # (2) `copy` is used in the compute (sin), but the original `primals_1` is saved for backward
+        # (2) no copy_ in the functional graph, even though we copied data into the input,
+        #     because the input has no storage at the end of graph execution (so no data to copy)
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1):
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
-    copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
-    sin = torch.ops.aten.sin.default(copy);  copy = None
-    return [sin, primals_1]""")
+    copy = torch.ops.aten.copy.default(primals_1, ones);  primals_1 = ones = None
+    sin = torch.ops.aten.sin.default(copy)
+    return [sin, copy]""")
 
     def test_input_mutation_storage_resize_not_supported(self):
         def f(a):
@@ -855,6 +859,9 @@ def forward(self, primals_1):
                 a_alias.mul_(2)
             return a + 1
         inp = [torch.ones(4, requires_grad=True)]
+        # The important bit: we detected that the input mutation is safe
+        # to include **inside** the graph, since it was under no_grad
+        # (so all we need to do is use mark_dirty() on the input to bump the VC)
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):

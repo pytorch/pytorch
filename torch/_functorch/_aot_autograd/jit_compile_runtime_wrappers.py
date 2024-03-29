@@ -221,15 +221,6 @@ def _input_node(gm: torch.fx.GraphModule, i: int) -> torch.fx.Node:
     raise IndexError(f"input {i} does not exist, only {seen} inputs in graph")
 
 
-def _can_detach(node: torch.fx.Node):
-    """
-    Avoid calling .detach() on inputs passed to _bind_nn_parameter()
-    """
-    from torch._dynamo.create_parameter_op import _bind_nn_parameter
-
-    return all(n.target is not _bind_nn_parameter for n in node.users)
-
-
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: List[Any],
@@ -366,7 +357,7 @@ def aot_dispatch_autograd(
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
             for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None and _can_detach(_input_node(fx_g, i)):
+                if bw_out is None:
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:

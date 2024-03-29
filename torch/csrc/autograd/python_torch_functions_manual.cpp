@@ -499,7 +499,7 @@ static PyObject* THPVariable__functionalize_get_storage_size(
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
   auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
   auto size = wrapper->get_storage_size(/*before=*/before);
-  return wrap(size);
+  return toPyObject(size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

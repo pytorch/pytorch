@@ -1357,7 +1357,6 @@ class MetaConverter:
                 exit_stack.enter_context(
                     torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
                 )
-            exit_stack.enter_context(torch._C._DisableFuncTorch())
 
             r = self.meta_tensor(
                 t_desc,

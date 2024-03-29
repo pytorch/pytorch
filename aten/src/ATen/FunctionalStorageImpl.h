@@ -94,9 +94,6 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   const Tensor& base() {
     return base_;
   }
-  const Tensor& original_base() {
-    return original_base_;
-  }
   size_t generation() const {
     return generation_;
   }
@@ -104,7 +101,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     frozen_ = true;
   }
 
-  int64_t get_storage_size(bool before) {
+  c10::SymInt get_storage_size(bool before) {
     if (before) {
       return original_storage_size_;
     } else {
@@ -141,7 +138,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
 
   void mark_inductor_storage_resize(c10::SymInt new_size) {
     inductor_storage_resized_ = true;
-    curr_storage_size_ = new_size.guard_int(__FILE__, __LINE__);
+    curr_storage_size_ = new_size;
   }
 
   bool was_inductor_storage_resized() {
@@ -158,8 +155,6 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // [Functionalization: Walualias Removal] for a diagram that shows this
   // visually.
   at::Tensor base_;
-  // Keep the original value of the tensor around
-  at::Tensor original_base_;
   std::vector<Update> updates_;
   // generation_ gets incremented every time a mutation is queued onto the
   // alias. It is used to determine if a given tensor is "up to date", or if it
@@ -169,13 +164,34 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // storage cannot be unfrozen.
   bool frozen_ = false;
 
-  bool inductor_storage_resized_ = false;
-  int64_t original_storage_size_;
-  int64_t curr_storage_size_;
-
+  // These mutation counters are bumped on the storage
+  // whenever a FunctionalTensorWrapper experiences a mutation.
+  // When the mutation is under no_grad, or comes from a triton kernel, we also
+  // bump the corresponding during_no_grad or hidden_from_autograd counters. Why
+  // do we need to detect these two situations separately from "normal" input
+  // mutations? (1) "normal" input mutations can mutate autograd metadata like
+  // .grad_fn,
+  //     in which case they need to be replayed outside of the compiled graph
+  // (2) "no_grad" input mutations are generally safe to keep in the graph (and
+  // compile),
+  //     but they bump the tensor's VC, so we need to mark_dirty() on the inputs
+  //     in torch.compile
+  // (3) mutations that are fully hidden from autograd (e.g. from a triton
+  // kernel)
+  //     do not mutate any autograd state, and be fully kept in the graph
+  // When we detect that an input was mutated, we need to be able to tell if:
+  // (1) all of the mutations were from triton kernels
+  // (2) all of the mutations were under no_grad
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_counter_hidden_from_autograd_ = 0;
+
+  // Used to tell if:
+  // (1) There were any storage resizes on a graph input
+  // (2) The original/curr storage size tell us if these resizes result in a nop
+  bool inductor_storage_resized_ = false;
+  c10::SymInt original_storage_size_;
+  c10::SymInt curr_storage_size_;
 };
 
 } // namespace at::functionalization

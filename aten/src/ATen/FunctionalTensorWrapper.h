@@ -149,7 +149,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return was_storage_changed_;
   }
 
-  int64_t get_storage_size(bool before) {
+  c10::SymInt get_storage_size(bool before) {
     return functional_storage_impl()->get_storage_size(before);
   }
 
