@@ -29,7 +29,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
 
   // If we have a batched bias or weight, we need to perform the computation separately.
   optional<Tensor> unbatched_bias;
-  bool separate_bias;
+  bool separate_bias = false;
   if ((rhs_bdim && bias && bias->defined()) || bias_bdim) {
     TORCH_INTERNAL_ASSERT(bias.has_value());
     TORCH_INTERNAL_ASSERT(bias->defined());
@@ -245,7 +245,7 @@ convolution_backward_input_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight, optional<int64_t> weight_bdim,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, c10::SymInt groups) {
+    c10::SymIntArrayRef output_padding, const c10::SymInt& groups) {
   const std::array<bool, 3> mask = {true, false, false};
   if (grad_output_bdim && weight_bdim) {
     // regular: BNO, BOI -> N(BO), (BO)I -> N(BI)
@@ -326,7 +326,7 @@ convolution_backward_weight_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight, optional<int64_t> weight_bdim,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, c10::SymInt groups) {
+    c10::SymIntArrayRef output_padding, const c10::SymInt& groups) {
   const std::array<bool, 3> mask = {false, true, false};
   if (grad_output_bdim && input_bdim) {
     // BNO, BNI -> N(BO), N(BI) -> (BO)I (regular) (BI)O (transposed)
