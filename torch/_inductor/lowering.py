@@ -370,7 +370,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
                 return ir.Constant(x, dtype, decode_device(None))
 
         return [const_func(x) for x in inputs]
-    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
+    ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
@@ -2095,8 +2095,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            low,
-            high,
+            ops.index_expr(low, torch.int64),
+            ops.index_expr(high, torch.int64),
         )
 
     return Pointwise.create(
