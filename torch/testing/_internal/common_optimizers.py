@@ -774,6 +774,15 @@ def optim_error_inputs_func_rmsprop(device, dtype):
 
 
 def optim_inputs_func_rprop(device):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001), "capturable": True},
+            desc="Tensor lr with capturable",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-4}, desc="non-default lr"),
@@ -786,7 +795,7 @@ def optim_inputs_func_rprop(device):
             desc="non-default step_sizes",
         ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_rprop(device, dtype):
