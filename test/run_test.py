@@ -1522,7 +1522,9 @@ def run_test_module(
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool
         ), f"While running {str(test)} got non integer return code {return_code}"
-        print(f"TIME INFO: Took {time.time() - start:.2f}s to run {str(test)}, expected time {test.time}s")
+        print(
+            f"TIME INFO: Took {time.time() - start:.2f}s to run {str(test)}, expected time {test.time}s"
+        )
         if return_code == 0:
             return None
 
@@ -1608,10 +1610,7 @@ def run_tests(
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
-                raise RuntimeError(
-                    failure.message
-                    + keep_going_message
-                )
+                raise RuntimeError(failure.message + keep_going_message)
 
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
@@ -1625,10 +1624,7 @@ def run_tests(
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
-                raise RuntimeError(
-                    failure.message
-                    + keep_going_message
-                )
+                raise RuntimeError(failure.message + keep_going_message)
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
