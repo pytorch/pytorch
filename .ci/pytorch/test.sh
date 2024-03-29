@@ -6,6 +6,11 @@
 
 set -ex
 
+# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+sudo chown -R jenkins /var/lib/jenkins/workspace
+git config --global --add safe.directory /var/lib/jenkins/workspace
+
 echo "Environment variables:"
 env
 
@@ -1248,3 +1253,6 @@ else
   test_torch_function_benchmark
   test_benchmarks
 fi
+
+# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
