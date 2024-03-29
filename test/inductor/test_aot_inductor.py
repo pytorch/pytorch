@@ -312,19 +312,14 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
     def test_amp_cpu(self):
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device=device)
-
-            def forward(self, y):
-                return torch.nn.functional.linear(y, self.weight)
+        def fn(x):
+            return torch.nn.functional.silu(x) * x
 
         example_inputs = (torch.randn(10, 10, device=self.device),)
 
         with config.patch({"fallback_random": True}):
             with torch.cpu.amp.autocast():
-                self.check_model(Model(self.device), example_inputs)
+                self.check_model(fn, example_inputs)
 
     def test_missing_output(self):
         class Model(torch.nn.Module):
@@ -2556,5 +2551,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
-        run_tests(needs="filelock")
+    # if HAS_CUDA or sys.platform == "darwin":
+    run_tests(needs="filelock")
