@@ -1704,18 +1704,19 @@ class TestExport(TestCase):
         inp = torch.randn(1, 1, 3, 3)
 
         gm = torch.export._trace._export(mod, (inp,), pre_dispatch=True).module()
+        arg_name = "arg6_1" if torch._dynamo.config.use_single_step_graph else "arg7_1"
         self.assertExpectedInline(
             str(gm.code).strip(),
-            """\
+            f"""\
 def forward(self, arg_0):
-    arg6_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    {arg_name}, = fx_pytree.tree_flatten_spec(([arg_0], {{}}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
-    conv2d = torch.ops.aten.conv2d.default(arg6_1, conv_weight, conv_bias);  arg6_1 = conv_weight = conv_bias = None
+    conv2d = torch.ops.aten.conv2d.default({arg_name}, conv_weight, conv_bias);  {arg_name} = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
     return pytree.tree_unflatten((getitem,), self._out_spec)""",

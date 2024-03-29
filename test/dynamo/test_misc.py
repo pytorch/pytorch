@@ -49,6 +49,7 @@ from torch._dynamo.testing import (
     skipIfNotPy311,
     unsupported,
     xfailIfPy311,
+    xfailIfSingleStepGraph,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -4342,36 +4343,37 @@ def fn():
         del x
         self.assertIs(x_ref(), None)
 
-    # def test_release_module_memory(self):
-    #     mod = torch.nn.Linear(10, 10)
-    #     x = torch.rand([10, 10])
-    #     mod_weight_ref = weakref.ref(mod.weight)
-    #     mod_ref = weakref.ref(mod)
+    @xfailIfSingleStepGraph
+    def test_release_module_memory(self):
+        mod = torch.nn.Linear(10, 10)
+        x = torch.rand([10, 10])
+        mod_weight_ref = weakref.ref(mod.weight)
+        mod_ref = weakref.ref(mod)
 
-    #     # Modules that are passed into torch._dynamo optimized functions
-    #     # will normally be held onto through the generated GraphModule,
-    #     # which contains the modules. remove the reference in this backend
-    #     # and test that no additional references are being held.
-    #     class NoLeakBackend:
-    #         def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-    #             gm.mod = None
+        # Modules that are passed into torch._dynamo optimized functions
+        # will normally be held onto through the generated GraphModule,
+        # which contains the modules. remove the reference in this backend
+        # and test that no additional references are being held.
+        class NoLeakBackend:
+            def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+                gm.mod = None
 
-    #             def foo(*args, **kwargs):
-    #                 return (1,)
+                def foo(*args, **kwargs):
+                    return (1,)
 
-    #             return foo
+                return foo
 
-    #     no_leak_backend = NoLeakBackend()
+        no_leak_backend = NoLeakBackend()
 
-    #     @torch._dynamo.optimize(no_leak_backend)
-    #     def foo(mod, x):
-    #         return mod(x)
+        @torch._dynamo.optimize(no_leak_backend)
+        def foo(mod, x):
+            return mod(x)
 
-    #     foo(mod, x)
-    #     del mod
-    #     del x
-    #     self.assertIsNone(mod_ref(), None)
-    #     self.assertIsNone(mod_weight_ref(), None)
+        foo(mod, x)
+        del mod
+        del x
+        self.assertIsNone(mod_ref(), None)
+        self.assertIsNone(mod_weight_ref(), None)
 
     def test_release_scope_memory(self):
         def inner(y):
@@ -9774,12 +9776,6 @@ fn
         gc.collect()
         self.assertTrue(cleared)
 
-    # VariableTracker will be created for the module weights which will
-    # hold a reference to the module.
-    @unittest.skipIf(
-        torch._dynamo.config.use_single_step_graph,
-        "VariableTracker will hold reference to module weight",
-    )
     def test_custom_module_free(self):
         """Test that a model is freed when it goes out of scope"""
 
@@ -9796,13 +9792,7 @@ fn
             lambda mod: mod.fc,
         )
 
-    # VariableTracker will be created for the module weights which will
-    # hold a reference to the module.
     @xfailIfPy311
-    @unittest.skipIf(
-        torch._dynamo.config.use_single_step_graph,
-        "VariableTracker will hold reference to module weight",
-    )
     def test_sequential_module_free(self):
         self._test_compile_model_free(
             lambda: (
