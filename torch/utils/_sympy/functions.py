@@ -376,7 +376,14 @@ def make_opaque_unary_fn(name):
                 # -0.848925964814655
                 # >>> math.sin(float(2**53+1))
                 # -0.848925964814655
-                return sympy.Float(getattr(math, name)(float(a)))
+                try:
+                    return sympy.Float(getattr(math, name)(float(a)))
+                # Just use sympy semantics for infinity/overflow, you might get some
+                # weird objects but ask silly questions, get silly answers
+                except OverflowError:
+                    return getattr(sympy, name)(a)
+            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo]:
+                return getattr(sympy, name)(a)
             return None
 
     OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
@@ -394,3 +401,6 @@ OpaqueUnaryFn_tanh = make_opaque_unary_fn("tanh")
 OpaqueUnaryFn_asin = make_opaque_unary_fn("asin")
 OpaqueUnaryFn_acos = make_opaque_unary_fn("acos")
 OpaqueUnaryFn_atan = make_opaque_unary_fn("atan")
+OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
+OpaqueUnaryFn_log = make_opaque_unary_fn("log")
+OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
