@@ -214,6 +214,7 @@ def make_constraints(
     )
 
     shape_env = fake_mode.shape_env
+    assert shape_env.tracked_fakes is not None
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
     input_contexts = [tf.symbolic_context for tf in shape_env.tracked_fakes]
