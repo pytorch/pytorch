@@ -1151,6 +1151,7 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
 
 
 def _register_woq_mm_int8_pattern1():
+    # F.linear(x, weight.to(dtype=x.dtype)) * scales
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
         CallFunction(
@@ -1202,6 +1203,7 @@ def _register_woq_mm_int8_pattern1():
 
 
 def _register_woq_mm_int8_pattern2():
+    # F.linear(x, weight.to(dtype=x.dtype)) * scales
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
         CallFunction(
