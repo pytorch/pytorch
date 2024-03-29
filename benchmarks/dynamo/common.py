@@ -2917,7 +2917,7 @@ def parse_args(args=None):
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu, hpu or cuda"
+        "--devices", "--device", "-d", action="append", help="cpu, cuda or hpu"
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
