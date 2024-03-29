@@ -16,6 +16,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class TestKernelBenchmark(TestCase):
+    device_type = GPU_TYPE
+
     @classmethod
     def setUpClass(cls):
         cls.exit_stack = contextlib.ExitStack()
@@ -202,7 +204,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.042
         self.check_bandwidth(compiled_module, "0.042")
 
-    @expectedFailureXPU
     @config.patch(max_autotune=True)
     def test_fused_layernorm_bandwidth_computation(self):
         M, N = 10, 1000000
