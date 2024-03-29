@@ -693,7 +693,7 @@ Tensor new_empty_strided_batching_rule(
 }
 
 Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+  TORCH_CHECK(!tensors.empty(), "cat() not supported on empty tensor list");
 
   std::vector<std::vector<Tensor>> unbound;
   for (const auto & tensor : tensors) {
@@ -703,7 +703,7 @@ Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
     TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = nt.unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "cat() not supported for differently-sized nested arguments");
     }

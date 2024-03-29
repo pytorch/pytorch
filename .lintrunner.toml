@@ -192,6 +192,8 @@ include_patterns = [
     'aten/src/ATen/*.cpp',
     'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
+    'aten/src/ATen/functorch/*.h',
+    'aten/src/ATen/functorch/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/csrc/*.h',
