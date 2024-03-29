@@ -208,12 +208,11 @@ class AbstractImplCtx:
 
     def to_fake_tensor(self, tensor: torch.Tensor):
         """
-        Creates a fake tensor from a concrete tensor.
+        Creates a fake tensor from a concrete tensor. Note: this is not needed for impl_abstract.
 
-        This is useful for writing the fake implementation (which is necessary
-        for torch.compile) for custom class. Users need to implement a from_real method that takes
-        a real custom object and creates a fake custom object. Users can use this API to create
-        fake tensors for the tensor states in the custom object.
+        This is useful for register_fake_class (which is necessary for torch.compile) for custom class.
+        Users need to implement a from_real method that takes a real custom object and creates a fake
+        custom object. Users can use this API to create fake tensors for the tensor states in the custom object.
 
         Args:
             tensor (torch.Tensor): A concrete tensor.

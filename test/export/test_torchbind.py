@@ -445,15 +445,14 @@ def forward(self, arg0_1, attr, arg1_1):
             ).fill_(-1)
         )
         x = torch.ones(2, 3)
-        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
-            gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
-            self.assertEqual(self.tq_push_counter, 2)
-            self.assertEqual(self.tq_pop_counter, 2)
-            self.assertEqual(self.tq_size_counter, 2)
-            self.assertEqual(tq.size(), 0)
-            self.assertExpectedInline(
-                gm.code.strip("\n"),
-                """\
+        gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
+        self.assertEqual(self.tq_push_counter, 2)
+        self.assertEqual(self.tq_pop_counter, 2)
+        self.assertEqual(self.tq_size_counter, 2)
+        self.assertEqual(tq.size(), 0)
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg1_1)
     call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'push', cos);  cos = None
@@ -467,9 +466,9 @@ def forward(self, arg0_1, arg1_1):
     sub = torch.ops.aten.sub.Tensor(call_torchbind_4, 0);  call_torchbind_4 = None
     return (sub, add, arg0_1)
     """,
-            )
-            mod.check_tq_is_fake = False
-            self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
+        )
+        mod.check_tq_is_fake = False
+        self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx_tensor_queue_methods_fakify_internal_states(
@@ -506,16 +505,15 @@ def forward(self, arg0_1, arg1_1):
             tq.push(torch.ones(2, 3))
             tq1.push(torch.ones(2, 3))
         x = torch.ones(2, 3)
-        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
-            prev_size = tq.size()
-            gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
-            self.assertEqual(self.tq_push_counter, 0)
-            self.assertEqual(self.tq_pop_counter, 2)
-            self.assertEqual(self.tq_size_counter, 2)
-            self.assertEqual(tq.size(), prev_size)
-            self.assertExpectedInline(
-                gm.code.strip("\n"),
-                """\
+        prev_size = tq.size()
+        gm = make_fx(mod, tracing_mode=make_fx_tracing_mode)(tq, x)
+        self.assertEqual(self.tq_push_counter, 0)
+        self.assertEqual(self.tq_pop_counter, 2)
+        self.assertEqual(self.tq_size_counter, 2)
+        self.assertEqual(tq.size(), prev_size)
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
 def forward(self, arg0_1, arg1_1):
     call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
     call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
@@ -527,16 +525,16 @@ def forward(self, arg0_1, arg1_1):
     add_2 = torch.ops.aten.add.Tensor(sub, arg1_1);  sub = arg1_1 = None
     return (add_2, add_1, arg0_1)
     """,
-            )
-            # turn off tq type checking in eager execution
-            mod.check_tq_is_fake = False
-            self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
-            self.assertEqual(tq.size(), 0)
-            self.assertEqual(tq1.size(), 0)
+        )
+        # turn off tq type checking in eager execution
+        mod.check_tq_is_fake = False
+        self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
+        self.assertEqual(tq.size(), 0)
+        self.assertEqual(tq1.size(), 0)
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
-class TestImplAbstractClass(TestCase):
+class TestRegisterFakeClass(TestCase):
     def tearDown(self):
         torch._library.fake_class_registry.global_fake_class_registry.clear()
 
@@ -593,7 +591,7 @@ class TestImplAbstractClass(TestCase):
                 x, y = foo_obj.__getstate__()
                 return cls(x, y)
 
-        with self.assertRaisesRegex(RuntimeError, "already registered"):
+        with self.assertWarnsRegex(UserWarning, "already registered"):
             torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
 
 

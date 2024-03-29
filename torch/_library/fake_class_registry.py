@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, Optional
+import warnings
+from typing import Any, Dict, Optional, Protocol, Tuple
 
 import torch
 
@@ -8,21 +9,32 @@ from torch._library.utils import parse_namespace
 log = logging.getLogger(__name__)
 
 
+class FakeScriptObject:
+    def __init__(self, wrapped_obj):
+        self.wrapped_obj = wrapped_obj
+
+
+class HasStaticMethodFromReal(Protocol):
+    @classmethod
+    def from_real(cls, real_obj: torch.ScriptObject):
+        pass
+
+
 class FakeClassRegistry:
     def __init__(self):
         self._registered_class: Dict[str, Any] = {}
 
-    def has_impl(self, full_qualname: str):
+    def has_impl(self, full_qualname: str) -> bool:
         return full_qualname in self._registered_class
 
-    def get_impl(self, full_qualname: str):
+    def get_impl(self, full_qualname: str) -> Any:
         self._check_registered(full_qualname)
         return self._registered_class[full_qualname]
 
     def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
-            raise RuntimeError(
-                f"{full_qualname} is already registered. Please use deregister to deregister it first."
+            warnings.warn(
+                f"{full_qualname} is already registered. Previous fake class is overrided with {fake_class}."
             )
         self._registered_class[full_qualname] = fake_class
 
@@ -35,10 +47,10 @@ class FakeClassRegistry:
         self._check_registered(full_qualname)
         return self._registered_class.pop(full_qualname)
 
-    def clear(self):
+    def clear(self) -> None:
         self._registered_class.clear()
 
-    def _check_registered(self, full_qualname: str):
+    def _check_registered(self, full_qualname: str) -> None:
         if full_qualname not in self._registered_class:
             raise RuntimeError(
                 f"{full_qualname} is not registered. Please use register_fake_class to register it first."
@@ -48,7 +60,7 @@ class FakeClassRegistry:
 global_fake_class_registry = FakeClassRegistry()
 
 
-def to_fake_obj(fake_mode, x: torch.ScriptObject):
+def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
     fake_x = _fake_obj_from_real(fake_mode, x)
 
     def _call_torchbind(method_name):
@@ -136,7 +148,8 @@ def register_fake_class(qualname, fake_class=None):
 
     """
 
-    def inner(fake_class):
+    def inner(fake_class: HasStaticMethodFromReal):
+        breakpoint()
         ns, name = parse_namespace(qualname)
 
         # This also checks whether the refered torch::class_ exists.
@@ -163,7 +176,7 @@ def deregister_fake_class(qualname):
     return global_fake_class_registry.deregister(_full_qual_class_name(qualname))
 
 
-def has_fake_class(full_qualname):
+def has_fake_class(full_qualname) -> bool:
     return global_fake_class_registry.has_impl(full_qualname)
 
 
@@ -173,20 +186,20 @@ def find_fake_class(full_qualname) -> Optional[Any]:
     return global_fake_class_registry.get_impl(full_qualname)
 
 
-def _full_qual_class_name(qualname: str):
+def _full_qual_class_name(qualname: str) -> str:
     ns, name = parse_namespace(qualname)
     return "__torch__.torch.classes." + ns + "." + name
 
 
 # Return the namespace and class name from fully qualified name.
-def _ns_and_class_name(full_qualname: str):
+def _ns_and_class_name(full_qualname: str) -> Tuple[str, str]:
     splits = full_qualname.split(".")
     assert len(splits) == 5
     _torch, torch_ns, classes, ns, class_name = splits
     return ns, class_name
 
 
-def _find_fake_class_for_script_object(x: torch.ScriptObject):
+def _find_fake_class_for_script_object(x: torch.ScriptObject) -> Any:
     full_qualname = x._type().qualified_name()  # type: ignore[attr-defined]
     ns, class_name = _ns_and_class_name(full_qualname)
     fake_class = find_fake_class(full_qualname)
@@ -206,12 +219,7 @@ def _find_fake_class_for_script_object(x: torch.ScriptObject):
 _CONVERT_FROM_REAL_NAME = "from_real"
 
 
-class FakeScriptObject:
-    def __init__(self, wrapped_obj):
-        self.wrapped_obj = wrapped_obj
-
-
-def _fake_obj_from_real(fake_mode, x):
+def _fake_obj_from_real(fake_mode, x) -> Any:
     fake_class = _find_fake_class_for_script_object(x)
 
     from_real_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)
