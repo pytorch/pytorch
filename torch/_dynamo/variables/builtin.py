@@ -100,6 +100,10 @@ def _polyfill_call_impl(name):
 
 class BuiltinVariable(VariableTracker):
     _SENTINEL = object()
+    _nonvar_fields = {
+        "fn",
+        *VariableTracker._nonvar_fields,
+    }
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -1503,6 +1507,7 @@ class BuiltinVariable(VariableTracker):
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
                 variables.ConstantVariable,
+                variables.DistributedVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
             ),
