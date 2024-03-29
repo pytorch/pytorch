@@ -206,7 +206,7 @@ class AbstractImplCtx:
         )
         return result
 
-    def create_fake_tensor(self, tensor: torch.Tensor):
+    def to_fake_tensor(self, tensor: torch.Tensor):
         """
         Creates a fake tensor from a concrete tensor.
 
@@ -228,7 +228,7 @@ class AbstractImplCtx:
             >>>     @classmethod
             >>>     def from_real(cls, real_tq):
             >>>         ctx = torch.library.get_ctx()
-            >>>         fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.queue_()]
+            >>>         fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
             >>>         return cls(fake_queue)
             >>>
             >>>     def push(self, x):
