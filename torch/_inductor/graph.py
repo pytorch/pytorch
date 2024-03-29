@@ -20,8 +20,12 @@ from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
-
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_symbols,
+    ShapeEnv,
+    SymTypes,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -188,13 +192,17 @@ class GraphLowering(torch.fx.Interpreter):
         if get_scheduling_for_device("cpu") is None:
             from .codegen.cpp import CppScheduling
 
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
+            )
 
         if get_scheduling_for_device("cuda") is None:
             from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
             # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
+            )
 
     def __init__(
         self,
@@ -1058,9 +1066,10 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if not unbacked_symbols_in_strides and dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
                     if (
                         len(result.get_size()) == 4
@@ -1190,23 +1199,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
-            self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
-        else:
-            device_types = self.device_types.copy()
-            device_types.discard("cpu")
-            # TODO(Eikan): Only support mixing cpu and other device now.
-            assert len(device_types) <= 1, "Does not support mixing {}".format(
-                "+".join(device_types)
-            )
-            only_cpu = len(device_types) == 0
-            device_type = "cpu" if only_cpu else device_types.pop()
 
-            self.device_ops = get_device_op_overrides(device_type)
-            wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
-            assert (
-                wrapper_code_gen_cls is not None
-            ), f"Device {device_type} not supported"
-            self.wrapper_code = wrapper_code_gen_cls()
+        device_types = self.device_types.copy()
+        device_types.discard("cpu")
+        # TODO(Eikan): Only support mixing cpu and other device now.
+        assert len(device_types) <= 1, "Does not support mixing {}".format(
+            "+".join(device_types)
+        )
+        only_cpu = len(device_types) == 0
+        device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+            device_type, self.cpp_wrapper
+        )
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
+        self.wrapper_code = wrapper_code_gen_cls()
 
         if self.const_module:
             # If we have const module, we could reuse the kernels
@@ -1265,6 +1273,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.cpp_wrapper = True
             self.removed_buffers.clear()
             self.inplaced_to_remove.clear()
+            V.graph.sizevars.precomputed_replacements.clear()
+            V.graph.sizevars.inv_precomputed_replacements.clear()
             return self.codegen()
         else:
             # cpu
@@ -1278,8 +1288,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
+        self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
-        return self.wrapper_code.generate(self.is_inference)
+        result = self.wrapper_code.generate(self.is_inference)
+        self.wrapper_code.pop_codegened_graph()
+        return result
 
     def codegen_subgraph(self, parent_graph):
         """
