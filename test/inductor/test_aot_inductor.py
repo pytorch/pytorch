@@ -2482,6 +2482,7 @@ if not IS_FBCODE:
                 is_skip=True
             ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
+            "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
