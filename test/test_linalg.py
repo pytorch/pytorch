@@ -7651,78 +7651,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
-    def test_svd_lowrank(self, device):
-        from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
-
-        dtype = torch.double
-
-        def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, svd, **options):
-            density = options.pop('density', 1)
-            if isinstance(matrix_size, int):
-                rows = columns = matrix_size
-            else:
-                rows, columns = matrix_size
-            if density == 1:
-                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device, dtype=dtype)
-                a = a_input
-            else:
-                a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
-                a = a_input.to_dense()
-            m = a_input.mean(axis=-2, keepdim=True)
-
-            u, s, v = svd(a_input, q=guess_rank, M=m, **options)
-
-            self.assertEqual(s.shape[-1], guess_rank)
-            self.assertEqual(u.shape[-2], rows)
-            self.assertEqual(u.shape[-1], guess_rank)
-            self.assertEqual(v.shape[-1], guess_rank)
-            self.assertEqual(v.shape[-2], columns)
-
-            A1 = u.matmul(s.diag_embed()).matmul(v.mT)
-            ones_m1 = torch.ones(batches + (rows, 1), dtype=a.dtype, device=device)
-            c = a.sum(axis=-2) / rows
-            c = c.reshape(batches + (1, columns))
-            A2 = a - ones_m1.matmul(c)
-            self.assertEqual(A1, A2)
-
-            if density == 1:
-                # actual rank is known only for dense input
-                detect_rank = (s.abs() > 1e-5).sum(axis=-1)
-                self.assertEqual(actual_rank * torch.ones(batches, device=device, dtype=torch.int64), detect_rank)
-                S = torch.linalg.svdvals(A2)
-                self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
-
-        all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [  # noqa: B020
-                (2, (17, 4), all_batches),
-                (2, (100, 4), all_batches),
-                (6, (100, 40), all_batches),
-                (12, (1000, 1000), [()]),
-        ]:
-            for batches in all_batches:
-                for guess_rank in [
-                        actual_rank,
-                        actual_rank + 2,
-                        actual_rank + 6,
-                ]:
-                    if guess_rank <= min(*size):
-                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.svd_lowrank)
-                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.svd_lowrank)
-
-        # sparse input
-        for guess_rank, size in [
-                (4, (17, 4)), (4, (4, 17)), (16, (17, 17)),
-                (21, (100, 40)), (20, (40, 100)), (600, (1000, 1000))]:
-            for density in [0.005, 0.1]:
-                run_subtest(guess_rank, None, size, (), device, torch.svd_lowrank, density=density)
-
-        # jitting support
-        jitted = torch.jit.script(torch.svd_lowrank)
-        guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
-        run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
-
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
@@ -7730,6 +7658,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
             density = options.pop('density', 1)
+            use_svd_lowrank = options.pop('use_svd_lowrank', False)
             if isinstance(matrix_size, int):
                 rows = columns = matrix_size
             else:
@@ -7741,7 +7670,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
                 a = a_input.to_dense()
 
-            u, s, v = pca(a_input, q=guess_rank, **options)
+            if use_svd_lowrank:
+                m = a_input.mean(dim=-2, keepdim=True)
+                u, s, v = pca(a_input, q=guess_rank, M=m, **options)
+            else:
+                u, s, v = pca(a_input, q=guess_rank, **options)
 
             self.assertEqual(s.shape[-1], guess_rank)
             self.assertEqual(u.shape[-2], rows)
@@ -7779,6 +7712,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     if guess_rank <= min(*size):
                         run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca_lowrank)
                         run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca_lowrank)
+                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.svd_lowrank, use_svd_lowrank=True)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device,  torch.svd_lowrank, use_svd_lowrank=True)
 
         # sparse input
         for guess_rank, size in [
