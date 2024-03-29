@@ -85,7 +85,6 @@ class NestedTensor(torch.Tensor):
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
-        assert values.device == offsets.device
 
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
@@ -421,8 +420,8 @@ def _nt_view_dummy() -> torch.Tensor:
     global _dummy_instance
     if _dummy_instance is None:
         _dummy_instance = NestedTensor(
-            values=torch.randn(3, 3, device="meta"),
-            offsets=torch.randint(3, (2,), device="meta", dtype=torch.int64),
+            values=torch.zeros(3, 3, device="meta"),
+            offsets=torch.zeros(3, device="meta", dtype=torch.int64),
         ).detach()
     return _dummy_instance
 
