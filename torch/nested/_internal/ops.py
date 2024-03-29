@@ -1232,7 +1232,7 @@ def _nested_view_from_jagged_with_cache_default(func, *args, **kwargs):
     )
     ragged_idx = new_kwargs["ragged_idx"]
     min_seqlen = new_kwargs["min_seqlen"]
-    max_seqlen = new_kwargs["min_seqlen"]
+    max_seqlen = new_kwargs["max_seqlen"]
     metadata_cache = {}
     if min_seqlen > -1:
         metadata_cache["min_seqlen"] = min_seqlen
