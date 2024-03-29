@@ -104,6 +104,14 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
             ),
         ),
         (
+            "CU_POINTER_ATTRIBUTE_RANGE_START_ADDR",
+            (
+                "HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR",
+                CONV_TYPE,
+                API_DRIVER,
+            ),
+        ),
+        (
             "CUDA_RESOURCE_DESC",
             ("HIP_RESOURCE_DESC", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
