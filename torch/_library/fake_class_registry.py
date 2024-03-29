@@ -87,7 +87,7 @@ def register_fake_class(qualname, fake_class=None):
     This API may be used as a decorator (see example). For the fake class, users
     are required to provide a from_real classmethod that takes a real object and
     returns an instance of the fake class. All tensors in the fake object should also
-    be properly fakified with create_fake_tensor() in from_real.
+    be properly fakified with to_fake_tensor() in from_real.
 
     Examples:
         # For a custom class Foo defined in test_custom_class_registration.cpp:
@@ -122,7 +122,7 @@ def register_fake_class(qualname, fake_class=None):
             @classmethod
             def from_real(cls, real_tq):
                 ctx = torch.library.get_ctx()
-                fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.clone_queue()]
+                fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.clone_queue()]
                 return cls(fake_queue)
 
             def push(self, x):
