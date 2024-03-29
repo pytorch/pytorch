@@ -2363,6 +2363,8 @@ CPU_TEST_FAILURES = {
     # FIXME: failed with compilation error
     "test_runtime_checks": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
+    # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
+    "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
