@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch.utils._python_dispatch import _disable_current_modes
 
 
 log = logging.getLogger(__name__)
@@ -322,9 +323,10 @@ class FakeTensorMeta:
 
     @staticmethod
     def from_fake(fake) -> "FakeTensorMeta":
-        return FakeTensorMeta(
-            fake.size(), fake.stride(), fake.storage_offset(), fake.is_nested
-        )
+        with _disable_current_modes():
+            return FakeTensorMeta(
+                fake.size(), fake.stride(), fake.storage_offset(), fake.is_nested
+            )
 
 
 # [Note: ShapeEnv State Equality]
