@@ -87,7 +87,7 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
     return fake_x_wrapped
 
 
-def register_fake_class(qualname, fake_class=None):
+def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] = None):
     r"""Register a fake implementation for this class.
 
     It's in the same spirit of registering a fake implementation for
@@ -149,7 +149,6 @@ def register_fake_class(qualname, fake_class=None):
     """
 
     def inner(fake_class: HasStaticMethodFromReal):
-        breakpoint()
         ns, name = parse_namespace(qualname)
 
         # This also checks whether the refered torch::class_ exists.
