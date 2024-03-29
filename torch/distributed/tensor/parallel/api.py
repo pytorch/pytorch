@@ -91,7 +91,7 @@ def parallelize_module(  # type: ignore[return]
             parent_module = leaf_module = module
             path_splits = module_path.split(".")
             if len(path_splits) == 0:
-                raise RuntimeError(
+                raise ValueError(
                     "Expect module path to be non-empty, but got empty string!"
                 )
             atom: str = ""
@@ -111,7 +111,23 @@ def parallelize_module(  # type: ignore[return]
                 else:
                     # proceed in depth
                     parent_module = leaf_module
-                    leaf_module = leaf_module.get_submodule(atom)
+                    try:
+                        leaf_module = leaf_module.get_submodule(atom)
+                    except AttributeError:
+                        # No match for child string. For example, `*.lin` will
+                        # apply to all children at the first level, but it is
+                        # possible that not all children have `lin`. We stop
+                        # going deeper and do not raise an error.
+                        leaf_module = None  # type: ignore[assignment]
+                        break
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Encountered error when trying to get submodule {atom} in {module_path}"
+                        ) from e
+
+            if leaf_module is None:  # no match
+                # Go to next item in plan dict.
+                continue
 
             # When `path_split` is empty, `leaf_module` should point to the target.
             # Thus we apply the plan to the target module.
@@ -124,7 +140,7 @@ def parallelize_module(  # type: ignore[return]
             )
         return module
     else:
-        raise RuntimeError(  # pyre-ignore[7]
+        raise TypeError(  # pyre-ignore[7]
             "Expect Union[ParallelStyle, Dict[str, ParallelStyle]] for"
             f" parallelize_plan, {type(parallelize_plan)} found!"
         )
