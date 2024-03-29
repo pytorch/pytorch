@@ -267,7 +267,6 @@ class ShardingPropagator:
                 else:
                     output_specs = None
 
-                assert suggestion_schema is not None
                 output_sharding = OutputSharding(
                     output_specs,
                     suggestion_schema,
