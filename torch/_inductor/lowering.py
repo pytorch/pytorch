@@ -605,35 +605,6 @@ def _device_put(x: TensorBox, device: torch.device):
     return to_device(x, device, copy=True)
 
 
-@register_lowering(aten.bmm.default, type_promotion_kind=None)
-def fallback_bmm(self: TensorBox, batch2: TensorBox):
-    # Make the inputs of bmm contiguous
-    # because bmm cpu implementation does contiguous() if not
-    # this is to avoid additional copies in bmm
-    def do_bmm_input_contiguous(t: TensorBox):
-        if (
-            isinstance(self.data, ir.View)
-            and isinstance(self.data.data, ir.PermuteView)
-            and self.data.data.dims == [0, 3, 1, 2]
-        ):
-            t = Pointwise.create(
-                device=t.get_device(),
-                dtype=t.get_dtype(),
-                inner_fn=t.make_loader(),
-                ranges=t.get_size(),
-                origin_node=t.get_origin_node(),
-                traceback=t.get_traceback(),
-            )
-            t.realize()
-            t.freeze_layout()
-        return t
-
-    if self.get_device().type == "cpu" and batch2.get_device().type == "cpu":
-        self = do_bmm_input_contiguous(self)
-        batch2 = do_bmm_input_contiguous(batch2)
-    return fallback_handler(aten.bmm.default)(self, batch2)
-
-
 def register_pointwise(
     aten_fn,
     name=None,

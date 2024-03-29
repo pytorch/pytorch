@@ -1,5 +1,6 @@
 import torch
 
+from .. import ir
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -87,6 +88,31 @@ aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
 
 @register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, *, layout=None):
+    # Make the inputs of bmm contiguous
+    # because bmm cpu implementation does contiguous() if not
+    # this is to avoid additional copies in bmm
+    def do_bmm_input_contiguous(t: ir.TensorBox):
+        if (
+            isinstance(t.data, ir.View)
+            and isinstance(t.data.data, ir.PermuteView)
+            and t.data.data.dims == [0, 3, 1, 2]
+        ):
+            t = ir.Pointwise.create(
+                device=t.get_device(),
+                dtype=t.get_dtype(),
+                inner_fn=t.make_loader(),
+                ranges=t.get_size(),
+                origin_node=t.get_origin_node(),
+                traceback=t.get_traceback(),
+            )
+            t.realize()
+            t.freeze_layout()
+        return t
+
+    if mat1.get_device().type == "cpu" and mat2.get_device().type == "cpu":
+        mat1 = do_bmm_input_contiguous(mat1)
+        mat2 = do_bmm_input_contiguous(mat2)
+
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
