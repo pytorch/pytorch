@@ -2801,21 +2801,6 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    # VecKernel override dtype for constant
-                    # Vectorization only support int32/fp32 now
-                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
-                    i32_iinfo = torch.iinfo(torch.int32)
-                    if (
-                        dtype == torch.int64
-                        and val <= i32_iinfo.max
-                        and val >= i32_iinfo.min
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-
                     f32_iinfo = torch.finfo(torch.float32)
                     if dtype == torch.double:
                         if (
@@ -2842,61 +2827,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def index_expr(expr, dtype):
-                assert len(self.ranges) == len(self.itervars)
-
-                def can_use_int32():
-                    free_symbols = list(expr.free_symbols)
-                    sizes = {
-                        k: v
-                        for k, v in zip(self.itervars, self.ranges)
-                        if k in free_symbols
-                    }
-                    # Trivial case: Range empty
-                    if any(v == 0 for v in sizes.values()):
-                        return True
-
-                    vars_ranges = {
-                        k: ValueRanges(0, v - 1)
-                        for k, v in sizes.items()
-                        if not isinstance(v, sympy.Expr) or v.is_number
-                    }
-                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
-                        i32_iinfo = torch.iinfo(torch.int32)
-                        return (
-                            expr.is_number
-                            and expr <= i32_iinfo.max
-                            and expr >= i32_iinfo.min
-                        )
-                    expr_ranges = bound_sympy(expr, vars_ranges)
-                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):  # type: ignore[arg-type]
-                        return False
-                    # If something takes the values 0..7, we will compare in the loop
-                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
-                    # to check that expr_ranges.upper + 1 is representable as well
-                    return range_expressable_in_32_bits(
-                        ValueRanges(
-                            int(expr_ranges.lower), int(expr_ranges.upper) + 1  # type: ignore[arg-type]
-                        )
-                    )
-
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    assert len(self.ranges) == len(self.itervars)
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    if (
-                        dtype == torch.int64
-                        and can_use_int32()
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-                    else:
-                        self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
-
-                    tmp_var = self.cse.newvar()
-                    return tmp_var
+                return self.cse.newvar()
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
