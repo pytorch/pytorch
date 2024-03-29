@@ -12,15 +12,15 @@ import typing
 
 import torch._custom_ops as custom_ops
 
-import torch.testing._internal.custom_op_db
 import torch.testing._internal.optests as optests
 import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
+from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.custom_op_db import custom_op_db, numpy_nonzero
+from torch.testing._internal.custom_op_db import numpy_nonzero
 from typing import *  # noqa: F403
 import numpy as np
 
@@ -324,7 +324,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             optests.opcheck(op, (x,), {})
 
-    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
@@ -1547,7 +1547,7 @@ def forward(self, x_1):
         self.assertExpectedInline(
             next(iter(counters["graph_break"].keys())).replace(";", "\n"),
             """\
-dynamic shape operator: DONT_USE_THIS_GIVE_EXPLICIT_NAMESPACE_IF_NEEDED.torchXtestingX_internalXcustom_op_dbXnumpy_nonzero.default
+dynamic shape operator: _torch_testing.numpy_nonzero.default
  to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True""",
         )
 
@@ -2192,7 +2192,9 @@ Please use `add.register_fake` to add an fake impl.""",
         cpu_call_count = 0
         cuda_call_count = 0
 
-        @torch.library.custom_op("_torch_testing::f", mutated_args=(), types="cpu")
+        @torch.library.custom_op(
+            "_torch_testing::f", mutated_args=(), device_types="cpu"
+        )
         def f(x: Tensor) -> Tensor:
             nonlocal cpu_call_count
             cpu_call_count += 1
@@ -2224,7 +2226,7 @@ Please use `add.register_fake` to add an fake impl.""",
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_multi_types(self):
         @torch.library.custom_op(
-            "_torch_testing::f", mutated_args=(), types=("cpu", "cuda")
+            "_torch_testing::f", mutated_args=(), device_types=("cpu", "cuda")
         )
         def f(x: Tensor) -> Tensor:
             x_np = x.cpu().numpy()
