@@ -45,10 +45,12 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-test:
