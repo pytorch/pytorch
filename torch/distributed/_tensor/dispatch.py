@@ -190,6 +190,27 @@ class OpDispatcher:
                 ):
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
+                # local_tensor_args need to be modified for new factory ops, potentially
+                # TODO: adjust the stride (args[2]) for aten.new_empty_strided.default
+                if op_call in [
+                    aten.new_empty.default,
+                    aten.new_full.default,
+                    aten.new_ones.default,
+                    aten.new_zeros.default,
+                    aten.new_empty_strided.default,
+                ]:
+                    assert isinstance(output_sharding.output_spec, DTensorSpec)
+                    # This happens when the output has the same shape as the input
+                    # and the input placements are not all Replicate().
+                    if output_sharding.output_spec.placements != tuple(
+                        [Replicate()] * mesh.ndim
+                    ):
+                        _local_tensor_args = list(local_tensor_args)
+                        assert isinstance(local_tensor_args[0], torch.Tensor)
+                        # args[1] is the shape of the output tensor
+                        _local_tensor_args[1] = local_tensor_args[0].shape
+                        local_tensor_args = tuple(_local_tensor_args)
+
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         # communicate the result to all ranks for some operators that return scalar value

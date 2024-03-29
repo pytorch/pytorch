@@ -181,14 +181,33 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
     input_strategy = op_schema.args_schema[0]
-    new_factory_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
+    input_shape = input_strategy.output_shape
+    output_shape = op_schema.args_schema[1]
+    assert isinstance(output_shape, (list, tuple, torch.Size))
+
+    new_factory_strategy = OpStrategy([])
     for arg_strategy in input_strategy.strategies:
         input_spec = arg_strategy.output_spec
         replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         new_factory_strategy.strategies.append(
-            PlacementStrategy(output_specs=replica_spec, input_specs=(input_spec,))
+            PlacementStrategy(
+                output_specs=replica_spec,
+                input_specs=(input_spec,),
+                redistribute_cost=[[0.0] * mesh.ndim],
+            )
         )
+
+        # if input shape is the same as output shape, we can just propagate input sharding
+        if list(input_shape) == list(output_shape):
+            new_factory_strategy.strategies.append(
+                PlacementStrategy(
+                    output_specs=input_spec,
+                    input_specs=(input_spec,),
+                    # encouraging new tensor placement to be the same as input
+                    redistribute_cost=[[-0.1] * mesh.ndim],
+                )
+            )
 
     return new_factory_strategy
 
