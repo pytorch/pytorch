@@ -1,10 +1,11 @@
 import collections
 import json
+from typing import Deque
 
 class ContextHintTracker:
-    hint_stack = collections.deque()
+    hint_stack: Deque[str] = collections.deque()
 
-    def __init__(self, hint):
+    def __init__(self, hint: str):
         self.hint = hint
 
     def __enter__(self):
@@ -14,12 +15,14 @@ class ContextHintTracker:
     def __exit__(self, exc_type, exc_val, exc_tb):
         ContextHintTracker.hint_stack.pop()
 
+    @staticmethod
     def get_last_hint():
         if len(ContextHintTracker.hint_stack):
             return ContextHintTracker.hint_stack[-1]
         else:
             return None
 
+    @staticmethod
     def get_hints_merged():
         if len(ContextHintTracker.hint_stack):
             merged_hints = {}

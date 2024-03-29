@@ -101,6 +101,7 @@ class LinearConstant(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        # Dummy, mathematically incorrect, implementation of BWD just to show hints.
         return grad_output * ctx.const1 + ctx.const2, None, None
 
 class ToyModelAutogradOverrideWithoutHints(torch.nn.Module):
@@ -141,6 +142,7 @@ class LinearConstantHinted(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        # Dummy, mathematically incorrect, implementation of BWD just to show hints.
         def backward_hinted(grad_output, const1, const2, hint):
             return grad_output * const1 + const2
         return torch.ops.higher_order.hinted_context(backward_hinted, grad_output, ctx.const1, ctx.const2, hint='{"bwd_custom_linear": "True"}'), None, None
@@ -195,6 +197,7 @@ class LinearConstantNestedHinted(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        # Dummy, mathematically incorrect, implementation of BWD just to show hints.
         def backward_mul(tensor, const1, hint):
             return tensor * const1
         def backward_add(tensor, const2, hint):
@@ -242,7 +245,7 @@ def _inner_compile(graph_module, example_inputs, is_fwd):
     print("#### _inner_compile BEGIN", "FWD" if is_fwd else "BWD")
     graph_module.print_readable(True)
     for node in graph_module.graph.nodes:
-        if node.op != "placeholder" and node.op != "output": 
+        if node.op != "placeholder" and node.op != "output":
             print("\nNODE:", node)
             print("hints:", node.meta["context_hints"] if "context_hints" in node.meta else None)
 
@@ -288,7 +291,6 @@ class ContextHintsTests(TestCase):
         self.assertTrue(loss1 > loss2)
         self.assertTrue(loss2 > loss3)
         self.assertTrue(loss3 > loss4)
-        self.assertTrue(loss1 > loss2)
 
     def test_outer_hint(self):
         torch._dynamo.reset()
@@ -322,7 +324,6 @@ class ContextHintsTests(TestCase):
         self.assertTrue(loss1 > loss2)
         self.assertTrue(loss2 > loss3)
         self.assertTrue(loss3 > loss4)
-        self.assertTrue(loss1 > loss2)
 
     def test_nested_hint(self):
         torch._dynamo.reset()
@@ -356,7 +357,6 @@ class ContextHintsTests(TestCase):
         self.assertTrue(loss1 > loss2)
         self.assertTrue(loss2 > loss3)
         self.assertTrue(loss3 > loss4)
-        self.assertTrue(loss1 > loss2)
 
     def test_nested_autograd_nohint(self):
         torch._dynamo.reset()
@@ -387,10 +387,7 @@ class ContextHintsTests(TestCase):
         print("Loss3:", loss3)
         print("Loss4:", loss4)
 
-        self.assertTrue(loss1 > loss2)
-        self.assertTrue(loss2 > loss3)
-        self.assertTrue(loss3 > loss4)
-        self.assertTrue(loss1 > loss2)
+        # No loss testing in this case, this is just hints showcase.
 
     def test_nested_autograd_hint(self):
         torch._dynamo.reset()
@@ -421,10 +418,7 @@ class ContextHintsTests(TestCase):
         print("Loss3:", loss3)
         print("Loss4:", loss4)
 
-        self.assertTrue(loss1 > loss2)
-        self.assertTrue(loss2 > loss3)
-        self.assertTrue(loss3 > loss4)
-        self.assertTrue(loss1 > loss2)
+        # No loss testing in this case, this is just hints showcase.
 
     def test_nested_autograd_nestedhint(self):
         torch._dynamo.reset()
@@ -455,10 +449,7 @@ class ContextHintsTests(TestCase):
         print("Loss3:", loss3)
         print("Loss4:", loss4)
 
-        self.assertTrue(loss1 > loss2)
-        self.assertTrue(loss2 > loss3)
-        self.assertTrue(loss3 > loss4)
-        self.assertTrue(loss1 > loss2)
+        # No loss testing in this case, this is just hints showcase.
 
 if __name__ == "__main__":
     torch.manual_seed(0xBADC0FEE)
