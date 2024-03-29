@@ -406,8 +406,8 @@ class TestExecutionTrace(TestCase):
             )
 
         # Uncomment for debugging
-        # print("Output kineto = ", kt.name)
-        # print("Output ET = ", fp.name)
+        print("Output kineto = ", kt.name)
+        print("Output ET = ", fp.name)
 
         p.export_chrome_trace(kt.name)
         self.assertEqual(trace_called_num, 1)
