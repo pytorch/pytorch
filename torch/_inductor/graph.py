@@ -1098,14 +1098,13 @@ class GraphLowering(torch.fx.Interpreter):
                         # When we do a better job selecting layout, we should
                         # revisit this.
                         need_fixed_layout = [
+                            torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
-                        need_fixed_channels_last_layout = [
-                            torch.ops.aten.convolution_backward.default,
-                        ]
+                        need_fixed_channels_last_layout = []
                         if not self.layout_opt:
-                            need_fixed_channels_last_layout.append(torch.ops.aten.convolution.default)
+                            need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C._has_mkldnn:
                             need_fixed_layout += [
                                 torch.ops.mkldnn._linear_pointwise.default,
@@ -1283,6 +1282,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.cpp_wrapper = True
             self.removed_buffers.clear()
             self.inplaced_to_remove.clear()
+            V.graph.sizevars.precomputed_replacements.clear()
+            V.graph.sizevars.inv_precomputed_replacements.clear()
             return self.codegen()
         else:
             # cpu
