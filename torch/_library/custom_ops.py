@@ -117,6 +117,8 @@ class CustomOpDef:
         This API may be used as a decorator.
 
         Args:
+            fn (Callable): The function to register as the implementation for
+                the given device types.
             device_types (str | Sequence[str]): The device device_types to register an impl to.
 
         Examples::
@@ -213,6 +215,10 @@ class CustomOpDef:
         the output Tensors are.
 
         Please see :func:`torch.library.impl_abstract` for more details.
+
+        Args:
+            fn (Callable): The function to register as the FakeTensor
+                implementation.
 
         Examples:
             >>> import torch
