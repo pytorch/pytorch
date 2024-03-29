@@ -250,6 +250,10 @@ manual_torch_name_rule_map = {
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
+    # avoid skipping user defined modules in distributed unit tests
+    "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
+    "torch/testing/_internal/distributed/_tensor/common_dtensor.py#forward": UserFunctionVariable,
+    "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
 }
 
 
@@ -2790,7 +2794,10 @@ def get_torch_obj_rule_map():
     d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
-            obj = load_object(k)
+            if ".py#" not in k:
+                obj = load_object(k)
+            else:
+                obj = _module_dir(torch) + k[len("torch/") :]
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -3470,6 +3477,10 @@ def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
+        if rule is not None:
+            return rule
+    elif name is not None and filename is not None and not is_direct_call:
+        rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
         if rule is not None:
             return rule
 
