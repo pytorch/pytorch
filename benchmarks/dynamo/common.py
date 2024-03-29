@@ -102,8 +102,9 @@ def is_hpu():
         "--devices=hpu" in sys.argv
 
 def import_if_hpu():
-    import habana_frameworks.torch.gpu_migration
-    import habana_frameworks.torch.core as htcore
+    if is_hpu():
+        import habana_frameworks.torch.gpu_migration
+        import habana_frameworks.torch.core as htcore
 
 import_if_hpu()
 
