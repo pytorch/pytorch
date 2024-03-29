@@ -399,6 +399,21 @@ AOT_COUNTER = itertools.count()
 # So the signature of the graph input would look something like
 # (*tokens, *params_buffers, *user_inputs), and the signature of the graph
 # output would look something like (*tokens, *outputs).
+#
+# However, Inductor does not want the concept of tokens in the final generated
+# code's input and output. Since changing the graph signature inside of inductor
+# is difficult, we will instead generate the following graph for Inductor, where
+# the tokens are created and sunk within the graph, rather than as inputs and
+# outputs:
+#
+# def gm(self, reader):
+#    token0 = torch.ops.aten._make_dep_token(1)
+#    token1, frame = with_token(ordered_effect_op, (reader,), token0)
+#    frame = frame * 2
+#    token2, frame2 = with_token(ordered_effect_op, (reader,), token1)
+#    frame2 = frame2 * 2
+#    sink_token = torch.ops.aten._sink_token([token2])
+#    return frame, frame2
 
 #
 #
@@ -810,6 +825,7 @@ def aot_module_simplified(
     decompositions: Optional[Dict] = None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
+    backend_name: Optional[str] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -897,6 +913,7 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
+        backend_name=backend_name,
     )
 
     with compiled_autograd.disable():
