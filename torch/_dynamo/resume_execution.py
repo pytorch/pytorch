@@ -10,6 +10,7 @@ from .bytecode_transformation import (
     create_dup_top,
     create_instruction,
     create_jump_absolute,
+    create_load_method,
     Instruction,
     InstructionExnTabEntry,
     transform_code_object,
@@ -70,7 +71,7 @@ class ReenterWith:
             *create_call_function(len(load_args), True),
             create_instruction("STORE_FAST", argval=ctx_name),
             create_instruction("LOAD_FAST", argval=ctx_name),
-            create_instruction("LOAD_METHOD", argval="__enter__"),
+            create_load_method("__enter__"),
             *create_call_method(0),
             create_instruction("POP_TOP"),
         ]
@@ -94,7 +95,7 @@ class ReenterWith:
         def create_reset():
             return [
                 create_instruction("LOAD_FAST", argval=ctx_name),
-                create_instruction("LOAD_METHOD", argval="__exit__"),
+                create_load_method("__exit__"),
                 create_instruction("LOAD_CONST", argval=None),
                 create_dup_top(),
                 create_dup_top(),
@@ -254,7 +255,9 @@ class ReenterWith:
                 exn_tab_1_target,  # PUSH_EXC_INFO
                 create_instruction("WITH_EXCEPT_START"),
                 create_instruction(
-                    "POP_JUMP_FORWARD_IF_TRUE",
+                    "POP_JUMP_FORWARD_IF_TRUE"
+                    if sys.version_info < (3, 12)
+                    else "POP_JUMP_IF_TRUE",
                     target=pop_top_after_with_except_start,
                 ),
                 exn_tab_2_end,  # RERAISE 2
