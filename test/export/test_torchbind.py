@@ -4,7 +4,7 @@ import torch
 import torch.testing._internal.torchbind_impls  # noqa: F401
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch._library.abstract_impl_class import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
-        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
             def __init__(self, x: int, y: int):
                 self.x = x
@@ -39,7 +39,7 @@ class TestExportTorchbind(TestCase):
         test.tq_pop_counter = 0
         test.tq_size_counter = 0
 
-        @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
         class FakeTensorQueue:
             def __init__(self, q):
                 self.queue = q
@@ -47,7 +47,9 @@ class TestExportTorchbind(TestCase):
             @classmethod
             def from_real(cls, real_tq):
                 ctx = torch.library.get_ctx()
-                fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.clone_queue()]
+                fake_queue = [
+                    ctx.create_fake_tensor(t) for t in real_tq.get_raw_queue()
+                ]
                 return cls(fake_queue)
 
             def push(self, x):
@@ -63,10 +65,10 @@ class TestExportTorchbind(TestCase):
                 return len(self.queue)
 
     def tearDown(self):
-        torch._library.abstract_impl_class.deregister_abstract_impl(
+        torch._library.fake_class_registry.deregister_fake_class(
             "_TorchScriptTesting::_Foo"
         )
-        torch._library.abstract_impl_class.deregister_abstract_impl(
+        torch._library.fake_class_registry.deregister_fake_class(
             "_TorchScriptTesting::_TensorQueue"
         )
 
@@ -569,27 +571,27 @@ def forward(self, arg0_1, arg1_1):
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestImplAbstractClass(TestCase):
     def tearDown(self):
-        torch._library.abstract_impl_class.global_abstract_class_registry.clear()
+        torch._library.fake_class_registry.global_fake_class_registry.clear()
 
-    def test_impl_abstract_class_no_torch_bind_class(self):
+    def test_register_fake_class_no_torch_bind_class(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate class"):
 
-            @torch._library.impl_abstract_class("_TorchScriptTesting::NOT_A_VALID_NAME")
+            @torch._library.register_fake_class("_TorchScriptTesting::NOT_A_VALID_NAME")
             class Invalid:
                 pass
 
-    def test_impl_abstract_class_no_from_real(self):
+    def test_register_fake_class_no_from_real(self):
         with self.assertRaisesRegex(RuntimeError, "define a classmethod from_real"):
 
-            @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+            @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
             class InvalidFakeFoo:
                 def __init__(self):
                     pass
 
-    def test_impl_abstract_class_from_real_not_classmethod(self):
+    def test_register_fake_class_from_real_not_classmethod(self):
         with self.assertRaisesRegex(RuntimeError, "is not a classmethod"):
 
-            @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+            @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
             class FakeFoo:
                 def __init__(self, x, y):
                     self.x = x
@@ -599,7 +601,7 @@ class TestImplAbstractClass(TestCase):
                     x, y = foo_obj.__getstate__()
                     return FakeFoo(x, y)
 
-    def test_impl_abstract_class_valid(self):
+    def test_register_fake_class_valid(self):
         class FakeFoo:
             def __init__(self, x, y):
                 self.x = x
@@ -610,10 +612,10 @@ class TestImplAbstractClass(TestCase):
                 x, y = foo_obj.__getstate__()
                 return cls(x, y)
 
-        torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
+        torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
 
-    def test_impl_abstract_class_duplicate_registration(self):
-        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+    def test_register_fake_class_duplicate_registration(self):
+        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
             def __init__(self, x, y):
                 self.x = x
@@ -625,7 +627,7 @@ class TestImplAbstractClass(TestCase):
                 return cls(x, y)
 
         with self.assertRaisesRegex(RuntimeError, "already registered"):
-            torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
+            torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
 
 
 instantiate_parametrized_tests(TestExportTorchbind)
