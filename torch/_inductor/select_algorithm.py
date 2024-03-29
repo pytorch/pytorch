@@ -157,6 +157,10 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+        if matrix_instr_nonkdim != 0:
+            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
