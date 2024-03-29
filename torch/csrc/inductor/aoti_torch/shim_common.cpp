@@ -27,9 +27,8 @@
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
 #include <ATen/ops/empty_strided.h>
-#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
-#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
-#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
@@ -672,7 +671,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
     AtenTensorHandle weight,
     AtenTensorHandle* out) {
   at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
-  auto packed_weight = at::native::fbgemm_pack_gemm_matrix_fp16(*weight_tensor);
+  auto packed_weight = at::fbgemm_pack_gemm_matrix_fp16(*weight_tensor);
 
   at::Tensor* out_tensor = new at::Tensor(std::move(packed_weight));
   *out = tensor_pointer_to_tensor_handle(out_tensor);
@@ -689,7 +688,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
   at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
   at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
 
-  auto out_result = at::native::fbgemm_linear_fp16_weight_fp32_activation(
+  auto out_result = at::fbgemm_linear_fp16_weight_fp32_activation(
       *input_tensor, *weight_tensor, *bias_tensor);
 
   at::Tensor* out_tensor = new at::Tensor(std::move(out_result));
