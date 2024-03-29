@@ -719,9 +719,9 @@ current_module = sys.modules[__name__]
 
 def _get_sym_math_fn(name):
     def fn(a):
-        import sympy
+        import torch.utils._sympy.functions
 
-        return getattr(sympy, name)(a)
+        return getattr(torch.utils._sympy.functions, f"OpaqueUnaryFn_{name}")(a)
 
     return fn
 

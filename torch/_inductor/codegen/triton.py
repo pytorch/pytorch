@@ -343,39 +343,39 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl_math.abs({self._print(expr.args[0])})"
 
-    def _print_cos(self, expr):
+    def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.cos(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_cosh(self, expr):
+    def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.cosh(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_acos(self, expr):
+    def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.acos(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_sin(self, expr):
+    def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.sin(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_sinh(self, expr):
+    def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.sinh(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_asin(self, expr):
+    def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.asin(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_tan(self, expr):
+    def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.tan(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_tanh(self, expr):
+    def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.tanh(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_atan(self, expr):
+    def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.atan(({self._print(expr.args[0])}).to(tl.float32))"
 
