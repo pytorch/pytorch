@@ -341,7 +341,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS: {
       // PrivateUse1 kineto backend reuse above ActivityTypes,
-      // If PrivauseUse1 backend enabled, this should return
+      // If PrivateUse1 backend enabled, this should return
       // c10::DeviceType::PrivateUse1.
       c10::DeviceType device_type = []() {
         if (c10::get_privateuse1_backend() != "privateuseone") {
